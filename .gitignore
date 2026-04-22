@@ -73,3 +73,9 @@ logs/
 
 # Claude Code local settings
 .claude/
+
+# Seed ubigeo dataset (descargado, no commitear)
+/supabase/seed/ubigeo-peru.json
+/supabase/seed/node_modules/
+/supabase/seed/package-lock.json
+/memory/

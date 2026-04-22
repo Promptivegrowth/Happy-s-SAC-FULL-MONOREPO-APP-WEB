@@ -1,12 +1,15 @@
-import 'dotenv/config';
-import { createClient } from '@supabase/supabase-js';
 import path from 'node:path';
 import url from 'node:url';
+import dotenv from 'dotenv';
+import { createClient } from '@supabase/supabase-js';
 
 const __filename = url.fileURLToPath(import.meta.url);
 export const __dirname = path.dirname(__filename);
 export const ROOT = path.resolve(__dirname, '../..');
 export const EXCEL_DIR = path.resolve(ROOT, 'documentos excels');
+
+// Cargar .env desde la raíz del repo, sin importar el cwd actual.
+dotenv.config({ path: path.resolve(ROOT, '.env') });
 
 const URL = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const SERVICE = process.env.SUPABASE_SERVICE_ROLE_KEY;
