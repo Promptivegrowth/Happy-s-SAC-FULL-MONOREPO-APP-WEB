@@ -32,7 +32,7 @@ export default async function VentasPage() {
               {data?.map((v) => {
                 const a = (v as unknown as { almacenes?: { nombre: string } }).almacenes;
                 const c = (v as unknown as { clientes?: { razon_social?: string; nombres?: string; apellido_paterno?: string } }).clientes;
-                const cliente = c?.razon_social ?? `${c?.nombres ?? ''} ${c?.apellido_paterno ?? ''}`.trim() || '—';
+                const cliente = c?.razon_social ?? (`${c?.nombres ?? ''} ${c?.apellido_paterno ?? ''}`.trim() || '—');
                 return (
                   <TableRow key={v.id}>
                     <TableCell className="font-mono text-xs">{v.numero}</TableCell>

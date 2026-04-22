@@ -1,3 +1,4 @@
+import { Suspense } from 'react';
 import Link from 'next/link';
 import { LoginForm } from './login-form';
 
@@ -13,7 +14,9 @@ export default function LoginPage() {
         <h1 className="font-display text-2xl font-semibold">HAPPY ERP</h1>
         <p className="mt-1 text-sm text-slate-500">Ingresa a tu panel</p>
       </div>
-      <LoginForm />
+      <Suspense fallback={<div className="h-72 animate-pulse rounded-md bg-slate-100" />}>
+        <LoginForm />
+      </Suspense>
       <p className="mt-6 text-center text-xs text-slate-500">
         ¿Olvidaste tu contraseña?{' '}
         <Link href="/forgot-password" className="font-medium text-happy-600 hover:underline">

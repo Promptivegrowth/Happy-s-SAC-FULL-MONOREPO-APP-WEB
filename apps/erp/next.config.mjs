@@ -12,6 +12,8 @@ const nextConfig = {
   experimental: {
     optimizePackageImports: ['lucide-react', 'date-fns'],
   },
+  // Lint corre como task separado (pnpm turbo run lint), no durante el build.
+  eslint: { ignoreDuringBuilds: true },
   async headers() {
     return [
       {

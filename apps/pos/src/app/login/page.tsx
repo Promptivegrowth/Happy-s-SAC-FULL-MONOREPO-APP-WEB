@@ -6,9 +6,11 @@ import { createClient } from '@happy/db/browser';
 import { Button } from '@happy/ui/button';
 import { Input } from '@happy/ui/input';
 import { Label } from '@happy/ui/label';
+import { Badge } from '@happy/ui/badge';
 import { Card, CardContent, CardHeader, CardTitle } from '@happy/ui/card';
+import { DEMO_USERS, DEMO_PASSWORD } from '@happy/lib/demo-users';
 import { toast } from 'sonner';
-import { Store, Loader2 } from 'lucide-react';
+import { Store, Loader2, Sparkles } from 'lucide-react';
 
 export default function PosLoginPage() {
   const router = useRouter();
@@ -16,20 +18,33 @@ export default function PosLoginPage() {
   const [pwd, setPwd] = useState('');
   const [loading, setLoading] = useState(false);
 
-  async function onSubmit(e: React.FormEvent) {
-    e.preventDefault();
+  async function login(emailToUse: string, passwordToUse: string) {
     setLoading(true);
     const sb = createClient();
-    const { error } = await sb.auth.signInWithPassword({ email, password: pwd });
+    const { error } = await sb.auth.signInWithPassword({ email: emailToUse, password: passwordToUse });
     setLoading(false);
-    if (error) return toast.error(error.message);
+    if (error) return toast.error(error.message === 'Invalid login credentials' ? 'Credenciales inválidas' : error.message);
     toast.success('¡Bienvenido!');
     router.push('/venta');
     router.refresh();
   }
 
+  async function onSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    await login(email, pwd);
+  }
+
+  function quickLogin(demoEmail: string) {
+    setEmail(demoEmail);
+    setPwd(DEMO_PASSWORD);
+    void login(demoEmail, DEMO_PASSWORD);
+  }
+
+  // Solo cajeros + gerente (gerente puede entrar a todo)
+  const posUsers = DEMO_USERS.filter((u) => u.acceso !== 'erp');
+
   return (
-    <main className="flex min-h-screen items-center justify-center bg-gradient-to-br from-happy-500 to-carnival-purple p-4">
+    <main className="flex min-h-screen items-center justify-center bg-gradient-to-br from-happy-500 to-carnival-purple p-4 py-8">
       <Card className="w-full max-w-sm">
         <CardHeader className="text-center">
           <div className="mx-auto mb-3 flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-to-br from-happy-500 to-carnival-purple text-white shadow-glow">
@@ -38,7 +53,7 @@ export default function PosLoginPage() {
           <CardTitle className="font-display text-2xl">POS HAPPY</CardTitle>
           <p className="text-sm text-slate-500">Punto de venta · Tiendas</p>
         </CardHeader>
-        <CardContent>
+        <CardContent className="space-y-5">
           <form onSubmit={onSubmit} className="space-y-4">
             <div>
               <Label>Correo</Label>
@@ -52,6 +67,38 @@ export default function PosLoginPage() {
               {loading ? <><Loader2 className="h-4 w-4 animate-spin" /> Ingresando…</> : 'Ingresar'}
             </Button>
           </form>
+
+          {/* === DEMO USERS — REMOVER ANTES DE PRODUCCIÓN === */}
+          <div className="rounded-xl border border-dashed border-amber-300 bg-amber-50/60 p-3">
+            <div className="mb-2 flex items-center gap-2">
+              <Sparkles className="h-3.5 w-3.5 text-amber-600" />
+              <p className="text-xs font-semibold uppercase tracking-wider text-amber-800">
+                Cuentas demo · click para entrar
+              </p>
+            </div>
+            <p className="mb-3 text-[11px] text-amber-700">
+              Password común: <code className="rounded bg-amber-100 px-1 font-mono">{DEMO_PASSWORD}</code>
+            </p>
+            <div className="grid grid-cols-1 gap-1.5">
+              {posUsers.map((u) => (
+                <button
+                  key={u.email}
+                  onClick={() => quickLogin(u.email)}
+                  disabled={loading}
+                  className="flex items-center gap-2.5 rounded-md border bg-white p-2 text-left transition hover:border-happy-400 hover:bg-happy-50 disabled:opacity-50"
+                >
+                  <span className="text-lg">{u.emoji}</span>
+                  <div className="min-w-0 flex-1">
+                    <p className="text-sm font-medium leading-tight">{u.label}</p>
+                    <p className="truncate text-[10px] text-slate-500">{u.scope ?? u.email}</p>
+                  </div>
+                  <Badge variant="secondary" className="shrink-0 text-[9px] uppercase tracking-wide">
+                    {u.badge}
+                  </Badge>
+                </button>
+              ))}
+            </div>
+          </div>
         </CardContent>
       </Card>
     </main>

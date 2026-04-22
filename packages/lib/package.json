@@ -16,7 +16,8 @@
     "./format": "./src/format/index.ts",
     "./bom": "./src/bom/index.ts",
     "./trazabilidad": "./src/trazabilidad/index.ts",
-    "./pdf": "./src/pdf/index.ts"
+    "./pdf": "./src/pdf/index.ts",
+    "./demo-users": "./src/demo-users.ts"
   },
   "scripts": {
     "lint": "eslint src",

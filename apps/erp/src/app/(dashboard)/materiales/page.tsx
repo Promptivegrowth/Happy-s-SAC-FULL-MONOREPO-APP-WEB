@@ -17,7 +17,7 @@ export default async function MaterialesPage({ searchParams }: { searchParams: P
   const sb = await createClient();
   let q = sb.from('materiales').select('id, codigo, nombre, categoria, precio_unitario, activo, unidades_medida!unidad_compra_id(codigo)').order('categoria').order('nombre').limit(500);
   if (sp.q) q = q.ilike('nombre', `%${sp.q}%`);
-  if (sp.cat) q = q.eq('categoria', sp.cat);
+  if (sp.cat) q = q.eq('categoria', sp.cat as 'TELA' | 'AVIO' | 'INSUMO' | 'EMPAQUE');
   const { data } = await q;
 
   return (

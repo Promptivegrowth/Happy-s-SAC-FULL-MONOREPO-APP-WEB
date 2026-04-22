@@ -11,5 +11,6 @@ const nextConfig = {
   experimental: {
     optimizePackageImports: ['lucide-react', 'date-fns', 'framer-motion'],
   },
+  eslint: { ignoreDuringBuilds: true },
 };
 export default nextConfig;

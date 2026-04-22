@@ -17,9 +17,9 @@ export async function createClient() {
   return createServerClient<Database>(url, anonKey, {
     cookies: {
       getAll: () => cookieStore.getAll(),
-      setAll: (toSet) => {
+      setAll: (toSet: { name: string; value: string; options: CookieOptions }[]) => {
         try {
-          toSet.forEach(({ name, value, options }: { name: string; value: string; options: CookieOptions }) => {
+          toSet.forEach(({ name, value, options }) => {
             cookieStore.set(name, value, options);
           });
         } catch {
