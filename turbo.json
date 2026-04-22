@@ -1,0 +1,54 @@
+{
+  "$schema": "https://turbo.build/schema.json",
+  "globalDependencies": [".env", "tsconfig.base.json"],
+  "globalEnv": [
+    "NODE_ENV",
+    "NEXT_PUBLIC_SUPABASE_URL",
+    "NEXT_PUBLIC_SUPABASE_ANON_KEY",
+    "SUPABASE_SERVICE_ROLE_KEY",
+    "NEXT_PUBLIC_APP_URL",
+    "NEXT_PUBLIC_WEB_URL",
+    "NEXT_PUBLIC_ERP_URL",
+    "NEXT_PUBLIC_POS_URL",
+    "APIS_NET_PE_TOKEN",
+    "WHATSAPP_NUMBER",
+    "CULQI_PUBLIC_KEY",
+    "CULQI_SECRET_KEY",
+    "IZIPAY_MERCHANT_ID",
+    "IZIPAY_PUBLIC_KEY",
+    "IZIPAY_HMAC_KEY",
+    "YAPE_QR_NUMBER",
+    "PLIN_QR_NUMBER",
+    "SUNAT_RUC",
+    "SUNAT_USER_SOL",
+    "SUNAT_PASSWORD_SOL",
+    "SUNAT_CERT_BASE64",
+    "SUNAT_CERT_PASSWORD",
+    "SUNAT_PSE_PROVIDER",
+    "NUBEFACT_TOKEN",
+    "NUBEFACT_RUC"
+  ],
+  "tasks": {
+    "build": {
+      "dependsOn": ["^build"],
+      "outputs": [".next/**", "!.next/cache/**", "dist/**"]
+    },
+    "dev": {
+      "cache": false,
+      "persistent": true
+    },
+    "lint": {
+      "dependsOn": ["^lint"]
+    },
+    "typecheck": {
+      "dependsOn": ["^typecheck"]
+    },
+    "test": {
+      "dependsOn": ["^build"],
+      "outputs": ["coverage/**"]
+    },
+    "clean": {
+      "cache": false
+    }
+  }
+}

@@ -1,0 +1,22 @@
+{
+  "name": "@happy/seed",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "base": "tsx 01-datos-base.ts",
+    "ubigeo": "tsx 02-ubigeo.ts",
+    "excel": "tsx import-excel.ts",
+    "all": "pnpm base && pnpm ubigeo && pnpm excel"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.46.1",
+    "dotenv": "^16.4.5",
+    "xlsx": "^0.18.5"
+  },
+  "devDependencies": {
+    "tsx": "^4.19.2",
+    "typescript": "^5.6.3",
+    "@types/node": "^22.9.0"
+  }
+}

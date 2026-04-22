@@ -1,0 +1,17 @@
+{
+  "extends": "@happy/config/tsconfig/nextjs.json",
+  "compilerOptions": {
+    "baseUrl": ".",
+    "paths": {
+      "@/*": ["./src/*"],
+      "@happy/ui": ["../../packages/ui/src"],
+      "@happy/ui/*": ["../../packages/ui/src/*"],
+      "@happy/db": ["../../packages/db/src"],
+      "@happy/db/*": ["../../packages/db/src/*"],
+      "@happy/lib": ["../../packages/lib/src"],
+      "@happy/lib/*": ["../../packages/lib/src/*"]
+    }
+  },
+  "include": ["next-env.d.ts", "src/**/*.ts", "src/**/*.tsx", ".next/types/**/*.ts"],
+  "exclude": ["node_modules", ".next"]
+}

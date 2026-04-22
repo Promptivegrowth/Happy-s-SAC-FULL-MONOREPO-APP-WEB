@@ -1,0 +1,40 @@
+{
+  "name": "happy-sac-monorepo",
+  "version": "0.1.0",
+  "private": true,
+  "description": "HAPPY SAC - ERP Textil + E-commerce + POS Dual (Disfraces Happys)",
+  "packageManager": "pnpm@9.12.0",
+  "engines": {
+    "node": ">=20.10.0",
+    "pnpm": ">=9.0.0"
+  },
+  "scripts": {
+    "build": "turbo run build",
+    "dev": "turbo run dev",
+    "lint": "turbo run lint",
+    "typecheck": "turbo run typecheck",
+    "test": "turbo run test",
+    "clean": "turbo run clean && rm -rf node_modules",
+    "format": "prettier --write \"**/*.{ts,tsx,md,json}\" --ignore-path .gitignore",
+    "db:types": "supabase gen types typescript --project-id trkokphwmkedhxwjriod > packages/db/src/types/supabase.ts",
+    "db:migrate": "supabase db push",
+    "db:reset": "supabase db reset",
+    "db:seed": "tsx supabase/seed/run-seed.ts",
+    "db:import-excel": "tsx supabase/seed/import-excel.ts"
+  },
+  "devDependencies": {
+    "turbo": "^2.3.0",
+    "prettier": "^3.4.0",
+    "prettier-plugin-tailwindcss": "^0.6.9",
+    "typescript": "^5.6.3",
+    "@types/node": "^22.9.0",
+    "tsx": "^4.19.2",
+    "supabase": "^1.219.0"
+  },
+  "pnpm": {
+    "overrides": {
+      "react": "^18.3.1",
+      "react-dom": "^18.3.1"
+    }
+  }
+}
