@@ -32,8 +32,17 @@ const BASE = 'https://api.apis.net.pe/v2';
 
 type FetchOptions = { token?: string; signal?: AbortSignal };
 
+/** Limpia el token: trim + remueve cualquier whitespace/newline interno (caso pegado mal en Vercel). */
+function cleanToken(raw: string | undefined): string | null {
+  if (!raw) return null;
+  // .trim() quita espacios al inicio/fin. .split(/\s/)[0] quita todo después de un newline o espacio
+  // (típico cuando se pegan mal varias env vars seguidas en Vercel).
+  const cleaned = raw.trim().split(/\s+/)[0]?.trim() ?? '';
+  return cleaned.length > 0 ? cleaned : null;
+}
+
 async function apisNetFetch<T>(path: string, opts: FetchOptions): Promise<T> {
-  const token = opts.token ?? process.env.APIS_NET_PE_TOKEN;
+  const token = cleanToken(opts.token ?? process.env.APIS_NET_PE_TOKEN);
   if (!token) {
     throw new Error('APIS_NET_PE_TOKEN no configurado. Crear cuenta en https://apis.net.pe');
   }
@@ -47,7 +56,7 @@ async function apisNetFetch<T>(path: string, opts: FetchOptions): Promise<T> {
   });
   if (!res.ok) {
     const text = await res.text().catch(() => '');
-    throw new Error(`apis.net.pe ${res.status}: ${text}`);
+    throw new Error(`apis.net.pe ${res.status}: ${text || res.statusText}`);
   }
   return res.json() as Promise<T>;
 }

@@ -1,6 +1,5 @@
 import Link from 'next/link';
 import Image from 'next/image';
-import { unstable_cache } from 'next/cache';
 import { createClient } from '@happy/db/server';
 import { Card } from '@happy/ui/card';
 import { Badge } from '@happy/ui/badge';
@@ -8,8 +7,21 @@ import { Badge } from '@happy/ui/badge';
 export const metadata = { title: 'Catálogo de disfraces' };
 export const dynamic = 'force-dynamic';
 
-const loadCatalogo = unstable_cache(
-  async (q: string) => {
+type Pub = {
+  producto_id: string;
+  slug: string | null;
+  titulo_web: string | null;
+  precio_oferta: number | null;
+  productos?: {
+    id: string;
+    nombre: string;
+    imagen_principal_url: string | null;
+    productos_variantes?: { talla: string; precio_publico: number | null }[];
+  } | null;
+};
+
+async function loadCatalogo(q: string): Promise<Pub[]> {
+  try {
     const sb = await createClient();
     let query = sb.from('productos_publicacion')
       .select('producto_id, slug, titulo_web, precio_oferta, productos!inner(id, nombre, imagen_principal_url, productos_variantes(id, talla, precio_publico))')
@@ -17,12 +29,17 @@ const loadCatalogo = unstable_cache(
       .order('orden_web')
       .limit(60);
     if (q) query = query.ilike('titulo_web', `%${q}%`);
-    const { data } = await query;
-    return data ?? [];
-  },
-  ['catalogo'],
-  { revalidate: 300, tags: ['catalogo'] },
-);
+    const { data, error } = await query;
+    if (error) {
+      console.warn('[catalogo] error:', error.message);
+      return [];
+    }
+    return (data ?? []) as unknown as Pub[];
+  } catch (e) {
+    console.warn('[catalogo] exception:', (e as Error).message);
+    return [];
+  }
+}
 
 export default async function CatalogoPage({ searchParams }: { searchParams: Promise<{ q?: string }> }) {
   const sp = await searchParams;
@@ -42,11 +59,12 @@ export default async function CatalogoPage({ searchParams }: { searchParams: Pro
       ) : (
         <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-4">
           {pubs.map((p) => {
-            const prod = (p as unknown as { productos: { id: string; nombre: string; imagen_principal_url: string | null; productos_variantes: { talla: string; precio_publico: number | null }[] } }).productos;
-            const min = prod.productos_variantes.map((v) => Number(v.precio_publico ?? 0)).filter((x) => x > 0).sort((a, b) => a - b)[0];
-            const tallas = Array.from(new Set(prod.productos_variantes.map((v) => v.talla.replace('T', '')))).slice(0, 6);
+            const prod = p.productos;
+            if (!prod) return null;
+            const min = (prod.productos_variantes ?? []).map((v) => Number(v.precio_publico ?? 0)).filter((x) => x > 0).sort((a, b) => a - b)[0];
+            const tallas = Array.from(new Set((prod.productos_variantes ?? []).map((v) => v.talla.replace('T', '')))).slice(0, 6);
             return (
-              <Link key={p.producto_id} href={`/productos/${p.slug}`} className="group">
+              <Link key={p.producto_id} href={`/productos/${p.slug ?? ''}`} className="group">
                 <Card className="overflow-hidden border-2 border-transparent transition hover:-translate-y-1 hover:border-happy-300 hover:shadow-glow">
                   <div className="relative aspect-square overflow-hidden bg-corp-50">
                     {prod.imagen_principal_url ? (

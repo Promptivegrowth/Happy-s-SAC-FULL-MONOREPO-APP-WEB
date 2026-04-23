@@ -1,14 +1,12 @@
 import Link from 'next/link';
 import Image from 'next/image';
-import { unstable_cache } from 'next/cache';
 import { Button } from '@happy/ui/button';
 import { Card } from '@happy/ui/card';
 import { Badge } from '@happy/ui/badge';
 import { ArrowRight, Truck, ShieldCheck, Sparkles, Heart, MessageCircle } from 'lucide-react';
 import { createClient } from '@happy/db/server';
 
-// SSR dinámico (env vars solo disponibles en runtime, no en build).
-// El unstable_cache de loadDestacados sirve la respuesta en memoria por 5 min.
+// Dinámico — env vars solo disponibles en runtime, no durante el build de Vercel.
 export const dynamic = 'force-dynamic';
 
 const CATS_HERO = [
@@ -20,20 +18,37 @@ const CATS_HERO = [
   { slug: 'princesas',        label: 'Princesas',       emoji: '👸', gradient: 'from-happy-400 to-danger' },
 ];
 
-const loadDestacados = unstable_cache(
-  async () => {
+type Destacado = {
+  producto_id: string;
+  slug: string | null;
+  titulo_web: string | null;
+  productos?: {
+    id: string;
+    nombre: string;
+    imagen_principal_url: string | null;
+    productos_variantes?: { precio_publico: number | null }[];
+  } | null;
+};
+
+async function loadDestacados(): Promise<Destacado[]> {
+  try {
     const sb = await createClient();
-    const { data } = await sb.from('productos_publicacion')
+    const { data, error } = await sb.from('productos_publicacion')
       .select('producto_id, slug, titulo_web, productos!inner(id, nombre, imagen_principal_url, productos_variantes(id, talla, precio_publico))')
       .eq('publicado', true)
       .eq('destacado_web', true)
       .order('orden_web')
       .limit(8);
-    return data ?? [];
-  },
-  ['home-destacados'],
-  { revalidate: 300, tags: ['catalogo'] },
-);
+    if (error) {
+      console.warn('[home] loadDestacados error:', error.message);
+      return [];
+    }
+    return (data ?? []) as unknown as Destacado[];
+  } catch (e) {
+    console.warn('[home] loadDestacados exception:', (e as Error).message);
+    return [];
+  }
+}
 
 export default async function Home() {
   const destacados = await loadDestacados();
@@ -137,10 +152,12 @@ export default async function Home() {
         ) : (
           <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-4">
             {destacados.map((p) => {
-              const prod = (p as unknown as { productos: { id: string; nombre: string; imagen_principal_url: string | null; productos_variantes: { precio_publico: number | null }[] } }).productos;
-              const min = prod.productos_variantes.map((v) => Number(v.precio_publico ?? 0)).filter((x) => x > 0).sort((a, b) => a - b)[0];
+              const prod = p.productos;
+              if (!prod) return null;
+              const min = (prod.productos_variantes ?? [])
+                .map((v) => Number(v.precio_publico ?? 0)).filter((x) => x > 0).sort((a, b) => a - b)[0];
               return (
-                <Link key={p.producto_id} href={`/productos/${p.slug}`} className="group">
+                <Link key={p.producto_id} href={`/productos/${p.slug ?? ''}`} className="group">
                   <Card className="overflow-hidden border-2 border-transparent transition hover:-translate-y-1 hover:border-happy-300 hover:shadow-glow">
                     <div className="relative aspect-square overflow-hidden bg-corp-50">
                       {prod.imagen_principal_url ? (
