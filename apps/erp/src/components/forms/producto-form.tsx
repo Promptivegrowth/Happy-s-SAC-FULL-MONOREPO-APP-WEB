@@ -9,6 +9,7 @@ import { Textarea } from '@happy/ui/textarea';
 import { Switch } from '@happy/ui/switch';
 import { FormGrid, FormRow, FormSection } from '@happy/ui/form-row';
 import { Button } from '@happy/ui/button';
+import { ImageUploader } from './image-uploader';
 import { crearProducto, actualizarProducto } from '@/server/actions/productos';
 
 type Producto = {
@@ -37,6 +38,7 @@ export function ProductoForm({ initial, categorias, campanas }: { initial?: Prod
   const [conjunto, setConjunto] = useState(initial?.es_conjunto ?? true);
   const [destacado, setDestacado] = useState(initial?.destacado ?? false);
   const [activo, setActivo] = useState(initial?.activo ?? true);
+  const [imagenUrl, setImagenUrl] = useState<string | null>(initial?.imagen_principal_url ?? null);
 
   return (
     <form action={formAction} className="space-y-6">
@@ -95,8 +97,15 @@ export function ProductoForm({ initial, categorias, campanas }: { initial?: Prod
 
       <FormSection title="Imagen y ficha">
         <FormGrid cols={2}>
-          <FormRow label="URL imagen principal" hint="Próximamente: subida directa a Storage">
-            <Input name="imagen_principal_url" type="url" defaultValue={initial?.imagen_principal_url ?? ''} placeholder="https://..." />
+          <FormRow label="Imagen principal del modelo" hint="Aparece en cards y como portada">
+            <ImageUploader
+              value={imagenUrl}
+              onChange={setImagenUrl}
+              name="imagen_principal_url"
+              prefix={`productos/${initial?.id ?? 'tmp'}`}
+              aspect="square"
+              className="max-w-[240px]"
+            />
           </FormRow>
           <FormRow label="Versión de ficha técnica">
             <Input name="version_ficha" defaultValue={initial?.version_ficha ?? 'v1.0'} placeholder="v1.0" />

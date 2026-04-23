@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { useActionForm } from './use-action-form';
 import { SubmitButton } from './submit-button';
 import { SunatLookup } from './sunat-lookup';
+import { UbigeoSelect } from './ubigeo-select';
 import { Input } from '@happy/ui/input';
 import { Textarea } from '@happy/ui/textarea';
 import { Switch } from '@happy/ui/switch';
@@ -139,8 +140,8 @@ export function ClienteForm({ initial }: { initial?: Cliente }) {
           <FormRow label="Dirección" className="sm:col-span-2">
             <Input name="direccion" value={direccion} onChange={(e) => setDireccion(e.target.value)} />
           </FormRow>
-          <FormRow label="Ubigeo (6 dígitos INEI)" className="sm:col-span-2" hint="Próximamente: selector con autocompletar">
-            <Input name="ubigeo" defaultValue={initial?.ubigeo ?? ''} maxLength={6} pattern="\d{6}" placeholder="150101 (Lima/Lima/Lima)" />
+          <FormRow label="Ubigeo" className="sm:col-span-2">
+            <UbigeoSelect name="ubigeo" value={initial?.ubigeo ?? null} />
           </FormRow>
         </FormGrid>
       </FormSection>

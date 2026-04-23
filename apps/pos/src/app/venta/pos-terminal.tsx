@@ -5,10 +5,11 @@ import { Card } from '@happy/ui/card';
 import { Input } from '@happy/ui/input';
 import { Button } from '@happy/ui/button';
 import { Badge } from '@happy/ui/badge';
-import { Search, Trash2, Plus, Minus, ScanBarcode, X, Smartphone, CreditCard, Banknote, Building2, MessageCircle } from 'lucide-react';
+import { Search, Trash2, Plus, Minus, ScanBarcode, X, Smartphone, CreditCard, Banknote, Building2, MessageCircle, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { formatPEN } from '@happy/lib';
 import { buildPedidoWaMessage, buildWhatsappUrl } from '@happy/lib/whatsapp';
+import { registrarVenta } from '@/server/actions/venta';
 
 type Variante = {
   id: string; sku: string; codigo_barras: string | null; talla: string;
@@ -79,15 +80,47 @@ export function PosTerminal({ variantes, cajas }: { variantes: Variante[]; cajas
     setPagos((p) => p.filter((_, i) => i !== idx));
   }
 
+  const [tipoComp, setTipoComp] = useState<'NOTA_VENTA' | 'BOLETA' | 'FACTURA'>('BOLETA');
+  const [cobrando, setCobrando] = useState(false);
+
   async function cobrar() {
     if (carrito.length === 0) return toast.error('Carrito vacío');
     if (pagado < total) return toast.error(`Falta cobrar ${formatPEN(total - pagado)}`);
-    // TODO: server action que crea venta + ventas_lineas + ventas_pagos + comprobante
-    toast.success(`Venta registrada: ${formatPEN(total)}`);
-    setCarrito([]);
-    setPagos([]);
-    setNombreCliente('');
-    setDocCliente('');
+    const cajaActual = cajas.find((c) => c.id === cajaId);
+    if (!cajaActual) return toast.error('Selecciona una caja');
+
+    setCobrando(true);
+    try {
+      const r = await registrarVenta({
+        caja_id: cajaId,
+        almacen_id: cajaActual.almacen_id,
+        cliente_id: null,
+        documento_cliente: docCliente || null,
+        tipo_documento_cliente: tipoCliente === 'completo' && docCliente
+          ? ((docCliente.length === 11 ? 'RUC' : 'DNI') as 'DNI' | 'RUC')
+          : null,
+        nombre_cliente_rapido: nombreCliente || null,
+        tipo_comprobante: tipoComp,
+        items: carrito.map((l) => ({
+          variante_id: l.variante.id,
+          cantidad: l.cantidad,
+          precio_unitario: Number(l.variante.precio_publico ?? 0),
+          descuento_monto: 0,
+        })),
+        pagos: pagos.map((p) => ({ metodo: p.metodo, monto: p.monto })),
+      });
+      if (r.ok) {
+        toast.success(`✅ ${r.numero}${r.comprobante ? ` · ${r.comprobante.serie}-${String(r.comprobante.numero).padStart(8, '0')}` : ''} · ${formatPEN(total)}`);
+        setCarrito([]);
+        setPagos([]);
+        setNombreCliente('');
+        setDocCliente('');
+      } else {
+        toast.error(r.error);
+      }
+    } finally {
+      setCobrando(false);
+    }
   }
 
   function pedirPorWhatsapp() {
@@ -253,12 +286,25 @@ export function PosTerminal({ variantes, cajas }: { variantes: Variante[]; cajas
             {pagado > total && <Row label="Vuelto" value={formatPEN(vuelto)} className="text-amber-700" bold />}
             {pagado < total && pagado > 0 && <Row label="Falta" value={formatPEN(total - pagado)} className="text-red-600" bold />}
           </div>
+          <div className="mb-2 flex gap-1 text-xs">
+            {(['NOTA_VENTA', 'BOLETA', 'FACTURA'] as const).map((t) => (
+              <button
+                key={t}
+                type="button"
+                onClick={() => setTipoComp(t)}
+                className={`flex-1 rounded-md border px-2 py-1.5 transition ${tipoComp === t ? 'border-happy-500 bg-happy-50 font-medium text-happy-700' : 'hover:bg-slate-50'}`}
+              >
+                {t === 'NOTA_VENTA' ? 'Nota Venta' : t === 'BOLETA' ? 'Boleta' : 'Factura'}
+              </button>
+            ))}
+          </div>
           <div className="grid grid-cols-2 gap-2">
-            <Button onClick={pedirPorWhatsapp} variant="outline" size="lg" disabled={carrito.length === 0}>
+            <Button onClick={pedirPorWhatsapp} variant="outline" size="lg" disabled={carrito.length === 0 || cobrando}>
               <MessageCircle className="h-4 w-4" /> WhatsApp
             </Button>
-            <Button onClick={cobrar} variant="premium" size="lg" disabled={pagado < total}>
-              Cobrar
+            <Button onClick={cobrar} variant="premium" size="lg" disabled={pagado < total || cobrando}>
+              {cobrando ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+              {cobrando ? 'Cobrando…' : 'Cobrar'}
             </Button>
           </div>
         </div>

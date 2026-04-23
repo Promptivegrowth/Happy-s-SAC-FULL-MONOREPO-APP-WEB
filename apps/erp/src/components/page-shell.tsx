@@ -8,7 +8,7 @@ export function PageShell({
   className,
 }: {
   title: string;
-  description?: string;
+  description?: React.ReactNode;
   actions?: React.ReactNode;
   children: React.ReactNode;
   className?: string;
@@ -18,7 +18,7 @@ export function PageShell({
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <h1 className="font-display text-2xl font-semibold">{title}</h1>
-          {description && <p className="text-sm text-slate-500">{description}</p>}
+          {description && <div className="text-sm text-slate-500">{description}</div>}
         </div>
         {actions && <div className="flex flex-wrap items-center gap-2">{actions}</div>}
       </div>

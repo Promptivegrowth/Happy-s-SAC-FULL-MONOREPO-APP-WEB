@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { useActionForm } from './use-action-form';
 import { SubmitButton } from './submit-button';
 import { SunatLookup } from './sunat-lookup';
+import { UbigeoSelect } from './ubigeo-select';
 import { Input } from '@happy/ui/input';
 import { Textarea } from '@happy/ui/textarea';
 import { Switch } from '@happy/ui/switch';
@@ -115,7 +116,7 @@ export function TallerForm({ initial }: { initial?: Taller }) {
             <Input name="direccion" value={direccion} onChange={(e) => setDireccion(e.target.value)} />
           </FormRow>
           <FormRow label="Ubigeo">
-            <Input name="ubigeo" defaultValue={initial?.ubigeo ?? ''} maxLength={6} pattern="\d{6}" />
+            <UbigeoSelect name="ubigeo" value={initial?.ubigeo ?? null} />
           </FormRow>
           <FormRow label="Teléfono">
             <Input name="telefono" defaultValue={initial?.telefono ?? ''} />

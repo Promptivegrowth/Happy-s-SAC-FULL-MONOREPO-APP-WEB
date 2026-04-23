@@ -28,8 +28,10 @@ export default async function ComprobantesPage() {
           <TableBody>
             {(data ?? []).length === 0 && <TableRow><TableCell colSpan={6} className="py-10 text-center text-sm text-slate-500">Sin comprobantes aún.</TableCell></TableRow>}
             {data?.map((c) => (
-              <TableRow key={c.id}>
-                <TableCell className="font-mono text-xs">{c.numero_completo}</TableCell>
+              <TableRow key={c.id} className="hover:bg-happy-50/50">
+                <TableCell className="font-mono text-xs">
+                  <a href={`/comprobantes/${c.id}`} className="hover:text-happy-600">{c.numero_completo}</a>
+                </TableCell>
                 <TableCell><Badge variant="secondary">{c.tipo}</Badge></TableCell>
                 <TableCell className="text-sm">{formatDateTime(c.fecha_emision)}</TableCell>
                 <TableCell className="text-sm">

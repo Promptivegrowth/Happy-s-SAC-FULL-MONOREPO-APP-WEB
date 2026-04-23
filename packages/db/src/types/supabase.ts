@@ -1052,6 +1052,13 @@ export type Database = {
             referencedColumns: ["id"]
           },
           {
+            foreignKeyName: "comprobantes_documento_referencia_id_fkey"
+            columns: ["documento_referencia_id"]
+            isOneToOne: false
+            referencedRelation: "v_comprobantes_sunat"
+            referencedColumns: ["id"]
+          },
+          {
             foreignKeyName: "comprobantes_pedido_b2b_id_fkey"
             columns: ["pedido_b2b_id"]
             isOneToOne: false
@@ -1126,6 +1133,13 @@ export type Database = {
             columns: ["comprobante_id"]
             isOneToOne: false
             referencedRelation: "comprobantes"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "comprobantes_lineas_comprobante_id_fkey"
+            columns: ["comprobante_id"]
+            isOneToOne: false
+            referencedRelation: "v_comprobantes_sunat"
             referencedColumns: ["id"]
           },
           {
@@ -1676,6 +1690,13 @@ export type Database = {
             columns: ["nota_credito_id"]
             isOneToOne: false
             referencedRelation: "comprobantes"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "devoluciones_nc_fk"
+            columns: ["nota_credito_id"]
+            isOneToOne: false
+            referencedRelation: "v_comprobantes_sunat"
             referencedColumns: ["id"]
           },
           {
@@ -4223,6 +4244,13 @@ export type Database = {
             referencedColumns: ["id"]
           },
           {
+            foreignKeyName: "pedidos_web_comprobante_id_fkey"
+            columns: ["comprobante_id"]
+            isOneToOne: false
+            referencedRelation: "v_comprobantes_sunat"
+            referencedColumns: ["id"]
+          },
+          {
             foreignKeyName: "pedidos_web_cupon_id_fkey"
             columns: ["cupon_id"]
             isOneToOne: false
@@ -5532,6 +5560,13 @@ export type Database = {
             referencedColumns: ["id"]
           },
           {
+            foreignKeyName: "reclamos_comprobante_id_fkey"
+            columns: ["comprobante_id"]
+            isOneToOne: false
+            referencedRelation: "v_comprobantes_sunat"
+            referencedColumns: ["id"]
+          },
+          {
             foreignKeyName: "reclamos_pedido_web_id_fkey"
             columns: ["pedido_web_id"]
             isOneToOne: false
@@ -5659,6 +5694,152 @@ export type Database = {
             columns: ["variante_id"]
             isOneToOne: false
             referencedRelation: "productos_variantes"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      sunat_config: {
+        Row: {
+          activo: boolean
+          ambiente: string
+          certificado_password: string | null
+          certificado_pfx_base64: string | null
+          certificado_subject: string | null
+          certificado_vencimiento: string | null
+          clave_sol: string
+          created_at: string | null
+          empresa_id: string
+          endpoint_consulta: string | null
+          endpoint_factura: string
+          endpoint_guia: string
+          firmante_cargo: string | null
+          firmante_nombre: string | null
+          id: string
+          updated_at: string | null
+          usuario_sol: string
+        }
+        Insert: {
+          activo?: boolean
+          ambiente?: string
+          certificado_password?: string | null
+          certificado_pfx_base64?: string | null
+          certificado_subject?: string | null
+          certificado_vencimiento?: string | null
+          clave_sol: string
+          created_at?: string | null
+          empresa_id: string
+          endpoint_consulta?: string | null
+          endpoint_factura?: string
+          endpoint_guia?: string
+          firmante_cargo?: string | null
+          firmante_nombre?: string | null
+          id?: string
+          updated_at?: string | null
+          usuario_sol: string
+        }
+        Update: {
+          activo?: boolean
+          ambiente?: string
+          certificado_password?: string | null
+          certificado_pfx_base64?: string | null
+          certificado_subject?: string | null
+          certificado_vencimiento?: string | null
+          clave_sol?: string
+          created_at?: string | null
+          empresa_id?: string
+          endpoint_consulta?: string | null
+          endpoint_factura?: string
+          endpoint_guia?: string
+          firmante_cargo?: string | null
+          firmante_nombre?: string | null
+          id?: string
+          updated_at?: string | null
+          usuario_sol?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "sunat_config_empresa_id_fkey"
+            columns: ["empresa_id"]
+            isOneToOne: true
+            referencedRelation: "empresa"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      sunat_envios: {
+        Row: {
+          cdr_path: string | null
+          cdr_xml: string | null
+          comprobante_id: string | null
+          duracion_ms: number | null
+          endpoint_url: string | null
+          exitoso: boolean | null
+          fecha: string
+          hash_documento: string | null
+          http_status: number | null
+          id: number
+          intento: number
+          notas: string | null
+          observaciones: Json | null
+          soap_fault: string | null
+          sunat_codigo: string | null
+          sunat_descripcion: string | null
+          xml_enviado: string | null
+          xml_zip_path: string | null
+        }
+        Insert: {
+          cdr_path?: string | null
+          cdr_xml?: string | null
+          comprobante_id?: string | null
+          duracion_ms?: number | null
+          endpoint_url?: string | null
+          exitoso?: boolean | null
+          fecha?: string
+          hash_documento?: string | null
+          http_status?: number | null
+          id?: number
+          intento?: number
+          notas?: string | null
+          observaciones?: Json | null
+          soap_fault?: string | null
+          sunat_codigo?: string | null
+          sunat_descripcion?: string | null
+          xml_enviado?: string | null
+          xml_zip_path?: string | null
+        }
+        Update: {
+          cdr_path?: string | null
+          cdr_xml?: string | null
+          comprobante_id?: string | null
+          duracion_ms?: number | null
+          endpoint_url?: string | null
+          exitoso?: boolean | null
+          fecha?: string
+          hash_documento?: string | null
+          http_status?: number | null
+          id?: number
+          intento?: number
+          notas?: string | null
+          observaciones?: Json | null
+          soap_fault?: string | null
+          sunat_codigo?: string | null
+          sunat_descripcion?: string | null
+          xml_enviado?: string | null
+          xml_zip_path?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "sunat_envios_comprobante_id_fkey"
+            columns: ["comprobante_id"]
+            isOneToOne: false
+            referencedRelation: "comprobantes"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "sunat_envios_comprobante_id_fkey"
+            columns: ["comprobante_id"]
+            isOneToOne: false
+            referencedRelation: "v_comprobantes_sunat"
             referencedColumns: ["id"]
           },
         ]
@@ -6457,6 +6638,13 @@ export type Database = {
             referencedColumns: ["id"]
           },
           {
+            foreignKeyName: "ventas_comprobante_fk"
+            columns: ["comprobante_id"]
+            isOneToOne: false
+            referencedRelation: "v_comprobantes_sunat"
+            referencedColumns: ["id"]
+          },
+          {
             foreignKeyName: "ventas_cupon_fk"
             columns: ["cupon_id"]
             isOneToOne: false
@@ -6735,6 +6923,216 @@ export type Database = {
           nombre_completo?: never
         }
         Relationships: []
+      }
+      v_comprobantes_sunat: {
+        Row: {
+          cdr_url: string | null
+          cliente_id: string | null
+          created_at: string | null
+          descuento_global: number | null
+          devolucion_id: string | null
+          direccion_cliente: string | null
+          documento_referencia_id: string | null
+          estado: Database["public"]["Enums"]["estado_comprobante"] | null
+          fecha_emision: string | null
+          fecha_vencimiento: string | null
+          forma_pago: string | null
+          hash_firma: string | null
+          icbper: number | null
+          id: string | null
+          igv: number | null
+          moneda: string | null
+          motivo_nc_nd: string | null
+          nota_interna: string | null
+          numero: number | null
+          numero_completo: string | null
+          numero_documento_cliente: string | null
+          pdf_url: string | null
+          pedido_b2b_id: string | null
+          pedido_web_id: string | null
+          pse_proveedor: string | null
+          pse_ticket: string | null
+          razon_social_cliente: string | null
+          serie: string | null
+          sub_total: number | null
+          sunat_aceptado_en: string | null
+          sunat_codigo_respuesta: string | null
+          sunat_enviado_en: string | null
+          sunat_mensaje: string | null
+          tipo: Database["public"]["Enums"]["tipo_comprobante"] | null
+          tipo_cambio: number | null
+          tipo_documento_cliente:
+            | Database["public"]["Enums"]["tipo_documento_identidad"]
+            | null
+          total: number | null
+          total_letras: string | null
+          ubigeo_cliente: string | null
+          ultimo_codigo: string | null
+          ultimo_envio_en: string | null
+          ultimo_envio_exitoso: boolean | null
+          ultimo_mensaje: string | null
+          updated_at: string | null
+          venta_id: string | null
+          xml_firmado_url: string | null
+        }
+        Insert: {
+          cdr_url?: string | null
+          cliente_id?: string | null
+          created_at?: string | null
+          descuento_global?: number | null
+          devolucion_id?: string | null
+          direccion_cliente?: string | null
+          documento_referencia_id?: string | null
+          estado?: Database["public"]["Enums"]["estado_comprobante"] | null
+          fecha_emision?: string | null
+          fecha_vencimiento?: string | null
+          forma_pago?: string | null
+          hash_firma?: string | null
+          icbper?: number | null
+          id?: string | null
+          igv?: number | null
+          moneda?: string | null
+          motivo_nc_nd?: string | null
+          nota_interna?: string | null
+          numero?: number | null
+          numero_completo?: string | null
+          numero_documento_cliente?: string | null
+          pdf_url?: string | null
+          pedido_b2b_id?: string | null
+          pedido_web_id?: string | null
+          pse_proveedor?: string | null
+          pse_ticket?: string | null
+          razon_social_cliente?: string | null
+          serie?: string | null
+          sub_total?: number | null
+          sunat_aceptado_en?: string | null
+          sunat_codigo_respuesta?: string | null
+          sunat_enviado_en?: string | null
+          sunat_mensaje?: string | null
+          tipo?: Database["public"]["Enums"]["tipo_comprobante"] | null
+          tipo_cambio?: number | null
+          tipo_documento_cliente?:
+            | Database["public"]["Enums"]["tipo_documento_identidad"]
+            | null
+          total?: number | null
+          total_letras?: string | null
+          ubigeo_cliente?: string | null
+          ultimo_codigo?: never
+          ultimo_envio_en?: never
+          ultimo_envio_exitoso?: never
+          ultimo_mensaje?: never
+          updated_at?: string | null
+          venta_id?: string | null
+          xml_firmado_url?: string | null
+        }
+        Update: {
+          cdr_url?: string | null
+          cliente_id?: string | null
+          created_at?: string | null
+          descuento_global?: number | null
+          devolucion_id?: string | null
+          direccion_cliente?: string | null
+          documento_referencia_id?: string | null
+          estado?: Database["public"]["Enums"]["estado_comprobante"] | null
+          fecha_emision?: string | null
+          fecha_vencimiento?: string | null
+          forma_pago?: string | null
+          hash_firma?: string | null
+          icbper?: number | null
+          id?: string | null
+          igv?: number | null
+          moneda?: string | null
+          motivo_nc_nd?: string | null
+          nota_interna?: string | null
+          numero?: number | null
+          numero_completo?: string | null
+          numero_documento_cliente?: string | null
+          pdf_url?: string | null
+          pedido_b2b_id?: string | null
+          pedido_web_id?: string | null
+          pse_proveedor?: string | null
+          pse_ticket?: string | null
+          razon_social_cliente?: string | null
+          serie?: string | null
+          sub_total?: number | null
+          sunat_aceptado_en?: string | null
+          sunat_codigo_respuesta?: string | null
+          sunat_enviado_en?: string | null
+          sunat_mensaje?: string | null
+          tipo?: Database["public"]["Enums"]["tipo_comprobante"] | null
+          tipo_cambio?: number | null
+          tipo_documento_cliente?:
+            | Database["public"]["Enums"]["tipo_documento_identidad"]
+            | null
+          total?: number | null
+          total_letras?: string | null
+          ubigeo_cliente?: string | null
+          ultimo_codigo?: never
+          ultimo_envio_en?: never
+          ultimo_envio_exitoso?: never
+          ultimo_mensaje?: never
+          updated_at?: string | null
+          venta_id?: string | null
+          xml_firmado_url?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "comprobantes_cliente_id_fkey"
+            columns: ["cliente_id"]
+            isOneToOne: false
+            referencedRelation: "clientes"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "comprobantes_cliente_id_fkey"
+            columns: ["cliente_id"]
+            isOneToOne: false
+            referencedRelation: "v_cliente_nombre_completo"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "comprobantes_devolucion_id_fkey"
+            columns: ["devolucion_id"]
+            isOneToOne: false
+            referencedRelation: "devoluciones"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "comprobantes_documento_referencia_id_fkey"
+            columns: ["documento_referencia_id"]
+            isOneToOne: false
+            referencedRelation: "comprobantes"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "comprobantes_documento_referencia_id_fkey"
+            columns: ["documento_referencia_id"]
+            isOneToOne: false
+            referencedRelation: "v_comprobantes_sunat"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "comprobantes_pedido_b2b_id_fkey"
+            columns: ["pedido_b2b_id"]
+            isOneToOne: false
+            referencedRelation: "pedidos_b2b"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "comprobantes_pedido_web_fk"
+            columns: ["pedido_web_id"]
+            isOneToOne: false
+            referencedRelation: "pedidos_web"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "comprobantes_venta_id_fkey"
+            columns: ["venta_id"]
+            isOneToOne: false
+            referencedRelation: "ventas"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       v_costo_materiales_producto: {
         Row: {

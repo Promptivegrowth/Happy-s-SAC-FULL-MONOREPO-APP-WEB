@@ -24,7 +24,7 @@ export function FormRow({ label, required, error, hint, children, className, htm
   );
 }
 
-export function FormGrid({ children, cols = 2, className }: { children: React.ReactNode; cols?: 1 | 2 | 3; className?: string }) {
+export function FormGrid({ children, cols = 2, className }: { children: React.ReactNode; cols?: 1 | 2 | 3 | 4; className?: string }) {
   return (
     <div
       className={cn(
@@ -32,6 +32,7 @@ export function FormGrid({ children, cols = 2, className }: { children: React.Re
         cols === 1 && 'sm:grid-cols-1',
         cols === 2 && 'sm:grid-cols-2',
         cols === 3 && 'sm:grid-cols-3',
+        cols === 4 && 'sm:grid-cols-4',
         className,
       )}
     >
