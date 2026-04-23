@@ -9,18 +9,22 @@ const buttonVariants = cva(
     variants: {
       variant: {
         default: 'bg-happy-500 text-white hover:bg-happy-600 shadow-sm',
-        destructive: 'bg-red-600 text-white hover:bg-red-700',
+        corp: 'bg-corp-700 text-white hover:bg-corp-800 shadow-sm',
+        destructive: 'bg-danger text-white hover:bg-danger-600',
         outline: 'border border-input bg-background hover:bg-accent hover:text-accent-foreground',
-        secondary: 'bg-slate-100 text-slate-900 hover:bg-slate-200',
+        secondary: 'bg-corp-50 text-corp-700 hover:bg-corp-100',
         ghost: 'hover:bg-accent hover:text-accent-foreground',
-        link: 'text-happy-600 underline-offset-4 hover:underline',
+        link: 'text-corp-700 underline-offset-4 hover:underline',
         premium:
-          'bg-gradient-to-r from-happy-500 via-carnival-pink to-carnival-purple text-white shadow-glow hover:brightness-110',
+          'bg-happy-gradient text-white shadow-glow hover:brightness-110',
+        'premium-corp':
+          'bg-corp-gradient text-white shadow-glow-corp hover:brightness-110',
       },
       size: {
         default: 'h-10 px-4 py-2',
         sm: 'h-9 rounded-md px-3 text-xs',
         lg: 'h-12 rounded-lg px-8 text-base',
+        xl: 'h-14 rounded-lg px-10 text-base',
         icon: 'h-10 w-10',
       },
     },

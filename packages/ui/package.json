@@ -21,7 +21,17 @@
     "./select": "./src/select.tsx",
     "./dropdown": "./src/dropdown.tsx",
     "./skeleton": "./src/skeleton.tsx",
+    "./logo": "./src/logo.tsx",
+    "./textarea": "./src/textarea.tsx",
+    "./switch": "./src/switch.tsx",
+    "./form-row": "./src/form-row.tsx",
+    "./empty-state": "./src/empty-state.tsx",
     "./styles.css": "./src/styles.css"
+  },
+  "peerDependencies": {
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "next": "^15.0.0"
   },
   "scripts": {
     "lint": "eslint \"src/**/*.{ts,tsx}\" --no-error-on-unmatched-pattern",
@@ -38,7 +48,8 @@
     "@radix-ui/react-select": "^2.1.2",
     "@radix-ui/react-slot": "^1.1.0",
     "@radix-ui/react-tabs": "^1.1.1",
-    "@radix-ui/react-toast": "^1.2.2"
+    "@radix-ui/react-toast": "^1.2.2",
+    "@radix-ui/react-switch": "^1.1.1"
   },
   "devDependencies": {
     "@happy/config": "workspace:*",
@@ -48,8 +59,7 @@
     "react-dom": "^18.3.1",
     "typescript": "^5.6.3"
   },
-  "peerDependencies": {
-    "react": "^18.3.1",
-    "react-dom": "^18.3.1"
+  "peerDependenciesMeta": {
+    "next": { "optional": false }
   }
 }

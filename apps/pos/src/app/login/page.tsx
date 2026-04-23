@@ -8,9 +8,10 @@ import { Input } from '@happy/ui/input';
 import { Label } from '@happy/ui/label';
 import { Badge } from '@happy/ui/badge';
 import { Card, CardContent, CardHeader, CardTitle } from '@happy/ui/card';
+import { Logo } from '@happy/ui/logo';
 import { DEMO_USERS, DEMO_PASSWORD } from '@happy/lib/demo-users';
 import { toast } from 'sonner';
-import { Store, Loader2, Sparkles } from 'lucide-react';
+import { Loader2, Sparkles } from 'lucide-react';
 
 export default function PosLoginPage() {
   const router = useRouter();
@@ -44,14 +45,16 @@ export default function PosLoginPage() {
   const posUsers = DEMO_USERS.filter((u) => u.acceso !== 'erp');
 
   return (
-    <main className="flex min-h-screen items-center justify-center bg-gradient-to-br from-happy-500 to-carnival-purple p-4 py-8">
-      <Card className="w-full max-w-sm">
+    <main className="relative flex min-h-screen items-center justify-center overflow-hidden bg-corp-900 p-4 py-8">
+      <div className="absolute -left-32 -top-32 h-96 w-96 rounded-full bg-happy-500/30 blur-3xl" />
+      <div className="absolute -right-40 bottom-0 h-[28rem] w-[28rem] rounded-full bg-corp-700/40 blur-3xl" />
+      <Card className="relative w-full max-w-sm shadow-2xl">
         <CardHeader className="text-center">
-          <div className="mx-auto mb-3 flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-to-br from-happy-500 to-carnival-purple text-white shadow-glow">
-            <Store className="h-7 w-7" />
+          <div className="mx-auto mb-2 flex justify-center">
+            <Logo height={48} priority />
           </div>
-          <CardTitle className="font-display text-2xl">POS HAPPY</CardTitle>
-          <p className="text-sm text-slate-500">Punto de venta · Tiendas</p>
+          <CardTitle className="font-display text-2xl text-corp-900">Punto de Venta</CardTitle>
+          <p className="text-sm text-slate-500">Disfraces Happys · Tiendas</p>
         </CardHeader>
         <CardContent className="space-y-5">
           <form onSubmit={onSubmit} className="space-y-4">

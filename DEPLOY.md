@@ -87,9 +87,9 @@ NEXT_PUBLIC_SUPABASE_ANON_KEY=<idem>
 SUPABASE_SERVICE_ROLE_KEY=<idem — necesario para crear pedidos sin RLS>
 APIS_NET_PE_TOKEN=sk_14887.Q5HUEN1YgB3ElfmgaMtDCYF88y2aIMrh
 WHATSAPP_NUMBER=51916856842
-NEXT_PUBLIC_ERP_URL=https://erp.disfraceshappys.com
-NEXT_PUBLIC_WEB_URL=https://disfraceshappys.com
-NEXT_PUBLIC_POS_URL=https://pos.disfraceshappys.com
+NEXT_PUBLIC_ERP_URL=https://happy-s-sac-full-monorepo-app-web-e.vercel.app/
+NEXT_PUBLIC_WEB_URL=https://happy-s-sac-full-monorepo-app-web-w.vercel.app/
+NEXT_PUBLIC_POS_URL=https://happy-s-sac-full-monorepo-app-web-p.vercel.app/
 NEXT_PUBLIC_CULQI_PUBLIC_KEY=<cuando contratemos Culqi>
 CULQI_SECRET_KEY=<cuando contratemos Culqi — solo server>
 ```
@@ -100,7 +100,7 @@ CULQI_SECRET_KEY=<cuando contratemos Culqi — solo server>
 NEXT_PUBLIC_SUPABASE_URL=https://trkokphwmkedhxwjriod.supabase.co
 NEXT_PUBLIC_SUPABASE_ANON_KEY=<idem>
 NEXT_PUBLIC_POS_URL=https://pos.disfraceshappys.com
-NEXT_PUBLIC_ERP_URL=https://erp.disfraceshappys.com
+NEXT_PUBLIC_ERP_URL=happy-s-sac-full-monorepo-app-web-e.vercel.app
 WHATSAPP_NUMBER=51916856842
 ```
 
