@@ -54,7 +54,8 @@ export function RecetaEditor({ recetaId, materiales, unidades, lineas }: {
     if (!confirm('¿Eliminar esta línea de la receta?')) return;
     start(async () => {
       const r = await eliminarLinea(id);
-      r.ok ? toast.success('Línea eliminada') : toast.error(r.error);
+      if (r.ok) toast.success('Línea eliminada');
+      else toast.error(r.error ?? 'Error');
     });
   }
 

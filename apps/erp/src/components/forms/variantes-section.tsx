@@ -49,7 +49,8 @@ export function VariantesSection({ productoId, variantes }: { productoId: string
     if (!confirm('¿Eliminar esta variante?')) return;
     start(async () => {
       const r = await eliminarVariante(id, productoId);
-      r.ok ? toast.success('Eliminada') : toast.error(r.error ?? 'Error');
+      if (r.ok) toast.success('Eliminada');
+      else toast.error(r.error ?? 'Error');
     });
   }
 

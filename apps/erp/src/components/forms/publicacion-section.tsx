@@ -46,7 +46,8 @@ export function PublicacionSection({ productoId, pub, productoNombre }: { produc
     fd.set('destacado_web', destacado ? 'on' : 'off');
     start(async () => {
       const r = await actualizarPublicacion(productoId, null, fd);
-      r.ok ? toast.success('Publicación actualizada') : toast.error(r.error);
+      if (r.ok) toast.success('Publicación actualizada');
+      else toast.error(r.error ?? 'Error');
     });
   }
 
