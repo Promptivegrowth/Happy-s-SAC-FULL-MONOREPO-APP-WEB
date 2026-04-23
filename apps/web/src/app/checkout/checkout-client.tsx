@@ -1,6 +1,7 @@
 'use client';
 
 import { useMemo, useState } from 'react';
+import Link from 'next/link';
 import { useCart } from '@/store/cart';
 import { Card } from '@happy/ui/card';
 import { Input } from '@happy/ui/input';
@@ -111,7 +112,7 @@ export function CheckoutClient() {
   if (items.length === 0) {
     return (
       <Card className="p-10 text-center text-sm text-slate-500">
-        Tu carrito está vacío. <a href="/productos" className="text-happy-600">Ver catálogo →</a>
+        Tu carrito está vacío. <Link href="/productos" className="text-happy-600">Ver catálogo →</Link>
       </Card>
     );
   }

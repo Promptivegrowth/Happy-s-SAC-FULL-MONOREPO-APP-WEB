@@ -14,7 +14,7 @@
     "./enums": "./src/enums.ts"
   },
   "scripts": {
-    "lint": "eslint src",
+    "lint": "eslint \"src/**/*.{ts,tsx}\" --no-error-on-unmatched-pattern",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

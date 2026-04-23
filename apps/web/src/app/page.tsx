@@ -125,7 +125,7 @@ export default async function Home() {
 
         {destacados.length === 0 ? (
           <Card className="p-10 text-center text-sm text-slate-500">
-            No hay productos destacados aún. Desde el ERP marca productos como "destacados" en /web-catalogo.
+            No hay productos destacados aún. Desde el ERP marca productos como “destacados” en /web-catalogo.
           </Card>
         ) : (
           <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-4">

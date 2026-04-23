@@ -1,5 +1,6 @@
 import { notFound } from 'next/navigation';
 import Image from 'next/image';
+import Link from 'next/link';
 import { createClient } from '@happy/db/server';
 import { Badge } from '@happy/ui/badge';
 import { ProductoDetalleClient } from './detalle-client';
@@ -53,10 +54,10 @@ export default async function ProductoDetallePage({ params }: { params: Promise<
   return (
     <article className="container px-4 py-10">
       <nav className="mb-4 text-sm text-slate-500">
-        <a href="/" className="hover:text-happy-600">Inicio</a>
+        <Link href="/" className="hover:text-happy-600">Inicio</Link>
         <span className="mx-2">/</span>
         {prod.categoria && <>
-          <a href={`/categoria/${prod.categoria.slug}`} className="hover:text-happy-600">{prod.categoria.nombre}</a>
+          <Link href={`/categoria/${prod.categoria.slug}`} className="hover:text-happy-600">{prod.categoria.nombre}</Link>
           <span className="mx-2">/</span>
         </>}
         <span className="text-slate-900">{prod.nombre}</span>

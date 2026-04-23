@@ -27,7 +27,7 @@ export default async function CatalogoPage({ searchParams }: { searchParams: Pro
 
       {(pubs ?? []).length === 0 ? (
         <Card className="p-10 text-center text-sm text-slate-500">
-          No hay productos publicados aún. Desde el ERP en /web-catalogo activa "Publicar en web".
+          No hay productos publicados aún. Desde el ERP en /web-catalogo activa “Publicar en web”.
         </Card>
       ) : (
         <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-4">

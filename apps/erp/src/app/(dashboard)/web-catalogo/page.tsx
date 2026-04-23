@@ -32,7 +32,7 @@ export default async function WebCatalogoPage() {
             <TableHead>Estado</TableHead><TableHead>Destacado</TableHead><TableHead>Orden</TableHead>
           </TableRow></TableHeader>
           <TableBody>
-            {(pubs ?? []).length === 0 && <TableRow><TableCell colSpan={5} className="py-10 text-center text-sm text-slate-500">Aún no hay productos publicados. Desde el detalle de producto activa "Publicar en web".</TableCell></TableRow>}
+            {(pubs ?? []).length === 0 && <TableRow><TableCell colSpan={5} className="py-10 text-center text-sm text-slate-500">Aún no hay productos publicados. Desde el detalle de producto activa “Publicar en web”.</TableCell></TableRow>}
             {pubs?.map((p) => {
               const prod = (p as unknown as { productos?: { nombre: string; codigo: string } }).productos;
               return (
