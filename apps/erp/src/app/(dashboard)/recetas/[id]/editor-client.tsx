@@ -72,18 +72,49 @@ export function RecetaEditor({ recetaId, materiales, unidades, lineas }: {
       <Card className="p-4">
         <div className="flex flex-wrap items-center gap-2">
           <span className="text-sm font-medium">Filtrar talla:</span>
-          <Badge variant={!filtroTalla ? 'default' : 'outline'} onClick={() => setFiltroTalla('')} className="cursor-pointer">Todas</Badge>
-          {TALLAS.map((t) => (
-            <Badge key={t} variant={filtroTalla === t ? 'default' : 'outline'} onClick={() => setFiltroTalla(t)} className="cursor-pointer">
-              {t.replace('T', '')}
-            </Badge>
-          ))}
+          <Badge
+            variant={!filtroTalla ? 'default' : 'outline'}
+            onClick={() => setFiltroTalla('')}
+            className="cursor-pointer"
+          >
+            Todas
+          </Badge>
+          {TALLAS.map((t) => {
+            const cantidad = lineas.filter((l) => l.talla === t).length;
+            const sinReceta = cantidad === 0;
+            return (
+              <button
+                key={t}
+                type="button"
+                onClick={() => !sinReceta && setFiltroTalla(t)}
+                disabled={sinReceta}
+                title={sinReceta ? 'Esta talla aún no tiene receta' : `${cantidad} línea${cantidad === 1 ? '' : 's'}`}
+                className={`relative inline-flex items-center gap-1 rounded-full border px-2.5 py-0.5 text-xs font-medium transition ${
+                  sinReceta
+                    ? 'cursor-not-allowed border-dashed border-slate-300 bg-slate-100 text-slate-400 opacity-60 line-through'
+                    : filtroTalla === t
+                      ? 'border-transparent bg-happy-500 text-white shadow-sm'
+                      : 'border-slate-300 bg-white text-slate-700 hover:border-happy-400 hover:bg-happy-50'
+                }`}
+              >
+                {t.replace('T', '')}
+                {!sinReceta && (
+                  <span className={`text-[9px] font-mono ${filtroTalla === t ? 'text-white/80' : 'text-slate-400'}`}>
+                    ·{cantidad}
+                  </span>
+                )}
+              </button>
+            );
+          })}
           <div className="ml-auto">
             <Button variant="premium" size="sm" onClick={() => setOpenForm(true)}>
               <Plus className="h-4 w-4" /> Agregar línea
             </Button>
           </div>
         </div>
+        <p className="mt-2 text-[10px] text-slate-500">
+          Las tallas en gris/tachadas todavía no tienen líneas — agregalas con el botón de arriba.
+        </p>
       </Card>
 
       {openForm && (
