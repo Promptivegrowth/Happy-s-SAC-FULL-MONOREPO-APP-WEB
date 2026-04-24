@@ -1,9 +1,63 @@
 'use server';
 
 import { z } from 'zod';
+import { redirect } from 'next/navigation';
 import { runAction, requireUser, bumpPaths, type ActionResult } from './_helpers';
 
 const ESTADOS = ['BORRADOR','PLANIFICADA','EN_CORTE','EN_HABILITADO','EN_SERVICIO','EN_DECORADO','EN_CONTROL_CALIDAD','COMPLETADA','CANCELADA'] as const;
+
+const crearOTSchema = z.object({
+  fecha_entrega_objetivo: z.string().optional().or(z.literal('')),
+  prioridad: z.coerce.number().int().min(0).default(100),
+  observacion: z.string().optional().or(z.literal('')),
+  campana_id: z.string().uuid().optional().or(z.literal('')),
+});
+
+export async function crearOT(_prev: unknown, fd: FormData): Promise<ActionResult<{ id: string }>> {
+  const r = await runAction(async () => {
+    const data = crearOTSchema.parse({
+      fecha_entrega_objetivo: fd.get('fecha_entrega_objetivo') || '',
+      prioridad: fd.get('prioridad') || 100,
+      observacion: fd.get('observacion') || '',
+      campana_id: fd.get('campana_id') || '',
+    });
+    const { sb, userId } = await requireUser();
+
+    const { data: nro, error: errNro } = await sb.rpc('generar_numero_ot');
+    if (errNro) throw new Error(errNro.message);
+
+    const { data: alm } = await sb.from('almacenes').select('id').eq('codigo', 'ALM-SB').maybeSingle();
+
+    const { data: row, error } = await sb.from('ot').insert({
+      numero: nro as string,
+      estado: 'BORRADOR',
+      fecha_apertura: new Date().toISOString().slice(0, 10),
+      fecha_entrega_objetivo: data.fecha_entrega_objetivo || null,
+      prioridad: data.prioridad,
+      observacion: data.observacion || null,
+      campana_id: data.campana_id || null,
+      es_campana: !!data.campana_id,
+      almacen_produccion: alm?.id ?? null,
+      responsable_usuario_id: userId,
+    }).select('id').single();
+    if (error) throw new Error(error.message);
+
+    await sb.from('ot_eventos').insert({
+      ot_id: row.id,
+      tipo: 'CREACION',
+      estado_nuevo: 'BORRADOR',
+      usuario_id: userId,
+      detalle: 'OT creada manualmente',
+    });
+
+    return { id: row.id };
+  });
+  if (r.ok && r.data) {
+    await bumpPaths('/ot');
+    redirect(`/ot/${r.data.id}`);
+  }
+  return r;
+}
 
 export async function cambiarEstadoOT(otId: string, nuevoEstado: typeof ESTADOS[number], detalle?: string): Promise<ActionResult> {
   const r = await runAction(async () => {

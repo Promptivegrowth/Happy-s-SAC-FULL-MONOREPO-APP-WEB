@@ -24,7 +24,7 @@ export default async function OtPage() {
     <PageShell
       title="Órdenes de Trabajo (OT)"
       description="Producción en curso. Cada OT agrupa modelos y tallas a producir."
-      actions={<Link href="/ot/nueva"><Button><Plus className="h-4 w-4" /> Nueva OT</Button></Link>}
+      actions={<Link href="/ot/nueva"><Button variant="premium"><Plus className="h-4 w-4" /> Nueva OT</Button></Link>}
     >
       <Card>
         <CardContent className="p-0">

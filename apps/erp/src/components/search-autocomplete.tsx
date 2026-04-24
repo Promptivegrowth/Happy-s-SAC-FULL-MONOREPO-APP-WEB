@@ -1,9 +1,9 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, useTransition } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Input } from '@happy/ui/input';
-import { Search, X } from 'lucide-react';
+import { Search, X, Loader2 } from 'lucide-react';
 
 export type AutocompleteItem = {
   id: string;
@@ -27,6 +27,7 @@ export function SearchAutocomplete({
   const [text, setText] = useState(initial);
   const [open, setOpen] = useState(false);
   const [highlight, setHighlight] = useState(-1);
+  const [pending, start] = useTransition();
   const wrapRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -52,13 +53,13 @@ export function SearchAutocomplete({
     const params = new URLSearchParams(sp.toString());
     if (qStr.trim()) params.set(paramName, qStr.trim());
     else params.delete(paramName);
-    router.push(`?${params.toString()}`);
+    start(() => router.push(`?${params.toString()}`, { scroll: false }));
     setOpen(false);
   }
 
   function elegir(it: AutocompleteItem) {
     if (it.href) {
-      router.push(it.href);
+      start(() => router.push(it.href!));
       setOpen(false);
       return;
     }
@@ -73,7 +74,11 @@ export function SearchAutocomplete({
 
   return (
     <div ref={wrapRef} className="relative max-w-md flex-1">
-      <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+      {pending ? (
+        <Loader2 className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 animate-spin text-happy-500" />
+      ) : (
+        <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+      )}
       <Input
         type="search"
         value={text}
