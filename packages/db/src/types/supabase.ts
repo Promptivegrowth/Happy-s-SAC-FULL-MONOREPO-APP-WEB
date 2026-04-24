@@ -489,11 +489,15 @@ export type Database = {
           codigo: string
           created_at: string | null
           descripcion: string | null
+          destacada_web: boolean
           factor_costo_servicio: number | null
           fecha_fin: string | null
           fecha_inicio: string | null
           id: string
+          imagen_url: string | null
           nombre: string
+          orden_web: number | null
+          slug: string | null
         }
         Insert: {
           activa?: boolean
@@ -501,11 +505,15 @@ export type Database = {
           codigo: string
           created_at?: string | null
           descripcion?: string | null
+          destacada_web?: boolean
           factor_costo_servicio?: number | null
           fecha_fin?: string | null
           fecha_inicio?: string | null
           id?: string
+          imagen_url?: string | null
           nombre: string
+          orden_web?: number | null
+          slug?: string | null
         }
         Update: {
           activa?: boolean
@@ -513,11 +521,15 @@ export type Database = {
           codigo?: string
           created_at?: string | null
           descripcion?: string | null
+          destacada_web?: boolean
           factor_costo_servicio?: number | null
           fecha_fin?: string | null
           fecha_inicio?: string | null
           id?: string
+          imagen_url?: string | null
           nombre?: string
+          orden_web?: number | null
+          slug?: string | null
         }
         Relationships: []
       }
@@ -4882,40 +4894,52 @@ export type Database = {
           aprobada: boolean | null
           aprobada_en: string | null
           aprobada_por: string | null
+          autor_email: string | null
+          autor_nombre: string | null
           cliente_id: string | null
           comentario: string | null
           created_at: string | null
           id: string
+          ip: string | null
           producto_id: string
           puntuacion: number
           titulo: string | null
           usuario_id: string | null
+          verificado: boolean
         }
         Insert: {
           aprobada?: boolean | null
           aprobada_en?: string | null
           aprobada_por?: string | null
+          autor_email?: string | null
+          autor_nombre?: string | null
           cliente_id?: string | null
           comentario?: string | null
           created_at?: string | null
           id?: string
+          ip?: string | null
           producto_id: string
           puntuacion: number
           titulo?: string | null
           usuario_id?: string | null
+          verificado?: boolean
         }
         Update: {
           aprobada?: boolean | null
           aprobada_en?: string | null
           aprobada_por?: string | null
+          autor_email?: string | null
+          autor_nombre?: string | null
           cliente_id?: string | null
           comentario?: string | null
           created_at?: string | null
           id?: string
+          ip?: string | null
           producto_id?: string
           puntuacion?: number
           titulo?: string | null
           usuario_id?: string | null
+          verificado?: boolean
         }
         Relationships: [
           {
@@ -7189,6 +7213,36 @@ export type Database = {
         }
         Relationships: []
       }
+      v_productos_rating: {
+        Row: {
+          producto_id: string | null
+          promedio_rating: number | null
+          total_resenas: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "productos_resenas_producto_id_fkey"
+            columns: ["producto_id"]
+            isOneToOne: false
+            referencedRelation: "productos"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "productos_resenas_producto_id_fkey"
+            columns: ["producto_id"]
+            isOneToOne: false
+            referencedRelation: "v_bom_activo"
+            referencedColumns: ["producto_id"]
+          },
+          {
+            foreignKeyName: "productos_resenas_producto_id_fkey"
+            columns: ["producto_id"]
+            isOneToOne: false
+            referencedRelation: "v_costo_materiales_producto"
+            referencedColumns: ["producto_id"]
+          },
+        ]
+      }
       v_stock_alertas: {
         Row: {
           almacen: string | null
@@ -7324,6 +7378,19 @@ export type Database = {
           unidad: string
         }[]
       }
+      fn_slug_unico_campana: {
+        Args: { _base: string; _excluir?: string }
+        Returns: string
+      }
+      fn_slug_unico_categoria: {
+        Args: { _base: string; _excluir?: string }
+        Returns: string
+      }
+      fn_slug_unico_publicacion: {
+        Args: { _base: string; _excluir?: string }
+        Returns: string
+      }
+      fn_slugify: { Args: { input: string }; Returns: string }
       generar_numero_oc: { Args: never; Returns: string }
       generar_numero_ot: { Args: never; Returns: string }
       generar_numero_pedido_web: { Args: never; Returns: string }

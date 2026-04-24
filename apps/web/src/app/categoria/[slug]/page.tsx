@@ -1,9 +1,11 @@
 import { notFound } from 'next/navigation';
 import Link from 'next/link';
-import Image from 'next/image';
 import { createClient } from '@happy/db/server';
 import { Card } from '@happy/ui/card';
 import { Badge } from '@happy/ui/badge';
+import { Sparkles, ArrowRight } from 'lucide-react';
+import { ProductCard } from '@/components/product-card';
+import { loadPublicaciones } from '@/server/queries/publicaciones';
 
 export const dynamic = 'force-dynamic';
 
@@ -11,87 +13,108 @@ export async function generateMetadata({ params }: { params: Promise<{ slug: str
   const { slug } = await params;
   try {
     const sb = await createClient();
-    const { data } = await sb.from('categorias').select('nombre, seo_titulo, seo_descripcion').eq('slug', slug).maybeSingle();
-    return { title: data?.seo_titulo ?? data?.nombre ?? 'Categoría', description: data?.seo_descripcion };
+    const { data } = await sb
+      .from('categorias')
+      .select('nombre, seo_titulo, seo_descripcion')
+      .eq('slug', slug)
+      .maybeSingle();
+    return {
+      title: data?.seo_titulo ?? data?.nombre ?? 'Categoría',
+      description: data?.seo_descripcion,
+    };
   } catch {
     return { title: 'Categoría' };
   }
 }
 
-type Pub = {
-  producto_id: string;
-  slug: string | null;
-  titulo_web: string | null;
-  productos?: {
-    nombre: string;
-    imagen_principal_url: string | null;
-    productos_variantes?: { precio_publico: number | null }[];
-  } | null;
-};
-
 export default async function CategoriaPage({ params }: { params: Promise<{ slug: string }> }) {
   const { slug } = await params;
-  let cat: { id: string; nombre: string; descripcion: string | null; icono: string | null; imagen_url: string | null } | null = null;
-  let pubs: Pub[] = [];
+  let cat: {
+    id: string;
+    nombre: string;
+    descripcion: string | null;
+    icono: string | null;
+    imagen_url: string | null;
+  } | null = null;
+  let camp: { id: string; nombre: string; slug: string | null } | null = null;
 
   try {
     const sb = await createClient();
-    const { data } = await sb.from('categorias').select('id, nombre, descripcion, icono, imagen_url').eq('slug', slug).maybeSingle();
-    cat = data;
-    if (cat) {
-      const { data: pubsData } = await sb.from('productos_publicacion')
-        .select('producto_id, slug, titulo_web, productos!inner(id, nombre, imagen_principal_url, categoria_id, productos_variantes(precio_publico))')
-        .eq('publicado', true)
-        .eq('productos.categoria_id', cat.id)
-        .order('orden_web')
-        .limit(60);
-      pubs = (pubsData ?? []) as unknown as Pub[];
-    }
+    // Buscar categoría y campaña con el mismo slug en paralelo
+    const [{ data: catData }, { data: campData }] = await Promise.all([
+      sb.from('categorias').select('id, nombre, descripcion, icono, imagen_url').eq('slug', slug).maybeSingle(),
+      sb.from('campanas').select('id, nombre, slug').eq('slug', slug).eq('activa', true).maybeSingle(),
+    ]);
+    cat = catData;
+    camp = campData;
   } catch (e) {
-    console.warn('[categoria] exception:', (e as Error).message);
+    console.warn('[categoria] error:', (e as Error).message);
   }
 
-  if (!cat) notFound();
+  if (!cat) {
+    // Si no hay categoría pero sí campaña con ese slug → redirigir mentalmente
+    if (camp) {
+      const { redirect } = await import('next/navigation');
+      redirect(`/campanias/${slug}`);
+    }
+    notFound();
+  }
+
+  // Cargar productos de la categoría + (si hay campaña con mismo nombre) productos de la campaña
+  const [pubsCategoria, pubsCampania] = await Promise.all([
+    loadPublicaciones({ categoriaId: cat.id, limit: 60 }),
+    camp ? loadPublicaciones({ campanaId: camp.id, limit: 60 }) : Promise.resolve([]),
+  ]);
+
+  // Mergear quitando duplicados (por slug)
+  const slugsCategoria = new Set(pubsCategoria.map((p) => p.slug).filter(Boolean));
+  const pubsCampaniaUnicos = pubsCampania.filter((p) => !slugsCategoria.has(p.slug));
+  const pubs = [...pubsCategoria, ...pubsCampaniaUnicos];
 
   return (
     <div className="container px-4 py-10">
       <header className="mb-8 flex items-center gap-4">
-        <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-happy-100 text-3xl">{cat.icono ?? '🎭'}</div>
-        <div>
+        <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-happy-100 text-3xl">
+          {cat.icono ?? '🎭'}
+        </div>
+        <div className="flex-1">
           <h1 className="font-display text-4xl font-semibold text-corp-900">{cat.nombre}</h1>
           {cat.descripcion && <p className="mt-1 text-slate-500">{cat.descripcion}</p>}
         </div>
       </header>
 
+      {camp && (
+        <Link
+          href={`/campanias/${camp.slug ?? slug}`}
+          className="mb-6 flex items-center justify-between gap-3 rounded-xl border-2 border-happy-300 bg-gradient-to-r from-happy-50 to-corp-50 px-5 py-3 transition hover:shadow-glow"
+        >
+          <div className="flex items-center gap-3">
+            <Badge className="bg-happy-500 hover:bg-happy-500">
+              <Sparkles className="mr-1 h-3 w-3" /> Campaña activa
+            </Badge>
+            <span className="text-sm font-medium text-corp-900">
+              {camp.nombre} · ver todos los productos en campaña
+            </span>
+          </div>
+          <ArrowRight className="h-4 w-4 text-corp-700" />
+        </Link>
+      )}
+
       {pubs.length === 0 ? (
         <Card className="p-10 text-center text-sm text-slate-500">
-          Sin productos publicados en esta categoría.
+          Sin productos publicados en esta categoría aún.
         </Card>
       ) : (
-        <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-4">
-          {pubs.map((p) => {
-            const prod = p.productos;
-            if (!prod) return null;
-            const min = (prod.productos_variantes ?? []).map((v) => Number(v.precio_publico ?? 0)).filter((x) => x > 0).sort((a, b) => a - b)[0];
-            return (
-              <Link key={p.producto_id} href={`/productos/${p.slug ?? ''}`} className="group">
-                <Card className="overflow-hidden border-2 border-transparent transition hover:-translate-y-1 hover:border-happy-300 hover:shadow-glow">
-                  <div className="relative aspect-square overflow-hidden bg-corp-50">
-                    {prod.imagen_principal_url ? (
-                      <Image src={prod.imagen_principal_url} alt={prod.nombre} fill className="object-cover transition group-hover:scale-105" sizes="(max-width: 768px) 100vw, 25vw" />
-                    ) : (
-                      <div className="flex h-full items-center justify-center text-5xl">🎭</div>
-                    )}
-                  </div>
-                  <div className="p-4">
-                    <h3 className="line-clamp-2 font-medium text-corp-900">{p.titulo_web ?? prod.nombre}</h3>
-                    <Badge variant="default" className="mt-2 text-xs">Desde S/ {(min ?? 0).toFixed(2)}</Badge>
-                  </div>
-                </Card>
-              </Link>
-            );
-          })}
-        </div>
+        <>
+          <p className="mb-4 text-sm text-slate-500">
+            {pubs.length} producto{pubs.length === 1 ? '' : 's'}
+          </p>
+          <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-4">
+            {pubs.map((p, i) => (
+              <ProductCard key={p.slug ?? i} p={p} />
+            ))}
+          </div>
+        </>
       )}
     </div>
   );
