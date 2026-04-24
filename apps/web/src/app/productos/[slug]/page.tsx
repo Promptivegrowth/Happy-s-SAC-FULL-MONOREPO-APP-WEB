@@ -10,6 +10,7 @@ import { TrustBadges } from '@/components/trust-badges';
 import { EnvioTimeline } from '@/components/envio-timeline';
 import { ResenasSection, type ResenaItem } from '@/components/resenas-section';
 import { ProductCard, type ProductCardData } from '@/components/product-card';
+import { BLUR_DATA_URL } from '@/lib/image';
 
 export const dynamic = 'force-dynamic';
 
@@ -58,6 +59,8 @@ export default async function ProductoDetallePage({ params }: { params: Promise<
   const { slug } = await params;
   const sb = await createClient();
 
+  // Query principal: necesitamos el producto_id + categoria_id antes de poder
+  // disparar las queries dependientes (rating, reseñas, relacionados).
   const { data: pub } = await sb
     .from('productos_publicacion')
     .select(
@@ -78,6 +81,33 @@ export default async function ProductoDetallePage({ params }: { params: Promise<
   if (!pub) notFound();
   const prod = (pub as unknown as { productos: ProductoDetalle }).productos;
 
+  // Disparar las 3 queries dependientes EN PARALELO (rating, reseñas, relacionados).
+  const [{ data: rating }, { data: resenasData }, { data: relData }] = await Promise.all([
+    sb
+      .from('v_productos_rating')
+      .select('total_resenas, promedio_rating')
+      .eq('producto_id', prod.id)
+      .maybeSingle(),
+    sb
+      .from('productos_resenas')
+      .select('id, autor_nombre, puntuacion, titulo, comentario, verificado, created_at')
+      .eq('producto_id', prod.id)
+      .eq('aprobada', true)
+      .order('created_at', { ascending: false })
+      .limit(10),
+    prod.categoria_id
+      ? sb
+          .from('productos_publicacion')
+          .select(
+            'producto_id, slug, titulo_web, precio_oferta, etiquetas, productos!inner(id, nombre, imagen_principal_url, categoria_id, productos_variantes(precio_publico))',
+          )
+          .eq('publicado', true)
+          .eq('productos.categoria_id', prod.categoria_id)
+          .neq('producto_id', prod.id)
+          .limit(8)
+      : Promise.resolve({ data: [] as never[] }),
+  ]);
+
   const galeria = [
     prod.imagen_principal_url,
     ...prod.productos_imagenes.sort((a, b) => a.orden - b.orden).map((i) => i.url),
@@ -87,23 +117,9 @@ export default async function ProductoDetallePage({ params }: { params: Promise<
   const precioBase = precios.length ? Math.min(...precios) : 0;
   const precioOferta = pub.precio_oferta ? Number(pub.precio_oferta) : null;
 
-  // Rating
-  const { data: rating } = await sb
-    .from('v_productos_rating')
-    .select('total_resenas, promedio_rating')
-    .eq('producto_id', prod.id)
-    .maybeSingle();
   const totalResenas = rating?.total_resenas ?? 0;
   const promedioRating = rating?.promedio_rating ? Number(rating.promedio_rating) : 0;
 
-  // Reseñas aprobadas
-  const { data: resenasData } = await sb
-    .from('productos_resenas')
-    .select('id, autor_nombre, puntuacion, titulo, comentario, verificado, created_at')
-    .eq('producto_id', prod.id)
-    .eq('aprobada', true)
-    .order('created_at', { ascending: false })
-    .limit(10);
   const resenas: ResenaItem[] = (resenasData ?? []).map((r) => ({
     id: r.id,
     autor: r.autor_nombre ?? 'Cliente',
@@ -114,43 +130,30 @@ export default async function ProductoDetallePage({ params }: { params: Promise<
     fecha: new Date(r.created_at as string).toLocaleDateString('es-PE', { year: 'numeric', month: 'short', day: 'numeric' }),
   }));
 
-  // Productos relacionados (misma categoría, otros)
-  let relacionados: ProductCardData[] = [];
-  if (prod.categoria_id) {
-    const { data: relData } = await sb
-      .from('productos_publicacion')
-      .select(
-        'producto_id, slug, titulo_web, precio_oferta, etiquetas, productos!inner(id, nombre, imagen_principal_url, categoria_id, productos_variantes(precio_publico))',
-      )
-      .eq('publicado', true)
-      .eq('productos.categoria_id', prod.categoria_id)
-      .neq('producto_id', prod.id)
-      .limit(8);
-    relacionados = ((relData ?? []) as unknown as Array<{
-      producto_id: string;
-      slug: string | null;
-      titulo_web: string | null;
-      precio_oferta: number | null;
-      etiquetas: string[] | null;
-      productos: {
-        nombre: string;
-        imagen_principal_url: string | null;
-        productos_variantes: { precio_publico: number | null }[];
-      };
-    }>).map((r) => {
-      const precios = (r.productos.productos_variantes ?? [])
-        .map((v) => Number(v.precio_publico ?? 0))
-        .filter((x) => x > 0);
-      return {
-        slug: r.slug,
-        titulo: r.titulo_web ?? r.productos.nombre,
-        imagen: r.productos.imagen_principal_url,
-        precio: precios.length ? Math.min(...precios) : null,
-        precioOferta: r.precio_oferta ? Number(r.precio_oferta) : null,
-        etiquetas: r.etiquetas,
-      };
-    });
-  }
+  const relacionados: ProductCardData[] = ((relData ?? []) as unknown as Array<{
+    producto_id: string;
+    slug: string | null;
+    titulo_web: string | null;
+    precio_oferta: number | null;
+    etiquetas: string[] | null;
+    productos: {
+      nombre: string;
+      imagen_principal_url: string | null;
+      productos_variantes: { precio_publico: number | null }[];
+    };
+  }>).map((r) => {
+    const preciosRel = (r.productos.productos_variantes ?? [])
+      .map((v) => Number(v.precio_publico ?? 0))
+      .filter((x) => x > 0);
+    return {
+      slug: r.slug,
+      titulo: r.titulo_web ?? r.productos.nombre,
+      imagen: r.productos.imagen_principal_url,
+      precio: preciosRel.length ? Math.min(...preciosRel) : null,
+      precioOferta: r.precio_oferta ? Number(r.precio_oferta) : null,
+      etiquetas: r.etiquetas,
+    };
+  });
 
   return (
     <article className="container px-4 py-10">
@@ -179,6 +182,8 @@ export default async function ProductoDetallePage({ params }: { params: Promise<
                 fill
                 className="object-cover"
                 sizes="(max-width:1024px) 100vw, 50vw"
+                placeholder="blur"
+                blurDataURL={BLUR_DATA_URL}
                 priority
               />
             ) : (
@@ -194,7 +199,15 @@ export default async function ProductoDetallePage({ params }: { params: Promise<
             <div className="grid grid-cols-4 gap-2">
               {galeria.slice(1, 5).map((g, i) => (
                 <div key={i} className="relative aspect-square overflow-hidden rounded-lg border bg-slate-50">
-                  <Image src={g} alt={`${prod.nombre} foto ${i + 2}`} fill className="object-cover" sizes="20vw" />
+                  <Image
+                    src={g}
+                    alt={`${prod.nombre} foto ${i + 2}`}
+                    fill
+                    className="object-cover"
+                    sizes="(max-width:1024px) 25vw, 12vw"
+                    placeholder="blur"
+                    blurDataURL={BLUR_DATA_URL}
+                  />
                 </div>
               ))}
             </div>

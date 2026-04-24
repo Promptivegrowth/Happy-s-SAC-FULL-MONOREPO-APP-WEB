@@ -3,6 +3,7 @@ import Image from 'next/image';
 import { Card } from '@happy/ui/card';
 import { Badge } from '@happy/ui/badge';
 import { Star, ShieldCheck } from 'lucide-react';
+import { BLUR_DATA_URL } from '@/lib/image';
 
 export type ProductCardData = {
   slug: string | null;
@@ -15,7 +16,7 @@ export type ProductCardData = {
   etiquetas?: string[] | null;
 };
 
-export function ProductCard({ p }: { p: ProductCardData }) {
+export function ProductCard({ p, priority = false }: { p: ProductCardData; priority?: boolean }) {
   const tieneOferta = p.precioOferta && p.precio && p.precioOferta < p.precio;
   const descuento = tieneOferta && p.precio
     ? Math.round((1 - (p.precioOferta as number) / p.precio) * 100)
@@ -33,6 +34,9 @@ export function ProductCard({ p }: { p: ProductCardData }) {
               fill
               className="object-cover transition group-hover:scale-105"
               sizes="(max-width: 768px) 50vw, 25vw"
+              placeholder="blur"
+              blurDataURL={BLUR_DATA_URL}
+              priority={priority}
             />
           ) : (
             <div className="flex h-full items-center justify-center text-5xl">🎭</div>

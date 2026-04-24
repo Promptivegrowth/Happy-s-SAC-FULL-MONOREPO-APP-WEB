@@ -7,6 +7,7 @@ import { ArrowRight, Truck, ShieldCheck, Sparkles, Heart, MessageCircle, Calenda
 import { createClient } from '@happy/db/server';
 import { ProductCard } from '@/components/product-card';
 import { loadPublicaciones } from '@/server/queries/publicaciones';
+import { BLUR_DATA_URL } from '@/lib/image';
 
 export const dynamic = 'force-dynamic';
 
@@ -131,7 +132,15 @@ export default async function Home() {
                   className="group relative overflow-hidden rounded-2xl border-2 border-happy-200 bg-gradient-to-br from-happy-500 via-danger to-corp-700 p-6 text-white shadow-soft transition hover:-translate-y-1 hover:shadow-glow"
                 >
                   {banner && (
-                    <Image src={banner} alt={c.nombre} fill className="object-cover opacity-40" sizes="(max-width: 768px) 100vw, 33vw" />
+                    <Image
+                      src={banner}
+                      alt={c.nombre}
+                      fill
+                      className="object-cover opacity-40"
+                      sizes="(max-width: 768px) 100vw, 33vw"
+                      placeholder="blur"
+                      blurDataURL={BLUR_DATA_URL}
+                    />
                   )}
                   <div className="relative">
                     <Badge className="mb-3 bg-white/20 text-white backdrop-blur-sm hover:bg-white/30">
@@ -199,7 +208,7 @@ export default async function Home() {
         ) : (
           <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-4">
             {destacados.map((p, i) => (
-              <ProductCard key={p.slug ?? i} p={p} />
+              <ProductCard key={p.slug ?? i} p={p} priority={i < 4} />
             ))}
           </div>
         )}

@@ -2,6 +2,9 @@ import { Sidebar } from '@/components/sidebar';
 import { Topbar } from '@/components/topbar';
 import { getSession } from '@/server/session';
 
+// El layout hace queries vía getSession(), por lo tanto debe ser dinámico.
+// Sin este flag, las pages hijas sin force-dynamic propio intentan prerrenderizarse
+// en build y fallan porque no tienen las env vars de Supabase.
 export const dynamic = 'force-dynamic';
 
 export default async function DashboardLayout({ children }: { children: React.ReactNode }) {

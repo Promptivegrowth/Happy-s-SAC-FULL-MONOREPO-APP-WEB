@@ -6,6 +6,7 @@ import { Badge } from '@happy/ui/badge';
 import { Calendar, Sparkles } from 'lucide-react';
 import { ProductCard } from '@/components/product-card';
 import { loadPublicaciones } from '@/server/queries/publicaciones';
+import { BLUR_DATA_URL } from '@/lib/image';
 
 export const dynamic = 'force-dynamic';
 
@@ -69,6 +70,8 @@ export default async function CampaniaPage({ params }: { params: Promise<{ slug:
             fill
             className="object-cover opacity-30"
             sizes="100vw"
+            placeholder="blur"
+            blurDataURL={BLUR_DATA_URL}
             priority
           />
         )}
@@ -106,7 +109,7 @@ export default async function CampaniaPage({ params }: { params: Promise<{ slug:
             </p>
             <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-4">
               {pubs.map((p, i) => (
-                <ProductCard key={p.slug ?? i} p={p} />
+                <ProductCard key={p.slug ?? i} p={p} priority={i < 4} />
               ))}
             </div>
           </>

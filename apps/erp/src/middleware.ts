@@ -18,7 +18,11 @@ export async function middleware(request: NextRequest) {
     },
   );
 
-  const { data: { user } } = await supabase.auth.getUser();
+  // getSession() solo decodifica el JWT del cookie (sin round-trip al server de auth).
+  // Se usa para gating de rutas en el edge — la validación real ocurre en server components
+  // vía getSession() de @/server/session que sí llama auth.getUser().
+  const { data: { session } } = await supabase.auth.getSession();
+  const user = session?.user ?? null;
 
   const { pathname } = request.nextUrl;
   const isPublic = PUBLIC_PATHS.some((p) => pathname.startsWith(p));
