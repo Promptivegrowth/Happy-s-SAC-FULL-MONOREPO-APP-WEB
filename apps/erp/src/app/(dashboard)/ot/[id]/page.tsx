@@ -6,7 +6,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@happy/ui/card';
 import { Badge } from '@happy/ui/badge';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@happy/ui/table';
 import { PageShell } from '@/components/page-shell';
-import { OtAcciones, OtNotaForm, OtLineaProduccion } from './client';
+import { OtAcciones, OtNotaForm, OtLineaProduccion, AgregarLineaOTForm, EliminarLineaOT } from './client';
 import { formatDate, formatDateTime, formatNumber } from '@happy/lib';
 import { Calendar, AlertTriangle, User } from 'lucide-react';
 
@@ -27,13 +27,15 @@ const COLOR: Record<string, 'success' | 'warning' | 'secondary' | 'default' | 'd
 export default async function Page({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const sb = await createClient();
-  const [{ data: ot }, { data: lineas }, { data: eventos }, { data: almacenes }] = await Promise.all([
+  const [{ data: ot }, { data: lineas }, { data: eventos }, { data: almacenes }, { data: productos }] = await Promise.all([
     sb.from('ot').select('*, plan_maestro(codigo)').eq('id', id).single(),
     sb.from('ot_lineas').select('*, productos(codigo, nombre)').eq('ot_id', id).order('producto_id'),
     sb.from('ot_eventos').select('*').eq('ot_id', id).order('fecha', { ascending: false }).limit(50),
     sb.from('almacenes').select('id, nombre, codigo').eq('tipo', 'PRODUCTO_TERMINADO').eq('activo', true),
+    sb.from('productos').select('id, codigo, nombre').eq('activo', true).order('nombre').limit(500),
   ]);
   if (!ot) notFound();
+  const puedeEditarLineas = !['COMPLETADA', 'CANCELADA'].includes(ot.estado);
 
   const totalPlan = (lineas ?? []).reduce((a, l) => a + Number(l.cantidad_planificada ?? 0), 0);
   const totalCortado = (lineas ?? []).reduce((a, l) => a + Number(l.cantidad_cortada ?? 0), 0);
@@ -72,9 +74,16 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
             <CardHeader>
               <CardTitle className="text-base">Avance por línea</CardTitle>
             </CardHeader>
-            <CardContent className="p-0">
+            <CardContent className={puedeEditarLineas ? 'space-y-4' : 'p-0'}>
+              {puedeEditarLineas && (
+                <AgregarLineaOTForm otId={id} productos={productos ?? []} />
+              )}
               {(lineas ?? []).length === 0 ? (
-                <div className="px-6 py-10 text-center text-sm text-slate-400">Sin líneas en esta OT.</div>
+                <div className="px-6 py-10 text-center text-sm text-slate-400">
+                  {puedeEditarLineas
+                    ? 'Agrega la primera línea con el formulario de arriba (producto × talla × cantidad).'
+                    : 'Esta OT no tiene líneas.'}
+                </div>
               ) : (
                 <Table>
                   <TableHeader><TableRow>
@@ -84,6 +93,7 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
                     <TableHead className="text-right">Fallas</TableHead>
                     <TableHead className="text-right">Terminado</TableHead>
                     <TableHead className="w-[200px]">Declarar</TableHead>
+                    <TableHead className="w-[40px]"></TableHead>
                   </TableRow></TableHeader>
                   <TableBody>
                     {lineas?.map((l) => {
@@ -103,10 +113,14 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
                             <OtLineaProduccion
                               otId={id}
                               lineaId={l.id}
+                              planificada={Number(l.cantidad_planificada ?? 0)}
                               cortada={Number(l.cantidad_cortada ?? 0)}
                               fallas={Number(l.cantidad_fallas ?? 0)}
-                              disabled={['COMPLETADA','CANCELADA'].includes(ot.estado)}
+                              disabled={!puedeEditarLineas}
                             />
+                          </TableCell>
+                          <TableCell className="text-right">
+                            <EliminarLineaOT otId={id} lineaId={l.id} disabled={!puedeEditarLineas} />
                           </TableCell>
                         </TableRow>
                       );

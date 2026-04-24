@@ -6,6 +6,62 @@ import { runAction, requireUser, bumpPaths, type ActionResult } from './_helpers
 
 const ESTADOS = ['BORRADOR','PLANIFICADA','EN_CORTE','EN_HABILITADO','EN_SERVICIO','EN_DECORADO','EN_CONTROL_CALIDAD','COMPLETADA','CANCELADA'] as const;
 
+const TALLAS = ['T0','T2','T4','T6','T8','T10','T12','T14','T16','TS','TAD'] as const;
+
+const agregarLineaSchema = z.object({
+  producto_id: z.string().uuid(),
+  talla: z.enum(TALLAS),
+  cantidad_planificada: z.coerce.number().int().min(1),
+});
+
+export async function agregarLineaOT(otId: string, _prev: unknown, fd: FormData): Promise<ActionResult> {
+  const r = await runAction(async () => {
+    const data = agregarLineaSchema.parse({
+      producto_id: fd.get('producto_id'),
+      talla: fd.get('talla'),
+      cantidad_planificada: fd.get('cantidad_planificada'),
+    });
+    const { sb } = await requireUser();
+
+    // Verificar que la OT no esté cerrada.
+    const { data: ot } = await sb.from('ot').select('estado').eq('id', otId).single();
+    if (!ot) throw new Error('OT no encontrada');
+    if (ot.estado === 'COMPLETADA' || ot.estado === 'CANCELADA') {
+      throw new Error('No se pueden agregar líneas a una OT cerrada');
+    }
+
+    const { error } = await sb.from('ot_lineas').insert({
+      ot_id: otId,
+      producto_id: data.producto_id,
+      talla: data.talla,
+      cantidad_planificada: data.cantidad_planificada,
+    });
+    if (error) {
+      if (error.code === '23505') throw new Error('Ya existe una línea con ese producto y talla');
+      throw new Error(error.message);
+    }
+    return null;
+  });
+  if (r.ok) await bumpPaths(`/ot/${otId}`);
+  return r;
+}
+
+export async function eliminarLineaOT(otId: string, lineaId: string): Promise<ActionResult> {
+  const r = await runAction(async () => {
+    const { sb } = await requireUser();
+    const { data: ot } = await sb.from('ot').select('estado').eq('id', otId).single();
+    if (!ot) throw new Error('OT no encontrada');
+    if (ot.estado === 'COMPLETADA' || ot.estado === 'CANCELADA') {
+      throw new Error('No se pueden modificar líneas de una OT cerrada');
+    }
+    const { error } = await sb.from('ot_lineas').delete().eq('id', lineaId);
+    if (error) throw new Error(error.message);
+    return null;
+  });
+  if (r.ok) await bumpPaths(`/ot/${otId}`);
+  return r;
+}
+
 const crearOTSchema = z.object({
   fecha_entrega_objetivo: z.string().optional().or(z.literal('')),
   prioridad: z.coerce.number().int().min(0).default(100),
@@ -15,7 +71,7 @@ const crearOTSchema = z.object({
 
 export async function crearOT(_prev: unknown, fd: FormData): Promise<ActionResult<{ id: string }>> {
   const r = await runAction(async () => {
-    const rawCampana = String(fd.get('campana_id') ?? '');
+    const rawCampana = String(fd.get('campana_id') ?? '').trim();
     const data = crearOTSchema.parse({
       fecha_entrega_objetivo: fd.get('fecha_entrega_objetivo') || '',
       prioridad: fd.get('prioridad') || 100,
@@ -153,9 +209,15 @@ export async function cerrarOT(otId: string, almacenDestinoId: string): Promise<
     if (ot.estado === 'COMPLETADA' || ot.estado === 'CANCELADA') throw new Error('OT ya cerrada');
 
     const { data: lineas } = await sb.from('ot_lineas')
-      .select('id, producto_id, talla, cantidad_cortada, cantidad_terminada, cantidad_fallas')
+      .select('id, producto_id, talla, cantidad_planificada, cantidad_cortada, cantidad_terminada, cantidad_fallas')
       .eq('ot_id', otId);
     if (!lineas || lineas.length === 0) throw new Error('OT sin líneas');
+
+    // Guardia: debe haber al menos una línea con cantidad cortada declarada.
+    const totalCortado = lineas.reduce((s, l) => s + Number(l.cantidad_cortada ?? 0), 0);
+    if (totalCortado <= 0) {
+      throw new Error('Declara la cantidad cortada en al menos una línea antes de cerrar la OT');
+    }
 
     // Crear ingreso PT
     const { data: numIng } = await sb.rpc('next_correlativo', { p_clave: 'INGPT', p_padding: 6 });

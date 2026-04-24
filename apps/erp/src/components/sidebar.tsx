@@ -14,8 +14,10 @@ export function Sidebar({ roles }: { roles: Rol[] }) {
   return (
     <aside className="hidden w-64 shrink-0 border-r bg-corp-900 text-white lg:block">
       <div className="flex h-16 items-center gap-3 border-b border-white/10 px-5">
-        <Link href="/dashboard" className="flex items-center gap-2">
-          <Logo height={28} />
+        <Link href="/dashboard" className="flex items-center gap-2.5">
+          <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-white shadow-md ring-2 ring-white/20">
+            <Logo height={28} />
+          </span>
           <div className="leading-tight">
             <p className="font-display text-sm font-semibold">ERP</p>
             <p className="text-[9px] uppercase tracking-wider text-happy-300/80">Disfraces Happys</p>
