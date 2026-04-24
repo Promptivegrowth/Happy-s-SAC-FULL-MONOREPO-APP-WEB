@@ -14,6 +14,8 @@ export type ProductCardData = {
   rating?: number | null;
   totalResenas?: number | null;
   etiquetas?: string[] | null;
+  stockTotal?: number | null;
+  agotado?: boolean;
 };
 
 export function ProductCard({ p, priority = false }: { p: ProductCardData; priority?: boolean }) {
@@ -22,17 +24,20 @@ export function ProductCard({ p, priority = false }: { p: ProductCardData; prior
     ? Math.round((1 - (p.precioOferta as number) / p.precio) * 100)
     : 0;
   const href = p.slug ? `/productos/${p.slug}` : '#';
+  const stock = p.stockTotal ?? null;
+  const agotado = !!p.agotado;
+  const ultimas = !agotado && stock !== null && stock > 0 && stock <= 5;
 
   return (
     <Link href={href} className="group block">
-      <Card className="relative overflow-hidden border-2 border-transparent transition hover:-translate-y-1 hover:border-happy-300 hover:shadow-glow">
+      <Card className={`relative overflow-hidden border-2 border-transparent transition hover:-translate-y-1 hover:border-happy-300 hover:shadow-glow ${agotado ? 'opacity-70' : ''}`}>
         <div className="relative aspect-square overflow-hidden bg-corp-50">
           {p.imagen ? (
             <Image
               src={p.imagen}
               alt={p.titulo}
               fill
-              className="object-cover transition group-hover:scale-105"
+              className={`object-cover transition group-hover:scale-105 ${agotado ? 'grayscale' : ''}`}
               sizes="(max-width: 768px) 50vw, 25vw"
               placeholder="blur"
               blurDataURL={BLUR_DATA_URL}
@@ -42,22 +47,38 @@ export function ProductCard({ p, priority = false }: { p: ProductCardData; prior
             <div className="flex h-full items-center justify-center text-5xl">🎭</div>
           )}
 
+          {/* Overlay AGOTADO */}
+          {agotado && (
+            <div className="absolute inset-0 flex items-center justify-center bg-slate-900/40">
+              <span className="rounded-full bg-slate-900/90 px-4 py-1.5 text-sm font-bold uppercase tracking-wider text-white shadow-lg">
+                Agotado
+              </span>
+            </div>
+          )}
+
           {/* Badge "Oferta" arriba izquierda */}
-          {tieneOferta && (
+          {tieneOferta && !agotado && (
             <Badge className="absolute left-2 top-2 bg-happy-500 hover:bg-happy-500">
               Oferta
             </Badge>
           )}
 
           {/* Badge % descuento arriba derecha */}
-          {descuento > 0 && (
+          {descuento > 0 && !agotado && (
             <Badge className="absolute right-2 top-2 bg-danger px-1.5 py-0.5 font-mono text-xs hover:bg-danger">
               -{descuento}%
             </Badge>
           )}
 
+          {/* Badge "Últimas X" cuando queda poco stock */}
+          {ultimas && (
+            <Badge className="absolute right-2 top-2 bg-amber-500 px-1.5 py-0.5 text-[10px] font-bold uppercase hover:bg-amber-500">
+              ¡Últimas {stock}!
+            </Badge>
+          )}
+
           {/* Etiquetas extra */}
-          {(p.etiquetas?.length ?? 0) > 0 && !tieneOferta && (
+          {(p.etiquetas?.length ?? 0) > 0 && !tieneOferta && !agotado && !ultimas && (
             <div className="absolute left-2 top-2 flex flex-wrap gap-1">
               {p.etiquetas?.slice(0, 2).map((t) => (
                 <Badge key={t} variant="default" className="bg-corp-700 text-[10px]">{t}</Badge>

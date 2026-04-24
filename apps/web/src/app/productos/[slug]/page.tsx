@@ -81,8 +81,9 @@ export default async function ProductoDetallePage({ params }: { params: Promise<
   if (!pub) notFound();
   const prod = (pub as unknown as { productos: ProductoDetalle }).productos;
 
-  // Disparar las 3 queries dependientes EN PARALELO (rating, reseñas, relacionados).
-  const [{ data: rating }, { data: resenasData }, { data: relData }] = await Promise.all([
+  // Disparar las queries dependientes EN PARALELO (rating, reseñas, relacionados, stock).
+  const varianteIds = prod.productos_variantes.map((v) => v.id);
+  const [{ data: rating }, { data: resenasData }, { data: relData }, { data: stocksData }] = await Promise.all([
     sb
       .from('v_productos_rating')
       .select('total_resenas, promedio_rating')
@@ -106,7 +107,20 @@ export default async function ProductoDetallePage({ params }: { params: Promise<
           .neq('producto_id', prod.id)
           .limit(8)
       : Promise.resolve({ data: [] as never[] }),
+    varianteIds.length > 0
+      ? sb
+          .from('v_stock_variante_total')
+          .select('variante_id, stock_total')
+          .in('variante_id', varianteIds)
+      : Promise.resolve({ data: [] as { variante_id: string; stock_total: number }[] }),
   ]);
+
+  const stockMap = new Map<string, number>();
+  for (const s of stocksData ?? []) {
+    stockMap.set(s.variante_id as string, Number(s.stock_total ?? 0));
+  }
+  const stockTotal = Array.from(stockMap.values()).reduce((a, b) => a + b, 0);
+  const agotado = stockTotal <= 0;
 
   const galeria = [
     prod.imagen_principal_url,
@@ -265,7 +279,10 @@ export default async function ProductoDetallePage({ params }: { params: Promise<
               talla: v.talla,
               precio: Number(v.precio_publico ?? 0),
               precioMayorista: Number(v.precio_mayorista_a ?? v.precio_mayorista_b ?? 0),
+              stock: stockMap.get(v.id) ?? 0,
             }))}
+            stockTotal={stockTotal}
+            agotado={agotado}
           />
 
           <TrustBadges />

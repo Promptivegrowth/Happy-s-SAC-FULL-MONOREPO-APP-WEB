@@ -15,11 +15,12 @@ const crearOTSchema = z.object({
 
 export async function crearOT(_prev: unknown, fd: FormData): Promise<ActionResult<{ id: string }>> {
   const r = await runAction(async () => {
+    const rawCampana = String(fd.get('campana_id') ?? '');
     const data = crearOTSchema.parse({
       fecha_entrega_objetivo: fd.get('fecha_entrega_objetivo') || '',
       prioridad: fd.get('prioridad') || 100,
       observacion: fd.get('observacion') || '',
-      campana_id: fd.get('campana_id') || '',
+      campana_id: rawCampana && rawCampana !== 'none' ? rawCampana : '',
     });
     const { sb, userId } = await requireUser();
 

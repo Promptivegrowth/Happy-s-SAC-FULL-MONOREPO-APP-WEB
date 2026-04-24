@@ -46,12 +46,12 @@ export default async function Page() {
           </FormGrid>
 
           <FormRow label="Campaña" hint="Opcional. Asocia la OT a una campaña activa.">
-            <Select name="campana_id">
+            <Select name="campana_id" defaultValue="none">
               <SelectTrigger>
                 <SelectValue placeholder="Sin campaña" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="">Sin campaña</SelectItem>
+                <SelectItem value="none">Sin campaña</SelectItem>
                 {(campanas ?? []).map((c) => (
                   <SelectItem key={c.id} value={c.id}>
                     {c.nombre}
