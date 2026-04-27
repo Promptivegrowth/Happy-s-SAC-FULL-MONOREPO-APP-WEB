@@ -4,9 +4,8 @@ import Image from 'next/image';
 import Link from 'next/link';
 import Script from 'next/script';
 import { useEffect, useState } from 'react';
-import { ChevronLeft, ChevronRight, Heart, Gift, Sparkles } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Heart, Gift, Sparkles, ArrowRight } from 'lucide-react';
 
-// Declaración mínima del web component para que TS no se queje.
 declare module 'react' {
   // eslint-disable-next-line @typescript-eslint/no-namespace
   namespace JSX {
@@ -24,7 +23,7 @@ declare module 'react' {
   }
 }
 
-type SlideLayout = 'derecha-lottie' | 'centro' | 'centro-amplio';
+type SlideLayout = 'izquierda-lottie' | 'centro' | 'centro-amplio';
 
 type Slide = {
   src: string;
@@ -37,6 +36,12 @@ type Slide = {
   subtitulo: string;
   cta: string;
   badgeIcon: 'heart' | 'gift' | 'sparkle';
+  /** Color del título principal — debe contrastar con el fondo del slide */
+  tituloColor: string;
+  /** Color del acento (segunda línea, va con shimmer animado) */
+  acentoFrom: string;
+  acentoVia: string;
+  acentoTo: string;
 };
 
 const SLIDES: Slide[] = [
@@ -44,47 +49,101 @@ const SLIDES: Slide[] = [
     src: '/slider1.webp',
     alt: 'Día de la Madre — disfraces típicos para mamá',
     href: '/campanias/dia-de-la-madre-2026',
-    layout: 'derecha-lottie',
-    pretitulo: 'Mayo 2026',
-    titulo: 'Feliz Día,',
-    tituloAcento: 'Mamá ❤',
-    subtitulo: 'Disfraces típicos y trajes especiales para que su show escolar sea inolvidable.',
-    cta: 'Ver colección Mamá →',
+    layout: 'izquierda-lottie',
+    pretitulo: '✨ Mayo 2026',
+    titulo: '¡Feliz día,',
+    tituloAcento: 'Mami!',
+    subtitulo: 'Disfraces típicos y trajes especiales para que su show del Día de la Madre sea inolvidable.',
+    cta: 'Ver colección',
     badgeIcon: 'heart',
+    tituloColor: '#231459', // azul oscuro corp-900 sobre fondo claro/rosa
+    acentoFrom: '#EC1C24',  // danger
+    acentoVia: '#E15A25',   // happy-600
+    acentoTo: '#F5821F',    // happy-500
   },
   {
     src: '/slider2.webp',
     alt: 'Disfraces para el día de la madre — colección 2026',
     href: '/campanias/dia-de-la-madre-2026',
     layout: 'centro',
-    pretitulo: 'Edición limitada',
+    pretitulo: '🌸 Edición limitada',
     titulo: 'Mamá merece',
     tituloAcento: 'lo mejor',
-    subtitulo: 'Vestidos coloridos para que mamá brille en cada presentación.',
+    subtitulo: 'Vestidos coloridos y trajes únicos para que mamá brille en cada presentación.',
     cta: 'Comprar ahora',
     badgeIcon: 'gift',
+    tituloColor: '#231459',
+    acentoFrom: '#E15A25',
+    acentoVia: '#F5821F',
+    acentoTo: '#EC1C24',
   },
   {
     src: '/slider3.webp',
     alt: 'Show del día de la madre — disfraces y accesorios',
     href: '/campanias/dia-de-la-madre-2026',
     layout: 'centro-amplio',
-    pretitulo: '¡Solo por mayo!',
+    pretitulo: '💝 ¡Solo por mayo!',
     titulo: 'Sorprende a',
     tituloAcento: 'la reina del hogar',
     subtitulo: 'Más de 200 modelos · 11 tallas · Yape · Plin · Tarjeta · Envío Lima 2-3 días',
     cta: 'Descubrir más',
     badgeIcon: 'sparkle',
+    tituloColor: '#231459',
+    acentoFrom: '#2D3193',  // azul corp medio
+    acentoVia: '#E15A25',
+    acentoTo: '#EC1C24',
   },
 ];
 
 const LOTTIE_SRC = 'https://lottie.host/0be6f22b-54c5-4c84-bce8-5c7367018885/jmgIfyFbJo.lottie';
-const AUTO_ROTATE_MS = 7500;
+const AUTO_ROTATE_MS = 8000;
 
 function BadgeIcon({ kind }: { kind: Slide['badgeIcon'] }) {
-  if (kind === 'heart') return <Heart className="h-3.5 w-3.5 fill-current" />;
-  if (kind === 'gift') return <Gift className="h-3.5 w-3.5" />;
-  return <Sparkles className="h-3.5 w-3.5" />;
+  if (kind === 'heart') return <Heart className="h-4 w-4 fill-current" />;
+  if (kind === 'gift') return <Gift className="h-4 w-4" />;
+  return <Sparkles className="h-4 w-4" />;
+}
+
+/**
+ * Texto animado letra por letra con efecto "bounce in" stagger.
+ * Cada letra aparece con un pequeño rebote 60ms después de la anterior.
+ * Los espacios se preservan con un span de width visible para que no colapse.
+ */
+function AnimatedText({
+  text,
+  className = '',
+  delayBase = 0,
+  letterDelay = 50,
+  style,
+}: {
+  text: string;
+  className?: string;
+  delayBase?: number;
+  letterDelay?: number;
+  style?: React.CSSProperties;
+}) {
+  return (
+    <span className={className} style={style} aria-label={text}>
+      {Array.from(text).map((ch, i) => (
+        <span
+          key={`${ch}-${i}`}
+          aria-hidden="true"
+          className="inline-block"
+          style={{
+            // Spaces no animan visualmente pero conservan el ancho.
+            animation:
+              ch === ' '
+                ? undefined
+                : `hero-letter-pop 600ms cubic-bezier(0.34, 1.56, 0.64, 1) ${delayBase + i * letterDelay}ms both`,
+            // Espacio inquebrantable para que el span tenga ancho.
+            whiteSpace: 'pre',
+          }}
+        >
+          {ch}
+        </span>
+      ))}
+    </span>
+  );
 }
 
 export function HeroSlider() {
@@ -124,32 +183,41 @@ export function HeroSlider() {
           .hero-kb-active {
             animation: hero-kenburns ${AUTO_ROTATE_MS + 1500}ms ease-out forwards;
           }
-          @keyframes hero-fade-down {
-            from { opacity: 0; transform: translateY(-12px); }
-            to   { opacity: 1; transform: translateY(0);     }
+
+          /* Letra por letra: aparece desde abajo, se pasa de tamaño y rebota */
+          @keyframes hero-letter-pop {
+            0%   { opacity: 0; transform: translateY(28px) scale(0.4) rotate(-8deg); }
+            55%  { opacity: 1; transform: translateY(-6px) scale(1.18) rotate(2deg); }
+            85%  { transform: translateY(2px) scale(0.96) rotate(-1deg); }
+            100% { transform: translateY(0)   scale(1)    rotate(0deg);  }
           }
-          @keyframes hero-fade-up {
-            from { opacity: 0; transform: translateY(20px); }
-            to   { opacity: 1; transform: translateY(0);    }
+
+          @keyframes hero-fade-in {
+            from { opacity: 0; transform: translateY(8px); }
+            to   { opacity: 1; transform: translateY(0);   }
           }
           @keyframes hero-bounce-in {
-            0%   { opacity: 0; transform: scale(0.6); }
-            60%  { opacity: 1; transform: scale(1.06); }
-            100% { transform: scale(1); }
+            0%   { opacity: 0; transform: scale(0.6) translateY(20px); }
+            60%  { opacity: 1; transform: scale(1.08) translateY(-4px); }
+            100% { transform: scale(1) translateY(0); }
           }
           @keyframes hero-progress { from { width: 0%; } to { width: 100%; } }
-          @keyframes hero-shimmer {
-            0%   { background-position: -200% 50%; }
-            100% { background-position:  200% 50%; }
+          @keyframes hero-shimmer-slide {
+            0%   { background-position:   0% 50%; }
+            100% { background-position: 200% 50%; }
           }
-          .hero-text-shimmer {
-            background: linear-gradient(90deg,
-              #fff 0%, #ffd6e0 25%, #ffb3c6 50%, #ffd6e0 75%, #fff 100%);
+          .hero-acento-shimmer {
             background-size: 200% auto;
             -webkit-background-clip: text;
             background-clip: text;
             color: transparent;
-            animation: hero-shimmer 4s linear infinite;
+            animation: hero-shimmer-slide 3.5s linear infinite;
+          }
+          /* Pequeña sombra blanca sutil para que el texto oscuro no se pierda en imágenes claras */
+          .hero-text-glow {
+            text-shadow:
+              0 1px 0 rgba(255, 255, 255, 0.7),
+              0 2px 8px rgba(255, 255, 255, 0.45);
           }
         `}</style>
 
@@ -163,7 +231,6 @@ export function HeroSlider() {
                   inactive ? 'pointer-events-none opacity-0' : 'opacity-100'
                 }`}
               >
-                {/* Imagen con Ken Burns */}
                 <div className={`absolute inset-0 ${inactive ? '' : 'hero-kb-active'}`} key={`${i}-${active}`}>
                   <Image
                     src={s.src}
@@ -176,40 +243,24 @@ export function HeroSlider() {
                   />
                 </div>
 
-                {/* Overlay degradado para mejor contraste del texto */}
-                {!inactive && (
-                  <div
-                    className={`pointer-events-none absolute inset-0 ${
-                      s.layout === 'derecha-lottie'
-                        ? 'bg-gradient-to-l from-black/40 via-transparent to-transparent'
-                        : 'bg-gradient-to-t from-black/30 via-transparent to-transparent sm:bg-gradient-to-r sm:from-transparent sm:via-white/10 sm:to-transparent'
-                    }`}
-                  />
-                )}
-
-                {/* Contenido por layout */}
-                {!inactive && (
-                  <SlideContent slide={s} keyForAnim={`${i}-${active}`} />
-                )}
+                {!inactive && <SlideContent slide={s} keyForAnim={`${i}-${active}`} />}
               </div>
             );
           })}
 
-          {/* Barra de progreso */}
           {!paused && (
             <div
               key={`progress-${active}`}
-              className="absolute left-0 top-0 z-20 h-1 bg-happy-400"
+              className="absolute left-0 top-0 z-20 h-1 bg-happy-500"
               style={{ animation: `hero-progress ${AUTO_ROTATE_MS}ms linear forwards` }}
             />
           )}
 
-          {/* Controles */}
           <button
             type="button"
             onClick={() => go(-1)}
             aria-label="Slide anterior"
-            className="absolute left-2 top-1/2 z-30 flex h-10 w-10 -translate-y-1/2 items-center justify-center rounded-full bg-black/30 text-white backdrop-blur-sm transition hover:bg-black/50 sm:left-4"
+            className="absolute left-2 top-1/2 z-30 flex h-10 w-10 -translate-y-1/2 items-center justify-center rounded-full bg-white/80 text-corp-900 shadow-md backdrop-blur-sm transition hover:bg-white sm:left-4 sm:h-11 sm:w-11"
           >
             <ChevronLeft className="h-5 w-5" />
           </button>
@@ -217,12 +268,11 @@ export function HeroSlider() {
             type="button"
             onClick={() => go(1)}
             aria-label="Slide siguiente"
-            className="absolute right-2 top-1/2 z-30 flex h-10 w-10 -translate-y-1/2 items-center justify-center rounded-full bg-black/30 text-white backdrop-blur-sm transition hover:bg-black/50 sm:right-4"
+            className="absolute right-2 top-1/2 z-30 flex h-10 w-10 -translate-y-1/2 items-center justify-center rounded-full bg-white/80 text-corp-900 shadow-md backdrop-blur-sm transition hover:bg-white sm:right-4 sm:h-11 sm:w-11"
           >
             <ChevronRight className="h-5 w-5" />
           </button>
 
-          {/* Dots */}
           <div className="absolute bottom-3 left-1/2 z-30 flex -translate-x-1/2 gap-2 sm:bottom-5">
             {SLIDES.map((_, i) => (
               <button
@@ -230,8 +280,8 @@ export function HeroSlider() {
                 type="button"
                 onClick={() => setActive(i)}
                 aria-label={`Ir al slide ${i + 1}`}
-                className={`h-2 rounded-full transition-all ${
-                  i === active ? 'w-8 bg-white' : 'w-2 bg-white/50 hover:bg-white/80'
+                className={`h-2.5 rounded-full transition-all ${
+                  i === active ? 'w-10 bg-happy-500' : 'w-2.5 bg-corp-900/40 hover:bg-corp-900/60'
                 }`}
               />
             ))}
@@ -245,76 +295,87 @@ export function HeroSlider() {
 function SlideContent({ slide, keyForAnim }: { slide: Slide; keyForAnim: string }) {
   // Posición / alineación del bloque de texto según layout
   const wrapperClasses = {
-    'derecha-lottie': 'items-center justify-end pr-4 sm:pr-12 lg:pr-32 xl:pr-48',
+    'izquierda-lottie': 'items-center justify-start pl-4 sm:pl-12 lg:pl-20 xl:pl-32',
     centro: 'items-center justify-center px-4',
     'centro-amplio': 'items-center justify-center px-4',
   }[slide.layout];
 
   const textWidth = {
-    'derecha-lottie': 'max-w-md text-right',
-    centro: 'max-w-lg text-center',
-    'centro-amplio': 'max-w-2xl text-center',
+    'izquierda-lottie': 'max-w-md text-left sm:max-w-lg lg:max-w-xl',
+    centro: 'max-w-xl text-center sm:max-w-2xl',
+    'centro-amplio': 'max-w-3xl text-center',
   }[slide.layout];
 
+  // Delay para empezar las letras del título DESPUÉS del badge
+  const TITULO_DELAY = 300;
+  const ACENTO_DELAY = TITULO_DELAY + slide.titulo.length * 50 + 100;
+  const SUBT_DELAY = ACENTO_DELAY + (slide.tituloAcento?.length ?? 0) * 50 + 200;
+  const CTA_DELAY = SUBT_DELAY + 400;
+
   return (
-    <div key={keyForAnim} className={`absolute inset-0 z-10 flex ${wrapperClasses}`}>
-      <div className={`${textWidth} relative space-y-3 sm:space-y-4`}>
+    <div key={keyForAnim} className={`absolute inset-0 z-10 flex font-fun ${wrapperClasses}`}>
+      <div className={`${textWidth} relative space-y-3 sm:space-y-5`}>
         {/* Pretítulo / badge */}
         <div
-          className="inline-flex items-center gap-1.5 rounded-full bg-gradient-to-r from-pink-500 to-rose-500 px-3 py-1 text-[11px] font-bold uppercase tracking-wider text-white shadow-lg sm:text-xs"
-          style={{ animation: 'hero-fade-down 600ms ease-out both' }}
+          className={`inline-flex items-center gap-2 rounded-full bg-gradient-to-r from-pink-500 via-rose-500 to-happy-500 px-4 py-1.5 text-xs font-bold uppercase tracking-wider text-white shadow-lg sm:text-sm ${
+            slide.layout === 'izquierda-lottie' ? '' : 'mx-auto'
+          }`}
+          style={{ animation: 'hero-bounce-in 600ms cubic-bezier(0.34,1.56,0.64,1) both' }}
         >
           <BadgeIcon kind={slide.badgeIcon} />
           {slide.pretitulo}
         </div>
 
-        {/* Título grande con shimmer rosa en la línea acento */}
+        {/* Título — letra por letra con bounce */}
         <h2
-          className="font-display text-2xl font-bold leading-tight text-white drop-shadow-[0_2px_8px_rgba(0,0,0,0.5)] sm:text-4xl lg:text-5xl xl:text-6xl"
-          style={{ animation: 'hero-fade-up 700ms ease-out 100ms both' }}
+          className="font-fun text-4xl font-bold leading-[1.05] tracking-tight sm:text-5xl lg:text-7xl xl:text-[5.5rem]"
+          style={{ color: slide.tituloColor }}
         >
-          <span className="block">{slide.titulo}</span>
+          <span className="hero-text-glow block">
+            <AnimatedText text={slide.titulo} delayBase={TITULO_DELAY} letterDelay={55} />
+          </span>
           {slide.tituloAcento && (
-            <span className="hero-text-shimmer block">{slide.tituloAcento}</span>
+            <span
+              className="hero-acento-shimmer block"
+              style={{
+                backgroundImage: `linear-gradient(90deg, ${slide.acentoFrom} 0%, ${slide.acentoVia} 50%, ${slide.acentoTo} 100%)`,
+              }}
+            >
+              <AnimatedText text={slide.tituloAcento} delayBase={ACENTO_DELAY} letterDelay={55} />
+            </span>
           )}
         </h2>
 
         {/* Subtítulo */}
         <p
-          className="text-xs text-white/95 drop-shadow-[0_1px_4px_rgba(0,0,0,0.5)] sm:text-sm lg:text-base"
-          style={{ animation: 'hero-fade-up 800ms ease-out 250ms both' }}
+          className="font-fun text-base font-medium text-corp-900/85 sm:text-lg lg:text-xl"
+          style={{ animation: `hero-fade-in 700ms ease-out ${SUBT_DELAY}ms both` }}
         >
           {slide.subtitulo}
         </p>
 
         {/* CTA */}
         <div
-          className={`pt-1 ${slide.layout === 'derecha-lottie' ? 'flex justify-end' : 'flex justify-center'}`}
-          style={{ animation: 'hero-bounce-in 700ms cubic-bezier(0.34,1.56,0.64,1) 400ms both' }}
+          className={`pt-2 ${slide.layout === 'izquierda-lottie' ? '' : 'flex justify-center'}`}
+          style={{ animation: `hero-bounce-in 700ms cubic-bezier(0.34,1.56,0.64,1) ${CTA_DELAY}ms both` }}
         >
           <Link
             href={slide.href}
-            className="group inline-flex items-center gap-2 rounded-full bg-gradient-to-r from-pink-500 via-rose-500 to-happy-500 px-6 py-2.5 text-sm font-bold text-white shadow-xl transition hover:scale-105 hover:shadow-2xl sm:px-8 sm:py-3 sm:text-base"
+            className="group inline-flex items-center gap-2 rounded-full bg-gradient-to-r from-happy-500 via-happy-600 to-danger px-7 py-3.5 text-base font-bold text-white shadow-xl transition hover:scale-105 hover:shadow-2xl sm:px-9 sm:py-4 sm:text-lg"
           >
             {slide.cta}
+            <ArrowRight className="h-5 w-5 transition group-hover:translate-x-1" />
           </Link>
         </div>
       </div>
 
-      {/* Lottie solo en slider 1, en el extremo derecho.
-          Se renderiza DENTRO del overlay para que el flex justify-end empuje el bloque
-          de texto hacia la izquierda. Lo posicionamos absolute para no afectar el flujo. */}
-      {slide.layout === 'derecha-lottie' && (
+      {/* Lottie solo en slider 1, en el extremo derecho. */}
+      {slide.layout === 'izquierda-lottie' && (
         <div
-          className="pointer-events-none absolute right-1 top-1/2 hidden h-32 w-32 -translate-y-1/2 sm:block sm:h-44 sm:w-44 lg:right-4 lg:h-56 lg:w-56 xl:h-64 xl:w-64"
-          style={{ animation: 'hero-fade-up 900ms ease-out 200ms both' }}
+          className="pointer-events-none absolute right-2 top-1/2 hidden h-40 w-40 -translate-y-1/2 sm:block sm:h-52 sm:w-52 lg:right-8 lg:h-72 lg:w-72 xl:right-16 xl:h-80 xl:w-80"
+          style={{ animation: 'hero-bounce-in 900ms cubic-bezier(0.34,1.56,0.64,1) 600ms both' }}
         >
-          <dotlottie-wc
-            src={LOTTIE_SRC}
-            autoplay
-            loop
-            style={{ width: '100%', height: '100%' }}
-          />
+          <dotlottie-wc src={LOTTIE_SRC} autoplay loop style={{ width: '100%', height: '100%' }} />
         </div>
       )}
     </div>

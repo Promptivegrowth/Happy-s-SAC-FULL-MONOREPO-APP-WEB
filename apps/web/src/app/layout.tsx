@@ -1,5 +1,5 @@
 import type { Metadata, Viewport } from 'next';
-import { Inter, Fraunces } from 'next/font/google';
+import { Inter, Fraunces, Fredoka } from 'next/font/google';
 import { Toaster } from 'sonner';
 import '@happy/ui/styles.css';
 import './globals.css';
@@ -9,6 +9,14 @@ import { WhatsappFab } from '@/components/whatsapp-fab';
 
 const inter = Inter({ subsets: ['latin'], variable: '--font-sans', display: 'swap' });
 const fraunces = Fraunces({ subsets: ['latin'], variable: '--font-display', display: 'swap' });
+// Fredoka — fuente redondeada y juguetona para titulares dirigidos a familias/niños.
+// Usada en el hero slider para darle calidez sin perder profesionalismo.
+const fredoka = Fredoka({
+  subsets: ['latin'],
+  variable: '--font-fun',
+  weight: ['400', '500', '600', '700'],
+  display: 'swap',
+});
 
 export const metadata: Metadata = {
   title: {
@@ -33,7 +41,7 @@ export const viewport: Viewport = {
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="es-PE" className={`${inter.variable} ${fraunces.variable}`}>
+    <html lang="es-PE" className={`${inter.variable} ${fraunces.variable} ${fredoka.variable}`}>
       <body className="flex min-h-screen flex-col bg-white font-sans antialiased">
         <SiteHeader />
         <main className="flex-1">{children}</main>

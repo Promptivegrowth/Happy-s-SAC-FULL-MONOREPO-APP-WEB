@@ -111,6 +111,8 @@ module.exports = {
       fontFamily: {
         sans: ['var(--font-sans)', 'ui-sans-serif', 'system-ui'],
         display: ['var(--font-display)', 'var(--font-sans)', 'system-ui'],
+        // 'fun' = Fredoka (redondeada, juguetona) — para titulares dirigidos a familias/niños
+        fun: ['var(--font-fun)', 'var(--font-sans)', 'system-ui'],
         mono: ['ui-monospace', 'SFMono-Regular', 'monospace'],
       },
       boxShadow: {
