@@ -11,7 +11,9 @@ type PubRow = {
     id: string;
     nombre: string;
     imagen_principal_url: string | null;
+    categoria_id: string | null;
     productos_variantes: { id: string; precio_publico: number | null }[];
+    categorias?: { activo: boolean } | null;
   } | null;
 };
 
@@ -30,7 +32,7 @@ export async function loadPublicaciones(opts: LoadOpts = {}): Promise<ProductCar
     let query = sb
       .from('productos_publicacion')
       .select(
-        'producto_id, slug, titulo_web, precio_oferta, etiquetas, productos!inner(id, nombre, imagen_principal_url, categoria_id, campana_id, productos_variantes(id, precio_publico))',
+        'producto_id, slug, titulo_web, precio_oferta, etiquetas, productos!inner(id, nombre, imagen_principal_url, categoria_id, campana_id, productos_variantes(id, precio_publico), categorias(activo))',
       )
       .eq('publicado', true)
       .order('orden_web')
@@ -81,6 +83,13 @@ export async function loadPublicaciones(opts: LoadOpts = {}): Promise<ProductCar
 
     return pubs
       .filter((p) => p.productos)
+      // Filtrar productos cuya categoría esté apagada (apagar temporada en cascada).
+      // Si el producto no tiene categoría asignada (categoria_id null), se muestra igual.
+      .filter((p) => {
+        const cat = p.productos!.categorias;
+        if (p.productos!.categoria_id == null) return true;
+        return cat?.activo !== false;
+      })
       .map((p) => {
         const prod = p.productos!;
         const variantes = prod.productos_variantes ?? [];

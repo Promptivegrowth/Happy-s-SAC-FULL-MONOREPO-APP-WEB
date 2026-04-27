@@ -42,7 +42,12 @@ export default async function CategoriaPage({ params }: { params: Promise<{ slug
     const sb = await createClient();
     // Buscar categoría y campaña con el mismo slug en paralelo
     const [{ data: catData }, { data: campData }] = await Promise.all([
-      sb.from('categorias').select('id, nombre, descripcion, icono, imagen_url').eq('slug', slug).maybeSingle(),
+      sb
+        .from('categorias')
+        .select('id, nombre, descripcion, icono, imagen_url, activo')
+        .eq('slug', slug)
+        .eq('activo', true)
+        .maybeSingle(),
       sb.from('campanas').select('id, nombre, slug').eq('slug', slug).eq('activa', true).maybeSingle(),
     ]);
     cat = catData;

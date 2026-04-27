@@ -23,8 +23,8 @@ const COLOR: Record<string, 'success' | 'warning' | 'secondary' | 'default' | 'd
 export default async function Page() {
   const sb = await createClient();
   const { data } = await sb.from('plan_maestro')
-    .select('id, codigo, semana, anio, fecha_inicio, fecha_fin, estado, plan_maestro_lineas(id)')
-    .order('fecha_inicio', { ascending: false }).limit(50);
+    .select('id, codigo, semana, anio, fecha_inicio, fecha_fin, estado, created_at, plan_maestro_lineas(id)')
+    .order('created_at', { ascending: false }).limit(50);
 
   return (
     <PageShell

@@ -7,6 +7,7 @@ import { EmptyState } from '@happy/ui/empty-state';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@happy/ui/table';
 import { PageShell } from '@/components/page-shell';
 import { Plus, Tags, Pencil } from 'lucide-react';
+import { ToggleCategoriaActivo } from './toggle-activo-client';
 
 export const metadata = { title: 'Categorías' };
 export const dynamic = 'force-dynamic';
@@ -18,7 +19,7 @@ export default async function CategoriasPage() {
   return (
     <PageShell
       title="Categorías"
-      description="Categorías que se muestran en la tienda web y agrupan los disfraces."
+      description="Categorías que se muestran en la tienda web y agrupan los disfraces. Apagar una categoría oculta automáticamente todos sus productos de la web (sin tocar el toggle individual de cada uno)."
       actions={
         <Link href="/categorias/nuevo"><Button variant="premium"><Plus className="h-4 w-4" /> Nueva categoría</Button></Link>
       }
@@ -49,7 +50,7 @@ export default async function CategoriasPage() {
                   <TableCell className="font-mono text-xs text-slate-500">/{c.slug}</TableCell>
                   <TableCell>{c.publicar_en_web ? <Badge variant="success">Visible</Badge> : <Badge variant="secondary">Oculta</Badge>}</TableCell>
                   <TableCell>{c.orden_web}</TableCell>
-                  <TableCell>{c.activo ? <Badge variant="success">Activa</Badge> : <Badge variant="secondary">Inactiva</Badge>}</TableCell>
+                  <TableCell><ToggleCategoriaActivo id={c.id} activo={!!c.activo} /></TableCell>
                   <TableCell className="text-right">
                     <Link href={`/categorias/${c.id}`}><Button variant="ghost" size="sm"><Pencil className="h-3.5 w-3.5" /></Button></Link>
                   </TableCell>

@@ -68,6 +68,24 @@ export async function actualizarCategoria(id: string, _prev: unknown, fd: FormDa
   return r;
 }
 
+/**
+ * Toggle inline rápido para activar/desactivar una categoría.
+ * Cuando se desactiva, los productos de la categoría dejan de aparecer en la web
+ * (la web filtra por categorias.activo en loadPublicaciones / categoria/[slug]).
+ * No toca productos_publicacion.publicado, así al reactivar la categoría todos
+ * vuelven a aparecer sin tener que re-publicar uno por uno.
+ */
+export async function toggleCategoriaActivo(id: string, activo: boolean): Promise<ActionResult> {
+  const r = await runAction(async () => {
+    const { sb } = await requireUser();
+    const { error } = await sb.from('categorias').update({ activo }).eq('id', id);
+    if (error) throw new Error(error.message);
+    return null;
+  });
+  if (r.ok) await bumpPaths('/categorias', '/web-catalogo');
+  return r;
+}
+
 export async function eliminarCategoria(id: string): Promise<ActionResult> {
   const r = await runAction(async () => {
     const { sb } = await requireUser();

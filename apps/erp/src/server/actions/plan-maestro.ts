@@ -85,6 +85,77 @@ export async function agregarLineaPlan(_prev: unknown, fd: FormData): Promise<Ac
   return r;
 }
 
+/**
+ * Agrega varias tallas de un producto en una sola operación.
+ * Acepta un array de { talla, cantidad } y crea N líneas atómicamente.
+ */
+const tallasBatchSchema = z.object({
+  plan_id: z.string().uuid(),
+  producto_id: z.string().uuid(),
+  prioridad: z.coerce.number().int().min(0).default(100),
+  campana_id: z.string().uuid().optional().or(z.literal('')),
+  tallas: z
+    .array(
+      z.object({
+        talla: z.enum(TALLAS),
+        cantidad: z.coerce.number().int().min(1),
+      }),
+    )
+    .min(1, 'Selecciona al menos una talla con cantidad'),
+});
+
+export type TallaCantidad = { talla: (typeof TALLAS)[number]; cantidad: number };
+
+export async function agregarLineasPlanBatch(input: {
+  plan_id: string;
+  producto_id: string;
+  prioridad?: number;
+  campana_id?: string;
+  tallas: TallaCantidad[];
+}): Promise<ActionResult<{ insertadas: number; duplicadas: number }>> {
+  const r = await runAction(async () => {
+    const data = tallasBatchSchema.parse({
+      plan_id: input.plan_id,
+      producto_id: input.producto_id,
+      prioridad: input.prioridad ?? 100,
+      campana_id: input.campana_id ?? '',
+      tallas: input.tallas,
+    });
+    const { sb } = await requireUser();
+
+    // Trae las líneas existentes para detectar duplicados (UNIQUE en plan_id+producto_id+talla).
+    const { data: existentes } = await sb
+      .from('plan_maestro_lineas')
+      .select('talla')
+      .eq('plan_id', data.plan_id)
+      .eq('producto_id', data.producto_id);
+    const yaExisten = new Set((existentes ?? []).map((e) => e.talla));
+
+    const aInsertar = data.tallas
+      .filter((t) => !yaExisten.has(t.talla))
+      .map((t) => ({
+        plan_id: data.plan_id,
+        producto_id: data.producto_id,
+        talla: t.talla,
+        cantidad_planificada: t.cantidad,
+        prioridad: data.prioridad,
+        campana_id: data.campana_id || null,
+      }));
+
+    const duplicadas = data.tallas.length - aInsertar.length;
+    if (aInsertar.length === 0) {
+      throw new Error(`Todas las tallas ya existían en el plan (${duplicadas} duplicadas)`);
+    }
+
+    const { error } = await sb.from('plan_maestro_lineas').insert(aInsertar);
+    if (error) throw new Error(error.message);
+
+    return { insertadas: aInsertar.length, duplicadas };
+  });
+  if (r.ok) await bumpPaths(`/plan-maestro/${input.plan_id}`, '/plan-maestro');
+  return r;
+}
+
 export async function eliminarLineaPlan(id: string, planId: string): Promise<ActionResult> {
   const r = await runAction(async () => {
     const { sb } = await requireUser();

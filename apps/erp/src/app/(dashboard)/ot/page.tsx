@@ -13,7 +13,11 @@ export const dynamic = 'force-dynamic';
 
 export default async function OtPage() {
   const sb = await createClient();
-  const { data } = await sb.from('ot').select('id, numero, estado, fecha_apertura, fecha_entrega_objetivo, prioridad, observacion').order('fecha_apertura', { ascending: false }).limit(100);
+  const { data } = await sb
+    .from('ot')
+    .select('id, numero, estado, fecha_apertura, fecha_entrega_objetivo, prioridad, observacion, created_at')
+    .order('created_at', { ascending: false })
+    .limit(100);
 
   const estadoColor = (e: string) =>
     e === 'COMPLETADA' ? 'success' :
