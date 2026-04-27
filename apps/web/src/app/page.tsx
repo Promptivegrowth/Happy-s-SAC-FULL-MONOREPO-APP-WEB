@@ -8,6 +8,7 @@ import { createClient } from '@happy/db/server';
 import { ProductCard } from '@/components/product-card';
 import { loadPublicaciones } from '@/server/queries/publicaciones';
 import { BLUR_DATA_URL } from '@/lib/image';
+import { HeroSlider } from '@/components/hero-slider';
 
 export const dynamic = 'force-dynamic';
 
@@ -60,58 +61,16 @@ export default async function Home() {
 
   return (
     <>
-      {/* HERO */}
-      <section className="relative overflow-hidden bg-gradient-to-br from-corp-50 via-white to-happy-50">
-        <div className="absolute -left-32 top-10 h-72 w-72 rounded-full bg-happy-200/50 blur-3xl" />
-        <div className="absolute right-0 bottom-0 h-96 w-96 rounded-full bg-corp-200/40 blur-3xl" />
-        <div className="container relative px-4 py-16 lg:py-24">
-          <div className="grid items-center gap-12 lg:grid-cols-2">
-            <div>
-              <Badge className="mb-4 bg-happy-100 text-happy-800 hover:bg-happy-200">
-                <Sparkles className="mr-1 h-3 w-3" /> Temporada Halloween 2026
-              </Badge>
-              <h1 className="font-display text-5xl font-semibold leading-tight tracking-tight text-corp-900 md:text-6xl">
-                Disfraces que <span className="bg-happy-gradient bg-clip-text text-transparent">alegran fiestas</span> en todo el Perú
-              </h1>
-              <p className="mt-4 max-w-xl text-lg text-corp-700/80">
-                Más de 200 modelos en 11 tallas. Confección propia con materiales premium.
-                Niños y adultos. Yape, Plin, tarjeta o WhatsApp.
-              </p>
-              <div className="mt-8 flex flex-wrap gap-3">
-                <Link href="/productos">
-                  <Button variant="premium" size="lg">
-                    Ver catálogo completo <ArrowRight className="h-4 w-4" />
-                  </Button>
-                </Link>
-                <Link href="/categoria/halloween">
-                  <Button variant="outline" size="lg" className="border-corp-700 text-corp-700 hover:bg-corp-50">
-                    🎃 Ofertas Halloween
-                  </Button>
-                </Link>
-              </div>
-              <div className="mt-10 grid grid-cols-3 gap-4 text-center">
-                <Stat icon={<Truck className="h-5 w-5" />} value="2-3 días" label="Envío Lima" />
-                <Stat icon={<ShieldCheck className="h-5 w-5" />} value="100%" label="Pago seguro" />
-                <Stat icon={<Heart className="h-5 w-5" />} value="+30k" label="Familias felices" />
-              </div>
-            </div>
+      {/* HERO SLIDER (3 imágenes webp horizontales auto-rotate) */}
+      <HeroSlider />
 
-            <div className="relative">
-              <div className="grid grid-cols-2 gap-3">
-                {CATS_HERO.slice(0, 4).map((c, i) => (
-                  <Link
-                    key={c.slug}
-                    href={`/categoria/${c.slug}`}
-                    className={`group relative overflow-hidden rounded-2xl bg-gradient-to-br ${c.gradient} p-6 text-white shadow-soft transition hover:shadow-glow ${i % 2 === 1 ? 'translate-y-6' : ''}`}
-                  >
-                    <div className="text-5xl drop-shadow-sm">{c.emoji}</div>
-                    <div className="mt-3 font-display text-lg font-semibold">{c.label}</div>
-                    <ArrowRight className="absolute bottom-4 right-4 h-5 w-5 opacity-60 transition group-hover:translate-x-1 group-hover:opacity-100" />
-                  </Link>
-                ))}
-              </div>
-            </div>
-          </div>
+      {/* Tira de beneficios debajo del slider */}
+      <section className="border-b bg-slate-50/60">
+        <div className="container grid grid-cols-2 gap-3 px-4 py-6 sm:grid-cols-4">
+          <Stat icon={<Truck className="h-5 w-5" />} value="2-3 días" label="Envío en Lima" />
+          <Stat icon={<ShieldCheck className="h-5 w-5" />} value="100% seguro" label="Yape · Plin · Tarjeta" />
+          <Stat icon={<Sparkles className="h-5 w-5" />} value="+200 modelos" label="11 tallas disponibles" />
+          <Stat icon={<Heart className="h-5 w-5" />} value="+30 mil" label="Familias felices" />
         </div>
       </section>
 
