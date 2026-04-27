@@ -23,7 +23,7 @@ const SLIDES = [
   },
 ];
 
-const AUTO_ROTATE_MS = 5500;
+const AUTO_ROTATE_MS = 6500;
 
 export function HeroSlider() {
   const [active, setActive] = useState(0);
@@ -47,6 +47,18 @@ export function HeroSlider() {
       aria-roledescription="carousel"
       aria-label="Promociones destacadas"
     >
+      {/* Animación Ken Burns: zoom suave continuo durante toda la duración del slide.
+          Usa una key dinámica para REINICIAR la animación cuando cambia el slide. */}
+      <style>{`
+        @keyframes hero-kenburns {
+          0%   { transform: scale(1)    translate(0,    0);    }
+          100% { transform: scale(1.12) translate(-1%, -1%);   }
+        }
+        .hero-kb-active {
+          animation: hero-kenburns ${AUTO_ROTATE_MS + 1000}ms ease-out forwards;
+        }
+      `}</style>
+
       {/* Slides container — usa aspect-ratio responsive que aproxima la proporción
           horizontal de los webp originales sin cortarlos en mobile. */}
       <div className="relative aspect-[16/9] w-full sm:aspect-[21/9] lg:aspect-[24/9]">
@@ -57,25 +69,39 @@ export function HeroSlider() {
               key={s.src}
               href={s.href}
               tabIndex={inactive ? -1 : 0}
-              className={`absolute inset-0 transition-opacity duration-700 ease-out ${
+              className={`absolute inset-0 transition-opacity duration-1000 ease-out ${
                 inactive ? 'pointer-events-none opacity-0' : 'opacity-100'
               }`}
             >
-              <Image
-                src={s.src}
-                alt={s.alt}
-                fill
-                priority={i === 0}
-                className="object-cover"
-                sizes="100vw"
-                // Las webp del cliente ya vienen optimizadas (~150KB cada una).
-                // unoptimized evita que el optimizer de Next/Vercel devuelva 400
-                // y sirve el archivo directo desde /public.
-                unoptimized
-              />
+              <div className={`absolute inset-0 ${inactive ? '' : 'hero-kb-active'}`} key={`${i}-${active}`}>
+                <Image
+                  src={s.src}
+                  alt={s.alt}
+                  fill
+                  priority={i === 0}
+                  className="object-cover"
+                  sizes="100vw"
+                  // Las webp del cliente ya vienen optimizadas (~150KB cada una).
+                  // unoptimized evita que el optimizer de Next/Vercel devuelva 400
+                  // y sirve el archivo directo desde /public.
+                  unoptimized
+                />
+              </div>
             </Link>
           );
         })}
+
+        {/* Barra de progreso fina arriba que indica cuánto falta para el próximo slide */}
+        {!paused && (
+          <div
+            key={`progress-${active}`}
+            className="absolute left-0 top-0 z-20 h-0.5 bg-happy-400"
+            style={{ animation: `hero-progress ${AUTO_ROTATE_MS}ms linear forwards` }}
+          />
+        )}
+        <style>{`
+          @keyframes hero-progress { from { width: 0%; } to { width: 100%; } }
+        `}</style>
 
         {/* Controles laterales (visibles en hover desktop, siempre visibles touch) */}
         <button
