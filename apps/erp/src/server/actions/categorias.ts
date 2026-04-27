@@ -69,20 +69,90 @@ export async function actualizarCategoria(id: string, _prev: unknown, fd: FormDa
 }
 
 /**
- * Toggle inline rápido para activar/desactivar una categoría.
- * Cuando se desactiva, los productos de la categoría dejan de aparecer en la web
- * (la web filtra por categorias.activo en loadPublicaciones / categoria/[slug]).
- * No toca productos_publicacion.publicado, así al reactivar la categoría todos
- * vuelven a aparecer sin tener que re-publicar uno por uno.
+ * Toggle inline para activar/desactivar una categoría.
+ * - APAGAR: solo cambia categorias.activo=false. La web ya filtra por
+ *   categoria.activo, así los productos se ocultan automáticamente sin
+ *   tocar productos_publicacion.publicado (no destructivo).
+ * - ENCENDER + cascada (default): además publica TODOS los productos
+ *   activos de la categoría que aún no estén publicados. Esto resuelve
+ *   el caso "activé la categoría pero no veo nada en la web".
  */
-export async function toggleCategoriaActivo(id: string, activo: boolean): Promise<ActionResult> {
+export async function toggleCategoriaActivo(
+  id: string,
+  activo: boolean,
+  cascadaPublicar = true,
+): Promise<ActionResult<{ publicados: number }>> {
   const r = await runAction(async () => {
-    const { sb } = await requireUser();
-    const { error } = await sb.from('categorias').update({ activo }).eq('id', id);
-    if (error) throw new Error(error.message);
-    return null;
+    const { sb, userId } = await requireUser();
+
+    const { error: errCat } = await sb.from('categorias').update({ activo }).eq('id', id);
+    if (errCat) throw new Error(errCat.message);
+
+    if (!activo || !cascadaPublicar) return { publicados: 0 };
+
+    // Encendido + cascada: publicar todos los productos activos de la categoría.
+    const { data: prods } = await sb
+      .from('productos')
+      .select('id')
+      .eq('categoria_id', id)
+      .eq('activo', true);
+
+    if (!prods || prods.length === 0) return { publicados: 0 };
+
+    const ahora = new Date().toISOString();
+    const filas = prods.map((p) => ({
+      producto_id: p.id,
+      publicado: true,
+      publicado_por: userId,
+      publicado_en: ahora,
+    }));
+
+    const { error: errPub } = await sb
+      .from('productos_publicacion')
+      .upsert(filas, { onConflict: 'producto_id' });
+    if (errPub) throw new Error(errPub.message);
+
+    return { publicados: prods.length };
   });
-  if (r.ok) await bumpPaths('/categorias', '/web-catalogo');
+  if (r.ok) await bumpPaths('/categorias', '/web-catalogo', '/productos');
+  return r;
+}
+
+/**
+ * Atajo de emergencia: publica TODOS los productos activos de TODAS las
+ * categorías activas. Útil para poblar la web por primera vez.
+ */
+export async function publicarTodoElCatalogo(): Promise<ActionResult<{ publicados: number; categorias: number }>> {
+  const r = await runAction(async () => {
+    const { sb, userId } = await requireUser();
+
+    const { data: cats } = await sb.from('categorias').select('id').eq('activo', true);
+    if (!cats || cats.length === 0) return { publicados: 0, categorias: 0 };
+
+    const catIds = cats.map((c) => c.id);
+    const { data: prods } = await sb
+      .from('productos')
+      .select('id')
+      .in('categoria_id', catIds)
+      .eq('activo', true);
+    if (!prods || prods.length === 0) return { publicados: 0, categorias: cats.length };
+
+    const ahora = new Date().toISOString();
+    const filas = prods.map((p) => ({
+      producto_id: p.id,
+      publicado: true,
+      publicado_por: userId,
+      publicado_en: ahora,
+    }));
+
+    const { error } = await sb
+      .from('productos_publicacion')
+      .upsert(filas, { onConflict: 'producto_id' });
+    if (error) throw new Error(error.message);
+
+    return { publicados: prods.length, categorias: cats.length };
+  });
+  if (r.ok) await bumpPaths('/categorias', '/web-catalogo', '/productos');
   return r;
 }
 

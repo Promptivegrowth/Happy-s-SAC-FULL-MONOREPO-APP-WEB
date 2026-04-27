@@ -11,12 +11,35 @@ export function ToggleCategoriaActivo({ id, activo }: { id: string; activo: bool
   const [pending, start] = useTransition();
 
   function onToggle(v: boolean) {
-    if (!v && !confirm('Apagar esta categoría también ocultará todos sus productos en la web. ¿Continuar?')) return;
+    if (v) {
+      // Encender — confirmar con cascada
+      const ok = confirm(
+        'Activar esta categoría también PUBLICARÁ todos sus productos en la web. ' +
+          '\n\n¿Continuar?\n\n(Tip: si solo querés re-mostrar productos ya publicados, podés cancelar y usar el botón ⋮ con "Publicar todos" — ambos funcionan igual.)',
+      );
+      if (!ok) return;
+    } else {
+      const ok = confirm(
+        'Apagar la categoría OCULTARÁ todos sus productos en la web (sin despublicarlos). ' +
+          '\n\nAl reactivarla, los productos vuelven a aparecer.\n\n¿Continuar?',
+      );
+      if (!ok) return;
+    }
+
     start(async () => {
-      const r = await toggleCategoriaActivo(id, v);
+      const r = await toggleCategoriaActivo(id, v, true);
       if (r.ok) {
         setVal(v);
-        toast.success(v ? '✨ Categoría activa: productos visibles en web' : 'Categoría apagada: productos ocultos en web');
+        if (v) {
+          const cant = r.data?.publicados ?? 0;
+          toast.success(
+            cant > 0
+              ? `✨ Categoría activa · ${cant} productos publicados en la web`
+              : '✨ Categoría activa (sin productos para publicar)',
+          );
+        } else {
+          toast.success('Categoría apagada · productos ocultos en la web');
+        }
       } else {
         toast.error(r.error ?? 'Error');
       }

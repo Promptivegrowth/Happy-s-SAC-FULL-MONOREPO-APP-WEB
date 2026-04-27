@@ -9,6 +9,7 @@ import { PageShell } from '@/components/page-shell';
 import { Plus, Tags, Pencil, Globe, Info } from 'lucide-react';
 import { ToggleCategoriaActivo } from './toggle-activo-client';
 import { AccionesMasivasCategoria } from './acciones-masivas-client';
+import { PublicarTodoElCatalogoButton } from './publicar-todo-client';
 
 export const metadata = { title: 'Categorías' };
 export const dynamic = 'force-dynamic';
@@ -65,11 +66,14 @@ export default async function CategoriasPage() {
       title="Categorías"
       description="Categorías que se muestran en la tienda web y agrupan los disfraces."
       actions={
-        <Link href="/categorias/nuevo">
-          <Button variant="premium">
-            <Plus className="h-4 w-4" /> Nueva categoría
-          </Button>
-        </Link>
+        <div className="flex items-center gap-2">
+          <PublicarTodoElCatalogoButton totalSinPublicar={totalProductos - totalPublicados} />
+          <Link href="/categorias/nuevo">
+            <Button variant="premium">
+              <Plus className="h-4 w-4" /> Nueva categoría
+            </Button>
+          </Link>
+        </div>
       }
     >
       {/* Banner explicativo del modelo de visibilidad */}
@@ -83,17 +87,21 @@ export default async function CategoriasPage() {
           </p>
           <ul className="ml-4 list-disc text-xs text-slate-600">
             <li>
-              <strong>Apagar la categoría</strong> oculta TODOS sus productos de la web instantáneamente
-              (cascada). Útil para apagar temporadas (Halloween, Fiestas Patrias, etc.).
+              <strong>ENCENDER el toggle de categoría</strong> ahora también PUBLICA todos sus
+              productos en la web automáticamente (cascada). Después podés ocultar productos
+              individualmente desde <code className="rounded bg-slate-100 px-1">/web-catalogo</code>.
             </li>
             <li>
-              <strong>Toggle individual de producto</strong> (en /web-catalogo o detalle del producto)
-              decide si ese SKU específico se muestra. Permite ocultar productos sin variantes,
-              descontinuados, etc.
+              <strong>APAGAR el toggle</strong> oculta los productos de la web sin despublicarlos.
+              Si lo volves a encender, los productos vuelven a estar disponibles.
             </li>
             <li>
-              Acción masiva <strong>"Publicar todos"</strong> (icono ⋮ a la derecha): publica de un
-              click todos los productos de la categoría sin tocarlos uno por uno.
+              <strong>Botón verde "Publicar todo el catálogo"</strong> arriba: atajo de emergencia
+              para publicar TODOS los productos de TODAS las categorías activas con un click.
+            </li>
+            <li>
+              Acción masiva <strong>"Publicar/Despublicar todos"</strong> (icono ⋮ a la derecha de
+              cada categoría): controla solo esa categoría sin tocar el toggle.
             </li>
           </ul>
         </div>

@@ -38,10 +38,8 @@ type Slide = {
   badgeIcon: 'heart' | 'gift' | 'sparkle';
   /** Color del título principal — debe contrastar con el fondo del slide */
   tituloColor: string;
-  /** Color del acento (segunda línea, va con shimmer animado) */
-  acentoFrom: string;
-  acentoVia: string;
-  acentoTo: string;
+  /** Color del acento (segunda línea — color sólido fuerte) */
+  acentoColor: string;
 };
 
 const SLIDES: Slide[] = [
@@ -57,9 +55,7 @@ const SLIDES: Slide[] = [
     cta: 'Ver colección',
     badgeIcon: 'heart',
     tituloColor: '#231459', // azul oscuro corp-900 sobre fondo claro/rosa
-    acentoFrom: '#EC1C24',  // danger
-    acentoVia: '#E15A25',   // happy-600
-    acentoTo: '#F5821F',    // happy-500
+    acentoColor: '#EC1C24', // rojo danger fuerte — alto contraste
   },
   {
     src: '/slider2.webp',
@@ -73,9 +69,7 @@ const SLIDES: Slide[] = [
     cta: 'Comprar ahora',
     badgeIcon: 'gift',
     tituloColor: '#231459',
-    acentoFrom: '#E15A25',
-    acentoVia: '#F5821F',
-    acentoTo: '#EC1C24',
+    acentoColor: '#E15A25', // naranja oscuro happy-600
   },
   {
     src: '/slider3.webp',
@@ -89,9 +83,7 @@ const SLIDES: Slide[] = [
     cta: 'Descubrir más',
     badgeIcon: 'sparkle',
     tituloColor: '#231459',
-    acentoFrom: '#2D3193',  // azul corp medio
-    acentoVia: '#E15A25',
-    acentoTo: '#EC1C24',
+    acentoColor: '#EC1C24', // rojo danger
   },
 ];
 
@@ -293,17 +285,21 @@ export function HeroSlider() {
 }
 
 function SlideContent({ slide, keyForAnim }: { slide: Slide; keyForAnim: string }) {
-  // Posición / alineación del bloque de texto según layout
+  // Posición / alineación del bloque de texto según layout.
+  // Slider 1: a la izquierda PERO no pegado al borde — empuja hacia el medio-izquierda.
+  // Slider 2 y 3: centrado, con padding amplio para que no se corte el texto.
   const wrapperClasses = {
-    'izquierda-lottie': 'items-center justify-start pl-4 sm:pl-12 lg:pl-20 xl:pl-32',
-    centro: 'items-center justify-center px-4',
-    'centro-amplio': 'items-center justify-center px-4',
+    'izquierda-lottie': 'items-center justify-start pl-8 sm:pl-20 lg:pl-32 xl:pl-48 2xl:pl-64',
+    centro: 'items-center justify-center px-6 sm:px-12',
+    'centro-amplio': 'items-center justify-center px-6 sm:px-12',
   }[slide.layout];
 
+  // Anchos máximos del bloque de texto. Generosos para que las dos líneas
+  // del título quepan sin recortarse incluso en xl con tipografía grande.
   const textWidth = {
-    'izquierda-lottie': 'max-w-md text-left sm:max-w-lg lg:max-w-xl',
-    centro: 'max-w-xl text-center sm:max-w-2xl',
-    'centro-amplio': 'max-w-3xl text-center',
+    'izquierda-lottie': 'max-w-[18rem] text-left sm:max-w-md lg:max-w-xl xl:max-w-2xl',
+    centro: 'max-w-md text-center sm:max-w-2xl lg:max-w-3xl',
+    'centro-amplio': 'max-w-md text-center sm:max-w-2xl lg:max-w-4xl',
   }[slide.layout];
 
   // Delay para empezar las letras del título DESPUÉS del badge
@@ -326,20 +322,25 @@ function SlideContent({ slide, keyForAnim }: { slide: Slide; keyForAnim: string 
           {slide.pretitulo}
         </div>
 
-        {/* Título — letra por letra con bounce */}
+        {/* Título — letra por letra con bounce.
+            Tamaños calibrados para que las dos líneas quepan en cada layout. */}
         <h2
-          className="font-fun text-4xl font-bold leading-[1.05] tracking-tight sm:text-5xl lg:text-7xl xl:text-[5.5rem]"
+          className={`font-fun font-bold leading-[1.05] tracking-tight ${
+            slide.layout === 'izquierda-lottie'
+              ? 'text-3xl sm:text-5xl lg:text-6xl xl:text-7xl'
+              : slide.layout === 'centro-amplio'
+                ? 'text-3xl sm:text-5xl lg:text-7xl'
+                : 'text-3xl sm:text-5xl lg:text-6xl'
+          }`}
           style={{ color: slide.tituloColor }}
         >
-          <span className="hero-text-glow block">
+          <span className="hero-text-glow block whitespace-nowrap">
             <AnimatedText text={slide.titulo} delayBase={TITULO_DELAY} letterDelay={55} />
           </span>
           {slide.tituloAcento && (
             <span
-              className="hero-acento-shimmer block"
-              style={{
-                backgroundImage: `linear-gradient(90deg, ${slide.acentoFrom} 0%, ${slide.acentoVia} 50%, ${slide.acentoTo} 100%)`,
-              }}
+              className="hero-text-glow block whitespace-nowrap"
+              style={{ color: slide.acentoColor }}
             >
               <AnimatedText text={slide.tituloAcento} delayBase={ACENTO_DELAY} letterDelay={55} />
             </span>
