@@ -50,26 +50,32 @@ export function HeroSlider() {
       {/* Slides container — usa aspect-ratio responsive que aproxima la proporción
           horizontal de los webp originales sin cortarlos en mobile. */}
       <div className="relative aspect-[16/9] w-full sm:aspect-[21/9] lg:aspect-[24/9]">
-        {SLIDES.map((s, i) => (
-          <Link
-            key={s.src}
-            href={s.href}
-            className={`absolute inset-0 transition-opacity duration-700 ease-out ${
-              i === active ? 'opacity-100' : 'pointer-events-none opacity-0'
-            }`}
-            aria-hidden={i !== active}
-            tabIndex={i === active ? 0 : -1}
-          >
-            <Image
-              src={s.src}
-              alt={s.alt}
-              fill
-              priority={i === 0}
-              className="object-cover"
-              sizes="100vw"
-            />
-          </Link>
-        ))}
+        {SLIDES.map((s, i) => {
+          const inactive = i !== active;
+          return (
+            <Link
+              key={s.src}
+              href={s.href}
+              tabIndex={inactive ? -1 : 0}
+              className={`absolute inset-0 transition-opacity duration-700 ease-out ${
+                inactive ? 'pointer-events-none opacity-0' : 'opacity-100'
+              }`}
+            >
+              <Image
+                src={s.src}
+                alt={s.alt}
+                fill
+                priority={i === 0}
+                className="object-cover"
+                sizes="100vw"
+                // Las webp del cliente ya vienen optimizadas (~150KB cada una).
+                // unoptimized evita que el optimizer de Next/Vercel devuelva 400
+                // y sirve el archivo directo desde /public.
+                unoptimized
+              />
+            </Link>
+          );
+        })}
 
         {/* Controles laterales (visibles en hover desktop, siempre visibles touch) */}
         <button
