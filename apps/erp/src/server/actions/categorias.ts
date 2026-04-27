@@ -86,6 +86,67 @@ export async function toggleCategoriaActivo(id: string, activo: boolean): Promis
   return r;
 }
 
+/**
+ * Acción masiva: publica TODOS los productos activos de una categoría.
+ * Hace upsert en productos_publicacion con publicado=true para cada uno.
+ * Retorna el número de productos efectivamente publicados (excluye los que ya estaban).
+ */
+export async function publicarTodosCategoria(categoriaId: string): Promise<ActionResult<{ afectados: number }>> {
+  const r = await runAction(async () => {
+    const { sb, userId } = await requireUser();
+
+    // Traer todos los productos activos de la categoría
+    const { data: prods, error: errProds } = await sb
+      .from('productos')
+      .select('id')
+      .eq('categoria_id', categoriaId)
+      .eq('activo', true);
+    if (errProds) throw new Error(errProds.message);
+    if (!prods || prods.length === 0) return { afectados: 0 };
+
+    const ahora = new Date().toISOString();
+    const filas = prods.map((p) => ({
+      producto_id: p.id,
+      publicado: true,
+      publicado_por: userId,
+      publicado_en: ahora,
+    }));
+
+    // Upsert por producto_id (PK de productos_publicacion). El trigger
+    // tg_publicacion_set_slug se encarga de generar slug si falta.
+    const { error } = await sb
+      .from('productos_publicacion')
+      .upsert(filas, { onConflict: 'producto_id' });
+    if (error) throw new Error(error.message);
+
+    return { afectados: prods.length };
+  });
+  if (r.ok) await bumpPaths('/categorias', '/web-catalogo', '/productos');
+  return r;
+}
+
+/** Despublica TODOS los productos de una categoría (publicado=false). */
+export async function despublicarTodosCategoria(categoriaId: string): Promise<ActionResult<{ afectados: number }>> {
+  const r = await runAction(async () => {
+    const { sb } = await requireUser();
+    const { data: prods, error: errProds } = await sb
+      .from('productos')
+      .select('id')
+      .eq('categoria_id', categoriaId);
+    if (errProds) throw new Error(errProds.message);
+    if (!prods || prods.length === 0) return { afectados: 0 };
+
+    const { error } = await sb
+      .from('productos_publicacion')
+      .update({ publicado: false })
+      .in('producto_id', prods.map((p) => p.id));
+    if (error) throw new Error(error.message);
+    return { afectados: prods.length };
+  });
+  if (r.ok) await bumpPaths('/categorias', '/web-catalogo', '/productos');
+  return r;
+}
+
 export async function eliminarCategoria(id: string): Promise<ActionResult> {
   const r = await runAction(async () => {
     const { sb } = await requireUser();
