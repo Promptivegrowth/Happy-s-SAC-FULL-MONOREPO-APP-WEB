@@ -22,6 +22,39 @@ const lineaSchema = z.object({
   observacion: z.string().optional().or(z.literal('')),
 });
 
+/**
+ * Crea una receta vacía v1.0 activa para un producto que aún no tiene
+ * receta activa. Si ya tiene una, retorna error explícito (el usuario
+ * debe abrir la existente o duplicarla).
+ */
+export async function crearReceta(productoId: string): Promise<ActionResult<{ id: string }>> {
+  const r = await runAction(async () => {
+    if (!productoId) throw new Error('Producto requerido');
+    const { sb } = await requireUser();
+
+    // Verificar que el producto no tenga ya una receta activa
+    const { data: existente } = await sb
+      .from('recetas')
+      .select('id')
+      .eq('producto_id', productoId)
+      .eq('activa', true)
+      .maybeSingle();
+    if (existente) {
+      throw new Error('Este producto ya tiene una receta activa. Abrila desde el listado o duplicala.');
+    }
+
+    const { data: row, error } = await sb
+      .from('recetas')
+      .insert({ producto_id: productoId, version: 'v1.0', activa: true })
+      .select('id')
+      .single();
+    if (error) throw new Error(error.message);
+    return { id: row.id as string };
+  });
+  if (r.ok) await bumpPaths('/recetas');
+  return r;
+}
+
 export async function upsertReceta(_prev: unknown, fd: FormData): Promise<ActionResult> {
   const r = await runAction(async () => {
     const data = lineaSchema.parse({

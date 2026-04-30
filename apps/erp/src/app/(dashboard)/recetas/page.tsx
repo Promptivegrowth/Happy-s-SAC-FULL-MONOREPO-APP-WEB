@@ -11,6 +11,7 @@ import { SearchAutocomplete } from '@/components/search-autocomplete';
 import { FilterChip } from '@/components/filter-chip';
 import { TableSkeleton } from '@/components/skeletons';
 import { FileText, Pencil } from 'lucide-react';
+import { NuevaRecetaButton } from './nueva-receta-client';
 
 export const metadata = { title: 'Recetas (BOM)' };
 export const dynamic = 'force-dynamic';
@@ -21,13 +22,22 @@ export default async function RecetasPage({ searchParams }: { searchParams: Prom
   const sp = await searchParams;
   const sb = await createClient();
 
-  // Index para autocomplete: todos los productos con receta activa
-  const { data: indexData } = await sb
-    .from('recetas')
-    .select('id, productos(id, codigo, nombre)')
-    .eq('activa', true)
-    .order('updated_at', { ascending: false })
-    .limit(1000);
+  // Cargamos en paralelo: index para autocomplete + lista de productos para el modal "Nueva receta".
+  const [{ data: indexData }, { data: productosAll }, { data: recetasActivas }] = await Promise.all([
+    sb
+      .from('recetas')
+      .select('id, productos(id, codigo, nombre)')
+      .eq('activa', true)
+      .order('updated_at', { ascending: false })
+      .limit(1000),
+    sb
+      .from('productos')
+      .select('id, codigo, nombre')
+      .eq('activo', true)
+      .order('nombre')
+      .limit(2000),
+    sb.from('recetas').select('producto_id').eq('activa', true),
+  ]);
   const indexItems = (indexData ?? [])
     .map((r) => {
       const p = (r as unknown as { productos?: { id: string; codigo: string; nombre: string } | null }).productos;
@@ -40,6 +50,14 @@ export default async function RecetasPage({ searchParams }: { searchParams: Prom
       };
     })
     .filter((x): x is NonNullable<typeof x> => x !== null);
+
+  const conReceta = new Set((recetasActivas ?? []).map((r) => r.producto_id as string));
+  const productosParaModal = (productosAll ?? []).map((p) => ({
+    id: p.id as string,
+    codigo: p.codigo as string,
+    nombre: p.nombre as string,
+    tieneReceta: conReceta.has(p.id as string),
+  }));
 
   function chipUrl(params: Record<string, string | undefined>) {
     const sp2 = new URLSearchParams();
@@ -59,6 +77,7 @@ export default async function RecetasPage({ searchParams }: { searchParams: Prom
     <PageShell
       title="Recetas (BOM)"
       description="Listas de materiales por producto y talla. Versionadas. Editables."
+      actions={<NuevaRecetaButton productos={productosParaModal} />}
     >
       <div className="flex flex-wrap items-center gap-3">
         <SearchAutocomplete items={indexItems} placeholder="Buscar receta por producto o código…" />
@@ -115,7 +134,7 @@ async function RecetasTable({ q, estado }: SP) {
         description={
           q
             ? `Sin coincidencias para "${q}".`
-            : 'Las recetas se crean automáticamente con cada producto. Importa los Excels o crea un producto.'
+            : 'Aún no hay recetas. Usá el botón "Nueva receta" arriba a la derecha para crear la primera.'
         }
       />
     );
