@@ -6,7 +6,7 @@ import { Card, CardContent } from '@happy/ui/card';
 import { EmptyState } from '@happy/ui/empty-state';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@happy/ui/table';
 import { PageShell } from '@/components/page-shell';
-import { Plus, Tags, Pencil, Globe, Info } from 'lucide-react';
+import { Plus, Tags, Pencil, Globe, Info, AlertTriangle, ArrowRight } from 'lucide-react';
 import { ToggleCategoriaActivo } from './toggle-activo-client';
 import { AccionesMasivasCategoria } from './acciones-masivas-client';
 import { PublicarTodoElCatalogoButton } from './publicar-todo-client';
@@ -60,6 +60,11 @@ export default async function CategoriasPage() {
 
   const totalProductos = (prods ?? []).length;
   const totalPublicados = publicadosSet.size;
+  // Productos sin categoría asignada (huérfanos): no se publican hasta que se les asigne categoría.
+  const huerfanos = (prods ?? []).filter((p) => p.categoria_id == null).length;
+  // Para el botón "Publicar todo el catálogo" descontamos los huérfanos del total
+  // (ellos no son publicables hasta tener categoría).
+  const sinPublicarPublicables = Math.max(0, (totalProductos - huerfanos) - totalPublicados);
 
   return (
     <PageShell
@@ -67,7 +72,7 @@ export default async function CategoriasPage() {
       description="Categorías que se muestran en la tienda web y agrupan los disfraces."
       actions={
         <div className="flex items-center gap-2">
-          <PublicarTodoElCatalogoButton totalSinPublicar={totalProductos - totalPublicados} />
+          <PublicarTodoElCatalogoButton totalSinPublicar={sinPublicarPublicables} />
           <Link href="/categorias/nuevo">
             <Button variant="premium">
               <Plus className="h-4 w-4" /> Nueva categoría
@@ -76,6 +81,27 @@ export default async function CategoriasPage() {
         </div>
       }
     >
+      {/* Alerta huérfanos: productos sin categoría asignada que no se pueden publicar */}
+      {huerfanos > 0 && (
+        <Link
+          href="/productos?sin_categoria=1"
+          className="group flex items-start gap-3 rounded-lg border-2 border-amber-300 bg-amber-50 p-4 transition hover:border-amber-400 hover:bg-amber-100"
+        >
+          <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-amber-600" />
+          <div className="flex-1 space-y-0.5 text-sm">
+            <p className="font-bold text-amber-900">
+              ⚠️ {huerfanos} producto{huerfanos === 1 ? '' : 's'} sin categoría asignada
+            </p>
+            <p className="text-xs text-amber-800">
+              Estos productos NO se publican en la web hasta que les asignes categoría. Click acá para verlos y categorizarlos.
+            </p>
+          </div>
+          <span className="flex items-center gap-1 self-center text-sm font-bold text-amber-700">
+            Asignar categoría <ArrowRight className="h-4 w-4 transition group-hover:translate-x-1" />
+          </span>
+        </Link>
+      )}
+
       {/* Banner explicativo del modelo de visibilidad */}
       <div className="flex items-start gap-3 rounded-lg border border-corp-200 bg-corp-50/40 p-4 text-sm">
         <Info className="mt-0.5 h-5 w-5 shrink-0 text-corp-700" />

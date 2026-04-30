@@ -11,12 +11,12 @@ import { PageShell } from '@/components/page-shell';
 import { SearchAutocomplete } from '@/components/search-autocomplete';
 import { FilterChip } from '@/components/filter-chip';
 import { TableSkeleton } from '@/components/skeletons';
-import { Plus, Shirt, Pencil, Globe } from 'lucide-react';
+import { Plus, Shirt, Pencil, Globe, AlertTriangle } from 'lucide-react';
 
 export const metadata = { title: 'Productos' };
 export const dynamic = 'force-dynamic';
 
-type SP = { q?: string; cat?: string; estado?: string; web?: string };
+type SP = { q?: string; cat?: string; estado?: string; web?: string; sin_categoria?: string };
 
 export default async function ProductosPage({ searchParams }: { searchParams: Promise<SP> }) {
   const sp = await searchParams;
@@ -46,6 +46,7 @@ export default async function ProductosPage({ searchParams }: { searchParams: Pr
     if (sp.cat) sp2.set('cat', sp.cat);
     if (sp.estado) sp2.set('estado', sp.estado);
     if (sp.web) sp2.set('web', sp.web);
+    if (sp.sin_categoria) sp2.set('sin_categoria', sp.sin_categoria);
     for (const [k, v] of Object.entries(params)) {
       if (v === undefined || v === '') sp2.delete(k);
       else sp2.set(k, v);
@@ -54,8 +55,10 @@ export default async function ProductosPage({ searchParams }: { searchParams: Pr
     return s ? `?${s}` : '?';
   }
 
+  const sinCategoriaActivo = sp.sin_categoria === '1';
+
   // Key estable para que Suspense remonte sólo la tabla cuando cambian los filtros.
-  const tableKey = `${sp.q ?? ''}|${sp.cat ?? ''}|${sp.estado ?? ''}|${sp.web ?? ''}`;
+  const tableKey = `${sp.q ?? ''}|${sp.cat ?? ''}|${sp.estado ?? ''}|${sp.web ?? ''}|${sp.sin_categoria ?? ''}`;
 
   return (
     <PageShell
@@ -71,7 +74,7 @@ export default async function ProductosPage({ searchParams }: { searchParams: Pr
     >
       <div className="flex flex-wrap items-center gap-3">
         <SearchAutocomplete items={indexItems} placeholder="Buscar producto por nombre o código…" />
-        <FilterChip href="/productos" active={!sp.cat && !sp.estado && !sp.web}>
+        <FilterChip href="/productos" active={!sp.cat && !sp.estado && !sp.web && !sinCategoriaActivo}>
           Todos
         </FilterChip>
         <FilterChip href={chipUrl({ web: 'si' })} active={sp.web === 'si'} variant="success">
@@ -79,6 +82,14 @@ export default async function ProductosPage({ searchParams }: { searchParams: Pr
         </FilterChip>
         <FilterChip href={chipUrl({ web: 'no' })} active={sp.web === 'no'}>
           Sin publicar
+        </FilterChip>
+        <FilterChip
+          href={chipUrl({ sin_categoria: sinCategoriaActivo ? '' : '1', cat: '' })}
+          active={sinCategoriaActivo}
+          variant="default"
+          className="bg-amber-500 hover:bg-amber-600"
+        >
+          <AlertTriangle className="h-3 w-3" /> Sin categoría
         </FilterChip>
         <FilterChip
           href={chipUrl({ estado: sp.estado === 'inactivo' ? '' : 'inactivo' })}
@@ -126,7 +137,7 @@ type ProdRow = {
   productos_publicacion: { publicado: boolean; destacado_web: boolean | null }[];
 };
 
-async function ProductosTable({ q, cat, estado, web }: SP) {
+async function ProductosTable({ q, cat, estado, web, sin_categoria }: SP) {
   const sb = await createClient();
   let query = sb
     .from('productos')
@@ -134,9 +145,10 @@ async function ProductosTable({ q, cat, estado, web }: SP) {
       'id, codigo, nombre, activo, destacado, categorias(id, nombre), campanas(id, nombre), productos_variantes(id, sku, talla, precio_publico), productos_publicacion(publicado, destacado_web)',
     )
     .order('nombre')
-    .limit(200);
+    .limit(500);
   if (q) query = query.ilike('nombre', `%${q}%`);
   if (cat) query = query.eq('categoria_id', cat);
+  if (sin_categoria === '1') query = query.is('categoria_id', null);
   if (estado === 'activo') query = query.eq('activo', true);
   if (estado === 'inactivo') query = query.eq('activo', false);
   const { data } = await query;

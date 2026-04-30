@@ -119,39 +119,42 @@ export async function toggleCategoriaActivo(
 }
 
 /**
- * Atajo de emergencia: publica TODOS los productos activos.
+ * Atajo de emergencia: publica TODOS los productos activos que tengan
+ * categoría ACTIVA asignada.
  * - Productos en categorías ACTIVAS → se publican
- * - Productos en categorías APAGADAS → se omiten (la cascada de la
- *   categoría apagada los oculta igual de la web)
- * - Productos SIN categoría asignada → SE PUBLICAN IGUAL (no son
- *   "huérfanos por castigo"; típicamente vienen del import de fotos)
- *
- * Antes solo procesaba los de categorías activas, dejando 145 productos
- * sin categoría eternamente sin publicar y el contador del botón
- * mostraba siempre 145 incluso después de hacer click.
+ * - Productos en categorías APAGADAS → se omiten (cascada los oculta igual)
+ * - Productos SIN categoría asignada → NO se publican (necesitan que el
+ *   usuario les asigne categoría primero, sino quedan sin breadcrumb,
+ *   sin filtro web, etc.). El conteo se reporta para que la UI lo
+ *   muestre como alerta separada con CTA "Asignar categoría".
  */
-export async function publicarTodoElCatalogo(): Promise<ActionResult<{ publicados: number; categorias: number; sinCategoria: number }>> {
+export async function publicarTodoElCatalogo(): Promise<ActionResult<{ publicados: number; categorias: number; huerfanos: number }>> {
   const r = await runAction(async () => {
     const { sb, userId } = await requireUser();
 
-    const [{ data: cats }, { data: todosProds }] = await Promise.all([
-      sb.from('categorias').select('id, activo'),
-      sb.from('productos').select('id, categoria_id').eq('activo', true),
-    ]);
+    const { data: cats } = await sb.from('categorias').select('id').eq('activo', true);
+    if (!cats || cats.length === 0) return { publicados: 0, categorias: 0, huerfanos: 0 };
 
-    if (!todosProds || todosProds.length === 0) return { publicados: 0, categorias: 0, sinCategoria: 0 };
+    const catIds = cats.map((c) => c.id);
+    const { data: prods } = await sb
+      .from('productos')
+      .select('id')
+      .in('categoria_id', catIds)
+      .eq('activo', true);
 
-    const catActivasSet = new Set((cats ?? []).filter((c) => c.activo).map((c) => c.id));
+    // Conteo informativo de huérfanos para mostrar al usuario
+    const { count: huerfanos } = await sb
+      .from('productos')
+      .select('id', { count: 'exact', head: true })
+      .is('categoria_id', null)
+      .eq('activo', true);
 
-    // Filtrar: incluir si NO tiene categoría O si tiene categoría activa
-    const aPublicar = todosProds.filter(
-      (p) => p.categoria_id == null || catActivasSet.has(p.categoria_id as string),
-    );
-
-    if (aPublicar.length === 0) return { publicados: 0, categorias: catActivasSet.size, sinCategoria: 0 };
+    if (!prods || prods.length === 0) {
+      return { publicados: 0, categorias: cats.length, huerfanos: huerfanos ?? 0 };
+    }
 
     const ahora = new Date().toISOString();
-    const filas = aPublicar.map((p) => ({
+    const filas = prods.map((p) => ({
       producto_id: p.id,
       publicado: true,
       publicado_por: userId,
@@ -163,10 +166,35 @@ export async function publicarTodoElCatalogo(): Promise<ActionResult<{ publicado
       .upsert(filas, { onConflict: 'producto_id' });
     if (error) throw new Error(error.message);
 
-    const sinCategoria = aPublicar.filter((p) => p.categoria_id == null).length;
-    return { publicados: aPublicar.length, categorias: catActivasSet.size, sinCategoria };
+    return { publicados: prods.length, categorias: cats.length, huerfanos: huerfanos ?? 0 };
   });
   if (r.ok) await bumpPaths('/categorias', '/web-catalogo', '/productos');
+  return r;
+}
+
+/**
+ * Asigna una categoría en lote a TODOS los productos huérfanos
+ * (categoria_id null) que coincidan con un patrón en el nombre, o a
+ * ids específicos. Útil para clasificar masivamente los auto-creados
+ * desde import de fotos.
+ */
+export async function asignarCategoriaMasivo(
+  categoriaId: string,
+  productoIds: string[],
+): Promise<ActionResult<{ asignados: number }>> {
+  const r = await runAction(async () => {
+    if (!productoIds || productoIds.length === 0) {
+      throw new Error('Selecciona al menos un producto');
+    }
+    const { sb } = await requireUser();
+    const { error } = await sb
+      .from('productos')
+      .update({ categoria_id: categoriaId })
+      .in('id', productoIds);
+    if (error) throw new Error(error.message);
+    return { asignados: productoIds.length };
+  });
+  if (r.ok) await bumpPaths('/categorias', '/productos', '/web-catalogo');
   return r;
 }
 

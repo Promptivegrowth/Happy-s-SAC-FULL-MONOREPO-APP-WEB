@@ -24,8 +24,11 @@ export function PublicarTodoElCatalogoButton({ totalSinPublicar }: { totalSinPub
     start(async () => {
       const r = await publicarTodoElCatalogo();
       if (r.ok && r.data) {
-        const { publicados, categorias, sinCategoria } = r.data;
-        const extra = sinCategoria > 0 ? ` (incluyendo ${sinCategoria} sin categoría asignada)` : '';
+        const { publicados, categorias, huerfanos } = r.data;
+        const extra =
+          huerfanos > 0
+            ? ` · ${huerfanos} sin categoría quedaron pendientes (asignáles categoría primero)`
+            : '';
         toast.success(
           `✨ ${publicados} productos publicados en ${categorias} categorías${extra}`,
         );
