@@ -17,6 +17,7 @@ import {
   toggleSaleAServicio,
   duplicarReceta,
   duplicarLineasTalla,
+  actualizarLineaReceta,
   agregarProceso,
   actualizarProceso,
   eliminarProceso,
@@ -207,7 +208,13 @@ function BomEditor({
             );
           })}
           <div className="ml-auto flex items-center gap-2">
-            <Button variant="outline" size="sm" onClick={() => setOpenDup(true)}>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setOpenDup(true)}
+              disabled={lineas.length === 0}
+              title={lineas.length === 0 ? 'Agregá al menos una línea para poder duplicar' : 'Duplicar a otro producto'}
+            >
               <Copy className="h-3.5 w-3.5" /> Duplicar a otro producto
             </Button>
             <Button variant="premium" size="sm" onClick={() => setOpenForm(true)}>
@@ -305,6 +312,7 @@ function BomEditor({
           recetaId={recetaId}
           productoActualId={productoId}
           productos={productos}
+          tallasConLineas={Object.keys(porTalla).filter((t) => porTalla[t]!.length > 0)}
           onClose={() => setOpenDup(false)}
         />
       )}
@@ -334,9 +342,19 @@ function RecetaTabla({
   pending: boolean;
   compact?: boolean;
 }) {
+  const [, start] = useTransition();
   if (lineas.length === 0) {
     return <div className="px-4 py-6 text-center text-sm text-slate-400">Sin líneas para esta talla</div>;
   }
+
+  function actualizarCampo(id: string, patch: Parameters<typeof actualizarLineaReceta>[1]) {
+    start(async () => {
+      const r = await actualizarLineaReceta(id, patch);
+      if (r.ok) toast.success('Línea actualizada');
+      else toast.error(r.error ?? 'Error');
+    });
+  }
+
   return (
     <Table>
       <TableHeader><TableRow>
@@ -346,6 +364,7 @@ function RecetaTabla({
         <TableHead className="text-right">Cantidad</TableHead>
         <TableHead className="text-right">Costo total</TableHead>
         <TableHead>✂️ Va al taller</TableHead>
+        <TableHead className="text-right">Queda en alm.</TableHead>
         <TableHead></TableHead>
       </TableRow></TableHeader>
       <TableBody>
@@ -359,7 +378,13 @@ function RecetaTabla({
                 <div className="font-mono text-[10px] text-slate-500">{l.materiales?.codigo}</div>
               </TableCell>
               <TableCell><Badge variant="secondary" className="text-[10px]">{l.materiales?.categoria}</Badge></TableCell>
-              <TableCell className="text-right font-mono text-sm">{Number(l.cantidad).toFixed(4)}</TableCell>
+              <TableCell className="text-right">
+                <InlineNumber
+                  valor={Number(l.cantidad)}
+                  step={0.0001}
+                  onChange={(v) => actualizarCampo(l.id, { cantidad: v })}
+                />
+              </TableCell>
               <TableCell className="text-right text-sm">S/ {costo.toFixed(2)}</TableCell>
               <TableCell>
                 <label className="flex items-center gap-2 text-xs">
@@ -369,9 +394,20 @@ function RecetaTabla({
                     disabled={pending}
                   />
                   <span className={l.sale_a_servicio ? 'font-medium text-emerald-700' : 'text-slate-500'}>
-                    {l.sale_a_servicio ? `Sí · queda ${Number(l.cantidad_almacen ?? 0).toFixed(2)} alm.` : 'No'}
+                    {l.sale_a_servicio ? 'Sí' : 'No'}
                   </span>
                 </label>
+              </TableCell>
+              <TableCell className="text-right">
+                {l.sale_a_servicio ? (
+                  <InlineNumber
+                    valor={Number(l.cantidad_almacen ?? 0)}
+                    step={0.0001}
+                    onChange={(v) => actualizarCampo(l.id, { cantidad_almacen: v })}
+                  />
+                ) : (
+                  <span className="text-xs text-slate-400">—</span>
+                )}
               </TableCell>
               <TableCell className="text-right">
                 <Button variant="ghost" size="sm" onClick={() => onDelete(l.id)} disabled={pending}>
@@ -383,6 +419,39 @@ function RecetaTabla({
         })}
       </TableBody>
     </Table>
+  );
+}
+
+/** Edita un número en línea con guardado al salir del input o presionar Enter. */
+function InlineNumber({
+  valor,
+  step = 1,
+  onChange,
+}: {
+  valor: number;
+  step?: number;
+  onChange: (v: number) => void;
+}) {
+  const [v, setV] = useState(String(valor));
+  useEffect(() => {
+    setV(String(valor));
+  }, [valor]);
+  return (
+    <input
+      type="number"
+      step={step}
+      min={0}
+      value={v}
+      onChange={(e) => setV(e.target.value)}
+      onBlur={() => {
+        const n = Number(v);
+        if (n !== valor && Number.isFinite(n)) onChange(n);
+      }}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
+      }}
+      className="h-8 w-24 rounded border border-slate-200 bg-white px-2 text-right font-mono text-xs focus:border-happy-400 focus:outline-none focus:ring-2 focus:ring-happy-100"
+    />
   );
 }
 
@@ -507,16 +576,21 @@ function DuplicarRecetaModal({
   recetaId,
   productoActualId,
   productos,
+  tallasConLineas,
   onClose,
 }: {
   recetaId: string;
   productoActualId: string;
   productos: Producto[];
+  tallasConLineas: string[];
   onClose: () => void;
 }) {
   const [pending, start] = useTransition();
   const [busca, setBusca] = useState('');
   const [seleccionadoId, setSeleccionadoId] = useState('');
+  const [tallaOrigen, setTallaOrigen] = useState('');
+  const [tallaDestino, setTallaDestino] = useState('');
+
   const filtrados = productos
     .filter((p) => p.id !== productoActualId)
     .filter((p) => !busca || p.nombre.toLowerCase().includes(busca.toLowerCase()) || p.codigo.toLowerCase().includes(busca.toLowerCase()))
@@ -525,9 +599,17 @@ function DuplicarRecetaModal({
   function ejecutar() {
     if (!seleccionadoId) return toast.error('Elegí un producto destino');
     start(async () => {
-      const r = await duplicarReceta(recetaId, seleccionadoId);
+      const r = await duplicarReceta(
+        recetaId,
+        seleccionadoId,
+        tallaOrigen || undefined,
+        tallaDestino || undefined,
+      );
       if (r.ok && r.data) {
-        toast.success(`✨ ${r.data.lineas} líneas duplicadas`);
+        const detalle = tallaOrigen
+          ? ` (talla ${tallaOrigen.replace('T', '')}${tallaDestino ? ` → ${tallaDestino.replace('T', '')}` : ''})`
+          : '';
+        toast.success(`✨ ${r.data.lineas} líneas duplicadas${detalle}`);
         onClose();
       } else toast.error(r.error ?? 'Error');
     });
@@ -539,33 +621,82 @@ function DuplicarRecetaModal({
         <div className="mb-4 flex items-start justify-between">
           <div>
             <h3 className="font-display text-base font-semibold">Duplicar receta</h3>
-            <p className="text-xs text-slate-500">Copia todas las líneas de esta receta a otro producto.</p>
+            <p className="text-xs text-slate-500">
+              Copia las líneas de esta receta a otro producto. Por defecto duplica todas las tallas
+              con sus líneas. Podés filtrar por una talla origen y/o cambiar la talla destino.
+            </p>
           </div>
           <button onClick={onClose} className="rounded p-1 text-slate-400 hover:bg-slate-100"><X className="h-4 w-4" /></button>
         </div>
-        <Input placeholder="Buscar producto destino…" value={busca} onChange={(e) => setBusca(e.target.value)} className="mb-2" />
-        <div className="max-h-60 overflow-auto rounded-md border">
-          {filtrados.length === 0 ? (
-            <p className="p-3 text-center text-xs text-slate-400">Sin productos</p>
-          ) : (
-            filtrados.map((p) => (
-              <button
-                key={p.id}
-                type="button"
-                onClick={() => setSeleccionadoId(p.id)}
-                className={`flex w-full items-center justify-between border-b px-3 py-2 text-left text-sm last:border-0 hover:bg-happy-50 ${
-                  seleccionadoId === p.id ? 'bg-happy-100 ring-1 ring-happy-400' : ''
-                }`}
+
+        <div className="space-y-3">
+          <div>
+            <label className="mb-1 block text-xs font-medium text-slate-700">Producto destino</label>
+            <Input placeholder="Buscar producto destino…" value={busca} onChange={(e) => setBusca(e.target.value)} className="mb-2" />
+            <div className="max-h-44 overflow-auto rounded-md border">
+              {filtrados.length === 0 ? (
+                <p className="p-3 text-center text-xs text-slate-400">Sin productos</p>
+              ) : (
+                filtrados.map((p) => (
+                  <button
+                    key={p.id}
+                    type="button"
+                    onClick={() => setSeleccionadoId(p.id)}
+                    className={`flex w-full items-center justify-between border-b px-3 py-2 text-left text-sm last:border-0 hover:bg-happy-50 ${
+                      seleccionadoId === p.id ? 'bg-happy-100 ring-1 ring-happy-400' : ''
+                    }`}
+                  >
+                    <span>
+                      <span className="font-medium">{p.nombre}</span>
+                      <span className="ml-2 font-mono text-[10px] text-slate-500">{p.codigo}</span>
+                    </span>
+                    {seleccionadoId === p.id && <Badge variant="success" className="text-[9px]">Elegido</Badge>}
+                  </button>
+                ))
+              )}
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="mb-1 block text-xs font-medium text-slate-700">
+                Talla origen <span className="font-normal text-slate-400">(opcional)</span>
+              </label>
+              <select
+                value={tallaOrigen}
+                onChange={(e) => setTallaOrigen(e.target.value)}
+                className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
               >
-                <span>
-                  <span className="font-medium">{p.nombre}</span>
-                  <span className="ml-2 font-mono text-[10px] text-slate-500">{p.codigo}</span>
-                </span>
-                {seleccionadoId === p.id && <Badge variant="success" className="text-[9px]">Elegido</Badge>}
-              </button>
-            ))
-          )}
+                <option value="">Todas las tallas</option>
+                {tallasConLineas.map((t) => (
+                  <option key={t} value={t}>{t.replace('T', '')}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="mb-1 block text-xs font-medium text-slate-700">
+                Talla destino <span className="font-normal text-slate-400">(opcional)</span>
+              </label>
+              <select
+                value={tallaDestino}
+                onChange={(e) => setTallaDestino(e.target.value)}
+                disabled={!tallaOrigen}
+                className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm disabled:opacity-50"
+              >
+                <option value="">Misma que la origen</option>
+                {TALLAS.filter((t) => t !== tallaOrigen).map((t) => (
+                  <option key={t} value={t}>{t.replace('T', '')}</option>
+                ))}
+              </select>
+            </div>
+          </div>
+          <p className="rounded bg-slate-50 p-2 text-[11px] text-slate-600">
+            <strong>Tip:</strong> Si querés crear T8 a partir de T6 en otro producto, elegí
+            origen T6 y destino T8 → las líneas se copian con las cantidades de T6 y después
+            las ajustás.
+          </p>
         </div>
+
         <div className="mt-4 flex justify-end gap-2">
           <Button variant="outline" onClick={onClose} disabled={pending}>Cancelar</Button>
           <Button variant="premium" onClick={ejecutar} disabled={pending || !seleccionadoId}>

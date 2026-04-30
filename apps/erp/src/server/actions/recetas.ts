@@ -109,24 +109,39 @@ export async function toggleSaleAServicio(id: string, valor: boolean): Promise<A
 }
 
 /**
- * Duplica todas las líneas de una receta hacia el producto destino.
- * Si el producto destino ya tiene receta activa, agrega/actualiza sus líneas
- * (upsert por unique key receta_id+material_id+talla); no destruye lo previo.
+ * Duplica las líneas de una receta hacia el producto destino.
+ * Acepta filtro opcional por talla origen y override opcional de talla destino:
+ * - Sin filtros: copia todas las líneas tal cual (mismo talla cada una).
+ * - tallaOrigen seteada: solo copia líneas de esa talla.
+ * - tallaDestino seteada: todas las líneas copiadas reciben esa talla (útil
+ *   para crear T8 a partir de T6 en otro producto y luego ajustar cantidades).
+ *
+ * Si el producto destino ya tiene receta activa, hace upsert (no destruye).
  */
 export async function duplicarReceta(
   recetaOrigenId: string,
   productoDestinoId: string,
+  tallaOrigen?: string,
+  tallaDestino?: string,
 ): Promise<ActionResult<{ lineas: number }>> {
   const r = await runAction(async () => {
     const { sb } = await requireUser();
 
-    // 1. Cargar líneas de la receta origen
-    const { data: lineas, error: errL } = await sb
+    // 1. Cargar líneas de la receta origen (filtradas por talla si aplica)
+    let q = sb
       .from('recetas_lineas')
       .select('material_id, talla, cantidad, sale_a_servicio, cantidad_almacen, unidad_id, observacion')
       .eq('receta_id', recetaOrigenId);
+    if (tallaOrigen) q = q.eq('talla', tallaOrigen as (typeof TALLAS)[number]);
+    const { data: lineas, error: errL } = await q;
     if (errL) throw new Error(errL.message);
-    if (!lineas || lineas.length === 0) throw new Error('La receta origen no tiene líneas que duplicar');
+    if (!lineas || lineas.length === 0) {
+      throw new Error(
+        tallaOrigen
+          ? `La receta origen no tiene líneas en la talla ${tallaOrigen.replace('T', '')}`
+          : 'La receta origen no tiene líneas que duplicar',
+      );
+    }
 
     // 2. Buscar/crear receta activa del producto destino
     const { data: recetaDest } = await sb
@@ -147,11 +162,11 @@ export async function duplicarReceta(
       recetaDestId = nueva.id;
     }
 
-    // 3. Insertar líneas con la nueva receta_id
+    // 3. Insertar líneas con la nueva receta_id (override talla destino si aplica)
     const filas = lineas.map((l) => ({
       receta_id: recetaDestId!,
       material_id: l.material_id,
-      talla: l.talla,
+      talla: (tallaDestino || l.talla) as (typeof TALLAS)[number],
       cantidad: l.cantidad,
       sale_a_servicio: l.sale_a_servicio,
       cantidad_almacen: l.cantidad_almacen,
@@ -166,6 +181,30 @@ export async function duplicarReceta(
     return { lineas: filas.length };
   });
   if (r.ok) await bumpPaths('/recetas', `/productos/${productoDestinoId}`);
+  return r;
+}
+
+/**
+ * Edición inline de campos de una línea de receta (cantidad, cantidad_almacen,
+ * observación, sale_a_servicio). No permite cambiar material/talla porque eso
+ * rompe la unique key — para eso eliminar y agregar de nuevo.
+ */
+export async function actualizarLineaReceta(
+  id: string,
+  patch: Partial<{
+    cantidad: number;
+    cantidad_almacen: number;
+    sale_a_servicio: boolean;
+    observacion: string;
+  }>,
+): Promise<ActionResult> {
+  const r = await runAction(async () => {
+    const { sb } = await requireUser();
+    const { error } = await sb.from('recetas_lineas').update(patch).eq('id', id);
+    if (error) throw new Error(error.message);
+    return null;
+  });
+  if (r.ok) await bumpPaths('/recetas');
   return r;
 }
 
