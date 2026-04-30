@@ -25,6 +25,17 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
 
   const prod = (receta as unknown as { productos: { id: string; nombre: string; codigo: string } }).productos;
 
+  // Carga adicional para los nuevos features: duplicar receta y procesos.
+  const [{ data: productosTodos }, { data: areas }, { data: procesos }] = await Promise.all([
+    sb.from('productos').select('id, codigo, nombre').eq('activo', true).order('nombre').limit(1000),
+    sb.from('areas_produccion').select('id, codigo, nombre, valor_minuto').eq('activa', true).order('nombre'),
+    sb
+      .from('productos_procesos')
+      .select('id, proceso, area_id, talla, orden, tiempo_estandar_min, es_tercerizado, observacion, areas_produccion(id, codigo, nombre, valor_minuto)')
+      .eq('producto_id', prod.id)
+      .order('orden'),
+  ]);
+
   // Tallas presentes en la receta
   const tallasUsadas = Array.from(new Set((lineas ?? []).map((l) => l.talla))).sort();
   const tallasFaltantes = TALLAS.filter((t) => !tallasUsadas.includes(t));
@@ -66,9 +77,13 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
 
       <RecetaEditor
         recetaId={id}
+        productoId={prod.id}
         materiales={materiales ?? []}
         unidades={unidades ?? []}
         lineas={lineas ?? []}
+        productos={(productosTodos ?? []) as Parameters<typeof RecetaEditor>[0]['productos']}
+        areas={(areas ?? []) as Parameters<typeof RecetaEditor>[0]['areas']}
+        procesos={(procesos ?? []) as Parameters<typeof RecetaEditor>[0]['procesos']}
       />
     </PageShell>
   );
