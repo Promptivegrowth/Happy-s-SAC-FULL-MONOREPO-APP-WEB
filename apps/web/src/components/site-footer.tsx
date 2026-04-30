@@ -4,7 +4,7 @@ import { Logo } from '@happy/ui/logo';
 
 export function SiteFooter() {
   return (
-    <footer className="mt-20 border-t bg-corp-900 text-corp-100/80">
+    <footer className="bg-corp-900 text-corp-100/80">
       <div className="container grid gap-10 px-4 py-14 md:grid-cols-4">
         <div>
           <Link href="/" className="inline-flex items-center" aria-label="Inicio">
