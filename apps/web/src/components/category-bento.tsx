@@ -81,18 +81,19 @@ function CategoryTile({
       <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_15%_10%,rgba(255,255,255,0.15),transparent_45%)]" />
 
       {/* Capa de imágenes — única zona con hover.
-          Tall: dos imágenes horizontales con overlap (cada una aspect-square al
-          ~70% del ancho del tile → mucho más grandes que con flex w-1/2).
-          Short: lado a lado al pie. */}
+          Tall: dos imágenes horizontales con overlap, levantadas del piso y
+          ligeramente más grandes (max-w-[380px]).
+          Short: lado a lado con overlap leve (w-[55%]) → imágenes más juntas
+          y más grandes que con flex w-1/2 + gap. */}
       {tall ? (
-        <div className="absolute inset-x-2 bottom-3 top-24 sm:bottom-5">
+        <div className="absolute inset-x-2 bottom-12 top-20 sm:bottom-16">
           <div className="relative h-full w-full">
             {cat.images.map((src, i) => {
               const isLeft = i === 0;
               return (
                 <div
                   key={src}
-                  className={`absolute bottom-0 aspect-square w-[68%] max-w-[340px] transition-all duration-500 ease-out ${
+                  className={`absolute bottom-0 aspect-square w-[74%] max-w-[380px] transition-all duration-500 ease-out ${
                     isLeft
                       ? 'left-0 z-10 group-hover:-translate-x-1 group-hover:-rotate-2'
                       : 'right-0 z-0 group-hover:translate-x-1 group-hover:rotate-2'
@@ -115,32 +116,34 @@ function CategoryTile({
           </div>
         </div>
       ) : (
-        <div className="absolute inset-x-0 bottom-0 top-20 flex items-end justify-center gap-1 px-4 sm:gap-2 sm:px-6">
-          {cat.images.map((src, i) => {
-            const isLeft = i === 0;
-            return (
-              <div
-                key={src}
-                className={`relative h-full w-1/2 transition-all duration-500 ease-out ${
-                  isLeft
-                    ? 'group-hover:-translate-x-1 group-hover:-rotate-2'
-                    : 'group-hover:translate-x-1 group-hover:rotate-2'
-                } group-hover:scale-[1.04]`}
-                style={{
-                  filter: 'drop-shadow(0 12px 18px rgba(0,0,0,0.25))',
-                }}
-              >
-                <Image
-                  src={src}
-                  alt={`${cat.label} — disfraz ${i + 1}`}
-                  fill
-                  className="object-contain object-bottom"
-                  sizes="(max-width: 768px) 50vw, 25vw"
-                  priority={false}
-                />
-              </div>
-            );
-          })}
+        <div className="absolute inset-x-2 bottom-0 top-20 sm:inset-x-3">
+          <div className="relative h-full w-full">
+            {cat.images.map((src, i) => {
+              const isLeft = i === 0;
+              return (
+                <div
+                  key={src}
+                  className={`absolute bottom-0 h-full w-[55%] transition-all duration-500 ease-out ${
+                    isLeft
+                      ? 'left-0 z-10 group-hover:-translate-x-1 group-hover:-rotate-2'
+                      : 'right-0 z-0 group-hover:translate-x-1 group-hover:rotate-2'
+                  } group-hover:scale-[1.04]`}
+                  style={{
+                    filter: 'drop-shadow(0 12px 18px rgba(0,0,0,0.25))',
+                  }}
+                >
+                  <Image
+                    src={src}
+                    alt={`${cat.label} — disfraz ${i + 1}`}
+                    fill
+                    className="object-contain object-bottom"
+                    sizes="(max-width: 768px) 50vw, 25vw"
+                    priority={false}
+                  />
+                </div>
+              );
+            })}
+          </div>
         </div>
       )}
 
