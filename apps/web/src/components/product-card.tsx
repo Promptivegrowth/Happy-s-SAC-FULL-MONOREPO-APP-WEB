@@ -11,6 +11,8 @@ export type ProductCardData = {
   imagen: string | null;
   precio: number | null;
   precioOferta?: number | null;
+  /** % de descuento explícito (preferido sobre cálculo desde precioOferta). */
+  descuentoPorcentaje?: number | null;
   rating?: number | null;
   totalResenas?: number | null;
   etiquetas?: string[] | null;
@@ -20,9 +22,13 @@ export type ProductCardData = {
 
 export function ProductCard({ p, priority = false }: { p: ProductCardData; priority?: boolean }) {
   const tieneOferta = p.precioOferta && p.precio && p.precioOferta < p.precio;
-  const descuento = tieneOferta && p.precio
-    ? Math.round((1 - (p.precioOferta as number) / p.precio) * 100)
-    : 0;
+  // Si llega descuentoPorcentaje explícito desde la BD, usarlo directo.
+  // Si no, calcular desde la diferencia precio vs precioOferta.
+  const descuento = p.descuentoPorcentaje && p.descuentoPorcentaje > 0
+    ? p.descuentoPorcentaje
+    : tieneOferta && p.precio
+      ? Math.round((1 - (p.precioOferta as number) / p.precio) * 100)
+      : 0;
   const href = p.slug ? `/productos/${p.slug}` : '#';
   const stock = p.stockTotal ?? null;
   const agotado = !!p.agotado;

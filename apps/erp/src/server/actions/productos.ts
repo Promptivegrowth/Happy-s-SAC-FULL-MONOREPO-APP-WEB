@@ -277,10 +277,15 @@ const publicacionSchema = z.object({
   destacado_web: z.boolean().default(false),
   orden_web: z.coerce.number().int().min(0).default(100),
   precio_oferta: z.coerce.number().min(0).optional().or(z.literal('')),
+  descuento_porcentaje: z.coerce.number().int().min(0).max(99).optional().or(z.literal('')),
+  descuento_excluir_tallas: z.array(z.string()).default([]),
 });
 
 export async function actualizarPublicacion(productoId: string, _prev: unknown, fd: FormData): Promise<ActionResult> {
   const r = await runAction(async () => {
+    // Tallas excluidas: vienen como múltiples valores con name="descuento_excluir_tallas".
+    const tallasExcluidas = fd.getAll('descuento_excluir_tallas').map(String).filter(Boolean);
+
     const data = publicacionSchema.parse({
       titulo_web: fd.get('titulo_web') || '',
       descripcion_corta: fd.get('descripcion_corta') || '',
@@ -289,6 +294,8 @@ export async function actualizarPublicacion(productoId: string, _prev: unknown, 
       destacado_web: fd.get('destacado_web') === 'on',
       orden_web: fd.get('orden_web') || 100,
       precio_oferta: fd.get('precio_oferta') || '',
+      descuento_porcentaje: fd.get('descuento_porcentaje') || '',
+      descuento_excluir_tallas: tallasExcluidas,
     });
     const { sb } = await requireUser();
     const { error } = await sb.from('productos_publicacion').upsert({
@@ -300,6 +307,11 @@ export async function actualizarPublicacion(productoId: string, _prev: unknown, 
       destacado_web: data.destacado_web,
       orden_web: data.orden_web,
       precio_oferta: data.precio_oferta === '' ? null : Number(data.precio_oferta),
+      descuento_porcentaje:
+        data.descuento_porcentaje === '' || data.descuento_porcentaje === 0
+          ? null
+          : Number(data.descuento_porcentaje),
+      descuento_excluir_tallas: data.descuento_excluir_tallas,
     }, { onConflict: 'producto_id' });
     if (error) throw new Error(error.message);
     return null;

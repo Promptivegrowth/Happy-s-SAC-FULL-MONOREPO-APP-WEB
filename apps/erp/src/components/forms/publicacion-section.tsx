@@ -22,13 +22,46 @@ type Pub = {
   orden_web?: number | null;
   precio_oferta?: number | null;
   publicado_en?: string | null;
+  descuento_porcentaje?: number | null;
+  descuento_excluir_tallas?: string[] | null;
 };
 
-export function PublicacionSection({ productoId, pub, productoNombre }: { productoId: string; pub: Pub | null; productoNombre: string }) {
+const TALLAS_OPCIONES = ['T0','T2','T4','T6','T8','T10','T12','T14','T16','TS','TAD'] as const;
+
+export function PublicacionSection({
+  productoId,
+  pub,
+  productoNombre,
+  tallasDelProducto = [],
+}: {
+  productoId: string;
+  pub: Pub | null;
+  productoNombre: string;
+  /** Tallas que tiene el producto (sus variantes). Si está vacío, se muestran todas. */
+  tallasDelProducto?: string[];
+}) {
   const [publicado, setPublicado] = useState(pub?.publicado ?? false);
   const [destacado, setDestacado] = useState(pub?.destacado_web ?? false);
+  const [descPct, setDescPct] = useState<string>(pub?.descuento_porcentaje?.toString() ?? '');
+  const [excluidas, setExcluidas] = useState<Set<string>>(
+    new Set(pub?.descuento_excluir_tallas ?? []),
+  );
   const [pending, start] = useTransition();
   const webUrl = process.env.NEXT_PUBLIC_WEB_URL ?? 'http://localhost:3001';
+
+  // Si el producto tiene variantes, mostrar solo esas tallas. Si no, todas las posibles.
+  const tallasMostradas = tallasDelProducto.length > 0 ? tallasDelProducto : TALLAS_OPCIONES;
+  const descPctNum = Number(descPct) || 0;
+  const tieneDescuento = descPctNum > 0;
+
+  function toggleTalla(t: string) {
+    setExcluidas((prev) => {
+      const s = new Set(prev);
+      if (s.has(t)) s.delete(t);
+      else s.add(t);
+      return s;
+    });
+  }
 
   function onTogglePub(value: boolean) {
     start(async () => {
@@ -44,6 +77,9 @@ export function PublicacionSection({ productoId, pub, productoNombre }: { produc
 
   function onSubmit(fd: FormData) {
     fd.set('destacado_web', destacado ? 'on' : 'off');
+    // Tallas excluidas: append cada una con el mismo name (server las junta con getAll).
+    fd.delete('descuento_excluir_tallas');
+    for (const t of excluidas) fd.append('descuento_excluir_tallas', t);
     start(async () => {
       const r = await actualizarPublicacion(productoId, null, fd);
       if (r.ok) toast.success('Publicación actualizada');
@@ -97,16 +133,93 @@ export function PublicacionSection({ productoId, pub, productoNombre }: { produc
           <FormRow label="Orden de aparición" hint="Menor = primero">
             <Input name="orden_web" type="number" defaultValue={pub?.orden_web ?? 100} min={0} />
           </FormRow>
-          <FormRow label="Precio oferta (S/) opcional">
+          <FormRow label="Precio oferta fijo (S/)" hint="Opcional. Si pones %, ignora este campo.">
             <Input name="precio_oferta" type="number" step="0.01" defaultValue={pub?.precio_oferta ?? ''} min={0} />
           </FormRow>
           <div className="flex items-end">
-            <label className="flex items-center gap-3 rounded-lg border bg-white p-3 text-sm w-full">
+            <label className="flex items-center gap-3 rounded-lg border-2 border-happy-200 bg-happy-50/40 p-3 text-sm w-full">
               <Switch checked={destacado} onCheckedChange={setDestacado} />
-              <span>Destacado (home web)</span>
+              <div>
+                <p className="font-medium text-corp-900">⭐ Destacado</p>
+                <p className="text-[10px] text-slate-500">Aparece en la sección "TOP" del home</p>
+              </div>
             </label>
           </div>
         </FormGrid>
+
+        {/* Sección Descuento por % */}
+        <div className="rounded-xl border-2 border-dashed border-happy-300 bg-happy-50/40 p-4">
+          <h3 className="mb-2 flex items-center gap-2 font-display text-sm font-semibold text-corp-900">
+            🏷️ Descuento por porcentaje
+          </h3>
+          <p className="mb-4 text-xs text-slate-600">
+            Aplica un descuento sobre el precio público de cada talla. Se muestra en la web como
+            badge <span className="rounded bg-danger px-1 font-mono text-white">-XX%</span> y precio
+            tachado. Tiene prioridad sobre el "precio oferta fijo".
+          </p>
+
+          <FormGrid cols={2}>
+            <FormRow label="% de descuento (0-99)" error={undefined}>
+              <div className="relative">
+                <Input
+                  name="descuento_porcentaje"
+                  type="number"
+                  min={0}
+                  max={99}
+                  value={descPct}
+                  onChange={(e) => setDescPct(e.target.value)}
+                  placeholder="Ej: 20"
+                />
+                <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-sm text-slate-400">
+                  %
+                </span>
+              </div>
+            </FormRow>
+            {tieneDescuento && (
+              <div className="flex items-end">
+                <Badge variant="default" className="bg-danger text-base">
+                  Badge en la web: -{descPctNum}%
+                </Badge>
+              </div>
+            )}
+          </FormGrid>
+
+          {tieneDescuento && (
+            <div className="mt-4">
+              <p className="mb-2 text-xs font-medium text-slate-700">
+                Excluir tallas del descuento
+                <span className="ml-1 font-normal text-slate-500">
+                  (click en una talla para excluirla — las tachadas no reciben el descuento)
+                </span>
+              </p>
+              <div className="flex flex-wrap gap-2">
+                {tallasMostradas.map((t) => {
+                  const exc = excluidas.has(t);
+                  return (
+                    <button
+                      key={t}
+                      type="button"
+                      onClick={() => toggleTalla(t)}
+                      className={`min-w-[44px] rounded-md border px-3 py-1.5 text-sm font-medium transition ${
+                        exc
+                          ? 'border-dashed border-slate-300 bg-slate-100 text-slate-400 line-through'
+                          : 'border-happy-400 bg-white text-happy-700 hover:bg-happy-50'
+                      }`}
+                    >
+                      {t.replace('T', '')}
+                    </button>
+                  );
+                })}
+              </div>
+              {excluidas.size > 0 && (
+                <p className="mt-2 text-[11px] text-slate-500">
+                  {excluidas.size} talla{excluidas.size === 1 ? '' : 's'} excluida{excluidas.size === 1 ? '' : 's'}: {' '}
+                  {Array.from(excluidas).map((t) => t.replace('T', '')).join(', ')}
+                </p>
+              )}
+            </div>
+          )}
+        </div>
         <div className="flex justify-end">
           <Button type="submit" variant="premium" disabled={pending}>
             {pending && <Loader2 className="h-4 w-4 animate-spin" />}

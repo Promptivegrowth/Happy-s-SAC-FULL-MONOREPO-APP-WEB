@@ -13,6 +13,11 @@ type Variante = {
   sku: string;
   talla: string;
   precio: number;
+  /** Precio final tras aplicar el descuento %, si la talla NO está excluida.
+   *  Igual a `precio` cuando no hay descuento o esta talla está excluida. */
+  precioConDescuento: number;
+  /** True si esta talla recibe el descuento %. */
+  aplicaDescuento: boolean;
   precioMayorista: number;
   stock: number;
 };
@@ -23,6 +28,7 @@ export function ProductoDetalleClient({
   imagen,
   variantes,
   precioOferta,
+  descuentoPorcentaje = 0,
   stockTotal,
   agotado,
 }: {
@@ -31,6 +37,8 @@ export function ProductoDetalleClient({
   imagen: string | null;
   variantes: Variante[];
   precioOferta?: number | null;
+  /** % de descuento aplicado a las tallas no excluidas */
+  descuentoPorcentaje?: number;
   stockTotal: number;
   agotado: boolean;
 }) {
@@ -48,14 +56,23 @@ export function ProductoDetalleClient({
   const stockSeleccionada = seleccionada?.stock ?? 0;
   const sinStockSeleccionada = stockSeleccionada <= 0;
 
-  const precioFinal =
-    precioOferta && seleccionada && precioOferta < seleccionada.precio
-      ? precioOferta
-      : seleccionada?.precio ?? 0;
-  const tieneOferta = !!(precioOferta && seleccionada && precioOferta < seleccionada.precio);
-  const descuento = tieneOferta && seleccionada
-    ? Math.round((1 - precioOferta / seleccionada.precio) * 100)
-    : 0;
+  // Prioridad 1: descuento % aplicado a la talla (si aplica).
+  // Prioridad 2: precio_oferta absoluto.
+  // Prioridad 3: precio normal.
+  let precioFinal = seleccionada?.precio ?? 0;
+  let tieneOferta = false;
+  let descuento = 0;
+  if (seleccionada) {
+    if (seleccionada.aplicaDescuento && seleccionada.precioConDescuento < seleccionada.precio) {
+      precioFinal = seleccionada.precioConDescuento;
+      tieneOferta = true;
+      descuento = descuentoPorcentaje;
+    } else if (precioOferta && precioOferta < seleccionada.precio) {
+      precioFinal = precioOferta;
+      tieneOferta = true;
+      descuento = Math.round((1 - precioOferta / seleccionada.precio) * 100);
+    }
+  }
 
   function agregarAlCarrito() {
     if (!seleccionada) return toast.error('Selecciona una talla');
@@ -146,20 +163,36 @@ Total: *S/ ${total.toFixed(2)}*${mensajeStock}
       )}
 
       <div>
-        <p className="mb-2 text-sm font-medium text-corp-900">
-          Talla: <span className="font-normal text-slate-600">{seleccionada?.talla.replace('T', '') ?? '—'}</span>
-        </p>
+        <div className="mb-2 flex items-center justify-between">
+          <p className="text-sm font-medium text-corp-900">
+            Talla: <span className="font-normal text-slate-600">{seleccionada?.talla.replace('T', '') ?? '—'}</span>
+          </p>
+          {descuentoPorcentaje > 0 && (
+            <p className="text-[10px] text-slate-500">
+              <span className="inline-block h-2 w-2 rounded-full bg-danger" /> con -{descuentoPorcentaje}%
+            </p>
+          )}
+        </div>
         <div className="flex flex-wrap gap-2">
           {tallasUnicas.map((t) => {
             const v = variantes.find((x) => x.talla === t)!;
             const active = seleccionada?.id === v.id;
             const sinStock = v.stock <= 0;
+            const tieneDesc = v.aplicaDescuento && descuentoPorcentaje > 0;
             return (
               <button
                 key={t}
                 onClick={() => setSeleccionada(v)}
                 disabled={sinStock}
-                title={sinStock ? `Talla ${t.replace('T', '')} agotada` : `Stock: ${v.stock}`}
+                title={
+                  sinStock
+                    ? `Talla ${t.replace('T', '')} agotada`
+                    : tieneDesc
+                      ? `Stock: ${v.stock} · -${descuentoPorcentaje}% aplicado`
+                      : descuentoPorcentaje > 0
+                        ? `Stock: ${v.stock} · esta talla NO tiene descuento`
+                        : `Stock: ${v.stock}`
+                }
                 className={`relative min-w-[44px] rounded-md border px-3 py-2 text-sm font-medium transition ${
                   sinStock
                     ? 'cursor-not-allowed border-slate-200 bg-slate-50 text-slate-400 line-through'
@@ -169,6 +202,12 @@ Total: *S/ ${total.toFixed(2)}*${mensajeStock}
                 }`}
               >
                 {t.replace('T', '')}
+                {tieneDesc && !sinStock && (
+                  <span
+                    className="absolute -right-1 -top-1 inline-block h-2.5 w-2.5 rounded-full bg-danger ring-2 ring-white"
+                    aria-label="Con descuento"
+                  />
+                )}
               </button>
             );
           })}

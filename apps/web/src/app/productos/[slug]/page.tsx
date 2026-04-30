@@ -130,6 +130,8 @@ export default async function ProductoDetallePage({ params }: { params: Promise<
   const precios = prod.productos_variantes.map((v) => Number(v.precio_publico ?? 0)).filter((x) => x > 0);
   const precioBase = precios.length ? Math.min(...precios) : 0;
   const precioOferta = pub.precio_oferta ? Number(pub.precio_oferta) : null;
+  const descuentoPct: number = pub.descuento_porcentaje ?? 0;
+  const tallasExcluidasDescuento: Set<string> = new Set(pub.descuento_excluir_tallas ?? []);
 
   const totalResenas = rating?.total_resenas ?? 0;
   const promedioRating = rating?.promedio_rating ? Number(rating.promedio_rating) : 0;
@@ -273,14 +275,23 @@ export default async function ProductoDetallePage({ params }: { params: Promise<
             nombre={pub.titulo_web ?? prod.nombre}
             imagen={prod.imagen_principal_url}
             precioOferta={precioOferta}
-            variantes={prod.productos_variantes.map((v) => ({
-              id: v.id,
-              sku: v.sku,
-              talla: v.talla,
-              precio: Number(v.precio_publico ?? 0),
-              precioMayorista: Number(v.precio_mayorista_a ?? v.precio_mayorista_b ?? 0),
-              stock: stockMap.get(v.id) ?? 0,
-            }))}
+            descuentoPorcentaje={descuentoPct}
+            variantes={prod.productos_variantes.map((v) => {
+              const precio = Number(v.precio_publico ?? 0);
+              const aplicaDescuento = descuentoPct > 0 && !tallasExcluidasDescuento.has(v.talla);
+              return {
+                id: v.id,
+                sku: v.sku,
+                talla: v.talla,
+                precio,
+                precioConDescuento: aplicaDescuento
+                  ? Math.round(precio * (1 - descuentoPct / 100) * 100) / 100
+                  : precio,
+                aplicaDescuento,
+                precioMayorista: Number(v.precio_mayorista_a ?? v.precio_mayorista_b ?? 0),
+                stock: stockMap.get(v.id) ?? 0,
+              };
+            })}
             stockTotal={stockTotal}
             agotado={agotado}
           />

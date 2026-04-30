@@ -49,7 +49,12 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
           <GaleriaSection productoId={id} imagenes={imgs ?? []} />
         </TabsContent>
         <TabsContent value="publicacion">
-          <PublicacionSection productoId={id} pub={pub} productoNombre={prod.nombre} />
+          <PublicacionSection
+            productoId={id}
+            pub={pub}
+            productoNombre={prod.nombre}
+            tallasDelProducto={Array.from(new Set((vars ?? []).map((v) => v.talla as string)))}
+          />
         </TabsContent>
       </Tabs>
     </PageShell>

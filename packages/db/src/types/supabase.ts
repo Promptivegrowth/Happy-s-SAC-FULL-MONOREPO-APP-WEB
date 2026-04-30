@@ -4808,6 +4808,8 @@ export type Database = {
         Row: {
           descripcion_corta: string | null
           descripcion_larga: string | null
+          descuento_excluir_tallas: string[]
+          descuento_porcentaje: number | null
           destacado_web: boolean
           etiquetas: string[] | null
           oferta_desde: string | null
@@ -4828,6 +4830,8 @@ export type Database = {
         Insert: {
           descripcion_corta?: string | null
           descripcion_larga?: string | null
+          descuento_excluir_tallas?: string[]
+          descuento_porcentaje?: number | null
           destacado_web?: boolean
           etiquetas?: string[] | null
           oferta_desde?: string | null
@@ -4848,6 +4852,8 @@ export type Database = {
         Update: {
           descripcion_corta?: string | null
           descripcion_larga?: string | null
+          descuento_excluir_tallas?: string[]
+          descuento_porcentaje?: number | null
           destacado_web?: boolean
           etiquetas?: string[] | null
           oferta_desde?: string | null

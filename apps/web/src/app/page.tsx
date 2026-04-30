@@ -148,30 +148,51 @@ export default async function Home() {
         </div>
       </section>
 
-      {/* DESTACADOS */}
-      <section className="container px-4 pb-20">
-        <div className="mb-8 flex items-end justify-between">
-          <div>
-            <h2 className="font-display text-3xl font-semibold text-corp-900">Más vendidos esta semana 🔥</h2>
-            <p className="mt-1 text-slate-500">Selección curada del equipo</p>
-          </div>
-          <Link href="/productos" className="text-sm font-medium text-happy-600 hover:underline">
-            Ver todos →
-          </Link>
-        </div>
+      {/* TOP / Más vendidos — sección destacada */}
+      {destacados.length > 0 && (
+        <section className="relative overflow-hidden bg-gradient-to-br from-happy-50 via-white to-corp-50 py-16">
+          <div className="absolute -right-20 top-0 h-64 w-64 rounded-full bg-happy-200/40 blur-3xl" />
+          <div className="absolute -left-20 bottom-0 h-64 w-64 rounded-full bg-corp-200/30 blur-3xl" />
 
-        {destacados.length === 0 ? (
-          <Card className="p-10 text-center text-sm text-slate-500">
-            No hay productos destacados aún. Desde el ERP marca productos como “destacados” en /web-catalogo.
-          </Card>
-        ) : (
-          <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-4">
-            {destacados.map((p, i) => (
-              <ProductCard key={p.slug ?? i} p={p} priority={i < 4} />
-            ))}
+          <div className="container relative px-4">
+            <div className="mb-10 text-center">
+              <Badge className="mb-3 bg-gradient-to-r from-happy-500 to-danger text-white hover:from-happy-500">
+                <Sparkles className="mr-1 h-3 w-3" /> Selección destacada
+              </Badge>
+              <h2 className="font-display text-4xl font-semibold text-corp-900 sm:text-5xl">
+                🔥 Lo más TOP
+              </h2>
+              <p className="mt-2 text-slate-600">
+                Los favoritos de las familias peruanas · {destacados.length} disfraces seleccionados
+              </p>
+            </div>
+
+            <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-4">
+              {destacados.map((p, i) => (
+                <ProductCard key={p.slug ?? i} p={p} priority={i < 4} />
+              ))}
+            </div>
+
+            <div className="mt-10 text-center">
+              <Link
+                href="/productos"
+                className="inline-flex items-center gap-2 rounded-full border-2 border-happy-500 bg-white px-7 py-3 font-bold text-happy-600 shadow-sm transition hover:bg-happy-500 hover:text-white"
+              >
+                Ver catálogo completo <ArrowRight className="h-4 w-4" />
+              </Link>
+            </div>
           </div>
-        )}
-      </section>
+        </section>
+      )}
+
+      {destacados.length === 0 && (
+        <section className="container px-4 pb-20">
+          <Card className="p-10 text-center text-sm text-slate-500">
+            No hay productos destacados aún. Desde el ERP, en cada producto activá el toggle
+            "⭐ Destacado" para que aparezca acá.
+          </Card>
+        </section>
+      )}
 
       {/* CTA WHATSAPP */}
       <section className="bg-corp-gradient py-16 text-white">

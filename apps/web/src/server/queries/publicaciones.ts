@@ -6,13 +6,15 @@ type PubRow = {
   slug: string | null;
   titulo_web: string | null;
   precio_oferta: number | null;
+  descuento_porcentaje: number | null;
+  descuento_excluir_tallas: string[] | null;
   etiquetas: string[] | null;
   productos: {
     id: string;
     nombre: string;
     imagen_principal_url: string | null;
     categoria_id: string | null;
-    productos_variantes: { id: string; precio_publico: number | null }[];
+    productos_variantes: { id: string; talla: string; precio_publico: number | null }[];
     categorias?: { activo: boolean } | null;
   } | null;
 };
@@ -32,7 +34,7 @@ export async function loadPublicaciones(opts: LoadOpts = {}): Promise<ProductCar
     let query = sb
       .from('productos_publicacion')
       .select(
-        'producto_id, slug, titulo_web, precio_oferta, etiquetas, productos!inner(id, nombre, imagen_principal_url, categoria_id, campana_id, productos_variantes(id, precio_publico), categorias(activo))',
+        'producto_id, slug, titulo_web, precio_oferta, descuento_porcentaje, descuento_excluir_tallas, etiquetas, productos!inner(id, nombre, imagen_principal_url, categoria_id, campana_id, productos_variantes(id, talla, precio_publico), categorias(activo))',
       )
       .eq('publicado', true)
       .order('orden_web')
@@ -96,12 +98,35 @@ export async function loadPublicaciones(opts: LoadOpts = {}): Promise<ProductCar
         const precios = variantes.map((v) => Number(v.precio_publico ?? 0)).filter((x) => x > 0);
         const stockTotal = variantes.reduce((sum, v) => sum + (stockPorVariante.get(v.id) ?? 0), 0);
         const rt = ratingMap.get(p.producto_id);
+
+        // Calcular precio mostrado en la card considerando el descuento %.
+        // Tomamos el precio mínimo entre las tallas que SÍ aplican descuento.
+        const precioMin = precios.length ? Math.min(...precios) : null;
+        const descPct = p.descuento_porcentaje ?? 0;
+        const tallasExc = new Set(p.descuento_excluir_tallas ?? []);
+        let precioOferta: number | null = null;
+        if (descPct > 0) {
+          // Encontrar el menor precio entre tallas NO excluidas, aplicar el %.
+          const preciosConDescuento = variantes
+            .filter((v) => !tallasExc.has(v.talla))
+            .map((v) => Number(v.precio_publico ?? 0))
+            .filter((x) => x > 0);
+          if (preciosConDescuento.length > 0) {
+            const minConDesc = Math.min(...preciosConDescuento);
+            precioOferta = Math.round(minConDesc * (1 - descPct / 100) * 100) / 100;
+          }
+        } else if (p.precio_oferta) {
+          // Fallback al precio oferta absoluto si no hay descuento %.
+          precioOferta = Number(p.precio_oferta);
+        }
+
         return {
           slug: p.slug,
           titulo: p.titulo_web ?? prod.nombre,
           imagen: prod.imagen_principal_url,
-          precio: precios.length ? Math.min(...precios) : null,
-          precioOferta: p.precio_oferta ? Number(p.precio_oferta) : null,
+          precio: precioMin,
+          precioOferta,
+          descuentoPorcentaje: descPct > 0 ? descPct : null,
           etiquetas: p.etiquetas,
           rating: rt?.promedio ?? null,
           totalResenas: rt?.total ?? null,
