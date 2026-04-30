@@ -86,14 +86,14 @@ function CategoryTile({
           Short: lado a lado con overlap leve (w-[55%]) → imágenes más juntas
           y más grandes que con flex w-1/2 + gap. */}
       {tall ? (
-        <div className="absolute inset-x-2 bottom-12 top-20 sm:bottom-16">
+        <div className="absolute inset-x-2 bottom-20 top-16 sm:bottom-24">
           <div className="relative h-full w-full">
             {cat.images.map((src, i) => {
               const isLeft = i === 0;
               return (
                 <div
                   key={src}
-                  className={`absolute bottom-0 aspect-square w-[74%] max-w-[380px] transition-all duration-500 ease-out ${
+                  className={`absolute bottom-0 aspect-square w-[80%] max-w-[420px] transition-all duration-500 ease-out ${
                     isLeft
                       ? 'left-0 z-10 group-hover:-translate-x-1 group-hover:-rotate-2'
                       : 'right-0 z-0 group-hover:translate-x-1 group-hover:rotate-2'
