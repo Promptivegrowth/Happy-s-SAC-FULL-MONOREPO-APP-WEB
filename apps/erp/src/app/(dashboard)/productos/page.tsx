@@ -258,28 +258,38 @@ async function ProductosTable({ q, cat, estado, web, sin_categoria }: SP) {
                     )}
                   </TableCell>
                   <TableCell>
-                    <div className="flex flex-wrap gap-1">
-                      {[...variantes]
-                        .sort((a, b) => ordenTalla(a.talla) - ordenTalla(b.talla))
-                        .slice(0, 11)
-                        .map((v) => {
-                          const stock = stockPorVariante.get(v.id) ?? 0;
-                          const sinStock = stock <= 0;
-                          return (
-                            <Badge
-                              key={v.sku}
-                              variant={sinStock ? 'destructive' : 'outline'}
-                              className={`text-[10px] ${sinStock ? 'line-through opacity-80' : ''}`}
-                              title={sinStock ? `Talla ${v.talla.replace('T', '')} sin stock` : `Stock: ${stock}`}
-                            >
-                              {v.talla.replace('T', '')}
-                            </Badge>
-                          );
-                        })}
-                      {variantes.length === 0 && (
-                        <span className="text-[10px] text-slate-400">sin variantes</span>
-                      )}
-                    </div>
+                    {variantes.length === 0 ? (
+                      <Link href={`/productos/${p.id}`}>
+                        <Badge
+                          variant="destructive"
+                          className="gap-1 text-[10px] hover:bg-amber-600"
+                          title="Este producto no tiene tallas configuradas. Click para configurar."
+                        >
+                          <AlertTriangle className="h-3 w-3" />
+                          Falta variantes
+                        </Badge>
+                      </Link>
+                    ) : (
+                      <div className="flex flex-wrap gap-1">
+                        {[...variantes]
+                          .sort((a, b) => ordenTalla(a.talla) - ordenTalla(b.talla))
+                          .slice(0, 11)
+                          .map((v) => {
+                            const stock = stockPorVariante.get(v.id) ?? 0;
+                            const sinStock = stock <= 0;
+                            return (
+                              <Badge
+                                key={v.sku}
+                                variant={sinStock ? 'destructive' : 'outline'}
+                                className={`text-[10px] ${sinStock ? 'line-through opacity-80' : ''}`}
+                                title={sinStock ? `Talla ${v.talla.replace('T', '')} sin stock` : `Stock: ${stock}`}
+                              >
+                                {v.talla.replace('T', '')}
+                              </Badge>
+                            );
+                          })}
+                      </div>
+                    )}
                   </TableCell>
                   <TableCell className="text-right font-medium">
                     {precioMin ? formatPEN(precioMin) : '—'}

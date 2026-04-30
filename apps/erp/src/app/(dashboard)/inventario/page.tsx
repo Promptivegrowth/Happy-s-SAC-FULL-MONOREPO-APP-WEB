@@ -12,6 +12,8 @@ import { FilterChip } from '@/components/filter-chip';
 import { TableSkeleton } from '@/components/skeletons';
 import { formatNumber } from '@happy/lib';
 import { Boxes, AlertTriangle } from 'lucide-react';
+import { AjustarStockButton } from './ajustar-stock-client';
+import { NuevoMovimientoButton } from './nuevo-movimiento-client';
 
 export const metadata = { title: 'Inventario' };
 export const dynamic = 'force-dynamic';
@@ -45,6 +47,12 @@ export default async function InventarioPage({ searchParams }: { searchParams: P
     };
   });
 
+  // Lista plana de variantes para el modal "Nuevo movimiento"
+  const variantesParaModal = (variantesIndex ?? []).map((v) => {
+    const prodNombre = (v as unknown as { productos?: { nombre: string } }).productos?.nombre ?? '';
+    return { id: v.id as string, sku: v.sku as string, talla: v.talla as string, producto_nombre: prodNombre };
+  });
+
   function chipUrl(params: Record<string, string | undefined>) {
     const sp2 = new URLSearchParams();
     if (sp.q) sp2.set('q', sp.q);
@@ -65,11 +73,14 @@ export default async function InventarioPage({ searchParams }: { searchParams: P
       title="Stock actual"
       description="Vista consolidada de inventario por almacén y SKU."
       actions={
-        <Link href="/inventario/alertas">
-          <Button variant="outline" className="gap-2">
-            <AlertTriangle className="h-4 w-4 text-amber-500" /> Ver alertas
-          </Button>
-        </Link>
+        <div className="flex items-center gap-2">
+          <NuevoMovimientoButton almacenes={almacenes} variantes={variantesParaModal} />
+          <Link href="/inventario/alertas">
+            <Button variant="outline" className="gap-2">
+              <AlertTriangle className="h-4 w-4 text-amber-500" /> Ver alertas
+            </Button>
+          </Link>
+        </div>
       }
     >
       <div className="flex flex-wrap items-center gap-3">
@@ -107,6 +118,8 @@ export default async function InventarioPage({ searchParams }: { searchParams: P
 type StockRow = {
   id: string;
   cantidad: number;
+  almacen_id: string;
+  variante_id: string;
   almacenes: { nombre: string; codigo: string } | null;
   productos_variantes: {
     sku: string;
@@ -119,7 +132,7 @@ async function InventarioTable({ q, almacen, vista }: SP) {
   const sb = await createClient();
   let query = sb
     .from('stock_actual')
-    .select('id, cantidad, almacenes(nombre, codigo), productos_variantes!inner(sku, talla, productos(nombre))')
+    .select('id, cantidad, almacen_id, variante_id, almacenes(nombre, codigo), productos_variantes!inner(sku, talla, productos(nombre))')
     .not('variante_id', 'is', null)
     .order('cantidad', { ascending: false })
     .limit(300);
@@ -163,6 +176,7 @@ async function InventarioTable({ q, almacen, vista }: SP) {
               <TableHead>Producto</TableHead>
               <TableHead>Talla</TableHead>
               <TableHead className="text-right">Stock</TableHead>
+              <TableHead className="text-right">Ajustar</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -186,6 +200,19 @@ async function InventarioTable({ q, almacen, vista }: SP) {
                       {formatNumber(cantidad)}
                     </span>
                     {bajo && <AlertTriangle className="ml-1 inline h-3 w-3 text-amber-500" />}
+                  </TableCell>
+                  <TableCell className="text-right">
+                    {v && a && (
+                      <AjustarStockButton
+                        almacenId={s.almacen_id}
+                        almacenNombre={a.nombre}
+                        varianteId={s.variante_id}
+                        sku={v.sku}
+                        productoNombre={v.productos?.nombre ?? ''}
+                        talla={v.talla}
+                        cantidadActual={cantidad}
+                      />
+                    )}
                   </TableCell>
                 </TableRow>
               );
