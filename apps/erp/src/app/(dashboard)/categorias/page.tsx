@@ -102,32 +102,32 @@ export default async function CategoriasPage() {
         </Link>
       )}
 
-      {/* Banner explicativo del modelo de visibilidad */}
+      {/* Banner explicativo del modelo de visibilidad (1 capa) */}
       <div className="flex items-start gap-3 rounded-lg border border-corp-200 bg-corp-50/40 p-4 text-sm">
         <Info className="mt-0.5 h-5 w-5 shrink-0 text-corp-700" />
         <div className="space-y-1 text-slate-700">
-          <p className="font-semibold text-corp-900">Cómo funciona la visibilidad en la web</p>
+          <p className="font-semibold text-corp-900">Cómo funciona la publicación en la web</p>
           <p className="text-xs">
-            Un disfraz se ve en la web solo si <strong>(1) su categoría está activa</strong> Y{' '}
-            <strong>(2) el producto tiene "Publicar en web" activado</strong>.
+            El <strong>toggle "Categoría activa"</strong> publica o despublica TODOS los productos
+            de la categoría en la web. Es la única acción que necesitás para una categoría completa.
           </p>
           <ul className="ml-4 list-disc text-xs text-slate-600">
             <li>
-              <strong>ENCENDER el toggle de categoría</strong> ahora también PUBLICA todos sus
-              productos en la web automáticamente (cascada). Después podés ocultar productos
-              individualmente desde <code className="rounded bg-slate-100 px-1">/web-catalogo</code>.
+              <strong>ENCENDER</strong> → publica todos los productos de la categoría en la web.
             </li>
             <li>
-              <strong>APAGAR el toggle</strong> oculta los productos de la web sin despublicarlos.
-              Si lo volves a encender, los productos vuelven a estar disponibles.
+              <strong>APAGAR</strong> → despublica todos los productos de la categoría en la web.
+              Al volver a encender, se publican de nuevo automáticamente.
             </li>
             <li>
-              <strong>Botón verde "Publicar todo el catálogo"</strong> arriba: atajo de emergencia
-              para publicar TODOS los productos de TODAS las categorías activas con un click.
+              <strong>Botón verde "Publicar todo el catálogo"</strong> arriba: enciende todas las
+              categorías y publica todos los productos de un click (excepto los huérfanos sin
+              categoría asignada — esos requieren acción aparte).
             </li>
             <li>
-              Acción masiva <strong>"Publicar/Despublicar todos"</strong> (icono ⋮ a la derecha de
-              cada categoría): controla solo esa categoría sin tocar el toggle.
+              ¿Necesitás ocultar UN producto puntual sin afectar al resto de la categoría? Andá
+              a <code className="rounded bg-slate-100 px-1">/web-catalogo</code> y usá el toggle
+              individual de ese producto.
             </li>
           </ul>
         </div>

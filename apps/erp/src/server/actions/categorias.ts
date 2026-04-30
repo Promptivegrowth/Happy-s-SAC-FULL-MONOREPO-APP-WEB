@@ -69,71 +69,88 @@ export async function actualizarCategoria(id: string, _prev: unknown, fd: FormDa
 }
 
 /**
- * Toggle inline para activar/desactivar una categoría.
- * - APAGAR: solo cambia categorias.activo=false. La web ya filtra por
- *   categoria.activo, así los productos se ocultan automáticamente sin
- *   tocar productos_publicacion.publicado (no destructivo).
- * - ENCENDER + cascada (default): además publica TODOS los productos
- *   activos de la categoría que aún no estén publicados. Esto resuelve
- *   el caso "activé la categoría pero no veo nada en la web".
+ * Toggle inline para publicar/despublicar TODOS los productos de una
+ * categoría en bloque. Modelo de 1 capa: el toggle ES la publicación.
+ * - ENCENDER: activa la categoría + upsert publicado=true a todos sus
+ *   productos activos.
+ * - APAGAR: desactiva la categoría + update publicado=false a todos sus
+ *   productos. El contador "Publicados en web" siempre refleja la
+ *   realidad. Para ocultar 1 producto puntual sin afectar al resto,
+ *   usar /web-catalogo (toggle individual).
  */
 export async function toggleCategoriaActivo(
   id: string,
   activo: boolean,
-  cascadaPublicar = true,
-): Promise<ActionResult<{ publicados: number }>> {
+): Promise<ActionResult<{ afectados: number }>> {
   const r = await runAction(async () => {
     const { sb, userId } = await requireUser();
 
     const { error: errCat } = await sb.from('categorias').update({ activo }).eq('id', id);
     if (errCat) throw new Error(errCat.message);
 
-    if (!activo || !cascadaPublicar) return { publicados: 0 };
-
-    // Encendido + cascada: publicar todos los productos activos de la categoría.
     const { data: prods } = await sb
       .from('productos')
       .select('id')
       .eq('categoria_id', id)
       .eq('activo', true);
 
-    if (!prods || prods.length === 0) return { publicados: 0 };
+    if (!prods || prods.length === 0) return { afectados: 0 };
 
-    const ahora = new Date().toISOString();
-    const filas = prods.map((p) => ({
-      producto_id: p.id,
-      publicado: true,
-      publicado_por: userId,
-      publicado_en: ahora,
-    }));
+    if (activo) {
+      // Encender: publicar todos los productos activos (upsert).
+      const ahora = new Date().toISOString();
+      const filas = prods.map((p) => ({
+        producto_id: p.id,
+        publicado: true,
+        publicado_por: userId,
+        publicado_en: ahora,
+      }));
+      const { error: errPub } = await sb
+        .from('productos_publicacion')
+        .upsert(filas, { onConflict: 'producto_id' });
+      if (errPub) throw new Error(errPub.message);
+    } else {
+      // Apagar: despublicar todos (update donde ya exista fila;
+      // si no existe, no hay nada que despublicar).
+      const ids = prods.map((p) => p.id);
+      const { error: errUnpub } = await sb
+        .from('productos_publicacion')
+        .update({ publicado: false })
+        .in('producto_id', ids);
+      if (errUnpub) throw new Error(errUnpub.message);
+    }
 
-    const { error: errPub } = await sb
-      .from('productos_publicacion')
-      .upsert(filas, { onConflict: 'producto_id' });
-    if (errPub) throw new Error(errPub.message);
-
-    return { publicados: prods.length };
+    return { afectados: prods.length };
   });
   if (r.ok) await bumpPaths('/categorias', '/web-catalogo', '/productos');
   return r;
 }
 
 /**
- * Atajo de emergencia: publica TODOS los productos activos que tengan
- * categoría ACTIVA asignada.
- * - Productos en categorías ACTIVAS → se publican
- * - Productos en categorías APAGADAS → se omiten (cascada los oculta igual)
- * - Productos SIN categoría asignada → NO se publican (necesitan que el
- *   usuario les asigne categoría primero, sino quedan sin breadcrumb,
- *   sin filtro web, etc.). El conteo se reporta para que la UI lo
- *   muestre como alerta separada con CTA "Asignar categoría".
+ * Atajo de emergencia: enciende TODAS las categorías + publica TODOS
+ * los productos con categoría asignada en un click.
+ * - Categorías apagadas → se encienden (activo=true)
+ * - Productos con categoría → se publican (publicado=true)
+ * - Productos SIN categoría (huérfanos) → se omiten (necesitan
+ *   que el usuario les asigne categoría primero). Se reporta el
+ *   conteo para mostrar la alerta separada con CTA "Asignar categoría".
  */
 export async function publicarTodoElCatalogo(): Promise<ActionResult<{ publicados: number; categorias: number; huerfanos: number }>> {
   const r = await runAction(async () => {
     const { sb, userId } = await requireUser();
 
-    const { data: cats } = await sb.from('categorias').select('id').eq('activo', true);
+    // Encender todas las categorías que estuvieran apagadas.
+    const { data: cats } = await sb.from('categorias').select('id, activo');
     if (!cats || cats.length === 0) return { publicados: 0, categorias: 0, huerfanos: 0 };
+
+    const apagadas = cats.filter((c) => !c.activo).map((c) => c.id);
+    if (apagadas.length > 0) {
+      const { error: errCat } = await sb
+        .from('categorias')
+        .update({ activo: true })
+        .in('id', apagadas);
+      if (errCat) throw new Error(errCat.message);
+    }
 
     const catIds = cats.map((c) => c.id);
     const { data: prods } = await sb
@@ -142,7 +159,7 @@ export async function publicarTodoElCatalogo(): Promise<ActionResult<{ publicado
       .in('categoria_id', catIds)
       .eq('activo', true);
 
-    // Conteo informativo de huérfanos para mostrar al usuario
+    // Conteo informativo de huérfanos para mostrar al usuario.
     const { count: huerfanos } = await sb
       .from('productos')
       .select('id', { count: 'exact', head: true })
