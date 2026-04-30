@@ -11,7 +11,7 @@ import { PageShell } from '@/components/page-shell';
 import { SearchAutocomplete } from '@/components/search-autocomplete';
 import { FilterChip } from '@/components/filter-chip';
 import { TableSkeleton } from '@/components/skeletons';
-import { Plus, Shirt, Pencil, Globe, AlertTriangle } from 'lucide-react';
+import { Plus, Shirt, Pencil, Globe, AlertTriangle, Gem } from 'lucide-react';
 
 export const metadata = { title: 'Productos' };
 export const dynamic = 'force-dynamic';
@@ -131,7 +131,7 @@ type ProdRow = {
   nombre: string;
   activo: boolean;
   destacado: boolean | null;
-  categorias: { id: string; nombre: string } | null;
+  categorias: { id: string; codigo: string; nombre: string } | null;
   campanas: { id: string; nombre: string } | null;
   productos_variantes: { id: string; sku: string; talla: string; precio_publico: number | null }[];
   productos_publicacion: { publicado: boolean; destacado_web: boolean | null }[];
@@ -142,7 +142,7 @@ async function ProductosTable({ q, cat, estado, web, sin_categoria }: SP) {
   let query = sb
     .from('productos')
     .select(
-      'id, codigo, nombre, activo, destacado, categorias(id, nombre), campanas(id, nombre), productos_variantes(id, sku, talla, precio_publico), productos_publicacion(publicado, destacado_web)',
+      'id, codigo, nombre, activo, destacado, categorias(id, codigo, nombre), campanas(id, nombre), productos_variantes(id, sku, talla, precio_publico), productos_publicacion(publicado, destacado_web)',
     )
     .order('nombre')
     .limit(500);
@@ -259,16 +259,27 @@ async function ProductosTable({ q, cat, estado, web, sin_categoria }: SP) {
                   </TableCell>
                   <TableCell>
                     {variantes.length === 0 ? (
-                      <Link href={`/productos/${p.id}`}>
+                      p.categorias?.codigo === 'ACC' ? (
                         <Badge
-                          variant="destructive"
-                          className="gap-1 text-[10px] hover:bg-amber-600"
-                          title="Este producto no tiene tallas configuradas. Click para configurar."
+                          variant="secondary"
+                          className="gap-1 border-sky-200 bg-sky-50 text-sky-700 text-[10px] hover:bg-sky-100"
+                          title="Producto del catálogo Accesorios — no requiere tallas"
                         >
-                          <AlertTriangle className="h-3 w-3" />
-                          Falta variantes
+                          <Gem className="h-3 w-3" />
+                          Accesorio
                         </Badge>
-                      </Link>
+                      ) : (
+                        <Link href={`/productos/${p.id}`}>
+                          <Badge
+                            variant="destructive"
+                            className="gap-1 text-[10px] hover:bg-amber-600"
+                            title="Este producto no tiene tallas configuradas. Click para configurar."
+                          >
+                            <AlertTriangle className="h-3 w-3" />
+                            Falta variantes
+                          </Badge>
+                        </Link>
+                      )
                     ) : (
                       <div className="flex flex-wrap gap-1">
                         {[...variantes]
