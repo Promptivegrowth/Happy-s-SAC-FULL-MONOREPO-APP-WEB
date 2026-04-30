@@ -1,5 +1,6 @@
 export * from './validators';
 export * from './format';
+export * from './talla';
 export * as ubigeo from './ubigeo';
 export * as sunat from './sunat';
 export * as pagos from './pagos';

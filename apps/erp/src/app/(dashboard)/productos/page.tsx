@@ -6,7 +6,7 @@ import { Badge } from '@happy/ui/badge';
 import { Card, CardContent } from '@happy/ui/card';
 import { EmptyState } from '@happy/ui/empty-state';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@happy/ui/table';
-import { formatPEN } from '@happy/lib';
+import { formatPEN, ordenTalla } from '@happy/lib';
 import { PageShell } from '@/components/page-shell';
 import { SearchAutocomplete } from '@/components/search-autocomplete';
 import { FilterChip } from '@/components/filter-chip';
@@ -122,7 +122,7 @@ type ProdRow = {
   destacado: boolean | null;
   categorias: { id: string; nombre: string } | null;
   campanas: { id: string; nombre: string } | null;
-  productos_variantes: { sku: string; talla: string; precio_publico: number | null }[];
+  productos_variantes: { id: string; sku: string; talla: string; precio_publico: number | null }[];
   productos_publicacion: { publicado: boolean; destacado_web: boolean | null }[];
 };
 
@@ -131,7 +131,7 @@ async function ProductosTable({ q, cat, estado, web }: SP) {
   let query = sb
     .from('productos')
     .select(
-      'id, codigo, nombre, activo, destacado, categorias(id, nombre), campanas(id, nombre), productos_variantes(sku, talla, precio_publico), productos_publicacion(publicado, destacado_web)',
+      'id, codigo, nombre, activo, destacado, categorias(id, nombre), campanas(id, nombre), productos_variantes(id, sku, talla, precio_publico), productos_publicacion(publicado, destacado_web)',
     )
     .order('nombre')
     .limit(200);
@@ -143,6 +143,19 @@ async function ProductosTable({ q, cat, estado, web }: SP) {
   let productos = ((data ?? []) as unknown as ProdRow[]);
   if (web === 'si') productos = productos.filter((p) => p.productos_publicacion?.[0]?.publicado);
   if (web === 'no') productos = productos.filter((p) => !p.productos_publicacion?.[0]?.publicado);
+
+  // Cargar stock por variante para todas las variantes de los productos visibles
+  const todasLasVariantes = productos.flatMap((p) => p.productos_variantes.map((v) => v.id));
+  const stockPorVariante = new Map<string, number>();
+  if (todasLasVariantes.length > 0) {
+    const { data: stocks } = await sb
+      .from('v_stock_variante_total')
+      .select('variante_id, stock_total')
+      .in('variante_id', todasLasVariantes);
+    for (const s of stocks ?? []) {
+      stockPorVariante.set(s.variante_id as string, Number(s.stock_total ?? 0));
+    }
+  }
 
   if (productos.length === 0) {
     return (
@@ -217,14 +230,23 @@ async function ProductosTable({ q, cat, estado, web }: SP) {
                   </TableCell>
                   <TableCell>
                     <div className="flex flex-wrap gap-1">
-                      {variantes.slice(0, 8).map((v) => (
-                        <Badge key={v.sku} variant="outline" className="text-[10px]">
-                          {v.talla.replace('T', '')}
-                        </Badge>
-                      ))}
-                      {variantes.length > 8 && (
-                        <span className="text-[10px] text-slate-400">+{variantes.length - 8}</span>
-                      )}
+                      {[...variantes]
+                        .sort((a, b) => ordenTalla(a.talla) - ordenTalla(b.talla))
+                        .slice(0, 11)
+                        .map((v) => {
+                          const stock = stockPorVariante.get(v.id) ?? 0;
+                          const sinStock = stock <= 0;
+                          return (
+                            <Badge
+                              key={v.sku}
+                              variant={sinStock ? 'destructive' : 'outline'}
+                              className={`text-[10px] ${sinStock ? 'line-through opacity-80' : ''}`}
+                              title={sinStock ? `Talla ${v.talla.replace('T', '')} sin stock` : `Stock: ${stock}`}
+                            >
+                              {v.talla.replace('T', '')}
+                            </Badge>
+                          );
+                        })}
                       {variantes.length === 0 && (
                         <span className="text-[10px] text-slate-400">sin variantes</span>
                       )}
