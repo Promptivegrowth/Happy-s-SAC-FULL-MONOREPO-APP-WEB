@@ -54,30 +54,56 @@ export async function eliminarArchivo(
   });
 }
 
-/** Server action: agrega imagen a la galería de un producto. */
+/** Server action: agrega imagen a la galería de un producto.
+ *  Retorna el id real de la fila creada para que el frontend pueda eliminarla
+ *  sin tener que recargar la página (antes usaba un UUID random que no
+ *  existía en BD → el botón eliminar fallaba silenciosamente). */
 export async function agregarImagenProducto(
   productoId: string,
   url: string,
   esPortada: boolean = false,
-): Promise<ActionResult> {
+): Promise<ActionResult<{ id: string; orden: number }>> {
   return runAction(async () => {
     const { sb } = await requireUser();
-    const { data: max } = await sb.from('productos_imagenes')
-      .select('orden').eq('producto_id', productoId).order('orden', { ascending: false }).limit(1).maybeSingle();
+
+    // Idempotencia: si ya existe una imagen con la misma URL en este producto,
+    // no insertamos otra fila (evita duplicados al doble-click o re-upload).
+    const { data: existing } = await sb
+      .from('productos_imagenes')
+      .select('id, orden')
+      .eq('producto_id', productoId)
+      .eq('url', url)
+      .maybeSingle();
+    if (existing) {
+      return { id: existing.id as string, orden: (existing.orden as number) ?? 0 };
+    }
+
+    const { data: max } = await sb
+      .from('productos_imagenes')
+      .select('orden')
+      .eq('producto_id', productoId)
+      .order('orden', { ascending: false })
+      .limit(1)
+      .maybeSingle();
     const orden = ((max as { orden?: number } | null)?.orden ?? -1) + 1;
-    const { error } = await sb.from('productos_imagenes').insert({
-      producto_id: productoId,
-      url,
-      orden,
-      es_portada: esPortada,
-      tipo: 'FOTO',
-    });
+
+    const { data: row, error } = await sb
+      .from('productos_imagenes')
+      .insert({
+        producto_id: productoId,
+        url,
+        orden,
+        es_portada: esPortada,
+        tipo: 'FOTO',
+      })
+      .select('id, orden')
+      .single();
     if (error) throw new Error(error.message);
 
     if (esPortada) {
       await sb.from('productos').update({ imagen_principal_url: url }).eq('id', productoId);
     }
-    return null;
+    return { id: row.id as string, orden: (row.orden as number) ?? orden };
   });
 }
 

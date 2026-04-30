@@ -18,11 +18,20 @@ export function GaleriaSection({ productoId, imagenes }: { productoId: string; i
 
   function add(url: string | null) {
     if (!url) return;
+    // Evitar duplicar in-memory si la URL ya está en la lista (ej. doble-click).
+    if (list.some((i) => i.url === url)) {
+      toast.info('Esta imagen ya está en la galería');
+      return;
+    }
     start(async () => {
-      const r = await agregarImagenProducto(productoId, url, list.length === 0);
-      if (r.ok) {
+      const esPortada = list.length === 0;
+      const r = await agregarImagenProducto(productoId, url, esPortada);
+      if (r.ok && r.data) {
         toast.success('Imagen agregada');
-        setList((arr) => [...arr, { id: crypto.randomUUID(), url, orden: arr.length, es_portada: arr.length === 0 }]);
+        setList((arr) => [
+          ...arr,
+          { id: r.data!.id, url, orden: r.data!.orden, es_portada: esPortada },
+        ]);
       } else {
         toast.error(r.error ?? 'Error');
       }

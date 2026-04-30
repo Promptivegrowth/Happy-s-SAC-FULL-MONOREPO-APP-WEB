@@ -7,7 +7,9 @@ import { runAction, requireUser, bumpPaths, type ActionResult } from './_helpers
 const TALLAS = ['T0','T2','T4','T6','T8','T10','T12','T14','T16','TS','TAD'] as const;
 
 const productoSchema = z.object({
-  codigo: z.string().min(1).max(40),
+  // Opcional: si está vacío, el server lo autogenera como <CAT_CODIGO>-<NNNN>
+  // (o PROD-NNNN si no hay categoría asignada).
+  codigo: z.string().max(40).optional().or(z.literal('')),
   nombre: z.string().min(2).max(150),
   descripcion: z.string().optional().or(z.literal('')),
   categoria_id: z.string().uuid().optional().or(z.literal('')),
@@ -23,7 +25,7 @@ const productoSchema = z.object({
 
 function parseForm(fd: FormData) {
   return productoSchema.parse({
-    codigo: fd.get('codigo'),
+    codigo: fd.get('codigo') || '',
     nombre: fd.get('nombre'),
     descripcion: fd.get('descripcion') || '',
     categoria_id: fd.get('categoria_id') || '',
@@ -40,7 +42,7 @@ function parseForm(fd: FormData) {
 
 function clean(data: ReturnType<typeof parseForm>) {
   return {
-    codigo: data.codigo.trim().toUpperCase(),
+    codigo: (data.codigo ?? '').trim().toUpperCase(),
     nombre: data.nombre.trim(),
     descripcion: data.descripcion || null,
     categoria_id: data.categoria_id || null,
@@ -55,11 +57,41 @@ function clean(data: ReturnType<typeof parseForm>) {
   };
 }
 
+/**
+ * Autogenera código de producto desde la categoría: `<CAT_CODIGO>-<NNNN>`.
+ * Ej: HALLOWEEN-0001, DANZAS-0023. Si no hay categoría, usa PROD-NNNN.
+ * Usa next_correlativo (SECURITY DEFINER) para garantizar unicidad atómica.
+ */
+async function autogenerarCodigoProducto(
+  sb: Awaited<ReturnType<typeof requireUser>>['sb'],
+  categoriaId: string | null,
+): Promise<string> {
+  let prefix = 'PROD';
+  if (categoriaId) {
+    const { data: cat } = await sb
+      .from('categorias')
+      .select('codigo')
+      .eq('id', categoriaId)
+      .maybeSingle();
+    if (cat?.codigo) prefix = cat.codigo.trim().toUpperCase();
+  }
+  const { data: nro, error } = await sb.rpc('next_correlativo', { p_clave: `PROD_${prefix}`, p_padding: 4 });
+  if (error) throw new Error(error.message);
+  return `${prefix}-${nro}`;
+}
+
 export async function crearProducto(_prev: unknown, fd: FormData): Promise<ActionResult<{ id: string }>> {
   const r = await runAction(async () => {
     const data = parseForm(fd);
     const { sb } = await requireUser();
-    const { data: row, error } = await sb.from('productos').insert(clean(data)).select('id').single();
+
+    // Si el código está vacío, autogenerar desde la categoría (CAT-NNNN).
+    const cleaned = clean(data);
+    if (!cleaned.codigo) {
+      cleaned.codigo = await autogenerarCodigoProducto(sb, cleaned.categoria_id);
+    }
+
+    const { data: row, error } = await sb.from('productos').insert(cleaned).select('id').single();
     if (error) throw new Error(error.message);
 
     // Crear receta v1.0 vacía y la entrada de publicación

@@ -1,6 +1,6 @@
 'use client';
 
-import { useRef, useState, useTransition } from 'react';
+import { useEffect, useRef, useState, useTransition } from 'react';
 import Image from 'next/image';
 import { Button } from '@happy/ui/button';
 import { Loader2, UploadCloud, X, ImageIcon } from 'lucide-react';
@@ -38,6 +38,14 @@ export function ImageUploader({
   const [url, setUrl] = useState<string | null>(value ?? null);
   const [pending, start] = useTransition();
   const fileRef = useRef<HTMLInputElement>(null);
+
+  // Sincroniza con el `value` controlado por el padre. Sin esto, el uploader
+  // se queda mostrando la última imagen subida aunque el padre lo resetee
+  // (caso galería: el padre pasa value=null para que vuelva a slot vacío y
+  // pueda subir más fotos sin que se vean duplicadas).
+  useEffect(() => {
+    setUrl(value ?? null);
+  }, [value]);
 
   function onPick(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
