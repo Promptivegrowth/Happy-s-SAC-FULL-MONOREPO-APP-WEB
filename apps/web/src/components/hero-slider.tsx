@@ -6,23 +6,6 @@ import Script from 'next/script';
 import { useEffect, useState } from 'react';
 import { ChevronLeft, ChevronRight, Heart, Gift, Sparkles, ArrowRight } from 'lucide-react';
 
-declare module 'react' {
-  // eslint-disable-next-line @typescript-eslint/no-namespace
-  namespace JSX {
-    interface IntrinsicElements {
-      'dotlottie-wc': React.DetailedHTMLProps<
-        React.HTMLAttributes<HTMLElement> & {
-          src?: string;
-          autoplay?: boolean | string;
-          loop?: boolean | string;
-          speed?: string | number;
-        },
-        HTMLElement
-      >;
-    }
-  }
-}
-
 type SlideLayout = 'izquierda-lottie' | 'derecha-lottie' | 'centro' | 'centro-amplio';
 
 type Slide = {

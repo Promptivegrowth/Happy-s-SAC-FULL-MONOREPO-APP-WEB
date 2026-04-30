@@ -10,6 +10,7 @@ import { BLUR_DATA_URL } from '@/lib/image';
 import { HeroSlider } from '@/components/hero-slider';
 import { PremiumStats } from '@/components/premium-stats';
 import { CategoryBento } from '@/components/category-bento';
+import { TrustMarquee } from '@/components/trust-marquee';
 
 export const dynamic = 'force-dynamic';
 
@@ -59,57 +60,6 @@ export default async function Home() {
       {/* Stats premium con counter animado */}
       <PremiumStats />
 
-      {/* CAMPAÑAS ACTIVAS */}
-      {campanias.length > 0 && (
-        <section className="container px-4 pt-12">
-          <div className="mb-6 flex items-center gap-2">
-            <Sparkles className="h-5 w-5 text-happy-500" />
-            <h2 className="font-display text-2xl font-semibold text-corp-900">Campañas activas</h2>
-          </div>
-          <div className={`grid gap-4 ${campanias.length === 1 ? '' : campanias.length === 2 ? 'sm:grid-cols-2' : 'sm:grid-cols-2 lg:grid-cols-3'}`}>
-            {campanias.map((c) => {
-              const banner = c.banner_url ?? c.imagen_url;
-              return (
-                <Link
-                  key={c.slug ?? c.nombre}
-                  href={`/campanias/${c.slug ?? ''}`}
-                  className="group relative overflow-hidden rounded-2xl border-2 border-happy-200 bg-gradient-to-br from-happy-500 via-danger to-corp-700 p-6 text-white shadow-soft transition hover:-translate-y-1 hover:shadow-glow"
-                >
-                  {banner && (
-                    <Image
-                      src={banner}
-                      alt={c.nombre}
-                      fill
-                      className="object-cover opacity-40"
-                      sizes="(max-width: 768px) 100vw, 33vw"
-                      placeholder="blur"
-                      blurDataURL={BLUR_DATA_URL}
-                    />
-                  )}
-                  <div className="relative">
-                    <Badge className="mb-3 bg-white/20 text-white backdrop-blur-sm hover:bg-white/30">
-                      <Sparkles className="mr-1 h-3 w-3" /> Campaña
-                    </Badge>
-                    <h3 className="font-display text-2xl font-semibold leading-tight">{c.nombre}</h3>
-                    {c.descripcion && (
-                      <p className="mt-1 line-clamp-2 text-sm text-white/90">{c.descripcion}</p>
-                    )}
-                    {c.fecha_fin && (
-                      <p className="mt-3 inline-flex items-center gap-1 rounded-full bg-white/15 px-3 py-1 text-xs">
-                        <Calendar className="h-3 w-3" /> Hasta {new Date(c.fecha_fin).toLocaleDateString('es-PE', { day: 'numeric', month: 'short' })}
-                      </p>
-                    )}
-                    <p className="mt-4 inline-flex items-center gap-1 text-sm font-semibold opacity-90 group-hover:opacity-100">
-                      Ver productos <ArrowRight className="h-4 w-4 transition group-hover:translate-x-1" />
-                    </p>
-                  </div>
-                </Link>
-              );
-            })}
-          </div>
-        </section>
-      )}
-
       {/* Bento grid de categorías — premium con imágenes transparentes */}
       <CategoryBento />
 
@@ -120,13 +70,21 @@ export default async function Home() {
           <div className="absolute -left-20 bottom-0 h-64 w-64 rounded-full bg-corp-200/30 blur-3xl" />
 
           <div className="container relative px-4">
-            <div className="mb-10 text-center">
+            <div className="mb-10 flex flex-col items-center text-center">
               <Badge className="mb-3 bg-gradient-to-r from-happy-500 to-danger text-white hover:from-happy-500">
                 <Sparkles className="mr-1 h-3 w-3" /> Selección destacada
               </Badge>
-              <h2 className="font-display text-4xl font-semibold text-corp-900 sm:text-5xl">
-                🔥 Lo más TOP
-              </h2>
+              <div className="flex items-center justify-center gap-1 sm:gap-2">
+                <dotlottie-wc
+                  src="https://lottie.host/3a89ec89-700f-4765-a30e-9209e1133377/zdzFqqAyIg.lottie"
+                  autoplay
+                  loop
+                  style={{ width: '70px', height: '70px' }}
+                />
+                <h2 className="font-display text-4xl font-semibold text-corp-900 sm:text-5xl">
+                  Lo más TOP
+                </h2>
+              </div>
               <p className="mt-2 text-slate-600">
                 Los favoritos de las familias peruanas · {destacados.length} disfraces seleccionados
               </p>
@@ -178,6 +136,75 @@ export default async function Home() {
           </a>
         </div>
       </section>
+
+      {/* CAMPAÑAS ACTIVAS — debajo del CTA */}
+      {campanias.length > 0 && (
+        <section className="container px-4 py-16">
+          <div className="mb-6 flex items-center gap-2">
+            <Sparkles className="h-5 w-5 text-happy-500" />
+            <h2 className="font-display text-2xl font-semibold text-corp-900 sm:text-3xl">
+              Campañas activas
+            </h2>
+          </div>
+          <div
+            className={`grid gap-4 ${
+              campanias.length === 1
+                ? ''
+                : campanias.length === 2
+                  ? 'sm:grid-cols-2'
+                  : 'sm:grid-cols-2 lg:grid-cols-3'
+            }`}
+          >
+            {campanias.map((c) => {
+              const banner = c.banner_url ?? c.imagen_url;
+              return (
+                <Link
+                  key={c.slug ?? c.nombre}
+                  href={`/campanias/${c.slug ?? ''}`}
+                  className="group relative overflow-hidden rounded-2xl border-2 border-happy-200 bg-gradient-to-br from-happy-500 via-danger to-corp-700 p-6 text-white shadow-soft transition hover:-translate-y-1 hover:shadow-glow"
+                >
+                  {banner && (
+                    <Image
+                      src={banner}
+                      alt={c.nombre}
+                      fill
+                      className="object-cover opacity-40"
+                      sizes="(max-width: 768px) 100vw, 33vw"
+                      placeholder="blur"
+                      blurDataURL={BLUR_DATA_URL}
+                    />
+                  )}
+                  <div className="relative">
+                    <Badge className="mb-3 bg-white/20 text-white backdrop-blur-sm hover:bg-white/30">
+                      <Sparkles className="mr-1 h-3 w-3" /> Campaña
+                    </Badge>
+                    <h3 className="font-display text-2xl font-semibold leading-tight">{c.nombre}</h3>
+                    {c.descripcion && (
+                      <p className="mt-1 line-clamp-2 text-sm text-white/90">{c.descripcion}</p>
+                    )}
+                    {c.fecha_fin && (
+                      <p className="mt-3 inline-flex items-center gap-1 rounded-full bg-white/15 px-3 py-1 text-xs">
+                        <Calendar className="h-3 w-3" /> Hasta{' '}
+                        {new Date(c.fecha_fin).toLocaleDateString('es-PE', {
+                          day: 'numeric',
+                          month: 'short',
+                        })}
+                      </p>
+                    )}
+                    <p className="mt-4 inline-flex items-center gap-1 text-sm font-semibold opacity-90 group-hover:opacity-100">
+                      Ver productos{' '}
+                      <ArrowRight className="h-4 w-4 transition group-hover:translate-x-1" />
+                    </p>
+                  </div>
+                </Link>
+              );
+            })}
+          </div>
+        </section>
+      )}
+
+      {/* Sección de confianza con marquesina animada */}
+      <TrustMarquee />
     </>
   );
 }
