@@ -194,11 +194,16 @@ export default async function Home() {
         </section>
       )}
 
-      {/* CTA WHATSAPP */}
-      <section className="bg-corp-gradient py-16 text-white">
-        <div className="container px-4 text-center">
-          <h2 className="font-display text-3xl font-semibold md:text-4xl">¿Compra al por mayor o personalizada?</h2>
-          <p className="mt-3 text-lg text-white/90">Hablemos por WhatsApp — atención directa con nuestro equipo</p>
+      {/* CTA WHATSAPP — fondo con efecto parallax + overlay para legibilidad */}
+      <section
+        className="relative overflow-hidden bg-corp-900 bg-cover bg-fixed bg-center py-28 text-white md:py-36"
+        style={{ backgroundImage: "url('/CTA.webp')" }}
+      >
+        {/* Overlay gradiente: oscurece el fondo lo suficiente para que el texto blanco resalte sin ocultar la foto */}
+        <div className="absolute inset-0 bg-gradient-to-b from-corp-900/70 via-corp-900/55 to-corp-900/75" />
+        <div className="container relative z-10 px-4 text-center">
+          <h2 className="font-display text-3xl font-semibold drop-shadow-lg md:text-4xl">¿Compra al por mayor o personalizada?</h2>
+          <p className="mt-3 text-lg text-white/95 drop-shadow-md">Hablemos por WhatsApp — atención directa con nuestro equipo</p>
           <a
             href="https://wa.me/51916856842"
             className="mt-8 inline-flex items-center gap-2 rounded-full bg-white px-8 py-4 font-semibold text-corp-900 shadow-2xl transition hover:scale-105 hover:text-happy-600"
