@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useRef, useState, useTransition } from 'react';
 import Link from 'next/link';
 import { useActionForm } from './use-action-form';
 import { SubmitButton } from './submit-button';
@@ -9,7 +9,8 @@ import { Textarea } from '@happy/ui/textarea';
 import { Switch } from '@happy/ui/switch';
 import { FormGrid, FormRow, FormSection } from '@happy/ui/form-row';
 import { Button } from '@happy/ui/button';
-import { crearMaterial, actualizarMaterial } from '@/server/actions/materiales';
+import { Sparkles } from 'lucide-react';
+import { crearMaterial, actualizarMaterial, sugerirFactorConversion } from '@/server/actions/materiales';
 
 type Material = {
   id?: string;
@@ -50,12 +51,63 @@ export function MaterialForm({ initial, unidades, proveedores }: Props) {
   const [lote, setLote] = useState(initial?.requiere_lote ?? false);
   const [activo, setActivo] = useState(initial?.activo ?? true);
 
+  // Auto-completar factor cuando cambian las unidades
+  const [unidadCompraId, setUnidadCompraId] = useState(initial?.unidad_compra_id ?? '');
+  const [unidadConsumoId, setUnidadConsumoId] = useState(initial?.unidad_consumo_id ?? '');
+  const [factor, setFactor] = useState<string>(String(initial?.factor_conversion ?? 1));
+  const [sugerencia, setSugerencia] = useState<{ factor: number; coincidencias: number } | null>(null);
+  const [pendingSug, startSug] = useTransition();
+  const usuarioTocoFactor = useRef(false);
+
+  useEffect(() => {
+    // No pisar lo que el usuario escribió manualmente
+    if (usuarioTocoFactor.current) return;
+    if (!unidadCompraId || !unidadConsumoId) {
+      setSugerencia(null);
+      return;
+    }
+    if (unidadCompraId === unidadConsumoId) {
+      setFactor('1');
+      setSugerencia(null);
+      return;
+    }
+    startSug(async () => {
+      const sug = await sugerirFactorConversion(unidadCompraId, unidadConsumoId);
+      setSugerencia(sug);
+      if (sug && sug.factor > 0) {
+        setFactor(String(sug.factor));
+      }
+    });
+  }, [unidadCompraId, unidadConsumoId]);
+
+  function aplicarSugerencia() {
+    if (sugerencia) {
+      setFactor(String(sugerencia.factor));
+      usuarioTocoFactor.current = false;
+    }
+  }
+
   return (
     <form action={formAction} className="space-y-6">
       <FormSection title="Identificación">
         <FormGrid cols={3}>
-          <FormRow label="Código" required error={state.fields?.codigo}>
-            <Input name="codigo" defaultValue={initial?.codigo} required maxLength={40} placeholder="TEL0000149" />
+          <FormRow
+            label="Código"
+            error={state.fields?.codigo}
+            hint={
+              isEdit
+                ? 'Ya asignado.'
+                : 'Opcional. Si lo dejas vacío, se autogenera como TEL0001 / AVI0001 / INS0001 / EMP0001 según categoría.'
+            }
+          >
+            <Input
+              name="codigo"
+              defaultValue={initial?.codigo ?? ''}
+              maxLength={40}
+              placeholder={isEdit ? '' : 'Auto desde categoría'}
+              readOnly={isEdit}
+              className={isEdit ? 'bg-slate-50 text-slate-600' : undefined}
+            />
           </FormRow>
           <FormRow label="Categoría" required>
             <select name="categoria" defaultValue={initial?.categoria ?? 'INSUMO'} required className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm">
@@ -80,19 +132,66 @@ export function MaterialForm({ initial, unidades, proveedores }: Props) {
       <FormSection title="Unidades y precio">
         <FormGrid cols={3}>
           <FormRow label="Unidad de compra">
-            <select name="unidad_compra_id" defaultValue={initial?.unidad_compra_id ?? ''} className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm">
+            <select
+              name="unidad_compra_id"
+              value={unidadCompraId}
+              onChange={(e) => {
+                setUnidadCompraId(e.target.value);
+                usuarioTocoFactor.current = false;
+              }}
+              className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
+            >
               <option value="">—</option>
               {unidades.map((u) => <option key={u.id} value={u.id}>{u.codigo} · {u.nombre}</option>)}
             </select>
           </FormRow>
           <FormRow label="Unidad de consumo" hint="Si difiere de la compra (ej. Rollo → m)">
-            <select name="unidad_consumo_id" defaultValue={initial?.unidad_consumo_id ?? ''} className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm">
+            <select
+              name="unidad_consumo_id"
+              value={unidadConsumoId}
+              onChange={(e) => {
+                setUnidadConsumoId(e.target.value);
+                usuarioTocoFactor.current = false;
+              }}
+              className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
+            >
               <option value="">— Igual a la de compra —</option>
               {unidades.map((u) => <option key={u.id} value={u.id}>{u.codigo} · {u.nombre}</option>)}
             </select>
           </FormRow>
-          <FormRow label="Factor conversión" hint="Compra → consumo">
-            <Input name="factor_conversion" type="number" step="0.0001" defaultValue={initial?.factor_conversion ?? 1} min={0} />
+          <FormRow
+            label="Factor conversión"
+            hint={
+              pendingSug
+                ? 'Buscando sugerencia…'
+                : sugerencia
+                  ? `Sugerido por ${sugerencia.coincidencias} material${sugerencia.coincidencias === 1 ? '' : 'es'} similar${sugerencia.coincidencias === 1 ? '' : 'es'}`
+                  : 'Cuántas unidades de consumo entran en 1 de compra'
+            }
+          >
+            <div className="relative">
+              <Input
+                name="factor_conversion"
+                type="number"
+                step="0.0001"
+                value={factor}
+                onChange={(e) => {
+                  usuarioTocoFactor.current = true;
+                  setFactor(e.target.value);
+                }}
+                min={0}
+              />
+              {sugerencia && Number(factor) !== sugerencia.factor && (
+                <button
+                  type="button"
+                  onClick={aplicarSugerencia}
+                  className="absolute right-2 top-1/2 inline-flex -translate-y-1/2 items-center gap-1 rounded-md bg-happy-100 px-2 py-1 text-[10px] font-medium text-happy-700 hover:bg-happy-200"
+                  title={`Aplicar sugerencia: ${sugerencia.factor}`}
+                >
+                  <Sparkles className="h-3 w-3" /> Usar {sugerencia.factor}
+                </button>
+              )}
+            </div>
           </FormRow>
           <FormRow label="Precio unitario (S/)" required>
             <Input name="precio_unitario" type="number" step="0.0001" defaultValue={initial?.precio_unitario ?? 0} min={0} required />

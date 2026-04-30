@@ -4,8 +4,17 @@ import { z } from 'zod';
 import { redirect } from 'next/navigation';
 import { runAction, requireUser, bumpPaths, type ActionResult } from './_helpers';
 
+// Mapeo categoría → prefijo de 3 letras para el código auto.
+const PREFIJO_CAT: Record<'TELA' | 'AVIO' | 'INSUMO' | 'EMPAQUE', string> = {
+  TELA: 'TEL',
+  AVIO: 'AVI',
+  INSUMO: 'INS',
+  EMPAQUE: 'EMP',
+};
+
 const schema = z.object({
-  codigo: z.string().min(1).max(40),
+  // Opcional: si vacío, server lo autogenera como <PREFIJO_CAT><NNNN>.
+  codigo: z.string().max(40).optional().or(z.literal('')),
   nombre: z.string().min(2).max(200),
   descripcion: z.string().optional().or(z.literal('')),
   categoria: z.enum(['TELA','AVIO','INSUMO','EMPAQUE']),
@@ -26,7 +35,7 @@ const schema = z.object({
 
 function parseForm(fd: FormData) {
   return schema.parse({
-    codigo: fd.get('codigo'),
+    codigo: fd.get('codigo') || '',
     nombre: fd.get('nombre'),
     descripcion: fd.get('descripcion') || '',
     categoria: fd.get('categoria') || 'INSUMO',
@@ -48,7 +57,7 @@ function parseForm(fd: FormData) {
 
 function clean(d: ReturnType<typeof parseForm>) {
   return {
-    codigo: d.codigo.trim().toUpperCase(),
+    codigo: (d.codigo ?? '').trim().toUpperCase(),
     nombre: d.nombre.trim(),
     descripcion: d.descripcion || null,
     categoria: d.categoria,
@@ -72,8 +81,27 @@ export async function crearMaterial(_prev: unknown, fd: FormData): Promise<Actio
   const r = await runAction(async () => {
     const data = parseForm(fd);
     const { sb } = await requireUser();
-    const { data: row, error } = await sb.from('materiales').insert(clean(data)).select('id').single();
-    if (error) throw new Error(error.message);
+
+    const cleaned = clean(data);
+
+    // Si el código vino vacío, autogenerar como <PREFIJO_CAT><NNNN>.
+    if (!cleaned.codigo) {
+      const prefix = PREFIJO_CAT[cleaned.categoria];
+      const { data: nro, error: errNro } = await sb.rpc('next_correlativo', {
+        p_clave: `MAT_${prefix}`,
+        p_padding: 4,
+      });
+      if (errNro) throw new Error(errNro.message);
+      cleaned.codigo = `${prefix}${nro}`;
+    }
+
+    const { data: row, error } = await sb.from('materiales').insert(cleaned).select('id').single();
+    if (error) {
+      if (error.code === '23505') {
+        throw new Error(`Código "${cleaned.codigo}" ya existe — déjalo vacío para autogenerar`);
+      }
+      throw new Error(error.message);
+    }
     return { id: row.id };
   });
   if (r.ok) {
@@ -81,6 +109,50 @@ export async function crearMaterial(_prev: unknown, fd: FormData): Promise<Actio
     redirect('/materiales');
   }
   return r;
+}
+
+/**
+ * Sugiere un factor de conversión para un par (unidad_compra, unidad_consumo)
+ * basándose en el factor más usado por OTROS materiales con esa misma combinación.
+ * Útil cuando la tabla unidades_medida no tiene factor_conversion definido.
+ *
+ * Retorna el factor más frecuente (moda) y cuántos materiales lo usan, para que
+ * la UI pueda decir "120 materiales usan factor 50". Devuelve null si no hay match.
+ */
+export async function sugerirFactorConversion(
+  unidadCompraId: string,
+  unidadConsumoId: string,
+): Promise<{ factor: number; coincidencias: number } | null> {
+  if (!unidadCompraId || !unidadConsumoId) return null;
+  if (unidadCompraId === unidadConsumoId) return { factor: 1, coincidencias: 0 };
+
+  const { sb } = await requireUser();
+  const { data, error } = await sb
+    .from('materiales')
+    .select('factor_conversion')
+    .eq('unidad_compra_id', unidadCompraId)
+    .eq('unidad_consumo_id', unidadConsumoId)
+    .not('factor_conversion', 'is', null)
+    .gt('factor_conversion', 0);
+  if (error || !data || data.length === 0) return null;
+
+  // Calcular moda (factor más frecuente)
+  const conteo = new Map<number, number>();
+  for (const row of data) {
+    const f = Number(row.factor_conversion ?? 0);
+    if (f <= 0) continue;
+    conteo.set(f, (conteo.get(f) ?? 0) + 1);
+  }
+  if (conteo.size === 0) return null;
+  let mejorFactor = 0;
+  let mejorCount = 0;
+  for (const [f, c] of conteo) {
+    if (c > mejorCount) {
+      mejorFactor = f;
+      mejorCount = c;
+    }
+  }
+  return { factor: mejorFactor, coincidencias: mejorCount };
 }
 
 export async function actualizarMaterial(id: string, _prev: unknown, fd: FormData): Promise<ActionResult> {
