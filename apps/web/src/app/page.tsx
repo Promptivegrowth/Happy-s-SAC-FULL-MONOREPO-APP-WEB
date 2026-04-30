@@ -1,25 +1,17 @@
 import Link from 'next/link';
 import Image from 'next/image';
-import { Button } from '@happy/ui/button';
 import { Card } from '@happy/ui/card';
 import { Badge } from '@happy/ui/badge';
-import { ArrowRight, Truck, ShieldCheck, Sparkles, Heart, MessageCircle, Calendar } from 'lucide-react';
+import { ArrowRight, Sparkles, MessageCircle, Calendar } from 'lucide-react';
 import { createClient } from '@happy/db/server';
 import { ProductCard } from '@/components/product-card';
 import { loadPublicaciones } from '@/server/queries/publicaciones';
 import { BLUR_DATA_URL } from '@/lib/image';
 import { HeroSlider } from '@/components/hero-slider';
+import { PremiumStats } from '@/components/premium-stats';
+import { CategoryBento } from '@/components/category-bento';
 
 export const dynamic = 'force-dynamic';
-
-const CATS_HERO = [
-  { slug: 'halloween',        label: 'Halloween',       emoji: '🎃', gradient: 'from-happy-500 to-corp-700' },
-  { slug: 'fiestas-patrias',  label: 'Fiestas Patrias', emoji: '🇵🇪', gradient: 'from-danger to-happy-500' },
-  { slug: 'navidad',          label: 'Navidad',         emoji: '🎅', gradient: 'from-corp-700 to-happy-600' },
-  { slug: 'danzas-tipicas',   label: 'Danzas Típicas',  emoji: '💃', gradient: 'from-happy-600 to-corp-900' },
-  { slug: 'superheroes',      label: 'Superhéroes',     emoji: '🦸', gradient: 'from-corp-700 to-corp-900' },
-  { slug: 'princesas',        label: 'Princesas',       emoji: '👸', gradient: 'from-happy-400 to-danger' },
-];
 
 type CampaniaActiva = {
   slug: string | null;
@@ -64,15 +56,8 @@ export default async function Home() {
       {/* HERO SLIDER (3 imágenes webp horizontales auto-rotate) */}
       <HeroSlider />
 
-      {/* Tira de beneficios debajo del slider */}
-      <section className="border-b bg-slate-50/60">
-        <div className="container grid grid-cols-2 gap-3 px-4 py-6 sm:grid-cols-4">
-          <Stat icon={<Truck className="h-5 w-5" />} value="2-3 días" label="Envío en Lima" />
-          <Stat icon={<ShieldCheck className="h-5 w-5" />} value="100% seguro" label="Yape · Plin · Tarjeta" />
-          <Stat icon={<Sparkles className="h-5 w-5" />} value="+200 modelos" label="11 tallas disponibles" />
-          <Stat icon={<Heart className="h-5 w-5" />} value="+30 mil" label="Familias felices" />
-        </div>
-      </section>
+      {/* Stats premium con counter animado */}
+      <PremiumStats />
 
       {/* CAMPAÑAS ACTIVAS */}
       {campanias.length > 0 && (
@@ -125,28 +110,8 @@ export default async function Home() {
         </section>
       )}
 
-      {/* CATEGORÍAS */}
-      <section className="container px-4 py-16">
-        <div className="mb-8 flex items-end justify-between">
-          <div>
-            <h2 className="font-display text-3xl font-semibold text-corp-900">Explora por temporada</h2>
-            <p className="mt-1 text-slate-500">Encuentra el disfraz perfecto para cada celebración</p>
-          </div>
-          <Link href="/productos" className="hidden text-sm font-medium text-happy-600 hover:underline md:inline">
-            Ver todas las categorías →
-          </Link>
-        </div>
-        <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-6">
-          {CATS_HERO.map((c) => (
-            <Link key={c.slug} href={`/categoria/${c.slug}`}>
-              <Card className="group flex aspect-square flex-col items-center justify-center gap-2 border-2 transition hover:-translate-y-1 hover:border-happy-400 hover:shadow-glow">
-                <div className="text-4xl transition group-hover:scale-110">{c.emoji}</div>
-                <span className="text-sm font-medium text-corp-900">{c.label}</span>
-              </Card>
-            </Link>
-          ))}
-        </div>
-      </section>
+      {/* Bento grid de categorías — premium con imágenes transparentes */}
+      <CategoryBento />
 
       {/* TOP / Más vendidos — sección destacada */}
       {destacados.length > 0 && (
@@ -217,12 +182,3 @@ export default async function Home() {
   );
 }
 
-function Stat({ icon, value, label }: { icon: React.ReactNode; value: string; label: string }) {
-  return (
-    <div>
-      <div className="mx-auto mb-1 flex h-9 w-9 items-center justify-center rounded-lg bg-happy-100 text-happy-600">{icon}</div>
-      <p className="font-display text-lg font-semibold text-corp-900">{value}</p>
-      <p className="text-xs text-slate-500">{label}</p>
-    </div>
-  );
-}
