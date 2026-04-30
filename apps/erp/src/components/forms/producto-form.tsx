@@ -114,10 +114,16 @@ export function ProductoForm({ initial, categorias, campanas }: { initial?: Prod
           </FormRow>
         </FormGrid>
         <div className="flex flex-wrap gap-6">
-          <label className="flex items-center gap-3 text-sm">
-            <Switch checked={destacado} onCheckedChange={setDestacado} />
+          <label className="flex items-start gap-3 text-sm">
+            <Switch checked={destacado} onCheckedChange={setDestacado} className="mt-0.5" />
             <input type="hidden" name="destacado" value={destacado ? 'on' : 'off'} />
-            <span>Marcar como destacado</span>
+            <div>
+              <p>Destacar internamente (ERP)</p>
+              <p className="text-[10px] text-slate-500">
+                Marca visible solo para el equipo, no afecta web/POS. Para destacar en la home de la
+                web, usá la pestaña "Publicación web".
+              </p>
+            </div>
           </label>
           <label className="flex items-center gap-3 text-sm">
             <Switch checked={activo} onCheckedChange={setActivo} />
