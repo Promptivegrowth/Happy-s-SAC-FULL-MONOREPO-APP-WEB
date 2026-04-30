@@ -10,6 +10,7 @@ import { Switch } from '@happy/ui/switch';
 import { FormGrid, FormRow, FormSection } from '@happy/ui/form-row';
 import { Button } from '@happy/ui/button';
 import { Sparkles } from 'lucide-react';
+import { ImageUploader } from './image-uploader';
 import { crearMaterial, actualizarMaterial, sugerirFactorConversion } from '@/server/actions/materiales';
 
 type Material = {
@@ -30,6 +31,7 @@ type Material = {
   requiere_lote?: boolean;
   proveedor_preferido_id?: string | null;
   notas?: string | null;
+  imagen_url?: string | null;
   activo?: boolean;
 };
 
@@ -50,6 +52,7 @@ export function MaterialForm({ initial, unidades, proveedores }: Props) {
   const [imp, setImp] = useState(initial?.es_importado ?? false);
   const [lote, setLote] = useState(initial?.requiere_lote ?? false);
   const [activo, setActivo] = useState(initial?.activo ?? true);
+  const [imagenUrl, setImagenUrl] = useState<string | null>(initial?.imagen_url ?? null);
 
   // Auto-completar factor cuando cambian las unidades
   const [unidadCompraId, setUnidadCompraId] = useState(initial?.unidad_compra_id ?? '');
@@ -193,7 +196,11 @@ export function MaterialForm({ initial, unidades, proveedores }: Props) {
               )}
             </div>
           </FormRow>
-          <FormRow label="Precio unitario (S/)" required>
+          <FormRow
+            label="Precio unitario (S/)"
+            required
+            hint="Precio de COMPRA por unidad de COMPRA (ej: precio del rollo entero, no por metro)"
+          >
             <Input name="precio_unitario" type="number" step="0.0001" defaultValue={initial?.precio_unitario ?? 0} min={0} required />
           </FormRow>
           <FormRow label="Stock mínimo">
@@ -206,6 +213,19 @@ export function MaterialForm({ initial, unidades, proveedores }: Props) {
             </select>
           </FormRow>
         </FormGrid>
+      </FormSection>
+
+      <FormSection title="Imagen del material" description="Foto de referencia para identificar el material visualmente.">
+        <FormRow label="Foto" hint="PNG, JPG o WebP · max 10MB">
+          <ImageUploader
+            value={imagenUrl}
+            onChange={setImagenUrl}
+            name="imagen_url"
+            prefix={`materiales/${initial?.id ?? 'tmp'}`}
+            aspect="square"
+            className="max-w-[200px]"
+          />
+        </FormRow>
       </FormSection>
 
       <FormSection title="Otras opciones">

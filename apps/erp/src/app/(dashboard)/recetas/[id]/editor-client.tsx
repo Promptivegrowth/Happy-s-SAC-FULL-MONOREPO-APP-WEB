@@ -1,13 +1,13 @@
 'use client';
 
-import { useState, useTransition } from 'react';
+import { useEffect, useMemo, useRef, useState, useTransition } from 'react';
 import { Button } from '@happy/ui/button';
 import { Input } from '@happy/ui/input';
 import { Card } from '@happy/ui/card';
 import { Badge } from '@happy/ui/badge';
 import { FormGrid, FormRow } from '@happy/ui/form-row';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@happy/ui/table';
-import { Plus, Trash2, Loader2 } from 'lucide-react';
+import { Plus, Trash2, Loader2, Search, X } from 'lucide-react';
 import { toast } from 'sonner';
 import { upsertReceta, eliminarLinea } from '@/server/actions/recetas';
 
@@ -37,6 +37,8 @@ export function RecetaEditor({ recetaId, materiales, unidades, lineas }: {
 
   const filtrado = lineas.filter((l) => !filtroTalla || l.talla === filtroTalla);
 
+  void busca; // mantener compatibilidad — el filtro ahora está dentro del MaterialCombobox
+
   function onSubmit(fd: FormData) {
     fd.append('receta_id', recetaId);
     start(async () => {
@@ -59,7 +61,7 @@ export function RecetaEditor({ recetaId, materiales, unidades, lineas }: {
     });
   }
 
-  const matsFiltrados = materiales.filter((m) => !busca || m.nombre.toLowerCase().includes(busca.toLowerCase()) || m.codigo.toLowerCase().includes(busca.toLowerCase()));
+  void materiales; // referencia para silenciar warning — usado dentro de MaterialCombobox
 
   // Agrupar líneas por talla para visualización
   const porTalla = TALLAS.reduce<Record<string, Linea[]>>((acc, t) => {
@@ -121,19 +123,12 @@ export function RecetaEditor({ recetaId, materiales, unidades, lineas }: {
         <Card className="border-happy-300 bg-happy-50/40 p-4">
           <form action={onSubmit} className="space-y-4">
             <h3 className="font-display text-sm font-semibold">Nueva línea de receta</h3>
-            <Input
-              placeholder="Buscar material por código o nombre…"
-              value={busca}
-              onChange={(e) => setBusca(e.target.value)}
-            />
+
+            <MaterialCombobox materiales={materiales} />
+
             <FormGrid cols={3}>
-              <FormRow label="Material" required>
-                <select name="material_id" required className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm">
-                  <option value="">— Seleccionar —</option>
-                  {matsFiltrados.slice(0, 100).map((m) => (
-                    <option key={m.id} value={m.id}>[{m.categoria}] {m.codigo} · {m.nombre}</option>
-                  ))}
-                </select>
+              <FormRow label="Material seleccionado (oculto)" className="hidden">
+                <Input name="_dummy" />
               </FormRow>
               <FormRow label="Talla" required>
                 <select name="talla" required className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm">
@@ -231,5 +226,142 @@ function RecetaTabla({ lineas, onDelete, pending, compact }: { lineas: Linea[]; 
         })}
       </TableBody>
     </Table>
+  );
+}
+
+/**
+ * Combobox: input que filtra in-memory por código + nombre + sub-categoría +
+ * color, muestra dropdown con resultados, al seleccionar setea el hidden
+ * input <input name="material_id" value={...}> que el form lee.
+ */
+function MaterialCombobox({ materiales }: { materiales: Mat[] }) {
+  const [text, setText] = useState('');
+  const [open, setOpen] = useState(false);
+  const [highlight, setHighlight] = useState(0);
+  const [seleccionado, setSeleccionado] = useState<Mat | null>(null);
+  const wrapRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    function onClick(e: MouseEvent) {
+      if (!wrapRef.current?.contains(e.target as Node)) setOpen(false);
+    }
+    document.addEventListener('mousedown', onClick);
+    return () => document.removeEventListener('mousedown', onClick);
+  }, []);
+
+  const filtrados = useMemo(() => {
+    const q = text.trim().toLowerCase();
+    if (!q && seleccionado) return [];
+    if (!q) return materiales.slice(0, 30);
+    const norm = (s: string) =>
+      s.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
+    const qn = norm(q);
+    return materiales
+      .filter((m) =>
+        norm(m.codigo).includes(qn) ||
+        norm(m.nombre).includes(qn) ||
+        (m as Mat & { categoria?: string }).categoria?.toLowerCase().includes(qn),
+      )
+      .slice(0, 30);
+  }, [materiales, text, seleccionado]);
+
+  function elegir(m: Mat) {
+    setSeleccionado(m);
+    setText(`${m.codigo} · ${m.nombre}`);
+    setOpen(false);
+  }
+
+  function limpiar() {
+    setSeleccionado(null);
+    setText('');
+    setOpen(true);
+  }
+
+  return (
+    <div ref={wrapRef} className="relative">
+      <input type="hidden" name="material_id" value={seleccionado?.id ?? ''} required />
+      <label className="mb-1 block text-xs font-medium text-slate-700">
+        Material <span className="text-danger">*</span>
+        <span className="ml-1 font-normal text-slate-400">— buscar por código o nombre</span>
+      </label>
+      <div className="relative">
+        <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+        <input
+          type="text"
+          value={text}
+          onChange={(e) => {
+            setText(e.target.value);
+            setSeleccionado(null);
+            setOpen(true);
+            setHighlight(0);
+          }}
+          onFocus={() => setOpen(true)}
+          onKeyDown={(e) => {
+            if (e.key === 'ArrowDown') {
+              e.preventDefault();
+              setHighlight((h) => Math.min(h + 1, filtrados.length - 1));
+            } else if (e.key === 'ArrowUp') {
+              e.preventDefault();
+              setHighlight((h) => Math.max(h - 1, 0));
+            } else if (e.key === 'Enter') {
+              e.preventDefault();
+              if (filtrados[highlight]) elegir(filtrados[highlight]);
+            } else if (e.key === 'Escape') {
+              setOpen(false);
+            }
+          }}
+          placeholder="Ej: TEL0001, hilo azul, COTTON…"
+          className={`h-10 w-full rounded-md border border-input bg-background pl-9 pr-9 text-sm focus:outline-none focus:ring-2 focus:ring-happy-200 ${
+            seleccionado ? 'border-happy-400 bg-happy-50/40' : ''
+          }`}
+        />
+        {seleccionado && (
+          <button
+            type="button"
+            onClick={limpiar}
+            className="absolute right-2 top-1/2 -translate-y-1/2 rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
+            aria-label="Limpiar"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        )}
+      </div>
+
+      {open && filtrados.length > 0 && (
+        <div className="absolute left-0 right-0 top-full z-30 mt-1 max-h-72 overflow-auto rounded-md border bg-white shadow-lg">
+          {filtrados.map((m, i) => (
+            <button
+              type="button"
+              key={m.id}
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => elegir(m)}
+              className={`flex w-full items-start gap-3 border-b px-3 py-2 text-left text-sm last:border-0 hover:bg-happy-50 ${
+                i === highlight ? 'bg-happy-50' : ''
+              }`}
+            >
+              <Badge variant="secondary" className="mt-0.5 text-[9px]">
+                {(m as Mat & { categoria?: string }).categoria ?? ''}
+              </Badge>
+              <div className="min-w-0 flex-1">
+                <div className="font-medium text-corp-900">{m.nombre}</div>
+                <div className="font-mono text-[11px] text-slate-500">
+                  {m.codigo}
+                  {m.precio_unitario != null && (
+                    <span className="ml-2 text-slate-400">
+                      · S/ {Number(m.precio_unitario).toFixed(2)}
+                    </span>
+                  )}
+                </div>
+              </div>
+            </button>
+          ))}
+        </div>
+      )}
+      {open && filtrados.length === 0 && text.trim() && (
+        <div className="absolute left-0 right-0 top-full z-30 mt-1 rounded-md border bg-white p-3 text-center text-xs text-slate-500 shadow-lg">
+          Sin coincidencias para &quot;{text}&quot;
+        </div>
+      )}
+    </div>
   );
 }

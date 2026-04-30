@@ -30,6 +30,7 @@ const schema = z.object({
   requiere_lote: z.boolean().default(false),
   proveedor_preferido_id: z.string().uuid().optional().or(z.literal('')),
   notas: z.string().optional().or(z.literal('')),
+  imagen_url: z.string().url().optional().or(z.literal('')),
   activo: z.boolean().default(true),
 });
 
@@ -51,6 +52,7 @@ function parseForm(fd: FormData) {
     requiere_lote: fd.get('requiere_lote') === 'on',
     proveedor_preferido_id: fd.get('proveedor_preferido_id') || '',
     notas: fd.get('notas') || '',
+    imagen_url: fd.get('imagen_url') || '',
     activo: fd.get('activo') !== 'off',
   });
 }
@@ -73,6 +75,7 @@ function clean(d: ReturnType<typeof parseForm>) {
     requiere_lote: d.requiere_lote,
     proveedor_preferido_id: d.proveedor_preferido_id || null,
     notas: d.notas || null,
+    imagen_url: d.imagen_url || null,
     activo: d.activo,
   };
 }
