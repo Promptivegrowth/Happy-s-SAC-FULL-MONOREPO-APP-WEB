@@ -156,16 +156,33 @@ async function ProductosTable({ q, cat, estado, web, sin_categoria }: SP) {
   if (web === 'si') productos = productos.filter((p) => p.productos_publicacion?.[0]?.publicado);
   if (web === 'no') productos = productos.filter((p) => !p.productos_publicacion?.[0]?.publicado);
 
-  // Cargar stock por variante para todas las variantes de los productos visibles
+  // Cargar stock por variante para todas las variantes de los productos visibles.
+  // Se batchea en chunks porque con muchos productos (límite 500) la lista de
+  // UUIDs puede exceder el largo máximo de URL de PostgREST y la query falla
+  // sin error visible (skeleton infinito en la página).
   const todasLasVariantes = productos.flatMap((p) => p.productos_variantes.map((v) => v.id));
   const stockPorVariante = new Map<string, number>();
   if (todasLasVariantes.length > 0) {
-    const { data: stocks } = await sb
-      .from('v_stock_variante_total')
-      .select('variante_id, stock_total')
-      .in('variante_id', todasLasVariantes);
-    for (const s of stocks ?? []) {
-      stockPorVariante.set(s.variante_id as string, Number(s.stock_total ?? 0));
+    const CHUNK = 200;
+    const chunks: string[][] = [];
+    for (let i = 0; i < todasLasVariantes.length; i += CHUNK) {
+      chunks.push(todasLasVariantes.slice(i, i + CHUNK));
+    }
+    try {
+      const results = await Promise.all(
+        chunks.map((c) =>
+          sb.from('v_stock_variante_total').select('variante_id, stock_total').in('variante_id', c),
+        ),
+      );
+      for (const { data: stocks } of results) {
+        for (const s of stocks ?? []) {
+          stockPorVariante.set(s.variante_id as string, Number(s.stock_total ?? 0));
+        }
+      }
+    } catch (e) {
+      // Si la vista de stock falla por cualquier motivo, seguimos renderizando
+      // sin badges de stock en lugar de colgar la página entera.
+      console.warn('[productos] no se pudo cargar stock_total:', (e as Error).message);
     }
   }
 
