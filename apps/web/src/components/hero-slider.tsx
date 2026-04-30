@@ -23,7 +23,7 @@ declare module 'react' {
   }
 }
 
-type SlideLayout = 'izquierda-lottie' | 'centro' | 'centro-amplio';
+type SlideLayout = 'izquierda-lottie' | 'derecha-lottie' | 'centro' | 'centro-amplio';
 
 type Slide = {
   src: string;
@@ -47,7 +47,7 @@ const SLIDES: Slide[] = [
     src: '/slider1.webp',
     alt: 'Día de la Madre — disfraces típicos para mamá',
     href: '/campanias/dia-de-la-madre-2026',
-    layout: 'izquierda-lottie',
+    layout: 'derecha-lottie',
     pretitulo: '✨ Mayo 2026',
     titulo: '¡Feliz día,',
     tituloAcento: 'Mami!',
@@ -65,7 +65,7 @@ const SLIDES: Slide[] = [
     pretitulo: '🌸 Edición limitada',
     titulo: 'Mamá merece',
     tituloAcento: 'lo mejor',
-    subtitulo: 'Vestidos coloridos y trajes únicos para que mamá brille en cada presentación.',
+    subtitulo: 'Vestidos coloridos y trajes únicos\npara que mamá brille en cada presentación.',
     cta: 'Comprar ahora',
     badgeIcon: 'gift',
     tituloColor: '#231459',
@@ -286,10 +286,11 @@ export function HeroSlider() {
 
 function SlideContent({ slide, keyForAnim }: { slide: Slide; keyForAnim: string }) {
   // Posición / alineación del bloque de texto según layout.
-  // Slider 1: a la izquierda PERO no pegado al borde — empuja hacia el medio-izquierda.
+  // Slider 1: derecha-lottie — texto a la derecha, lottie a la izquierda.
   // Slider 2 y 3: centrado, con padding amplio para que no se corte el texto.
   const wrapperClasses = {
     'izquierda-lottie': 'items-center justify-start pl-8 sm:pl-20 lg:pl-32 xl:pl-48 2xl:pl-64',
+    'derecha-lottie': 'items-center justify-end pr-8 sm:pr-20 lg:pr-32 xl:pr-48 2xl:pr-64',
     centro: 'items-center justify-center px-6 sm:px-12',
     'centro-amplio': 'items-center justify-center px-6 sm:px-12',
   }[slide.layout];
@@ -298,9 +299,12 @@ function SlideContent({ slide, keyForAnim }: { slide: Slide; keyForAnim: string 
   // del título quepan sin recortarse incluso en xl con tipografía grande.
   const textWidth = {
     'izquierda-lottie': 'max-w-[18rem] text-left sm:max-w-md lg:max-w-xl xl:max-w-2xl',
+    'derecha-lottie': 'max-w-[18rem] text-right sm:max-w-md lg:max-w-xl xl:max-w-2xl',
     centro: 'max-w-md text-center sm:max-w-2xl lg:max-w-3xl',
     'centro-amplio': 'max-w-md text-center sm:max-w-2xl lg:max-w-4xl',
   }[slide.layout];
+
+  const layoutLateral = slide.layout === 'izquierda-lottie' || slide.layout === 'derecha-lottie';
 
   // Delay para empezar las letras del título DESPUÉS del badge
   const TITULO_DELAY = 300;
@@ -314,7 +318,7 @@ function SlideContent({ slide, keyForAnim }: { slide: Slide; keyForAnim: string 
         {/* Pretítulo / badge */}
         <div
           className={`inline-flex items-center gap-2 rounded-full bg-gradient-to-r from-pink-500 via-rose-500 to-happy-500 px-4 py-1.5 text-xs font-bold uppercase tracking-wider text-white shadow-lg sm:text-sm ${
-            slide.layout === 'izquierda-lottie' ? '' : 'mx-auto'
+            layoutLateral ? '' : 'mx-auto'
           }`}
           style={{ animation: 'hero-bounce-in 600ms cubic-bezier(0.34,1.56,0.64,1) both' }}
         >
@@ -326,7 +330,7 @@ function SlideContent({ slide, keyForAnim }: { slide: Slide; keyForAnim: string 
             Tamaños calibrados para que las dos líneas quepan en cada layout. */}
         <h2
           className={`font-fun font-bold leading-[1.05] tracking-tight ${
-            slide.layout === 'izquierda-lottie'
+            layoutLateral
               ? 'text-3xl sm:text-5xl lg:text-6xl xl:text-7xl'
               : slide.layout === 'centro-amplio'
                 ? 'text-3xl sm:text-5xl lg:text-7xl'
@@ -347,9 +351,9 @@ function SlideContent({ slide, keyForAnim }: { slide: Slide; keyForAnim: string 
           )}
         </h2>
 
-        {/* Subtítulo */}
+        {/* Subtítulo — whitespace-pre-line respeta los \n del texto. */}
         <p
-          className="font-fun text-base font-medium text-corp-900/85 sm:text-lg lg:text-xl"
+          className="whitespace-pre-line font-fun text-base font-medium text-corp-900/85 sm:text-lg lg:text-xl"
           style={{ animation: `hero-fade-in 700ms ease-out ${SUBT_DELAY}ms both` }}
         >
           {slide.subtitulo}
@@ -357,7 +361,7 @@ function SlideContent({ slide, keyForAnim }: { slide: Slide; keyForAnim: string 
 
         {/* CTA */}
         <div
-          className={`pt-2 ${slide.layout === 'izquierda-lottie' ? '' : 'flex justify-center'}`}
+          className={`pt-2 ${layoutLateral ? '' : 'flex justify-center'}`}
           style={{ animation: `hero-bounce-in 700ms cubic-bezier(0.34,1.56,0.64,1) ${CTA_DELAY}ms both` }}
         >
           <Link
@@ -370,10 +374,14 @@ function SlideContent({ slide, keyForAnim }: { slide: Slide; keyForAnim: string 
         </div>
       </div>
 
-      {/* Lottie solo en slider 1, en el extremo derecho. */}
-      {slide.layout === 'izquierda-lottie' && (
+      {/* Lottie en layouts laterales: se ubica en el lado opuesto al texto. */}
+      {layoutLateral && (
         <div
-          className="pointer-events-none absolute right-2 top-1/2 hidden h-40 w-40 -translate-y-1/2 sm:block sm:h-52 sm:w-52 lg:right-8 lg:h-72 lg:w-72 xl:right-16 xl:h-80 xl:w-80"
+          className={`pointer-events-none absolute top-1/2 hidden h-40 w-40 -translate-y-1/2 sm:block sm:h-52 sm:w-52 lg:h-72 lg:w-72 xl:h-80 xl:w-80 ${
+            slide.layout === 'izquierda-lottie'
+              ? 'right-2 lg:right-8 xl:right-16'
+              : 'left-2 lg:left-8 xl:left-16'
+          }`}
           style={{ animation: 'hero-bounce-in 900ms cubic-bezier(0.34,1.56,0.64,1) 600ms both' }}
         >
           <dotlottie-wc src={LOTTIE_SRC} autoplay loop style={{ width: '100%', height: '100%' }} />
