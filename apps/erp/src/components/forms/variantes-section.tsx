@@ -79,8 +79,17 @@ export function VariantesSection({ productoId, variantes }: { productoId: string
                 {tallasDisponibles.map((t) => <option key={t} value={t}>{t.replace('T', '')}</option>)}
               </select>
             </FormRow>
-            <FormRow label="SKU" required hint="Ej: PV482, MOANA-4">
-              <Input name="sku" required value={skuPrefix} onChange={(e) => setSkuPrefix(e.target.value.toUpperCase())} />
+            <FormRow
+              label="SKU (código)"
+              hint="Opcional. Si lo dejas vacío, se autogenera como HLW0001, DNZ0001 según la categoría del producto."
+            >
+              <Input
+                name="sku"
+                value={skuPrefix}
+                onChange={(e) => setSkuPrefix(e.target.value.toUpperCase())}
+                placeholder="Auto desde categoría"
+                maxLength={40}
+              />
             </FormRow>
             <FormRow label="Código de barras (EAN-13)">
               <Input name="codigo_barras" placeholder="opcional" />

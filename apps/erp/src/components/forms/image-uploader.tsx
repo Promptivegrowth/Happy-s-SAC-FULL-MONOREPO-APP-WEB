@@ -35,14 +35,18 @@ export function ImageUploader({
   aspect = 'square',
   className = '',
 }: Props) {
+  // Modo "galería": cuando NO hay prop `name` (no es campo de formulario),
+  // el uploader es un slot reutilizable que debe volver a vacío después de
+  // cada upload para que el padre maneje la lista completa de imágenes.
+  // Modo "formulario": cuando hay `name`, mantiene la imagen como preview
+  // del campo hidden del form (ej. imagen_principal_url del producto).
+  const isGalleryMode = !name;
   const [url, setUrl] = useState<string | null>(value ?? null);
   const [pending, start] = useTransition();
   const fileRef = useRef<HTMLInputElement>(null);
 
-  // Sincroniza con el `value` controlado por el padre. Sin esto, el uploader
-  // se queda mostrando la última imagen subida aunque el padre lo resetee
-  // (caso galería: el padre pasa value=null para que vuelva a slot vacío y
-  // pueda subir más fotos sin que se vean duplicadas).
+  // Sincroniza el preview interno con el value controlado por el padre.
+  // Útil cuando el padre cambia value externamente (ej. reset de form).
   useEffect(() => {
     setUrl(value ?? null);
   }, [value]);
@@ -55,8 +59,15 @@ export function ImageUploader({
       fd.append('file', file);
       const r = await subirArchivo(fd, bucket, prefix);
       if (r.ok && r.data) {
-        setUrl(r.data.url);
+        // Notificar al padre con la URL nueva
         onChange(r.data.url, r.data.path);
+        // En modo galería: resetear preview a vacío (el padre se encargó
+        // de agregar la imagen a su lista). En modo form: mostrar preview.
+        if (isGalleryMode) {
+          setUrl(null);
+        } else {
+          setUrl(r.data.url);
+        }
         toast.success('Imagen subida');
       } else {
         toast.error(r.error ?? 'Error al subir');

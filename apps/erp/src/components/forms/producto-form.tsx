@@ -42,32 +42,19 @@ export function ProductoForm({ initial, categorias, campanas }: { initial?: Prod
 
   return (
     <form action={formAction} className="space-y-6">
-      <FormSection title="Identificación del modelo" description="El modelo agrupa todas las tallas. Las tallas (variantes) se gestionan luego en el detalle.">
-        <FormGrid cols={3}>
-          <FormRow
-            label={isEdit ? 'Código del modelo' : 'Código del modelo'}
-            error={state.fields?.codigo}
-            hint={
-              isEdit
-                ? 'Editable. Ya está asignado.'
-                : 'Opcional. Si lo dejas vacío, se autogenera como CATEGORIA-0001 (ej. HALLOWEEN-0001).'
-            }
-          >
-            <Input
-              name="codigo"
-              defaultValue={initial?.codigo ?? ''}
-              maxLength={40}
-              placeholder={isEdit ? '' : 'Auto desde categoría'}
-              readOnly={isEdit}
-              className={isEdit ? 'bg-slate-50 text-slate-600' : undefined}
-            />
-          </FormRow>
-          <div className="sm:col-span-2">
-            <FormRow label="Nombre" required error={state.fields?.nombre}>
-              <Input name="nombre" defaultValue={initial?.nombre} required maxLength={150} placeholder="Moana / Bolívar / Chavo" />
-            </FormRow>
-          </div>
-        </FormGrid>
+      <FormSection
+        title="Identificación del modelo"
+        description="El modelo agrupa todas las tallas (variantes). Cada variante se identifica con un SKU del tipo HLW0001 que se autogenera desde la categoría."
+      >
+        <FormRow label="Nombre" required error={state.fields?.nombre}>
+          <Input
+            name="nombre"
+            defaultValue={initial?.nombre}
+            required
+            maxLength={150}
+            placeholder="Ej: Moana, Bolívar, Disfraz de Bombero…"
+          />
+        </FormRow>
 
         <FormGrid cols={3}>
           <FormRow label="Categoría">
