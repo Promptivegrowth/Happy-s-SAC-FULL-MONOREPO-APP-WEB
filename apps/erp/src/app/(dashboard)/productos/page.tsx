@@ -156,6 +156,27 @@ async function ProductosTable({ q, cat, estado, web, sin_categoria }: SP) {
   if (web === 'si') productos = productos.filter((p) => p.productos_publicacion?.[0]?.publicado);
   if (web === 'no') productos = productos.filter((p) => !p.productos_publicacion?.[0]?.publicado);
 
+  // Cargar categorías extra para los productos visibles. Cast hasta
+  // regenerar tipos de Supabase tras aplicar la migración 31.
+  const extrasMap = new Map<string, { id: string; nombre: string }[]>();
+  try {
+    const ids = productos.map((p) => p.id);
+    if (ids.length > 0) {
+      const { data: pcex } = await (sb as unknown as { from: (t: string) => any }) // eslint-disable-line @typescript-eslint/no-explicit-any
+        .from('productos_categorias_extra')
+        .select('producto_id, categorias!inner(id, nombre)')
+        .in('producto_id', ids);
+      for (const e of (pcex ?? []) as { producto_id: string; categorias?: { id: string; nombre: string } }[]) {
+        if (!e.categorias) continue;
+        const arr = extrasMap.get(e.producto_id) ?? [];
+        arr.push(e.categorias);
+        extrasMap.set(e.producto_id, arr);
+      }
+    }
+  } catch {
+    /* tabla no existe aún (mig 31 sin aplicar) — sin extras */
+  }
+
   // Cargar stock por variante para todas las variantes de los productos visibles.
   // Se batchea en chunks porque con muchos productos (límite 500) la lista de
   // UUIDs puede exceder el largo máximo de URL de PostgREST y la query falla
@@ -242,11 +263,23 @@ async function ProductosTable({ q, cat, estado, web, sin_categoria }: SP) {
                     )}
                   </TableCell>
                   <TableCell>
-                    {p.categorias?.nombre ? (
-                      <Badge variant="secondary">{p.categorias.nombre}</Badge>
-                    ) : (
-                      <span className="text-xs text-slate-400">—</span>
-                    )}
+                    <div className="flex flex-wrap items-center gap-1">
+                      {p.categorias?.nombre ? (
+                        <Badge variant="secondary">{p.categorias.nombre}</Badge>
+                      ) : (
+                        <span className="text-xs text-slate-400">—</span>
+                      )}
+                      {(extrasMap.get(p.id) ?? []).map((ex) => (
+                        <Badge
+                          key={ex.id}
+                          variant="outline"
+                          className="border-dashed text-[9px] text-slate-500"
+                          title="Categoría extra (red de seguridad)"
+                        >
+                          + {ex.nombre}
+                        </Badge>
+                      ))}
+                    </div>
                   </TableCell>
                   <TableCell>
                     {p.campanas?.nombre ? (

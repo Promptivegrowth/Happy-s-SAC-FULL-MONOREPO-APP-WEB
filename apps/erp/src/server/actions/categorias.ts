@@ -69,14 +69,16 @@ export async function actualizarCategoria(id: string, _prev: unknown, fd: FormDa
 }
 
 /**
- * Toggle inline para publicar/despublicar TODOS los productos de una
- * categoría en bloque. Modelo de 1 capa: el toggle ES la publicación.
- * - ENCENDER: activa la categoría + upsert publicado=true a todos sus
- *   productos activos.
- * - APAGAR: desactiva la categoría + update publicado=false a todos sus
- *   productos. El contador "Publicados en web" siempre refleja la
- *   realidad. Para ocultar 1 producto puntual sin afectar al resto,
- *   usar /web-catalogo (toggle individual).
+ * Toggle de categoría. Considera categorías extra: un producto NO se
+ * despublica si todavía pertenece a otra categoría activa (principal
+ * o extra). Es la "red de seguridad" pedida por el negocio para que
+ * los disfraces multi-temporada (Halloween + Día de la Madre) no
+ * desaparezcan al rotar campañas.
+ *
+ * - ENCENDER: publica todos los productos cuya principal sea esta
+ *   categoría O que la tengan como extra.
+ * - APAGAR: despublica solo los productos que se quedan SIN
+ *   ninguna categoría activa (ni principal ni extras).
  */
 export async function toggleCategoriaActivo(
   id: string,
@@ -88,19 +90,30 @@ export async function toggleCategoriaActivo(
     const { error: errCat } = await sb.from('categorias').update({ activo }).eq('id', id);
     if (errCat) throw new Error(errCat.message);
 
-    const { data: prods } = await sb
-      .from('productos')
-      .select('id')
-      .eq('categoria_id', id)
-      .eq('activo', true);
+    // Productos que tocan a esta categoría (como principal O como extra).
+    // Cast hasta regenerar tipos tras aplicar mig 31.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const sbAny = sb as unknown as { from: (t: string) => any };
+    const [{ data: principales }, { data: extras }] = await Promise.all([
+      sb.from('productos').select('id').eq('categoria_id', id).eq('activo', true),
+      sbAny
+        .from('productos_categorias_extra')
+        .select('producto_id, productos!inner(activo)')
+        .eq('categoria_id', id)
+        .eq('productos.activo', true),
+    ]);
 
-    if (!prods || prods.length === 0) return { afectados: 0 };
+    const idsPrincipales = (principales ?? []).map((p) => p.id as string);
+    const idsExtras = ((extras ?? []) as { producto_id: string }[]).map((e) => e.producto_id);
+    const idsAfectados = Array.from(new Set([...idsPrincipales, ...idsExtras]));
+
+    if (idsAfectados.length === 0) return { afectados: 0 };
 
     if (activo) {
-      // Encender: publicar todos los productos activos (upsert).
+      // ENCENDER: publica todos los afectados (principales + extras).
       const ahora = new Date().toISOString();
-      const filas = prods.map((p) => ({
-        producto_id: p.id,
+      const filas = idsAfectados.map((pid) => ({
+        producto_id: pid,
         publicado: true,
         publicado_por: userId,
         publicado_en: ahora,
@@ -110,17 +123,45 @@ export async function toggleCategoriaActivo(
         .upsert(filas, { onConflict: 'producto_id' });
       if (errPub) throw new Error(errPub.message);
     } else {
-      // Apagar: despublicar todos (update donde ya exista fila;
-      // si no existe, no hay nada que despublicar).
-      const ids = prods.map((p) => p.id);
-      const { error: errUnpub } = await sb
-        .from('productos_publicacion')
-        .update({ publicado: false })
-        .in('producto_id', ids);
-      if (errUnpub) throw new Error(errUnpub.message);
+      // APAGAR: solo despublica los que se quedan sin ninguna otra
+      // categoría activa. Para eso traemos para cada afectado todas
+      // sus categorías (principal + extras) y vemos si al menos una
+      // sigue activa (excluyendo la que acabamos de apagar).
+      const [{ data: prodCats }, { data: extrasCats }] = await Promise.all([
+        sb
+          .from('productos')
+          .select('id, categorias!inner(id, activo)')
+          .in('id', idsAfectados),
+        sbAny
+          .from('productos_categorias_extra')
+          .select('producto_id, categorias!inner(id, activo)')
+          .in('producto_id', idsAfectados),
+      ]);
+
+      type CatRef = { id: string; activo: boolean };
+      const altActivasPorProd = new Map<string, boolean>();
+      for (const p of prodCats ?? []) {
+        const cat = (p as unknown as { categorias: CatRef }).categorias;
+        if (cat && cat.id !== id && cat.activo) altActivasPorProd.set(p.id as string, true);
+      }
+      for (const e of (extrasCats ?? []) as { producto_id: string; categorias?: CatRef }[]) {
+        const cat = e.categorias;
+        if (cat && cat.id !== id && cat.activo) {
+          altActivasPorProd.set(e.producto_id, true);
+        }
+      }
+
+      const idsADespublicar = idsAfectados.filter((pid) => !altActivasPorProd.get(pid));
+      if (idsADespublicar.length > 0) {
+        const { error: errUnpub } = await sb
+          .from('productos_publicacion')
+          .update({ publicado: false })
+          .in('producto_id', idsADespublicar);
+        if (errUnpub) throw new Error(errUnpub.message);
+      }
     }
 
-    return { afectados: prods.length };
+    return { afectados: idsAfectados.length };
   });
   if (r.ok) await bumpPaths('/categorias', '/web-catalogo', '/productos');
   return r;

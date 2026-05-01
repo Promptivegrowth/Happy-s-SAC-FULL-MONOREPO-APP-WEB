@@ -41,7 +41,29 @@ export async function loadPublicaciones(opts: LoadOpts = {}): Promise<ProductCar
       .limit(opts.limit ?? 60);
 
     if (opts.q) query = query.ilike('titulo_web', `%${opts.q}%`);
-    if (opts.categoriaId) query = query.eq('productos.categoria_id', opts.categoriaId);
+    if (opts.categoriaId) {
+      // El producto puede aparecer en una categoría como principal O como
+      // extra (red de seguridad para que no desaparezca al rotar temporada).
+      // Cast: tabla productos_categorias_extra (mig 31) aún no está en
+      // los tipos auto-generados — regenerar tipos cuando se aplique.
+      try {
+        const { data: pcex } = await (sb as unknown as { from: (t: string) => any }) // eslint-disable-line @typescript-eslint/no-explicit-any
+          .from('productos_categorias_extra')
+          .select('producto_id')
+          .eq('categoria_id', opts.categoriaId);
+        const extraIds = ((pcex ?? []) as { producto_id: string }[]).map((e) => e.producto_id);
+        if (extraIds.length > 0) {
+          query = query.or(
+            `categoria_id.eq.${opts.categoriaId},id.in.(${extraIds.join(',')})`,
+            { foreignTable: 'productos' },
+          );
+        } else {
+          query = query.eq('productos.categoria_id', opts.categoriaId);
+        }
+      } catch {
+        query = query.eq('productos.categoria_id', opts.categoriaId);
+      }
+    }
     if (opts.campanaId) query = query.eq('productos.campana_id', opts.campanaId);
     if (opts.destacado) query = query.eq('destacado_web', true);
 
@@ -53,11 +75,11 @@ export async function loadPublicaciones(opts: LoadOpts = {}): Promise<ProductCar
     const pubs = (data ?? []) as unknown as PubRow[];
     if (pubs.length === 0) return [];
 
-    // Cargar ratings + stock en paralelo
+    // Cargar ratings + stock + extras (con cat activa) en paralelo
     const productoIds = pubs.map((p) => p.producto_id);
     const varianteIds = pubs.flatMap((p) => (p.productos?.productos_variantes ?? []).map((v) => v.id));
 
-    const [{ data: ratings }, { data: stocks }] = await Promise.all([
+    const [{ data: ratings }, { data: stocks }, extrasRes] = await Promise.all([
       sb
         .from('v_productos_rating')
         .select('producto_id, total_resenas, promedio_rating')
@@ -68,7 +90,22 @@ export async function loadPublicaciones(opts: LoadOpts = {}): Promise<ProductCar
             .select('variante_id, stock_total')
             .in('variante_id', varianteIds)
         : Promise.resolve({ data: [] as { variante_id: string; stock_total: number }[] }),
+      // Extras: si alguna está activa, el producto queda visible aunque
+      // la categoría principal esté apagada. Cast hasta regenerar tipos.
+      (sb as unknown as { from: (t: string) => any }) // eslint-disable-line @typescript-eslint/no-explicit-any
+        .from('productos_categorias_extra')
+        .select('producto_id, categorias!inner(activo)')
+        .in('producto_id', productoIds)
+        .then(
+          (r: { data: unknown[] | null }) => r,
+          () => ({ data: [] as unknown[] }),
+        ),
     ]);
+
+    const tieneExtraActiva = new Map<string, boolean>();
+    for (const e of (extrasRes.data ?? []) as { producto_id: string; categorias?: { activo: boolean } }[]) {
+      if (e.categorias?.activo) tieneExtraActiva.set(e.producto_id, true);
+    }
 
     const ratingMap = new Map<string, { total: number; promedio: number }>();
     for (const r of ratings ?? []) {
@@ -85,12 +122,13 @@ export async function loadPublicaciones(opts: LoadOpts = {}): Promise<ProductCar
 
     return pubs
       .filter((p) => p.productos)
-      // Filtrar productos cuya categoría esté apagada (apagar temporada en cascada).
-      // Si el producto no tiene categoría asignada (categoria_id null), se muestra igual.
+      // Si la categoría principal está apagada, el producto solo se muestra
+      // si tiene al menos una categoría EXTRA activa (red de seguridad).
       .filter((p) => {
         const cat = p.productos!.categorias;
         if (p.productos!.categoria_id == null) return true;
-        return cat?.activo !== false;
+        if (cat?.activo !== false) return true;
+        return tieneExtraActiva.get(p.producto_id) === true;
       })
       .map((p) => {
         const prod = p.productos!;

@@ -125,6 +125,38 @@ async function autogenerarSKU(
   return `${abv}${nro}`;
 }
 
+/**
+ * Lee el array de categorías extra del FormData. Acepta múltiples appends
+ * con name="categorias_extra". Filtra duplicados, la categoría principal
+ * y limita a 2 (la BD también lo valida).
+ */
+function parseCategoriasExtra(fd: FormData, categoriaPrincipalId: string | null): string[] {
+  const raw = fd.getAll('categorias_extra').map((v) => String(v)).filter(Boolean);
+  const unique = Array.from(new Set(raw)).filter((id) => id !== categoriaPrincipalId);
+  return unique.slice(0, 2);
+}
+
+/** Sincroniza la lista de extras: borra las que ya no están y agrega las nuevas.
+ *  Cast hasta regenerar tipos de Supabase tras aplicar la migración 31. */
+async function syncCategoriasExtra(
+  sb: Awaited<ReturnType<typeof requireUser>>['sb'],
+  productoId: string,
+  nuevas: string[],
+) {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const sbAny = sb as unknown as { from: (t: string) => any };
+  const { error: errDel } = await sbAny
+    .from('productos_categorias_extra')
+    .delete()
+    .eq('producto_id', productoId);
+  if (errDel) throw new Error(`extras delete: ${errDel.message}`);
+  if (nuevas.length === 0) return;
+  const { error: errIns } = await sbAny
+    .from('productos_categorias_extra')
+    .insert(nuevas.map((cid) => ({ producto_id: productoId, categoria_id: cid })));
+  if (errIns) throw new Error(`extras insert: ${errIns.message}`);
+}
+
 export async function crearProducto(_prev: unknown, fd: FormData): Promise<ActionResult<{ id: string }>> {
   const r = await runAction(async () => {
     const data = parseForm(fd);
@@ -147,6 +179,12 @@ export async function crearProducto(_prev: unknown, fd: FormData): Promise<Actio
       slug: data.nombre.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, ''),
       titulo_web: data.nombre,
     });
+
+    // Categorías extra (opcional, max 2)
+    const extras = parseCategoriasExtra(fd, cleaned.categoria_id);
+    if (extras.length > 0) {
+      await syncCategoriasExtra(sb, row.id, extras);
+    }
     return { id: row.id };
   });
   if (r.ok && r.data) {
@@ -160,8 +198,13 @@ export async function actualizarProducto(id: string, _prev: unknown, fd: FormDat
   const r = await runAction(async () => {
     const data = parseForm(fd);
     const { sb } = await requireUser();
-    const { error } = await sb.from('productos').update(clean(data)).eq('id', id);
+    const cleaned = clean(data);
+    const { error } = await sb.from('productos').update(cleaned).eq('id', id);
     if (error) throw new Error(error.message);
+
+    // Sincronizar extras (puede ser lista vacía → borra todas)
+    const extras = parseCategoriasExtra(fd, cleaned.categoria_id);
+    await syncCategoriasExtra(sb, id, extras);
     return null;
   });
   if (r.ok) await bumpPaths('/productos', `/productos/${id}`, '/web-catalogo');

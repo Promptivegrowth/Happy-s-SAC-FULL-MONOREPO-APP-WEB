@@ -30,7 +30,18 @@ type Producto = {
 
 type Lookup = { id: string; nombre: string; codigo?: string | null };
 
-export function ProductoForm({ initial, categorias, campanas }: { initial?: Producto; categorias: Lookup[]; campanas: Lookup[] }) {
+export function ProductoForm({
+  initial,
+  categorias,
+  campanas,
+  categoriasExtraIniciales = [],
+}: {
+  initial?: Producto;
+  categorias: Lookup[];
+  campanas: Lookup[];
+  /** IDs de categorías que ya están como extras del producto (al editar) */
+  categoriasExtraIniciales?: string[];
+}) {
   const isEdit = Boolean(initial?.id);
   const action = isEdit ? actualizarProducto.bind(null, initial!.id!) : crearProducto;
   const { formAction, state } = useActionForm(action, isEdit ? 'Producto actualizado' : 'Producto creado');
@@ -39,6 +50,16 @@ export function ProductoForm({ initial, categorias, campanas }: { initial?: Prod
   const [destacado, setDestacado] = useState(initial?.destacado ?? false);
   const [activo, setActivo] = useState(initial?.activo ?? true);
   const [imagenUrl, setImagenUrl] = useState<string | null>(initial?.imagen_principal_url ?? null);
+  const [categoriaPrincipal, setCategoriaPrincipal] = useState<string>(initial?.categoria_id ?? '');
+  const [extras, setExtras] = useState<string[]>(categoriasExtraIniciales);
+
+  function toggleExtra(catId: string) {
+    setExtras((prev) => {
+      if (prev.includes(catId)) return prev.filter((x) => x !== catId);
+      if (prev.length >= 2) return prev; // máx 2
+      return [...prev, catId];
+    });
+  }
 
   return (
     <form action={formAction} className="space-y-6">
@@ -57,8 +78,17 @@ export function ProductoForm({ initial, categorias, campanas }: { initial?: Prod
         </FormRow>
 
         <FormGrid cols={3}>
-          <FormRow label="Categoría">
-            <select name="categoria_id" defaultValue={initial?.categoria_id ?? ''} className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm">
+          <FormRow label="Categoría principal" hint="Define URL, código y breadcrumb">
+            <select
+              name="categoria_id"
+              value={categoriaPrincipal}
+              onChange={(e) => {
+                setCategoriaPrincipal(e.target.value);
+                // si la nueva principal estaba como extra, sacarla
+                setExtras((prev) => prev.filter((x) => x !== e.target.value));
+              }}
+              className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
+            >
               <option value="">— Sin categoría —</option>
               {categorias.map((c) => <option key={c.id} value={c.id}>{c.nombre}</option>)}
             </select>
@@ -83,6 +113,50 @@ export function ProductoForm({ initial, categorias, campanas }: { initial?: Prod
 
         <FormRow label="Descripción">
           <Textarea name="descripcion" defaultValue={initial?.descripcion ?? ''} rows={3} placeholder="Descripción interna y notas técnicas" />
+        </FormRow>
+
+        <FormRow
+          label="Categorías extra (opcional, máx 2)"
+          hint="El producto aparece también en estas categorías y NO se despublica si se apaga la principal mientras al menos una extra siga activa. No genera código nuevo."
+        >
+          {/* Hidden inputs para enviar la selección al server */}
+          {extras.map((id) => (
+            <input key={id} type="hidden" name="categorias_extra" value={id} />
+          ))}
+          <div className="flex flex-wrap gap-2 rounded-md border border-dashed border-slate-200 p-3">
+            {categorias.length === 0 && (
+              <p className="text-xs text-slate-400">Sin categorías disponibles.</p>
+            )}
+            {categorias
+              .filter((c) => c.id !== categoriaPrincipal)
+              .map((c) => {
+                const seleccionada = extras.includes(c.id);
+                const llena = !seleccionada && extras.length >= 2;
+                return (
+                  <button
+                    key={c.id}
+                    type="button"
+                    onClick={() => toggleExtra(c.id)}
+                    disabled={llena}
+                    className={`rounded-full border px-3 py-1 text-xs font-medium transition ${
+                      seleccionada
+                        ? 'border-happy-500 bg-happy-500 text-white shadow-sm'
+                        : llena
+                          ? 'cursor-not-allowed border-slate-200 bg-slate-50 text-slate-300'
+                          : 'border-slate-300 bg-white text-slate-700 hover:border-happy-400 hover:bg-happy-50'
+                    }`}
+                    title={llena ? 'Ya elegiste 2 extras (máximo)' : ''}
+                  >
+                    {seleccionada && '✓ '}{c.nombre}
+                  </button>
+                );
+              })}
+          </div>
+          {extras.length > 0 && (
+            <p className="mt-1 text-[10px] text-slate-500">
+              Elegidas: {extras.length} / 2
+            </p>
+          )}
         </FormRow>
       </FormSection>
 
