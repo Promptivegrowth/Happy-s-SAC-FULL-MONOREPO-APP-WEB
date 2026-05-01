@@ -315,13 +315,48 @@ export async function crearOS(
   return r;
 }
 
+/**
+ * Máquina de estados de la OS (server-side).
+ * EMITIDA → DESPACHADA → EN_PROCESO → RECEPCIONADA → CERRADA
+ * ANULADA es accesible desde cualquier estado activo (no desde finales).
+ */
+const FLOW_OS: Record<string, string[]> = {
+  EMITIDA:      ['DESPACHADA', 'ANULADA'],
+  DESPACHADA:   ['EN_PROCESO', 'ANULADA'],
+  EN_PROCESO:   ['RECEPCIONADA', 'ANULADA'],
+  RECEPCIONADA: ['CERRADA', 'ANULADA'],
+  CERRADA:      [],
+  ANULADA:      [],
+};
+
 export async function cambiarEstadoOS(osId: string, nuevoEstado: string): Promise<ActionResult> {
   const r = await runAction(async () => {
     const { sb } = await requireUser();
+    const { data: actual } = await sb.from('ordenes_servicio').select('estado').eq('id', osId).single();
+    if (!actual) throw new Error('OS no encontrada');
+
+    const estadoActual = (actual.estado as string) ?? 'EMITIDA';
+    const permitidos = FLOW_OS[estadoActual] ?? [];
+    if (!permitidos.includes(nuevoEstado)) {
+      throw new Error(
+        `Transición no permitida: ${estadoActual.replace('_', ' ')} → ${nuevoEstado.replace('_', ' ')}. ` +
+          `Desde ${estadoActual.replace('_', ' ')} solo se puede ir a: ${permitidos.length === 0 ? '(estado final)' : permitidos.join(', ')}.`,
+      );
+    }
+
     const update: { estado: string; fecha_recepcion?: string } = { estado: nuevoEstado };
     if (nuevoEstado === 'RECEPCIONADA') update.fecha_recepcion = new Date().toISOString().slice(0, 10);
-    const { error } = await sb.from('ordenes_servicio').update(update).eq('id', osId);
+
+    // Update con WHERE en estado actual para atomicidad
+    const { error, count } = await sb
+      .from('ordenes_servicio')
+      .update(update, { count: 'exact' })
+      .eq('id', osId)
+      .eq('estado', estadoActual);
     if (error) throw new Error(error.message);
+    if ((count ?? 0) === 0) {
+      throw new Error('La OS cambió de estado mientras procesabas. Recargá la página.');
+    }
     return null;
   });
   if (r.ok) await bumpPaths(`/servicios/${osId}`, '/servicios');

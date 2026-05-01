@@ -167,21 +167,64 @@ export async function eliminarLineaPlan(id: string, planId: string): Promise<Act
   return r;
 }
 
+/**
+ * Aprueba un plan idempotente: solo permite la transición BORRADOR → APROBADO.
+ * Si ya está APROBADO/EN_EJECUCION/COMPLETADO/CANCELADO, devuelve error claro
+ * en vez de hacer un UPDATE silencioso (evita doble-click duplicando OTs).
+ */
 export async function aprobarPlan(planId: string): Promise<ActionResult> {
   const r = await runAction(async () => {
     const { sb } = await requireUser();
-    const { error } = await sb.from('plan_maestro').update({ estado: 'APROBADO' }).eq('id', planId);
+    const { error, count } = await sb
+      .from('plan_maestro')
+      .update({ estado: 'APROBADO' }, { count: 'exact' })
+      .eq('id', planId)
+      .eq('estado', 'BORRADOR');
     if (error) throw new Error(error.message);
+    if ((count ?? 0) === 0) {
+      // Diagnóstico: ¿no existe o está en otro estado?
+      const { data: actual } = await sb
+        .from('plan_maestro')
+        .select('estado')
+        .eq('id', planId)
+        .maybeSingle();
+      if (!actual) throw new Error('Plan no encontrado');
+      throw new Error(
+        `No se puede aprobar: el plan está en estado ${(actual.estado as string).replace('_', ' ')}. Solo se aprueba desde BORRADOR.`,
+      );
+    }
     return null;
   });
   if (r.ok) await bumpPaths(`/plan-maestro/${planId}`);
   return r;
 }
 
-/** Genera una OT por cada producto del plan y las marca el plan como EN_EJECUCION. */
+/**
+ * Genera una OT por cada producto del plan y marca el plan como EN_EJECUCION.
+ * Solo se puede ejecutar si el plan está APROBADO (idempotente: no genera OTs
+ * duplicadas si se llama dos veces).
+ */
 export async function generarOTsDelPlan(planId: string): Promise<ActionResult<{ otsCreadas: number }>> {
   const r = await runAction(async () => {
     const { sb, userId } = await requireUser();
+
+    // Precondición: el plan debe estar APROBADO. Si está EN_EJECUCION o
+    // COMPLETADO, bloquear (las OTs ya fueron generadas).
+    const { data: plan } = await sb
+      .from('plan_maestro')
+      .select('estado')
+      .eq('id', planId)
+      .maybeSingle();
+    if (!plan) throw new Error('Plan no encontrado');
+    const estado = plan.estado as string;
+    if (estado !== 'APROBADO') {
+      throw new Error(
+        estado === 'EN_EJECUCION'
+          ? 'Las OTs de este plan ya fueron generadas (estado EN_EJECUCION). No se duplican.'
+          : `Solo se pueden generar OTs desde estado APROBADO (actualmente: ${estado.replace('_', ' ')}).`,
+      );
+    }
+
     const { data: lineas } = await sb.from('plan_maestro_lineas')
       .select('producto_id, talla, cantidad_planificada, prioridad, campana_id')
       .eq('plan_id', planId);
@@ -233,7 +276,12 @@ export async function generarOTsDelPlan(planId: string): Promise<ActionResult<{ 
       count++;
     }
 
-    await sb.from('plan_maestro').update({ estado: 'EN_EJECUCION' }).eq('id', planId);
+    // Marcar plan como EN_EJECUCION solo si sigue APROBADO (atomicidad).
+    await sb
+      .from('plan_maestro')
+      .update({ estado: 'EN_EJECUCION' })
+      .eq('id', planId)
+      .eq('estado', 'APROBADO');
     return { otsCreadas: count };
   });
   if (r.ok) await bumpPaths(`/plan-maestro/${planId}`, '/ot');

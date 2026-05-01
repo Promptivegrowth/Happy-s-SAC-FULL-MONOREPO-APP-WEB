@@ -5,6 +5,24 @@ import { redirect } from 'next/navigation';
 import { runAction, requireUser, bumpPaths, type ActionResult } from './_helpers';
 
 const ESTADOS = ['BORRADOR','PLANIFICADA','EN_CORTE','EN_HABILITADO','EN_SERVICIO','EN_DECORADO','EN_CONTROL_CALIDAD','COMPLETADA','CANCELADA'] as const;
+type EstadoOT = typeof ESTADOS[number];
+
+/**
+ * Máquina de estados de la OT (server-side, espejo del FLOW del cliente).
+ * CANCELADA es accesible desde cualquier estado activo (excepto cerrados).
+ * COMPLETADA solo desde EN_CONTROL_CALIDAD.
+ */
+const FLOW_ESTADOS: Record<EstadoOT, EstadoOT[]> = {
+  BORRADOR:           ['PLANIFICADA', 'CANCELADA'],
+  PLANIFICADA:        ['EN_CORTE', 'CANCELADA'],
+  EN_CORTE:           ['EN_HABILITADO', 'EN_SERVICIO', 'CANCELADA'],
+  EN_HABILITADO:      ['EN_SERVICIO', 'CANCELADA'],
+  EN_SERVICIO:        ['EN_DECORADO', 'EN_CONTROL_CALIDAD', 'CANCELADA'],
+  EN_DECORADO:        ['EN_CONTROL_CALIDAD', 'CANCELADA'],
+  EN_CONTROL_CALIDAD: ['COMPLETADA', 'CANCELADA'],
+  COMPLETADA:         [],
+  CANCELADA:          [],
+};
 
 const TALLAS = ['T0','T2','T4','T6','T8','T10','T12','T14','T16','TS','TAD'] as const;
 
@@ -122,16 +140,36 @@ export async function cambiarEstadoOT(otId: string, nuevoEstado: typeof ESTADOS[
     const { data: actual } = await sb.from('ot').select('estado').eq('id', otId).single();
     if (!actual) throw new Error('OT no encontrada');
 
-    const { error: errUpd } = await sb.from('ot').update({ estado: nuevoEstado }).eq('id', otId);
+    // Validación server-side de la transición. Espeja al FLOW del cliente
+    // pero acá no se puede saltear vía DevTools / API directa.
+    const estadoActual = actual.estado as EstadoOT;
+    const permitidos = FLOW_ESTADOS[estadoActual] ?? [];
+    if (!permitidos.includes(nuevoEstado)) {
+      throw new Error(
+        `Transición no permitida: ${estadoActual.replace('_', ' ')} → ${nuevoEstado.replace('_', ' ')}. ` +
+          `Desde ${estadoActual.replace('_', ' ')} solo se puede ir a: ${permitidos.length === 0 ? '(estado final)' : permitidos.map((p) => p.replace('_', ' ')).join(', ')}.`,
+      );
+    }
+
+    // Update con WHERE en estado actual para atomicidad (evita race con otro
+    // usuario que también esté cambiando el estado en paralelo).
+    const { error: errUpd, count } = await sb
+      .from('ot')
+      .update({ estado: nuevoEstado }, { count: 'exact' })
+      .eq('id', otId)
+      .eq('estado', estadoActual);
     if (errUpd) throw new Error(errUpd.message);
+    if ((count ?? 0) === 0) {
+      throw new Error('La OT cambió de estado mientras procesabas. Recargá la página.');
+    }
 
     await sb.from('ot_eventos').insert({
       ot_id: otId,
       tipo: 'ESTADO_CAMBIO',
-      estado_anterior: actual.estado,
+      estado_anterior: estadoActual,
       estado_nuevo: nuevoEstado,
       usuario_id: userId,
-      detalle: detalle ?? `Transición ${actual.estado} → ${nuevoEstado}`,
+      detalle: detalle ?? `Transición ${estadoActual} → ${nuevoEstado}`,
     });
     return null;
   });
@@ -185,7 +223,31 @@ export async function actualizarOT(otId: string, fd: FormData): Promise<ActionRe
 
 export async function declararProduccion(otId: string, lineaId: string, cantidadCortada: number, cantidadFallas: number): Promise<ActionResult> {
   const r = await runAction(async () => {
+    if (cantidadCortada < 0 || cantidadFallas < 0) {
+      throw new Error('Las cantidades no pueden ser negativas');
+    }
+    if (cantidadFallas > cantidadCortada) {
+      throw new Error('Las fallas no pueden superar la cantidad cortada');
+    }
     const { sb } = await requireUser();
+
+    // Validar contra cantidad_planificada de la línea + estado de la OT
+    const { data: linea } = await sb
+      .from('ot_lineas')
+      .select('cantidad_planificada, ot:ot_id(estado)')
+      .eq('id', lineaId)
+      .single();
+    if (!linea) throw new Error('Línea de OT no encontrada');
+    const ot = (linea as unknown as { ot?: { estado: string } | null }).ot;
+    if (ot?.estado === 'COMPLETADA' || ot?.estado === 'CANCELADA') {
+      throw new Error('No se puede declarar producción en una OT cerrada');
+    }
+    if (cantidadCortada > Number(linea.cantidad_planificada)) {
+      throw new Error(
+        `La cantidad cortada (${cantidadCortada}) no puede superar la planificada (${linea.cantidad_planificada})`,
+      );
+    }
+
     const { error } = await sb.from('ot_lineas').update({
       cantidad_cortada: cantidadCortada,
       cantidad_fallas: cantidadFallas,
@@ -206,7 +268,13 @@ export async function cerrarOT(otId: string, almacenDestinoId: string): Promise<
     const { sb, userId } = await requireUser();
     const { data: ot } = await sb.from('ot').select('numero, estado').eq('id', otId).single();
     if (!ot) throw new Error('OT no encontrada');
-    if (ot.estado === 'COMPLETADA' || ot.estado === 'CANCELADA') throw new Error('OT ya cerrada');
+
+    // Precondición: solo se puede cerrar desde EN_CONTROL_CALIDAD.
+    if (ot.estado !== 'EN_CONTROL_CALIDAD') {
+      throw new Error(
+        `La OT debe estar en estado "Control de Calidad" para cerrarse (actualmente: ${(ot.estado as string).replace('_', ' ')}).`,
+      );
+    }
 
     const { data: lineas } = await sb.from('ot_lineas')
       .select('id, producto_id, talla, cantidad_planificada, cantidad_cortada, cantidad_terminada, cantidad_fallas')
@@ -217,6 +285,18 @@ export async function cerrarOT(otId: string, almacenDestinoId: string): Promise<
     const totalCortado = lineas.reduce((s, l) => s + Number(l.cantidad_cortada ?? 0), 0);
     if (totalCortado <= 0) {
       throw new Error('Declara la cantidad cortada en al menos una línea antes de cerrar la OT');
+    }
+
+    // Validación: cantidad terminada efectiva (cortada - fallas o terminada
+    // explícita - fallas) no puede superar cantidad planificada en ninguna línea.
+    for (const l of lineas) {
+      const cantTerm = Number(l.cantidad_terminada ?? l.cantidad_cortada ?? 0) - Number(l.cantidad_fallas ?? 0);
+      if (cantTerm > Number(l.cantidad_planificada)) {
+        throw new Error(
+          `Línea ${l.talla}: cantidad terminada (${cantTerm}) supera planificada (${l.cantidad_planificada}). ` +
+            `Revisá la declaración antes de cerrar.`,
+        );
+      }
     }
 
     // Crear ingreso PT
