@@ -80,17 +80,71 @@ export async function agregarLineaCorte(_prev: unknown, fd: FormData): Promise<A
   return r;
 }
 
-export async function cerrarCorte(corteId: string): Promise<ActionResult> {
+/**
+ * Cierra un corte y SINCRONIZA las cantidades cortadas con la OT.
+ * Antes (bug): solo cambiaba estado → ot_lineas.cantidad_cortada quedaba en 0
+ * → al cerrar la OT generaba lotes con cantidad incorrecta.
+ * Ahora: suma cantidad_real de cada línea del corte al cantidad_cortada
+ * de la línea correspondiente de la OT (matcheando por talla y producto).
+ */
+export async function cerrarCorte(corteId: string): Promise<ActionResult<{ ot_lineas_sync: number }>> {
   const r = await runAction(async () => {
     const { sb } = await requireUser();
-    const { error } = await sb.from('ot_corte').update({
-      estado: 'COMPLETADO',
-      fecha_fin: new Date().toISOString(),
-    }).eq('id', corteId);
+
+    // 1) Validar estado del corte
+    const { data: corte, error: errCorte } = await sb
+      .from('ot_corte')
+      .select('id, ot_id, producto_id, estado')
+      .eq('id', corteId)
+      .single();
+    if (errCorte) throw new Error(errCorte.message);
+    if (!corte) throw new Error('Corte no encontrado');
+    if (corte.estado === 'COMPLETADO') throw new Error('Este corte ya está cerrado');
+    if (corte.estado === 'ANULADO') throw new Error('No se puede cerrar un corte anulado');
+
+    // 2) Cargar líneas del corte y de la OT (mismo producto)
+    const [{ data: lineasCorte, error: errLC }, { data: lineasOT, error: errLO }] = await Promise.all([
+      sb.from('ot_corte_lineas').select('talla, cantidad_real').eq('corte_id', corteId),
+      sb
+        .from('ot_lineas')
+        .select('id, talla, cantidad_cortada')
+        .eq('ot_id', corte.ot_id)
+        .eq('producto_id', corte.producto_id),
+    ]);
+    if (errLC) throw new Error(errLC.message);
+    if (errLO) throw new Error(errLO.message);
+
+    const otByTalla = new Map<string, { id: string; cantidad_cortada: number | null }>();
+    for (const l of lineasOT ?? []) {
+      otByTalla.set(l.talla as string, { id: l.id as string, cantidad_cortada: l.cantidad_cortada as number | null });
+    }
+
+    // 3) Sumar cantidad_real al cantidad_cortada de la OT por talla
+    let sincronizadas = 0;
+    for (const lc of lineasCorte ?? []) {
+      const cantidad = Number(lc.cantidad_real ?? 0);
+      if (cantidad <= 0) continue;
+      const ot = otByTalla.get(lc.talla as string);
+      if (!ot) continue; // talla cortada no existe en la OT (raro pero defensivo)
+      const nueva = Number(ot.cantidad_cortada ?? 0) + cantidad;
+      const { error: errUpd } = await sb
+        .from('ot_lineas')
+        .update({ cantidad_cortada: nueva })
+        .eq('id', ot.id);
+      if (errUpd) throw new Error(`sync ot_linea ${ot.id}: ${errUpd.message}`);
+      sincronizadas++;
+    }
+
+    // 4) Marcar corte como COMPLETADO al final (rollback simple si algún update falló arriba)
+    const { error } = await sb
+      .from('ot_corte')
+      .update({ estado: 'COMPLETADO', fecha_fin: new Date().toISOString() })
+      .eq('id', corteId);
     if (error) throw new Error(error.message);
-    return null;
+
+    return { ot_lineas_sync: sincronizadas };
   });
-  if (r.ok) await bumpPaths(`/corte/${corteId}`, '/corte');
+  if (r.ok) await bumpPaths(`/corte/${corteId}`, '/corte', '/ot');
   return r;
 }
 
@@ -113,7 +167,98 @@ const osSchema = z.object({
   consideraciones: z.string().optional().or(z.literal('')),
 });
 
-export async function crearOS(_prev: unknown, fd: FormData): Promise<ActionResult<{ id: string }>> {
+/**
+ * Pobla automáticamente las líneas y los avíos de una OS recién creada
+ * a partir del corte vinculado:
+ *   - Líneas: cada (producto, talla) del corte con cantidad_real > 0 → fila
+ *     en ordenes_servicio_lineas con esa cantidad.
+ *   - Avíos: por cada línea, busca la receta activa del producto y trae sus
+ *     materiales con sale_a_servicio=true para esa talla; multiplica
+ *     cantidad_unitaria × cantidad_a_producir y agrupa por material.
+ *
+ * Si no hay receta activa, no falla — solo no genera avíos (se pueden
+ * agregar manualmente después).
+ */
+async function poblarLineasYAviosOS(
+  sb: Awaited<ReturnType<typeof requireUser>>['sb'],
+  osId: string,
+  corteId: string,
+): Promise<{ lineas: number; avios: number }> {
+  // 1) Cargar el corte y sus líneas no vacías
+  const { data: corte, error: errC } = await sb
+    .from('ot_corte')
+    .select('producto_id, ot_corte_lineas(talla, cantidad_real)')
+    .eq('id', corteId)
+    .single();
+  if (errC) throw new Error(`corte: ${errC.message}`);
+  if (!corte) return { lineas: 0, avios: 0 };
+
+  const productoId = corte.producto_id as string;
+  type LC = { talla: string; cantidad_real: number | null };
+  const lineasCorte = ((corte as unknown as { ot_corte_lineas?: LC[] }).ot_corte_lineas ?? []).filter(
+    (l) => Number(l.cantidad_real ?? 0) > 0,
+  );
+
+  if (lineasCorte.length === 0) return { lineas: 0, avios: 0 };
+
+  // 2) Insertar líneas en ordenes_servicio_lineas
+  const filasLineas = lineasCorte.map((l) => ({
+    os_id: osId,
+    producto_id: productoId,
+    talla: l.talla as 'T0' | 'T2' | 'T4' | 'T6' | 'T8' | 'T10' | 'T12' | 'T14' | 'T16' | 'TS' | 'TAD',
+    cantidad: Number(l.cantidad_real),
+  }));
+  const { error: errL } = await sb.from('ordenes_servicio_lineas').insert(filasLineas);
+  if (errL) throw new Error(`OS lineas: ${errL.message}`);
+
+  // 3) Calcular avíos: receta activa × cantidad por talla
+  const { data: receta } = await sb
+    .from('recetas')
+    .select('id')
+    .eq('producto_id', productoId)
+    .eq('activa', true)
+    .maybeSingle();
+  if (!receta) {
+    return { lineas: filasLineas.length, avios: 0 };
+  }
+
+  const tallasNecesarias = lineasCorte.map((l) => l.talla as 'T0' | 'T2' | 'T4' | 'T6' | 'T8' | 'T10' | 'T12' | 'T14' | 'T16' | 'TS' | 'TAD');
+  const { data: lineasReceta } = await sb
+    .from('recetas_lineas')
+    .select('material_id, talla, cantidad')
+    .eq('receta_id', receta.id)
+    .eq('sale_a_servicio', true)
+    .in('talla', tallasNecesarias);
+
+  const cantPorTalla = new Map<string, number>();
+  for (const l of lineasCorte) cantPorTalla.set(l.talla, Number(l.cantidad_real));
+
+  const aviosMap = new Map<string, number>();
+  for (const lr of lineasReceta ?? []) {
+    const cantUnidades = cantPorTalla.get(lr.talla as string) ?? 0;
+    if (cantUnidades <= 0) continue;
+    const cantAvios = Number(lr.cantidad) * cantUnidades;
+    const matId = lr.material_id as string;
+    aviosMap.set(matId, (aviosMap.get(matId) ?? 0) + cantAvios);
+  }
+
+  if (aviosMap.size > 0) {
+    const filasAvios = [...aviosMap.entries()].map(([material_id, cantidad_enviada]) => ({
+      os_id: osId,
+      material_id,
+      cantidad_enviada,
+    }));
+    const { error: errA } = await sb.from('ordenes_servicio_avios').insert(filasAvios);
+    if (errA) throw new Error(`OS avios: ${errA.message}`);
+  }
+
+  return { lineas: filasLineas.length, avios: aviosMap.size };
+}
+
+export async function crearOS(
+  _prev: unknown,
+  fd: FormData,
+): Promise<ActionResult<{ id: string; lineas: number; avios: number }>> {
   const r = await runAction(async () => {
     const data = osSchema.parse({
       corte_id: fd.get('corte_id') || '',
@@ -149,7 +294,19 @@ export async function crearOS(_prev: unknown, fd: FormData): Promise<ActionResul
       estado: 'EMITIDA',
     }).select('id').single();
     if (error) throw new Error(error.message);
-    return { id: row.id };
+
+    // Si la OS viene de un corte, poblar líneas + avíos. Si falla, eliminar
+    // la cabecera para evitar OS huérfanas.
+    let extras = { lineas: 0, avios: 0 };
+    if (data.corte_id) {
+      try {
+        extras = await poblarLineasYAviosOS(sb, row.id as string, data.corte_id);
+      } catch (e) {
+        await sb.from('ordenes_servicio').delete().eq('id', row.id);
+        throw new Error(`No se pudieron poblar líneas/avíos: ${(e as Error).message}`);
+      }
+    }
+    return { id: row.id as string, ...extras };
   });
   if (r.ok && r.data) {
     await bumpPaths('/servicios');
