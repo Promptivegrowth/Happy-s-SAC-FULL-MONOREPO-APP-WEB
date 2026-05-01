@@ -23,13 +23,14 @@
     "db:import-excel": "tsx supabase/seed/import-excel.ts"
   },
   "devDependencies": {
-    "turbo": "^2.3.0",
+    "@types/node": "^22.9.0",
+    "docx": "^9.6.1",
     "prettier": "^3.4.0",
     "prettier-plugin-tailwindcss": "^0.6.9",
-    "typescript": "^5.6.3",
-    "@types/node": "^22.9.0",
+    "supabase": "^1.219.0",
     "tsx": "^4.19.2",
-    "supabase": "^1.219.0"
+    "turbo": "^2.3.0",
+    "typescript": "^5.6.3"
   },
   "pnpm": {
     "overrides": {
