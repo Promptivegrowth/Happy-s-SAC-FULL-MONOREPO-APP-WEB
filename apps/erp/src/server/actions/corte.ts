@@ -81,68 +81,20 @@ export async function agregarLineaCorte(_prev: unknown, fd: FormData): Promise<A
 }
 
 /**
- * Cierra un corte y SINCRONIZA las cantidades cortadas con la OT.
- * Antes (bug): solo cambiaba estado → ot_lineas.cantidad_cortada quedaba en 0
- * → al cerrar la OT generaba lotes con cantidad incorrecta.
- * Ahora: suma cantidad_real de cada línea del corte al cantidad_cortada
- * de la línea correspondiente de la OT (matcheando por talla y producto).
+ * Cierra un corte ATÓMICAMENTE: sincroniza ot_lineas.cantidad_cortada y
+ * marca el corte como COMPLETADO en una sola transacción PL/pgSQL
+ * (función close_corte_atomic — migración 32).
+ * Si algo falla, ROLLBACK total — ninguna línea queda actualizada parcial.
  */
 export async function cerrarCorte(corteId: string): Promise<ActionResult<{ ot_lineas_sync: number }>> {
   const r = await runAction(async () => {
     const { sb } = await requireUser();
-
-    // 1) Validar estado del corte
-    const { data: corte, error: errCorte } = await sb
-      .from('ot_corte')
-      .select('id, ot_id, producto_id, estado')
-      .eq('id', corteId)
-      .single();
-    if (errCorte) throw new Error(errCorte.message);
-    if (!corte) throw new Error('Corte no encontrado');
-    if (corte.estado === 'COMPLETADO') throw new Error('Este corte ya está cerrado');
-    if (corte.estado === 'ANULADO') throw new Error('No se puede cerrar un corte anulado');
-
-    // 2) Cargar líneas del corte y de la OT (mismo producto)
-    const [{ data: lineasCorte, error: errLC }, { data: lineasOT, error: errLO }] = await Promise.all([
-      sb.from('ot_corte_lineas').select('talla, cantidad_real').eq('corte_id', corteId),
-      sb
-        .from('ot_lineas')
-        .select('id, talla, cantidad_cortada')
-        .eq('ot_id', corte.ot_id)
-        .eq('producto_id', corte.producto_id),
-    ]);
-    if (errLC) throw new Error(errLC.message);
-    if (errLO) throw new Error(errLO.message);
-
-    const otByTalla = new Map<string, { id: string; cantidad_cortada: number | null }>();
-    for (const l of lineasOT ?? []) {
-      otByTalla.set(l.talla as string, { id: l.id as string, cantidad_cortada: l.cantidad_cortada as number | null });
-    }
-
-    // 3) Sumar cantidad_real al cantidad_cortada de la OT por talla
-    let sincronizadas = 0;
-    for (const lc of lineasCorte ?? []) {
-      const cantidad = Number(lc.cantidad_real ?? 0);
-      if (cantidad <= 0) continue;
-      const ot = otByTalla.get(lc.talla as string);
-      if (!ot) continue; // talla cortada no existe en la OT (raro pero defensivo)
-      const nueva = Number(ot.cantidad_cortada ?? 0) + cantidad;
-      const { error: errUpd } = await sb
-        .from('ot_lineas')
-        .update({ cantidad_cortada: nueva })
-        .eq('id', ot.id);
-      if (errUpd) throw new Error(`sync ot_linea ${ot.id}: ${errUpd.message}`);
-      sincronizadas++;
-    }
-
-    // 4) Marcar corte como COMPLETADO al final (rollback simple si algún update falló arriba)
-    const { error } = await sb
-      .from('ot_corte')
-      .update({ estado: 'COMPLETADO', fecha_fin: new Date().toISOString() })
-      .eq('id', corteId);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data, error } = await (sb as unknown as { rpc: (fn: string, args: any) => any })
+      .rpc('close_corte_atomic', { p_corte_id: corteId });
     if (error) throw new Error(error.message);
-
-    return { ot_lineas_sync: sincronizadas };
+    const synced = (data as { ot_lineas_sync?: number } | null)?.ot_lineas_sync ?? 0;
+    return { ot_lineas_sync: synced };
   });
   if (r.ok) await bumpPaths(`/corte/${corteId}`, '/corte', '/ot');
   return r;

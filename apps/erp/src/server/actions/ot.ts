@@ -260,136 +260,21 @@ export async function declararProduccion(otId: string, lineaId: string, cantidad
 }
 
 /**
- * Cierra la OT: declara las prendas terminadas, crea lote PT y registra
- * entradas en kardex del almacén PT.
+ * Cierra la OT ATÓMICAMENTE vía función SQL close_ot_atomic (migración 32).
+ * En una sola transacción PL/pgSQL: valida estado y cantidades, crea ingreso
+ * PT, lotes, kardex, trazabilidad y marca OT como COMPLETADA. Si algo falla,
+ * Postgres revierte todo — ninguna OT cerrada deja lotes huérfanos.
  */
 export async function cerrarOT(otId: string, almacenDestinoId: string): Promise<ActionResult<{ lotes: number }>> {
   const r = await runAction(async () => {
     const { sb, userId } = await requireUser();
-    const { data: ot } = await sb.from('ot').select('numero, estado').eq('id', otId).single();
-    if (!ot) throw new Error('OT no encontrada');
-
-    // Precondición: solo se puede cerrar desde EN_CONTROL_CALIDAD.
-    if (ot.estado !== 'EN_CONTROL_CALIDAD') {
-      throw new Error(
-        `La OT debe estar en estado "Control de Calidad" para cerrarse (actualmente: ${(ot.estado as string).replace('_', ' ')}).`,
-      );
-    }
-
-    const { data: lineas } = await sb.from('ot_lineas')
-      .select('id, producto_id, talla, cantidad_planificada, cantidad_cortada, cantidad_terminada, cantidad_fallas')
-      .eq('ot_id', otId);
-    if (!lineas || lineas.length === 0) throw new Error('OT sin líneas');
-
-    // Guardia: debe haber al menos una línea con cantidad cortada declarada.
-    const totalCortado = lineas.reduce((s, l) => s + Number(l.cantidad_cortada ?? 0), 0);
-    if (totalCortado <= 0) {
-      throw new Error('Declara la cantidad cortada en al menos una línea antes de cerrar la OT');
-    }
-
-    // Validación: cantidad terminada efectiva (cortada - fallas o terminada
-    // explícita - fallas) no puede superar cantidad planificada en ninguna línea.
-    for (const l of lineas) {
-      const cantTerm = Number(l.cantidad_terminada ?? l.cantidad_cortada ?? 0) - Number(l.cantidad_fallas ?? 0);
-      if (cantTerm > Number(l.cantidad_planificada)) {
-        throw new Error(
-          `Línea ${l.talla}: cantidad terminada (${cantTerm}) supera planificada (${l.cantidad_planificada}). ` +
-            `Revisá la declaración antes de cerrar.`,
-        );
-      }
-    }
-
-    // Crear ingreso PT
-    const { data: numIng } = await sb.rpc('next_correlativo', { p_clave: 'INGPT', p_padding: 6 });
-    const { data: ing, error: errIng } = await sb.from('ingresos_pt').insert({
-      numero: `INGPT-${numIng}`,
-      ot_id: otId,
-      almacen_destino: almacenDestinoId,
-      declarado_por: userId,
-      observacion: `Cierre de OT ${ot.numero}`,
-    }).select('id').single();
-    if (errIng) throw new Error(errIng.message);
-
-    let lotes = 0;
-    for (const l of lineas) {
-      const cantTerminada = Number(l.cantidad_terminada ?? l.cantidad_cortada ?? 0) - Number(l.cantidad_fallas ?? 0);
-      if (cantTerminada <= 0) continue;
-
-      // Buscar variante
-      const { data: variante } = await sb.from('productos_variantes')
-        .select('id, sku, precio_costo_estandar')
-        .eq('producto_id', l.producto_id).eq('talla', l.talla).maybeSingle();
-      if (!variante) continue;
-
-      // Crear lote PT
-      const { data: numLote } = await sb.rpc('next_correlativo', { p_clave: 'LOTPT', p_padding: 6 });
-      const codigoLote = `LT-${new Date().toISOString().slice(0,10).replace(/-/g,'')}-${variante.sku}-${numLote}`;
-      const { data: lote, error: errLot } = await sb.from('lotes_pt').insert({
-        codigo: codigoLote,
-        ot_id: otId,
-        ingreso_pt_id: ing.id,
-        variante_id: variante.id,
-        cantidad_inicial: cantTerminada,
-        cantidad_actual: cantTerminada,
-        costo_unitario: variante.precio_costo_estandar,
-        almacen_actual: almacenDestinoId,
-        estado: 'DISPONIBLE',
-      }).select('id').single();
-      if (errLot) throw new Error(errLot.message);
-
-      // Línea de ingreso
-      await sb.from('ingresos_pt_lineas').insert({
-        ingreso_id: ing.id,
-        variante_id: variante.id,
-        cantidad: cantTerminada,
-        cantidad_falla: l.cantidad_fallas ?? 0,
-        costo_unitario_total: variante.precio_costo_estandar,
-        lote_pt_id: lote.id,
-      });
-
-      // Movimiento de kardex (entrada)
-      await sb.from('kardex_movimientos').insert({
-        tipo: 'ENTRADA_PRODUCCION',
-        almacen_id: almacenDestinoId,
-        variante_id: variante.id,
-        cantidad: cantTerminada,
-        costo_unitario: variante.precio_costo_estandar,
-        costo_total: cantTerminada * Number(variante.precio_costo_estandar ?? 0),
-        referencia_tipo: 'INGRESO_PT',
-        referencia_id: ing.id,
-        usuario_id: userId,
-        lote_pt_id: lote.id,
-        observacion: `Cierre OT ${ot.numero}`,
-      });
-
-      // Evento trazabilidad
-      await sb.from('trazabilidad_eventos').insert({
-        lote_pt_id: lote.id,
-        variante_id: variante.id,
-        tipo: 'PRODUCCION',
-        almacen_destino: almacenDestinoId,
-        ot_id: otId,
-        usuario_id: userId,
-        cantidad: cantTerminada,
-        observacion: `Producción cerrada de OT ${ot.numero}`,
-      });
-
-      // Actualizar línea con cantidad_terminada
-      await sb.from('ot_lineas').update({ cantidad_terminada: cantTerminada }).eq('id', l.id);
-
-      lotes++;
-    }
-
-    // Cambiar estado OT
-    await sb.from('ot').update({ estado: 'COMPLETADA', fecha_cierre: new Date().toISOString().slice(0,10) }).eq('id', otId);
-    await sb.from('ot_eventos').insert({
-      ot_id: otId,
-      tipo: 'ESTADO_CAMBIO',
-      estado_nuevo: 'COMPLETADA',
-      usuario_id: userId,
-      detalle: `Cierre de OT con ${lotes} lote(s) PT generados`,
-    });
-
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data, error } = await (sb as unknown as { rpc: (fn: string, args: any) => any }).rpc(
+      'close_ot_atomic',
+      { p_ot_id: otId, p_almacen_destino: almacenDestinoId, p_user_id: userId },
+    );
+    if (error) throw new Error(error.message);
+    const lotes = (data as { lotes?: number } | null)?.lotes ?? 0;
     return { lotes };
   });
   if (r.ok) await bumpPaths(`/ot/${otId}`, '/ot', '/inventario', '/kardex');
