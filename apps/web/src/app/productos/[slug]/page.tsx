@@ -68,7 +68,7 @@ export default async function ProductoDetallePage({ params }: { params: Promise<
       *,
       productos!inner(
         id, codigo, nombre, descripcion, imagen_principal_url, piezas_descripcion, genero, categoria_id,
-        categoria:categorias(nombre, slug),
+        categoria:categorias!productos_categoria_id_fkey(nombre, slug),
         productos_variantes(id, sku, talla, precio_publico, precio_mayorista_a, precio_mayorista_b, imagen_url),
         productos_imagenes(id, url, orden, alt_texto)
       )

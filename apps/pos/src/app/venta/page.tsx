@@ -27,7 +27,7 @@ export default async function VentaPage() {
       sb
         .from('productos_variantes')
         .select(
-          'id, sku, codigo_barras, talla, precio_publico, productos!inner(id, nombre, codigo, imagen_principal_url, categoria_id, activo, categorias(id, nombre, activo))',
+          'id, sku, codigo_barras, talla, precio_publico, productos!inner(id, nombre, codigo, imagen_principal_url, categoria_id, activo, categorias!productos_categoria_id_fkey(id, nombre, activo))',
         )
         .eq('activo', true)
         .eq('productos.activo', true)

@@ -34,7 +34,7 @@ export async function loadPublicaciones(opts: LoadOpts = {}): Promise<ProductCar
     let query = sb
       .from('productos_publicacion')
       .select(
-        'producto_id, slug, titulo_web, precio_oferta, descuento_porcentaje, descuento_excluir_tallas, etiquetas, productos!inner(id, nombre, imagen_principal_url, categoria_id, campana_id, productos_variantes(id, talla, precio_publico), categorias(activo))',
+        'producto_id, slug, titulo_web, precio_oferta, descuento_porcentaje, descuento_excluir_tallas, etiquetas, productos!inner(id, nombre, imagen_principal_url, categoria_id, campana_id, productos_variantes(id, talla, precio_publico), categorias!productos_categoria_id_fkey(activo))',
       )
       .eq('publicado', true)
       .order('orden_web')

@@ -26,7 +26,7 @@ export default async function ProductosPage({ searchParams }: { searchParams: Pr
   const [{ data: catsData }, { data: campsData }, { data: indexData }] = await Promise.all([
     sb.from('categorias').select('id, nombre').eq('activo', true).order('nombre'),
     sb.from('campanas').select('id, nombre, activa').eq('activa', true).order('nombre'),
-    sb.from('productos').select('id, codigo, nombre, categorias(nombre)').eq('activo', true).order('nombre').limit(500),
+    sb.from('productos').select('id, codigo, nombre, categorias!productos_categoria_id_fkey(nombre)').eq('activo', true).order('nombre').limit(500),
   ]);
   const categorias = (catsData ?? []) as { id: string; nombre: string }[];
   const campanas = (campsData ?? []) as { id: string; nombre: string }[];
@@ -153,7 +153,7 @@ async function ProductosTable({ q, cat, estado, web, sin_categoria }: SP) {
   let query = sb
     .from('productos')
     .select(
-      'id, codigo, nombre, activo, destacado, categorias(id, codigo, nombre), campanas(id, nombre), productos_variantes(id, sku, talla, precio_publico), productos_publicacion(publicado, destacado_web)',
+      'id, codigo, nombre, activo, destacado, categorias!productos_categoria_id_fkey(id, codigo, nombre), campanas(id, nombre), productos_variantes(id, sku, talla, precio_publico), productos_publicacion(publicado, destacado_web)',
     )
     .order('nombre')
     .limit(500);
