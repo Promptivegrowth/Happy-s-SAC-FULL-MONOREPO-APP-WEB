@@ -125,6 +125,7 @@ export default async function ProductosPage({ searchParams }: { searchParams: Pr
   );
 }
 
+type PubRef = { publicado: boolean; destacado_web: boolean | null };
 type ProdRow = {
   id: string;
   codigo: string;
@@ -134,8 +135,18 @@ type ProdRow = {
   categorias: { id: string; codigo: string; nombre: string } | null;
   campanas: { id: string; nombre: string } | null;
   productos_variantes: { id: string; sku: string; talla: string; precio_publico: number | null }[];
-  productos_publicacion: { publicado: boolean; destacado_web: boolean | null }[];
+  // PostgREST puede devolver objeto (FK con UNIQUE) o array. Aceptamos ambos.
+  productos_publicacion: PubRef | PubRef[] | null;
 };
+
+/** Normaliza productos_publicacion a un único objeto (o null) sin importar
+ *  si PostgREST lo devolvió como objeto suelto o como array. */
+function getPub(p: ProdRow): PubRef | null {
+  const v = p.productos_publicacion;
+  if (!v) return null;
+  if (Array.isArray(v)) return v[0] ?? null;
+  return v;
+}
 
 async function ProductosTable({ q, cat, estado, web, sin_categoria }: SP) {
   const sb = await createClient();
@@ -153,8 +164,8 @@ async function ProductosTable({ q, cat, estado, web, sin_categoria }: SP) {
   if (estado === 'inactivo') query = query.eq('activo', false);
   const { data } = await query;
   let productos = ((data ?? []) as unknown as ProdRow[]);
-  if (web === 'si') productos = productos.filter((p) => p.productos_publicacion?.[0]?.publicado);
-  if (web === 'no') productos = productos.filter((p) => !p.productos_publicacion?.[0]?.publicado);
+  if (web === 'si') productos = productos.filter((p) => getPub(p)?.publicado === true);
+  if (web === 'no') productos = productos.filter((p) => getPub(p)?.publicado !== true);
 
   // Cargar categorías extra para los productos visibles. Cast hasta
   // regenerar tipos de Supabase tras aplicar la migración 31.
@@ -248,7 +259,7 @@ async function ProductosTable({ q, cat, estado, web, sin_categoria }: SP) {
                 .map((v) => Number(v.precio_publico ?? 0))
                 .filter((x) => x > 0)
                 .sort((a, b) => a - b)[0];
-              const pub = p.productos_publicacion?.[0];
+              const pub = getPub(p);
               return (
                 <TableRow key={p.id} className="hover:bg-happy-50/50">
                   <TableCell className="font-mono text-xs">{p.codigo}</TableCell>
