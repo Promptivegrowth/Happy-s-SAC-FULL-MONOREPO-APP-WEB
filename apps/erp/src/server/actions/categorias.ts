@@ -10,6 +10,7 @@ const schema = z.object({
   descripcion: z.string().optional().or(z.literal('')),
   slug: z.string().regex(/^[a-z0-9-]+$/, 'Solo minúsculas, números y guiones').optional().or(z.literal('')),
   icono: z.string().optional().or(z.literal('')),
+  imagen_url: z.string().url('URL de imagen inválida').optional().or(z.literal('')),
   publicar_en_web: z.boolean().default(true),
   orden_web: z.coerce.number().int().min(0).default(100),
   activo: z.boolean().default(true),
@@ -22,6 +23,7 @@ function parseForm(fd: FormData) {
     descripcion: fd.get('descripcion') || '',
     slug: fd.get('slug') || '',
     icono: fd.get('icono') || '',
+    imagen_url: fd.get('imagen_url') || '',
     publicar_en_web: fd.get('publicar_en_web') === 'on',
     orden_web: fd.get('orden_web') || 100,
     activo: fd.get('activo') === 'on',
@@ -37,6 +39,7 @@ export async function crearCategoria(_prev: unknown, fd: FormData): Promise<Acti
       slug: data.slug || data.nombre.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, ''),
       descripcion: data.descripcion || null,
       icono: data.icono || null,
+      imagen_url: data.imagen_url || null,
     }).select('id').single();
     if (error) throw new Error(error.message);
     return { id: row.id };
@@ -57,6 +60,7 @@ export async function actualizarCategoria(id: string, _prev: unknown, fd: FormDa
       slug: data.slug || data.nombre.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, ''),
       descripcion: data.descripcion || null,
       icono: data.icono || null,
+      imagen_url: data.imagen_url || null,
     }).eq('id', id);
     if (error) throw new Error(error.message);
     return null;
