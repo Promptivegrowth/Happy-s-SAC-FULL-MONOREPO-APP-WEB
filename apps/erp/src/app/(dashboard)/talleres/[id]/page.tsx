@@ -19,7 +19,7 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
     <PageShell
       title={`Editar: ${data.nombre}`}
       description={`Código ${data.codigo}`}
-      actions={<DeleteButton action={onDelete} label="Desactivar" itemName="este taller" />}
+      actions={<DeleteButton action={onDelete} label="Desactivar" itemName="este taller" redirectTo="/talleres" />}
     >
       <TallerForm initial={data} />
     </PageShell>

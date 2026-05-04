@@ -132,11 +132,29 @@ export function TallerForm({ initial }: { initial?: Taller }) {
 
       <FormSection title="Pagos">
         <FormGrid cols={2}>
-          <FormRow label="Banco">
-            <Input name="banco" defaultValue={initial?.banco ?? ''} placeholder="BCP / BBVA / Interbank" />
+          <FormRow label="Banco" hint="Donde se le deposita al taller. Si no figura el suyo, elegí 'Otro' y aclaralo en notas.">
+            <select
+              name="banco"
+              defaultValue={initial?.banco ?? ''}
+              className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
+            >
+              <option value="">— Sin banco asignado —</option>
+              <option value="BCP">BCP</option>
+              <option value="BBVA">BBVA</option>
+              <option value="INTERBANK">Interbank</option>
+              <option value="SCOTIABANK">Scotiabank</option>
+              <option value="BANBIF">BanBif</option>
+              <option value="BANCO_NACION">Banco de la Nación</option>
+              <option value="MIBANCO">Mibanco</option>
+              <option value="PICHINCHA">Banco Pichincha</option>
+              <option value="GNB">GNB</option>
+              <option value="YAPE">Yape</option>
+              <option value="PLIN">Plin</option>
+              <option value="OTRO">Otro (aclarar en notas)</option>
+            </select>
           </FormRow>
           <FormRow label="Número de cuenta / CCI">
-            <Input name="numero_cuenta" defaultValue={initial?.numero_cuenta ?? ''} />
+            <Input name="numero_cuenta" defaultValue={initial?.numero_cuenta ?? ''} placeholder="Ej. 191-12345678901-2-34 o CCI 002 191 ..." />
           </FormRow>
         </FormGrid>
         <FormRow label="Notas">

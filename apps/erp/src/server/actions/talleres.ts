@@ -88,6 +88,11 @@ export async function actualizarTaller(id: string, _prev: unknown, fd: FormData)
   return r;
 }
 
+/**
+ * Soft-delete: marca el taller como activo=false. La navegación post-éxito
+ * la hace el cliente (DeleteButton) para evitar que el redirect del server
+ * cuelgue el useTransition.
+ */
 export async function eliminarTaller(id: string): Promise<ActionResult> {
   const r = await runAction(async () => {
     const { sb } = await requireUser();
@@ -95,6 +100,6 @@ export async function eliminarTaller(id: string): Promise<ActionResult> {
     if (error) throw new Error(error.message);
     return null;
   });
-  if (r.ok) { await bumpPaths('/talleres'); redirect('/talleres'); }
+  if (r.ok) await bumpPaths('/talleres');
   return r;
 }
