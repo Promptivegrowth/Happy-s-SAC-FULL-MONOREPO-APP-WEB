@@ -2,7 +2,7 @@ import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { createClient } from '@happy/db/server';
 import { Button } from '@happy/ui/button';
-import { Wallet } from 'lucide-react';
+import { Wallet, Tags } from 'lucide-react';
 import { PageShell } from '@/components/page-shell';
 import { TallerForm } from '@/components/forms/taller-form';
 import { DeleteButton } from '@/components/forms/delete-button';
@@ -24,6 +24,11 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
       description={`Código ${data.codigo}`}
       actions={
         <div className="flex items-center gap-2">
+          <Link href={`/talleres/${id}/tarifas`}>
+            <Button variant="outline" className="gap-2">
+              <Tags className="h-4 w-4" /> Tarifas
+            </Button>
+          </Link>
           <Link href={`/talleres/${id}/pagos`}>
             <Button variant="outline" className="gap-2">
               <Wallet className="h-4 w-4" /> Ver pagos

@@ -121,20 +121,24 @@ const osSchema = z.object({
 
 /**
  * Pobla automáticamente las líneas y los avíos de una OS recién creada
- * a partir del corte vinculado:
- *   - Líneas: cada (producto, talla) del corte con cantidad_real > 0 → fila
- *     en ordenes_servicio_lineas con esa cantidad.
- *   - Avíos: por cada línea, busca la receta activa del producto y trae sus
- *     materiales con sale_a_servicio=true para esa talla; multiplica
- *     cantidad_unitaria × cantidad_a_producir y agrupa por material.
+ * a partir del corte vinculado.
  *
- * Si no hay receta activa, no falla — solo no genera avíos (se pueden
- * agregar manualmente después).
+ * - Si tallasFiltro está definido (no vacío), solo se incluyen esas tallas
+ *   → permite DIVIDIR un corte en 2+ OSs (mandar T2-T4 a un taller y
+ *   T6-T8 a otro en campañas).
+ *
+ * - Avíos: por cada línea de receta con sale_a_servicio=true, la cantidad
+ *   enviada al taller = (cantidad_unitaria - cantidad_almacen) × cantidad
+ *   a producir. cantidad_almacen es la parte que QUEDA en planta para
+ *   decoración manual u otros procesos internos.
+ *
+ * Si no hay receta activa, no falla — solo no genera avíos.
  */
 async function poblarLineasYAviosOS(
   sb: Awaited<ReturnType<typeof requireUser>>['sb'],
   osId: string,
   corteId: string,
+  tallasFiltro?: string[],
 ): Promise<{ lineas: number; avios: number }> {
   // 1) Cargar el corte y sus líneas no vacías
   const { data: corte, error: errC } = await sb
@@ -147,9 +151,11 @@ async function poblarLineasYAviosOS(
 
   const productoId = corte.producto_id as string;
   type LC = { talla: string; cantidad_real: number | null };
-  const lineasCorte = ((corte as unknown as { ot_corte_lineas?: LC[] }).ot_corte_lineas ?? []).filter(
+  const lineasTodas = ((corte as unknown as { ot_corte_lineas?: LC[] }).ot_corte_lineas ?? []).filter(
     (l) => Number(l.cantidad_real ?? 0) > 0,
   );
+  const filtroSet = tallasFiltro && tallasFiltro.length > 0 ? new Set(tallasFiltro) : null;
+  const lineasCorte = filtroSet ? lineasTodas.filter((l) => filtroSet.has(l.talla)) : lineasTodas;
 
   if (lineasCorte.length === 0) return { lineas: 0, avios: 0 };
 
@@ -164,6 +170,7 @@ async function poblarLineasYAviosOS(
   if (errL) throw new Error(`OS lineas: ${errL.message}`);
 
   // 3) Calcular avíos: receta activa × cantidad por talla
+  // Considera cantidad_almacen para dividir avíos (parte va al taller, parte queda en planta).
   const { data: receta } = await sb
     .from('recetas')
     .select('id')
@@ -177,7 +184,7 @@ async function poblarLineasYAviosOS(
   const tallasNecesarias = lineasCorte.map((l) => l.talla as 'T0' | 'T2' | 'T4' | 'T6' | 'T8' | 'T10' | 'T12' | 'T14' | 'T16' | 'TS' | 'TAD');
   const { data: lineasReceta } = await sb
     .from('recetas_lineas')
-    .select('material_id, talla, cantidad')
+    .select('material_id, talla, cantidad, cantidad_almacen')
     .eq('receta_id', receta.id)
     .eq('sale_a_servicio', true)
     .in('talla', tallasNecesarias);
@@ -189,7 +196,11 @@ async function poblarLineasYAviosOS(
   for (const lr of lineasReceta ?? []) {
     const cantUnidades = cantPorTalla.get(lr.talla as string) ?? 0;
     if (cantUnidades <= 0) continue;
-    const cantAvios = Number(lr.cantidad) * cantUnidades;
+    // Cantidad efectiva al taller = cantidad por unidad - lo que queda en almacén.
+    // Si cantidad_almacen >= cantidad, no se manda nada al taller (todo queda en planta).
+    const cantAlTaller = Math.max(0, Number(lr.cantidad) - Number(lr.cantidad_almacen ?? 0));
+    if (cantAlTaller <= 0) continue;
+    const cantAvios = cantAlTaller * cantUnidades;
     const matId = lr.material_id as string;
     aviosMap.set(matId, (aviosMap.get(matId) ?? 0) + cantAvios);
   }
@@ -247,12 +258,19 @@ export async function crearOS(
     }).select('id').single();
     if (error) throw new Error(error.message);
 
-    // Si la OS viene de un corte, poblar líneas + avíos. Si falla, eliminar
-    // la cabecera para evitar OS huérfanas.
+    // Si la OS viene de un corte, poblar líneas + avíos. Acepta filtro
+    // opcional de tallas (campo 'tallas_seleccionadas' en el FormData,
+    // múltiples valores) para dividir un corte en 2+ OSs.
     let extras = { lineas: 0, avios: 0 };
     if (data.corte_id) {
+      const tallasFiltro = fd.getAll('tallas_seleccionadas').map((v) => String(v)).filter(Boolean);
       try {
-        extras = await poblarLineasYAviosOS(sb, row.id as string, data.corte_id);
+        extras = await poblarLineasYAviosOS(
+          sb,
+          row.id as string,
+          data.corte_id,
+          tallasFiltro.length > 0 ? tallasFiltro : undefined,
+        );
       } catch (e) {
         await sb.from('ordenes_servicio').delete().eq('id', row.id);
         throw new Error(`No se pudieron poblar líneas/avíos: ${(e as Error).message}`);
