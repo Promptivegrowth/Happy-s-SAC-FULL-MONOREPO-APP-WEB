@@ -5,7 +5,7 @@ import { Badge } from '@happy/ui/badge';
 import { Button } from '@happy/ui/button';
 import { PageShell } from '@/components/page-shell';
 import { requireRol } from '@/server/session';
-import { Ruler, Receipt } from 'lucide-react';
+import { Ruler, Receipt, Factory } from 'lucide-react';
 
 export const metadata = { title: 'Configuración' };
 export const dynamic = 'force-dynamic';
@@ -28,6 +28,19 @@ export default async function ConfiguracionPage() {
               <div className="flex-1">
                 <p className="font-display text-sm font-semibold text-corp-900">Unidades de medida</p>
                 <p className="text-xs text-slate-500">Gestionar unidades de compra y consumo</p>
+              </div>
+            </CardContent>
+          </Card>
+        </Link>
+        <Link href="/configuracion/areas">
+          <Card className="group cursor-pointer transition hover:-translate-y-0.5 hover:border-happy-300 hover:shadow-md">
+            <CardContent className="flex items-center gap-3 p-4">
+              <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-happy-50 text-happy-600 transition group-hover:bg-happy-500 group-hover:text-white">
+                <Factory className="h-5 w-5" />
+              </div>
+              <div className="flex-1">
+                <p className="font-display text-sm font-semibold text-corp-900">Áreas de producción</p>
+                <p className="text-xs text-slate-500">Tarifa por minuto y catálogo de áreas</p>
               </div>
             </CardContent>
           </Card>

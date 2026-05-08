@@ -363,6 +363,39 @@ export async function actualizarProceso(
   return r;
 }
 
+/**
+ * Reordena las operaciones de un producto. Recibe los ids en el orden
+ * deseado; les asigna orden = 10, 20, 30, … (con espacios para futuras
+ * inserciones manuales).
+ */
+export async function reordenarProcesos(
+  productoId: string,
+  idsEnOrden: string[],
+): Promise<ActionResult<{ actualizadas: number }>> {
+  const r = await runAction(async () => {
+    if (idsEnOrden.length === 0) return { actualizadas: 0 };
+    const { sb } = await requireUser();
+    let count = 0;
+    // Una transacción real requiere PL/pgSQL; acá hacemos updates secuenciales
+    // que son seguros porque solo tocan el campo `orden` y no hay constraints
+    // de unicidad en él.
+    for (let i = 0; i < idsEnOrden.length; i++) {
+      const id = idsEnOrden[i]!;
+      const orden = (i + 1) * 10;
+      const { error } = await sb
+        .from('productos_procesos')
+        .update({ orden })
+        .eq('id', id)
+        .eq('producto_id', productoId); // doble check para que no se reordenen procesos de otro producto
+      if (error) throw new Error(`reorder ${id}: ${error.message}`);
+      count++;
+    }
+    return { actualizadas: count };
+  });
+  if (r.ok) await bumpPaths(`/productos/${productoId}`, '/recetas');
+  return r;
+}
+
 export async function eliminarProceso(id: string): Promise<ActionResult> {
   const r = await runAction(async () => {
     const { sb } = await requireUser();

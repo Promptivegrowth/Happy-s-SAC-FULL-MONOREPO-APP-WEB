@@ -9,8 +9,23 @@ import { Switch } from '@happy/ui/switch';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@happy/ui/tabs';
 import { FormGrid, FormRow } from '@happy/ui/form-row';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@happy/ui/table';
-import { Plus, Trash2, Loader2, Search, X, Copy, Scissors, Clock, ListOrdered } from 'lucide-react';
+import { Plus, Trash2, Loader2, Search, X, Copy, Scissors, Clock, ListOrdered, GripVertical } from 'lucide-react';
 import { toast } from 'sonner';
+import {
+  DndContext,
+  closestCenter,
+  PointerSensor,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+} from '@dnd-kit/core';
+import {
+  arrayMove,
+  SortableContext,
+  useSortable,
+  verticalListSortingStrategy,
+} from '@dnd-kit/sortable';
+import { CSS } from '@dnd-kit/utilities';
 import {
   upsertReceta,
   upsertRecetaMulti,
@@ -22,6 +37,7 @@ import {
   agregarProceso,
   actualizarProceso,
   eliminarProceso,
+  reordenarProcesos,
 } from '@/server/actions/recetas';
 
 const TALLAS = ['T0','T2','T4','T6','T8','T10','T12','T14','T16','TS','TAD'] as const;
@@ -1100,76 +1116,20 @@ function ProcesosEditor({
         </Card>
       ) : (
         <Card>
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead className="w-16">Orden</TableHead>
-                <TableHead>Proceso</TableHead>
-                <TableHead>Área</TableHead>
-                <TableHead>Talla</TableHead>
-                <TableHead className="text-right">Tiempo (min)</TableHead>
-                <TableHead className="text-right">Costo</TableHead>
-                <TableHead>Tercerizado</TableHead>
-                <TableHead>Observación</TableHead>
-                <TableHead></TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {ordenados.map((p) => {
-                const tiempoMin = Number(p.tiempo_estandar_min ?? 0);
-                const valorMin = Number(p.areas_produccion?.valor_minuto ?? 0);
-                const costo = tiempoMin * valorMin;
-                return (
-                  <TableRow key={p.id}>
-                    <TableCell className="font-mono text-xs">{p.orden}</TableCell>
-                    <TableCell className="font-medium">{p.proceso.replace('_', ' ')}</TableCell>
-                    <TableCell>
-                      {p.areas_produccion ? (
-                        <Badge variant="secondary">{p.areas_produccion.nombre}</Badge>
-                      ) : (
-                        <span className="text-xs text-slate-400">—</span>
-                      )}
-                    </TableCell>
-                    <TableCell>
-                      {p.talla ? (
-                        <Badge variant="outline">{p.talla.replace('T', '')}</Badge>
-                      ) : (
-                        <span className="text-xs text-slate-400">Todas</span>
-                      )}
-                    </TableCell>
-                    <TableCell className="text-right">
-                      <InlineTiempo
-                        valor={tiempoMin}
-                        onChange={async (v) => {
-                          start(async () => {
-                            const r = await actualizarProceso(p.id, { tiempo_estandar_min: v });
-                            if (r.ok) toast.success('Tiempo actualizado');
-                            else toast.error(r.error ?? 'Error');
-                          });
-                        }}
-                      />
-                    </TableCell>
-                    <TableCell className="text-right text-sm">
-                      {valorMin > 0 ? `S/ ${costo.toFixed(2)}` : <span className="text-xs text-slate-400">—</span>}
-                    </TableCell>
-                    <TableCell>
-                      {p.es_tercerizado ? (
-                        <Badge variant="default" className="bg-amber-500 text-[10px]">Externo</Badge>
-                      ) : (
-                        <Badge variant="secondary" className="text-[10px]">Interno</Badge>
-                      )}
-                    </TableCell>
-                    <TableCell className="max-w-xs truncate text-xs text-slate-500">{p.observacion}</TableCell>
-                    <TableCell className="text-right">
-                      <Button variant="ghost" size="sm" onClick={() => eliminar(p.id)} disabled={pending}>
-                        <Trash2 className="h-3.5 w-3.5 text-danger" />
-                      </Button>
-                    </TableCell>
-                  </TableRow>
-                );
-              })}
-            </TableBody>
-          </Table>
+          <ProcesosTabla
+            procesos={ordenados}
+            orderBy={orderBy}
+            productoId={productoId}
+            onEliminar={eliminar}
+            onActualizarTiempo={(id, v) => {
+              start(async () => {
+                const r = await actualizarProceso(id, { tiempo_estandar_min: v });
+                if (r.ok) toast.success('Tiempo actualizado');
+                else toast.error(r.error ?? 'Error');
+              });
+            }}
+            pending={pending}
+          />
           <div className="border-t bg-slate-50 px-4 py-3 text-sm">
             <div className="flex justify-end gap-6">
               <div className="flex items-center gap-2">
@@ -1186,6 +1146,175 @@ function ProcesosEditor({
         </Card>
       )}
     </div>
+  );
+}
+
+// ============================================================================
+// Tabla de operaciones con drag & drop (solo cuando orderBy === 'orden')
+// ============================================================================
+
+function ProcesosTabla({
+  procesos,
+  orderBy,
+  productoId,
+  onEliminar,
+  onActualizarTiempo,
+  pending,
+}: {
+  procesos: Proceso[];
+  orderBy: 'orden' | 'area' | 'tiempo';
+  productoId: string;
+  onEliminar: (id: string) => void;
+  onActualizarTiempo: (id: string, v: number) => void;
+  pending: boolean;
+}) {
+  // Estado local para reflejar el orden visualmente al instante (optimistic).
+  // Cuando llega `procesos` por props (después del refresh server), se sincroniza.
+  const [items, setItems] = useState<Proceso[]>(procesos);
+  useEffect(() => setItems(procesos), [procesos]);
+
+  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 4 } }));
+  const dndDisabled = orderBy !== 'orden';
+
+  function onDragEnd(event: DragEndEvent) {
+    const { active, over } = event;
+    if (!over || active.id === over.id) return;
+    const oldIndex = items.findIndex((i) => i.id === active.id);
+    const newIndex = items.findIndex((i) => i.id === over.id);
+    if (oldIndex < 0 || newIndex < 0) return;
+    const nuevo = arrayMove(items, oldIndex, newIndex);
+    setItems(nuevo);
+    // Persistir orden en server
+    reordenarProcesos(productoId, nuevo.map((i) => i.id))
+      .then((r) => {
+        if (!r.ok) {
+          toast.error(r.error ?? 'No se pudo reordenar');
+          setItems(procesos); // revertir
+        } else {
+          toast.success('Orden guardado');
+        }
+      });
+  }
+
+  return (
+    <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onDragEnd}>
+      <SortableContext items={items.map((i) => i.id)} strategy={verticalListSortingStrategy}>
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead className="w-8"></TableHead>
+              <TableHead className="w-16">Orden</TableHead>
+              <TableHead>Proceso</TableHead>
+              <TableHead>Área</TableHead>
+              <TableHead>Talla</TableHead>
+              <TableHead className="text-right">Tiempo (min)</TableHead>
+              <TableHead className="text-right">Costo</TableHead>
+              <TableHead>Tercerizado</TableHead>
+              <TableHead>Observación</TableHead>
+              <TableHead></TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {items.map((p) => (
+              <ProcesoFila
+                key={p.id}
+                proceso={p}
+                onEliminar={onEliminar}
+                onActualizarTiempo={onActualizarTiempo}
+                pending={pending}
+                dndDisabled={dndDisabled}
+              />
+            ))}
+          </TableBody>
+        </Table>
+      </SortableContext>
+      {dndDisabled && (
+        <p className="border-t bg-amber-50/40 px-4 py-2 text-[10px] text-amber-700">
+          💡 Para reordenar arrastrando, cambiá el orden a &quot;Orden / secuencia&quot; arriba.
+        </p>
+      )}
+    </DndContext>
+  );
+}
+
+function ProcesoFila({
+  proceso: p,
+  onEliminar,
+  onActualizarTiempo,
+  pending,
+  dndDisabled,
+}: {
+  proceso: Proceso;
+  onEliminar: (id: string) => void;
+  onActualizarTiempo: (id: string, v: number) => void;
+  pending: boolean;
+  dndDisabled: boolean;
+}) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
+    id: p.id,
+    disabled: dndDisabled,
+  });
+  const style: React.CSSProperties = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    opacity: isDragging ? 0.5 : 1,
+    background: isDragging ? '#fef3c7' : undefined,
+  };
+  const tiempoMin = Number(p.tiempo_estandar_min ?? 0);
+  const valorMin = Number(p.areas_produccion?.valor_minuto ?? 0);
+  const costo = tiempoMin * valorMin;
+  return (
+    <TableRow ref={setNodeRef} style={style}>
+      <TableCell className="w-8 px-1">
+        <button
+          type="button"
+          {...attributes}
+          {...listeners}
+          disabled={dndDisabled}
+          aria-label="Arrastrar para reordenar"
+          className={`flex h-6 w-6 items-center justify-center rounded text-slate-400 ${
+            dndDisabled ? 'cursor-not-allowed opacity-30' : 'cursor-grab hover:bg-slate-100 hover:text-slate-700 active:cursor-grabbing'
+          }`}
+        >
+          <GripVertical className="h-3.5 w-3.5" />
+        </button>
+      </TableCell>
+      <TableCell className="font-mono text-xs">{p.orden}</TableCell>
+      <TableCell className="font-medium">{p.proceso.replace('_', ' ')}</TableCell>
+      <TableCell>
+        {p.areas_produccion ? (
+          <Badge variant="secondary">{p.areas_produccion.nombre}</Badge>
+        ) : (
+          <span className="text-xs text-slate-400">—</span>
+        )}
+      </TableCell>
+      <TableCell>
+        {p.talla ? (
+          <Badge variant="outline">{p.talla.replace('T', '')}</Badge>
+        ) : (
+          <span className="text-xs text-slate-400">Todas</span>
+        )}
+      </TableCell>
+      <TableCell className="text-right">
+        <InlineTiempo valor={tiempoMin} onChange={(v) => onActualizarTiempo(p.id, v)} />
+      </TableCell>
+      <TableCell className="text-right text-sm">
+        {valorMin > 0 ? `S/ ${costo.toFixed(2)}` : <span className="text-xs text-slate-400">—</span>}
+      </TableCell>
+      <TableCell>
+        {p.es_tercerizado ? (
+          <Badge variant="default" className="bg-amber-500 text-[10px]">Externo</Badge>
+        ) : (
+          <Badge variant="secondary" className="text-[10px]">Interno</Badge>
+        )}
+      </TableCell>
+      <TableCell className="max-w-xs truncate text-xs text-slate-500">{p.observacion}</TableCell>
+      <TableCell className="text-right">
+        <Button variant="ghost" size="sm" onClick={() => onEliminar(p.id)} disabled={pending}>
+          <Trash2 className="h-3.5 w-3.5 text-danger" />
+        </Button>
+      </TableCell>
+    </TableRow>
   );
 }
 
