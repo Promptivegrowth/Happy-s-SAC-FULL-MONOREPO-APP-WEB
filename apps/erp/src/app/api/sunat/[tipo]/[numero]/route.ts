@@ -27,6 +27,14 @@ export async function GET(_req: Request, { params }: { params: Promise<{ tipo: s
     }
     return NextResponse.json({ error: 'tipo inválido' }, { status: 400 });
   } catch (e) {
-    return NextResponse.json({ error: (e as Error).message }, { status: 500 });
+    const msg = (e as Error).message;
+    // Mapear el mensaje a un código HTTP adecuado para que la consola no
+    // muestre todo como 500 (que sugiere bug del server).
+    let status = 500;
+    if (msg.includes('inválido') || msg.includes('Documento inválido')) status = 422;
+    else if (msg.includes('no encontrado')) status = 404;
+    else if (msg.includes('Token inválido')) status = 401;
+    else if (msg.includes('Cuota')) status = 429;
+    return NextResponse.json({ error: msg }, { status });
   }
 }

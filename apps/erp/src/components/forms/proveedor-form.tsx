@@ -42,6 +42,9 @@ export function ProveedorForm({ initial }: { initial?: Proveedor }) {
   const [direccion, setDireccion] = useState(initial?.direccion ?? '');
   const [imp, setImp] = useState(initial?.es_importacion ?? false);
   const [activo, setActivo] = useState(initial?.activo ?? true);
+  const [tipoDoc, setTipoDoc] = useState<'DNI' | 'RUC' | 'CE'>(
+    (initial?.tipo_documento as 'DNI' | 'RUC' | 'CE' | null) ?? 'RUC',
+  );
 
   function applyLookup(d: { numero?: string; razonSocial?: string; direccion?: string }) {
     if (d.numero) setNumero(d.numero);
@@ -54,15 +57,37 @@ export function ProveedorForm({ initial }: { initial?: Proveedor }) {
       <FormSection title="Identificación" description="Autocompleta con SUNAT.">
         <FormGrid cols={3}>
           <FormRow label="Tipo">
-            <select name="tipo_documento" defaultValue={initial?.tipo_documento ?? 'RUC'} className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm">
+            <select
+              name="tipo_documento"
+              value={tipoDoc}
+              onChange={(e) => setTipoDoc(e.target.value as 'DNI' | 'RUC' | 'CE')}
+              className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
+            >
               <option value="RUC">RUC</option>
               <option value="DNI">DNI</option>
               <option value="CE">CE</option>
             </select>
           </FormRow>
           <div className="sm:col-span-2">
-            <FormRow label="Número" required error={state.fields?.numero_documento}>
-              <SunatLookup tipo="ruc" defaultValue={numero} onResult={applyLookup} name="numero_documento" required />
+            <FormRow label={`Número de ${tipoDoc}`} required error={state.fields?.numero_documento}>
+              {tipoDoc === 'DNI' || tipoDoc === 'RUC' ? (
+                <SunatLookup
+                  tipo={tipoDoc.toLowerCase() as 'dni' | 'ruc'}
+                  defaultValue={numero}
+                  onResult={applyLookup}
+                  name="numero_documento"
+                  required
+                />
+              ) : (
+                <input
+                  name="numero_documento"
+                  value={numero}
+                  onChange={(e) => setNumero(e.target.value)}
+                  required
+                  className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
+                  placeholder="Número de CE"
+                />
+              )}
             </FormRow>
           </div>
         </FormGrid>

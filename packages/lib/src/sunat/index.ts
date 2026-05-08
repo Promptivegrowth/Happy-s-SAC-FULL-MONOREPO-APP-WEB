@@ -68,6 +68,19 @@ async function decolectaFetch<T>(path: string, opts: FetchOptions): Promise<T> {
     if (res.status === 404) {
       throw new Error('Documento no encontrado en RENIEC/SUNAT.');
     }
+    if (res.status === 422) {
+      // Decolecta devuelve 422 cuando el formato del documento es inválido
+      // (ej. RUC que no empieza con 10/15/16/17/20). El cuerpo viene como
+      // {"message":"ruc no valido"}.
+      let detalle = '';
+      try {
+        const j = JSON.parse(text) as { message?: string };
+        detalle = j.message ?? '';
+      } catch {
+        /* texto plano */
+      }
+      throw new Error(detalle ? `Documento inválido: ${detalle}` : 'Documento inválido (formato no reconocido).');
+    }
     if (res.status === 429) {
       throw new Error('Cuota mensual del plan gratuito agotada. Esperá al próximo mes o subí de plan en Decolecta.');
     }
