@@ -8,10 +8,14 @@ const TALLAS = ['T0','T2','T4','T6','T8','T10','T12','T14','T16','TS','TAD'] as 
 
 const corteSchema = z.object({
   ot_id: z.string().uuid(),
-  producto_id: z.string().uuid(),
+  // producto_id es opcional: si no viene, se infiere de ot_lineas (caso normal:
+  // OTs generadas desde plan tienen 1 producto). Solo es requerido si la OT
+  // tiene varios productos y hay que desambiguar.
+  producto_id: z.string().uuid().optional().or(z.literal('')),
   responsable_operario_id: z.string().uuid().optional().or(z.literal('')),
   capas_tendidas: z.coerce.number().int().min(0).default(0),
   metros_consumidos: z.coerce.number().min(0).default(0),
+  merma_metros: z.coerce.number().min(0).default(0),
   observacion: z.string().optional().or(z.literal('')),
 });
 
@@ -19,21 +23,42 @@ export async function crearCorte(_prev: unknown, fd: FormData): Promise<ActionRe
   const r = await runAction(async () => {
     const data = corteSchema.parse({
       ot_id: fd.get('ot_id'),
-      producto_id: fd.get('producto_id'),
+      producto_id: fd.get('producto_id') || '',
       responsable_operario_id: fd.get('responsable_operario_id') || '',
       capas_tendidas: fd.get('capas_tendidas') || 0,
       metros_consumidos: fd.get('metros_consumidos') || 0,
+      merma_metros: fd.get('merma_metros') || 0,
       observacion: fd.get('observacion') || '',
     });
     const { sb } = await requireUser();
+
+    // Si no vino producto_id, inferir de ot_lineas. Si la OT tiene 1 solo
+    // producto, lo usamos directo. Si tiene varios, exigimos el campo.
+    let productoId = data.producto_id;
+    if (!productoId) {
+      const { data: lineas } = await sb
+        .from('ot_lineas')
+        .select('producto_id')
+        .eq('ot_id', data.ot_id);
+      const productos = Array.from(new Set((lineas ?? []).map((l) => l.producto_id as string)));
+      if (productos.length === 0) {
+        throw new Error('La OT seleccionada no tiene líneas planificadas — no se puede crear un corte sobre ella.');
+      }
+      if (productos.length > 1) {
+        throw new Error('La OT tiene varios productos; tenés que indicar cuál se está cortando.');
+      }
+      productoId = productos[0]!;
+    }
+
     const { data: nro } = await sb.rpc('next_correlativo', { p_clave: 'CORTE', p_padding: 6 });
     const { data: row, error } = await sb.from('ot_corte').insert({
       numero: `COR-${nro}`,
       ot_id: data.ot_id,
-      producto_id: data.producto_id,
+      producto_id: productoId,
       responsable_operario_id: data.responsable_operario_id || null,
       capas_tendidas: data.capas_tendidas,
       metros_consumidos: data.metros_consumidos,
+      merma_metros: data.merma_metros,
       observacion: data.observacion || null,
       estado: 'ABIERTO',
       fecha_inicio: new Date().toISOString(),
@@ -41,19 +66,15 @@ export async function crearCorte(_prev: unknown, fd: FormData): Promise<ActionRe
     if (error) throw new Error(error.message);
     return { id: row.id };
   });
-  if (r.ok && r.data) {
-    await bumpPaths('/corte');
-    redirect(`/corte/${r.data.id}`);
-  }
+  if (r.ok && r.data) await bumpPaths('/corte');
   return r;
 }
 
 const lineaCorteSchema = z.object({
   corte_id: z.string().uuid(),
   talla: z.enum(TALLAS),
-  cantidad_teorica: z.coerce.number().int().min(0),
+  cantidad_teorica: z.coerce.number().int().min(1, 'Cantidad teórica debe ser > 0'),
   cantidad_real: z.coerce.number().int().min(0).optional().or(z.literal('')),
-  merma: z.coerce.number().int().min(0).default(0),
 });
 
 export async function agregarLineaCorte(_prev: unknown, fd: FormData): Promise<ActionResult> {
@@ -63,15 +84,17 @@ export async function agregarLineaCorte(_prev: unknown, fd: FormData): Promise<A
       talla: fd.get('talla'),
       cantidad_teorica: fd.get('cantidad_teorica'),
       cantidad_real: fd.get('cantidad_real') || '',
-      merma: fd.get('merma') || 0,
     });
     const { sb } = await requireUser();
+    // merma por talla quedó deprecada — la merma del corte se carga en metros
+    // a nivel cabecera (ot_corte.merma_metros). Insertamos 0 para no romper
+    // la columna existente.
     const { error } = await sb.from('ot_corte_lineas').insert({
       corte_id: data.corte_id,
       talla: data.talla,
       cantidad_teorica: data.cantidad_teorica,
       cantidad_real: data.cantidad_real === '' ? null : Number(data.cantidad_real),
-      merma: data.merma,
+      merma: 0,
     });
     if (error) throw new Error(error.message);
     return null;

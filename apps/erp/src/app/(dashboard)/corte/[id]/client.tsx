@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useTransition } from 'react';
+import { useMemo, useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
 import { Button } from '@happy/ui/button';
 import { Input } from '@happy/ui/input';
@@ -22,56 +22,131 @@ type Linea = {
   merma: number | null;
 };
 
-export function LineasCorteEditor({ corteId, lineas, editable }: { corteId: string; lineas: Linea[]; editable: boolean }) {
+export function LineasCorteEditor({
+  corteId,
+  lineas,
+  editable,
+  planPorTalla,
+  cortadoOtrosPorTalla,
+}: {
+  corteId: string;
+  lineas: Linea[];
+  editable: boolean;
+  /** Cantidad planificada en la OT por talla (para este modelo). */
+  planPorTalla: Record<string, number>;
+  /** Cantidad ya cortada en otros cortes del mismo OT/modelo, para calcular saldo. */
+  cortadoOtrosPorTalla: Record<string, number>;
+}) {
+  const router = useRouter();
   const [open, setOpen] = useState(false);
   const [pending, start] = useTransition();
+  const [tallaSel, setTallaSel] = useState('');
+  const [cantTeorica, setCantTeorica] = useState('');
+  const [cantReal, setCantReal] = useState('');
 
-  function add(fd: FormData) {
-    fd.append('corte_id', corteId);
-    start(async () => {
-      const r = await agregarLineaCorte(null, fd);
-      if (r.ok) { toast.success('Línea agregada'); setOpen(false); }
-      else toast.error(r.error ?? 'Error');
-    });
+  const tallasUsadas = useMemo(() => new Set(lineas.map((l) => l.talla)), [lineas]);
+  // Tallas disponibles: las que están en el plan de la OT y no fueron usadas
+  // todavía en este corte. Si la OT no tiene plan (caso raro), caemos a la
+  // lista completa de tallas para no bloquear.
+  const tallasDelPlan = Object.keys(planPorTalla);
+  const disponibles = (tallasDelPlan.length > 0 ? tallasDelPlan : (TALLAS as readonly string[]))
+    .filter((t) => !tallasUsadas.has(t));
+
+  function saldoDe(t: string): number {
+    const plan = planPorTalla[t] ?? 0;
+    const otros = cortadoOtrosPorTalla[t] ?? 0;
+    return Math.max(0, plan - otros);
   }
 
-  const tallasUsadas = lineas.map((l) => l.talla);
-  const disponibles = TALLAS.filter((t) => !tallasUsadas.includes(t));
+  function abrir() {
+    const primeraTalla = disponibles[0] ?? '';
+    setTallaSel(primeraTalla);
+    setCantTeorica(primeraTalla ? String(saldoDe(primeraTalla)) : '');
+    setCantReal('');
+    setOpen(true);
+  }
+
+  function onTallaChange(t: string) {
+    setTallaSel(t);
+    setCantTeorica(String(saldoDe(t)));
+  }
+
+  function submit() {
+    if (!tallaSel) return toast.error('Elegí una talla');
+    if (!cantTeorica || Number(cantTeorica) <= 0) return toast.error('Ingresá la cantidad teórica');
+    const fd = new FormData();
+    fd.set('corte_id', corteId);
+    fd.set('talla', tallaSel);
+    fd.set('cantidad_teorica', cantTeorica);
+    if (cantReal) fd.set('cantidad_real', cantReal);
+    start(async () => {
+      const r = await agregarLineaCorte(null, fd);
+      if (r.ok) {
+        toast.success('Línea agregada');
+        setOpen(false);
+        router.refresh();
+      } else {
+        toast.error(r.error ?? 'Error');
+      }
+    });
+  }
 
   return (
     <div>
       {editable && open && (
         <Card className="m-4 border-happy-300 bg-happy-50/40 p-4">
-          <form action={add}>
-            <FormGrid cols={4}>
-              <FormRow label="Talla" required>
-                <select name="talla" required className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm">
-                  {disponibles.map((t) => <option key={t} value={t}>{t.replace('T', '')}</option>)}
-                </select>
-              </FormRow>
-              <FormRow label="Cant. teórica" required>
-                <Input name="cantidad_teorica" type="number" min={0} required defaultValue={50} />
-              </FormRow>
-              <FormRow label="Cant. real">
-                <Input name="cantidad_real" type="number" min={0} placeholder="opcional" />
-              </FormRow>
-              <FormRow label="Merma">
-                <Input name="merma" type="number" min={0} defaultValue={0} />
-              </FormRow>
-            </FormGrid>
-            <div className="mt-3 flex justify-end gap-2">
-              <Button type="button" variant="outline" onClick={() => setOpen(false)} disabled={pending}>Cancelar</Button>
-              <Button type="submit" variant="premium" disabled={pending}>
-                {pending && <Loader2 className="h-4 w-4 animate-spin" />} Agregar
-              </Button>
-            </div>
-          </form>
+          <FormGrid cols={3}>
+            <FormRow
+              label="Talla"
+              required
+              hint={planPorTalla[tallaSel] !== undefined
+                ? `Plan: ${planPorTalla[tallaSel]} · Saldo: ${saldoDe(tallaSel)}`
+                : undefined}
+            >
+              <select
+                value={tallaSel}
+                onChange={(e) => onTallaChange(e.target.value)}
+                className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
+              >
+                {disponibles.map((t) => (
+                  <option key={t} value={t}>
+                    {t.replace('T', '')}
+                    {planPorTalla[t] !== undefined ? ` (saldo ${saldoDe(t)})` : ''}
+                  </option>
+                ))}
+              </select>
+            </FormRow>
+            <FormRow label="Cant. teórica" required hint="Auto-completa con el saldo del plan">
+              <Input
+                type="number"
+                min={1}
+                value={cantTeorica}
+                onChange={(e) => setCantTeorica(e.target.value)}
+              />
+            </FormRow>
+            <FormRow label="Cant. real" hint="Cuánto efectivamente salió del corte (si ya lo sabés)">
+              <Input
+                type="number"
+                min={0}
+                value={cantReal}
+                onChange={(e) => setCantReal(e.target.value)}
+                placeholder="opcional"
+              />
+            </FormRow>
+          </FormGrid>
+          <div className="mt-3 flex justify-end gap-2">
+            <Button type="button" variant="outline" onClick={() => setOpen(false)} disabled={pending}>Cancelar</Button>
+            <Button type="button" variant="premium" onClick={submit} disabled={pending}>
+              {pending && <Loader2 className="h-4 w-4 animate-spin" />} Agregar
+            </Button>
+          </div>
         </Card>
       )}
       {editable && !open && (
         <div className="px-4 pt-4">
-          <Button variant="premium" size="sm" onClick={() => setOpen(true)} disabled={disponibles.length === 0}>
-            <Plus className="h-4 w-4" /> Agregar talla
+          <Button variant="premium" size="sm" onClick={abrir} disabled={disponibles.length === 0}>
+            <Plus className="h-4 w-4" />
+            {disponibles.length === 0 ? 'Todas las tallas del plan ya cargadas' : 'Agregar talla'}
           </Button>
         </div>
       )}
@@ -80,12 +155,11 @@ export function LineasCorteEditor({ corteId, lineas, editable }: { corteId: stri
           <TableHead>Talla</TableHead>
           <TableHead className="text-right">Teórica</TableHead>
           <TableHead className="text-right">Real</TableHead>
-          <TableHead className="text-right">Merma</TableHead>
           <TableHead className="text-right">Diferencia</TableHead>
         </TableRow></TableHeader>
         <TableBody>
           {lineas.length === 0 ? (
-            <TableRow><TableCell colSpan={5} className="py-10 text-center text-sm text-slate-400">Sin líneas. Agrega tallas para empezar.</TableCell></TableRow>
+            <TableRow><TableCell colSpan={4} className="py-10 text-center text-sm text-slate-400">Sin líneas. Agrega tallas para empezar.</TableCell></TableRow>
           ) : lineas.map((l) => {
             const dif = (l.cantidad_real ?? l.cantidad_teorica) - l.cantidad_teorica;
             return (
@@ -93,7 +167,6 @@ export function LineasCorteEditor({ corteId, lineas, editable }: { corteId: stri
                 <TableCell><Badge variant="outline">{l.talla.replace('T', '')}</Badge></TableCell>
                 <TableCell className="text-right font-mono">{l.cantidad_teorica}</TableCell>
                 <TableCell className="text-right font-mono">{l.cantidad_real ?? '—'}</TableCell>
-                <TableCell className="text-right font-mono text-danger">{l.merma ?? 0}</TableCell>
                 <TableCell className={`text-right font-mono ${dif < 0 ? 'text-danger' : dif > 0 ? 'text-emerald-600' : ''}`}>{dif > 0 ? '+' : ''}{dif}</TableCell>
               </TableRow>
             );
