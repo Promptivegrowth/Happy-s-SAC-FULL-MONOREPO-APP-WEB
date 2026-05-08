@@ -6,6 +6,7 @@ import { Badge } from '@happy/ui/badge';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@happy/ui/table';
 import { PageShell } from '@/components/page-shell';
 import { OsTransitions } from './client';
+import { TicketsOperacionOS, type Ticket } from './procesos-client';
 import { formatDate, formatPEN } from '@happy/lib';
 
 export const dynamic = 'force-dynamic';
@@ -38,7 +39,9 @@ type AvioOS = {
 export default async function Page({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const sb = await createClient();
-  const [{ data: os }, { data: lineasData }, { data: aviosData }] = await Promise.all([
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const sbAny = sb as unknown as { from: (t: string) => any };
+  const [{ data: os }, { data: lineasData }, { data: aviosData }, { data: ticketsRaw }, { data: ops }, { data: areas }] = await Promise.all([
     sb
       .from('ordenes_servicio')
       .select('*, talleres(id, nombre, telefono, contacto_nombre), ot(numero, id), ot_corte(numero, id)')
@@ -53,8 +56,24 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
       .from('ordenes_servicio_avios')
       .select('id, cantidad_enviada, cantidad_devuelta, observacion, materiales(nombre, codigo, categoria)')
       .eq('os_id', id),
+    sbAny
+      .from('tickets_operacion')
+      .select('id, proceso, inicio, fin, duracion_min, cantidad, observacion, operario:operario_id(id, nombres, apellido_paterno), area:area_id(id, nombre)')
+      .eq('os_id', id)
+      .order('inicio', { ascending: false }),
+    sb.from('operarios').select('id, codigo, nombres, apellido_paterno').eq('activo', true).order('nombres'),
+    sb.from('areas_produccion').select('id, nombre').eq('activa', true).order('nombre'),
   ]);
   if (!os) notFound();
+  // Tipo extendido: los nuevos campos no están aún en la generación de tipos.
+  const osExt = os as unknown as typeof os & { movilidad_por_unidad: number | null; campana_por_unidad: number | null };
+  const tickets = (ticketsRaw ?? []) as unknown as Ticket[];
+  const operariosOpts = (ops ?? []).map((o) => ({
+    id: o.id as string,
+    codigo: (o.codigo as string) ?? '',
+    nombre: `${o.nombres ?? ''} ${o.apellido_paterno ?? ''}`.trim(),
+  }));
+  const areasOpts = (areas ?? []).map((a) => ({ id: a.id as string, nombre: a.nombre as string }));
 
   const t = (os as unknown as { talleres?: { id: string; nombre: string; telefono: string | null; contacto_nombre: string | null } | null }).talleres;
   const ot = (os as unknown as { ot?: { numero: string; id: string } | null }).ot;
@@ -89,8 +108,14 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
             <Table>
               <TableBody>
                 <Row label="Monto base" value={formatPEN(Number(os.monto_base ?? 0))} />
-                <Row label="Adicional movilidad" value={formatPEN(Number(os.adicional_movilidad ?? 0))} />
-                <Row label="Adicional campaña" value={formatPEN(Number(os.adicional_campana ?? 0))} />
+                <Row
+                  label={`Movilidad (${formatPEN(Number(osExt.movilidad_por_unidad ?? 0))} × ${totalUnidades} unid)`}
+                  value={formatPEN(Number(os.adicional_movilidad ?? 0))}
+                />
+                <Row
+                  label={`Campaña (${formatPEN(Number(osExt.campana_por_unidad ?? 0))} × ${totalUnidades} unid)`}
+                  value={formatPEN(Number(os.adicional_campana ?? 0))}
+                />
                 <Row label="Total" value={<span className="font-display text-lg font-semibold text-happy-600">{formatPEN(Number(os.monto_total ?? 0))}</span>} />
               </TableBody>
             </Table>
@@ -116,6 +141,30 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
           </CardContent>
         </Card>
       )}
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">
+            Procesos / tiempos
+            {tickets.length > 0 && (
+              <Badge variant="secondary" className="ml-2 text-[10px]">
+                {tickets.filter((t) => t.fin === null).length} en curso · {tickets.length} totales
+              </Badge>
+            )}
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          <TicketsOperacionOS
+            osId={id}
+            otId={ot?.id ?? null}
+            procesoOS={os.proceso ?? 'COSTURA'}
+            cantidadOS={totalUnidades}
+            tickets={tickets}
+            operarios={operariosOpts}
+            areas={areasOpts}
+          />
+        </CardContent>
+      </Card>
 
       {/* Líneas de la OS — qué prendas se mandaron al taller */}
       <Card>

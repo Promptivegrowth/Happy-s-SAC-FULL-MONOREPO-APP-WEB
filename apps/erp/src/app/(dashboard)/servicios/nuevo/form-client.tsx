@@ -57,6 +57,8 @@ export function NuevaOSForm({
   const [esCampana, setEsCampana] = useState(false);
   const [tallasSel, setTallasSel] = useState<Set<string>>(new Set());
   const [montoBase, setMontoBase] = useState<string>('0');
+  const [movilidadUnit, setMovilidadUnit] = useState<string>('');
+  const [campanaUnit, setCampanaUnit] = useState<string>('');
   const [tarifaInfo, setTarifaInfo] = useState<{ total: number; detalle: { talla: string; cantidad: number; tarifa: number; subtotal: number }[]; faltantes: string[] } | null>(null);
   const [calcPending, setCalcPending] = useState(false);
 
@@ -160,6 +162,8 @@ export function NuevaOSForm({
     fd.set('proceso', proceso);
     fd.set('es_campana', esCampana ? 'on' : 'off');
     fd.set('monto_base', montoBase || '0');
+    fd.set('movilidad_por_unidad', movilidadUnit || '0');
+    fd.set('campana_por_unidad', campanaUnit || '0');
     // Si hay corte y se seleccionaron solo algunas tallas, mandarlas como filtro
     if (corteId && tallasSel.size > 0 && tallasSel.size < lineasPreview.length) {
       fd.delete('tallas_seleccionadas');
@@ -380,11 +384,31 @@ export function NuevaOSForm({
               onChange={(e) => setMontoBase(e.target.value)}
             />
           </FormRow>
-          <FormRow label="Adicional movilidad (S/)">
-            <Input name="adicional_movilidad" type="number" step="0.01" min={0} defaultValue={0} />
+          <FormRow
+            label="Movilidad por unidad (S/)"
+            hint={totalPrendasSeleccionadas > 0 ? `Total movilidad ≈ S/ ${(Number(movilidadUnit || 0) * totalPrendasSeleccionadas).toFixed(2)} (${totalPrendasSeleccionadas} unid)` : 'S/ por unidad enviada'}
+          >
+            <Input
+              type="number"
+              step="0.01"
+              min={0}
+              value={movilidadUnit}
+              onChange={(e) => setMovilidadUnit(e.target.value)}
+              placeholder="0.00"
+            />
           </FormRow>
-          <FormRow label="Adicional campaña (S/)">
-            <Input name="adicional_campana" type="number" step="0.01" min={0} defaultValue={0} />
+          <FormRow
+            label="Campaña por unidad (S/)"
+            hint={totalPrendasSeleccionadas > 0 ? `Total campaña ≈ S/ ${(Number(campanaUnit || 0) * totalPrendasSeleccionadas).toFixed(2)}` : 'S/ extra por unidad si es de campaña'}
+          >
+            <Input
+              type="number"
+              step="0.01"
+              min={0}
+              value={campanaUnit}
+              onChange={(e) => setCampanaUnit(e.target.value)}
+              placeholder="0.00"
+            />
           </FormRow>
           <FormRow label="Es campaña">
             <label className="flex h-10 items-center gap-3 rounded-md border border-input bg-background px-3 text-sm">

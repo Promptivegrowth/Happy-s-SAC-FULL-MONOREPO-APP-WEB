@@ -134,8 +134,10 @@ const osSchema = z.object({
   proceso: z.enum(['COSTURA','BORDADO','ESTAMPADO','SUBLIMADO','PLISADO','DECORADO','ACABADO','PLANCHADO','OJAL_BOTON']).default('COSTURA'),
   fecha_entrega_esperada: z.string().optional().or(z.literal('')),
   monto_base: z.coerce.number().min(0).default(0),
-  adicional_movilidad: z.coerce.number().min(0).default(0),
-  adicional_campana: z.coerce.number().min(0).default(0),
+  // Adicionales en S/ POR UNIDAD enviada (no es un total). El total se
+  // calcula al guardar = por_unidad * unidades_enviadas.
+  movilidad_por_unidad: z.coerce.number().min(0).default(0),
+  campana_por_unidad: z.coerce.number().min(0).default(0),
   es_campana: z.boolean().default(false),
   observaciones: z.string().optional().or(z.literal('')),
   cuidados: z.string().optional().or(z.literal('')),
@@ -253,8 +255,8 @@ export async function crearOS(
       proceso: fd.get('proceso') || 'COSTURA',
       fecha_entrega_esperada: fd.get('fecha_entrega_esperada') || '',
       monto_base: fd.get('monto_base') || 0,
-      adicional_movilidad: fd.get('adicional_movilidad') || 0,
-      adicional_campana: fd.get('adicional_campana') || 0,
+      movilidad_por_unidad: fd.get('movilidad_por_unidad') || 0,
+      campana_por_unidad: fd.get('campana_por_unidad') || 0,
       es_campana: fd.get('es_campana') === 'on',
       observaciones: fd.get('observaciones') || '',
       cuidados: fd.get('cuidados') || '',
@@ -262,7 +264,9 @@ export async function crearOS(
     });
     const { sb, userId } = await requireUser();
     const { data: nro } = await sb.rpc('next_correlativo', { p_clave: 'OS', p_padding: 6 });
-    const { data: row, error } = await sb.from('ordenes_servicio').insert({
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const sbAny = sb as unknown as { from: (t: string) => any };
+    const { data: row, error } = await sbAny.from('ordenes_servicio').insert({
       numero: `OS-${nro}`,
       corte_id: data.corte_id || null,
       ot_id: data.ot_id,
@@ -270,8 +274,12 @@ export async function crearOS(
       proceso: data.proceso,
       fecha_entrega_esperada: data.fecha_entrega_esperada || null,
       monto_base: data.monto_base,
-      adicional_movilidad: data.adicional_movilidad,
-      adicional_campana: data.adicional_campana,
+      // Inicialmente dejamos los totales en 0 — se recalculan tras poblar
+      // las líneas (ya conocemos las unidades efectivamente enviadas).
+      adicional_movilidad: 0,
+      adicional_campana: 0,
+      movilidad_por_unidad: data.movilidad_por_unidad,
+      campana_por_unidad: data.campana_por_unidad,
       es_campana: data.es_campana,
       observaciones: data.observaciones || null,
       cuidados: data.cuidados || null,
@@ -299,6 +307,21 @@ export async function crearOS(
         throw new Error(`No se pudieron poblar líneas/avíos: ${(e as Error).message}`);
       }
     }
+
+    // Recalcular adicionales totales en función de las unidades enviadas.
+    const { data: lineasOs } = await sb
+      .from('ordenes_servicio_lineas')
+      .select('cantidad')
+      .eq('os_id', row.id);
+    const totalUnidades = (lineasOs ?? []).reduce((s, l) => s + Number(l.cantidad ?? 0), 0);
+    const totalMovilidad = Math.round(data.movilidad_por_unidad * totalUnidades * 100) / 100;
+    const totalCampana = Math.round(data.campana_por_unidad * totalUnidades * 100) / 100;
+    if (totalMovilidad > 0 || totalCampana > 0) {
+      await sbAny.from('ordenes_servicio')
+        .update({ adicional_movilidad: totalMovilidad, adicional_campana: totalCampana })
+        .eq('id', row.id);
+    }
+
     return { id: row.id as string, ...extras };
   });
   if (r.ok && r.data) {
