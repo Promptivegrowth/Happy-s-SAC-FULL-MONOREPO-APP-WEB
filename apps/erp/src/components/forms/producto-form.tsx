@@ -44,7 +44,20 @@ export function ProductoForm({
 }) {
   const isEdit = Boolean(initial?.id);
   const action = isEdit ? actualizarProducto.bind(null, initial!.id!) : crearProducto;
-  const { formAction, state } = useActionForm(action, isEdit ? 'Producto actualizado' : 'Producto creado');
+  const { formAction, state } = useActionForm(
+    action,
+    isEdit ? 'Producto actualizado' : 'Producto creado',
+    {
+      // Al CREAR navega al detalle del producto recién creado (la action devuelve {id}).
+      // Al EDITAR no navega — el usuario sigue en el form para ajustar más cosas.
+      redirectTo: isEdit
+        ? undefined
+        : (s) => {
+            const id = (s.data as { id?: string } | undefined)?.id;
+            return id ? `/productos/${id}` : undefined;
+          },
+    },
+  );
 
   const [conjunto, setConjunto] = useState(initial?.es_conjunto ?? true);
   const [destacado, setDestacado] = useState(initial?.destacado ?? false);

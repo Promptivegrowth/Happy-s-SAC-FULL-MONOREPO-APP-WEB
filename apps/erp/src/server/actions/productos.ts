@@ -187,10 +187,10 @@ export async function crearProducto(_prev: unknown, fd: FormData): Promise<Actio
     }
     return { id: row.id };
   });
-  if (r.ok && r.data) {
-    await bumpPaths('/productos');
-    redirect(`/productos/${r.data.id}`);
-  }
+  // Sin redirect server-side: el cliente navega tras el toast usando
+  // redirectTo en useActionForm. Patrón consistente con crearOS y crearCorte
+  // — evita que el redirect interrumpa el toast de éxito.
+  if (r.ok) await bumpPaths('/productos');
   return r;
 }
 
