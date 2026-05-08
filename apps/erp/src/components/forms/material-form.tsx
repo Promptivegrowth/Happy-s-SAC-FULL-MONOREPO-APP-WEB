@@ -9,9 +9,10 @@ import { Textarea } from '@happy/ui/textarea';
 import { Switch } from '@happy/ui/switch';
 import { FormGrid, FormRow, FormSection } from '@happy/ui/form-row';
 import { Button } from '@happy/ui/button';
-import { Sparkles } from 'lucide-react';
+import { Plus, Sparkles } from 'lucide-react';
 import { ImageUploader } from './image-uploader';
 import { crearMaterial, actualizarMaterial, sugerirFactorConversion } from '@/server/actions/materiales';
+import { NuevaUnidadInlineModal, type UnidadCreada } from './nueva-unidad-inline-modal';
 
 type Material = {
   id?: string;
@@ -54,6 +55,10 @@ export function MaterialForm({ initial, unidades, proveedores }: Props) {
   const [activo, setActivo] = useState(initial?.activo ?? true);
   const [imagenUrl, setImagenUrl] = useState<string | null>(initial?.imagen_url ?? null);
 
+  // Lista local de unidades: arranca con las del server pero se puede expandir
+  // si el usuario crea una nueva inline desde el modal.
+  const [unidadesLocal, setUnidadesLocal] = useState<Lookup[]>(unidades);
+
   // Auto-completar factor cuando cambian las unidades
   const [unidadCompraId, setUnidadCompraId] = useState(initial?.unidad_compra_id ?? '');
   const [unidadConsumoId, setUnidadConsumoId] = useState(initial?.unidad_consumo_id ?? '');
@@ -61,6 +66,32 @@ export function MaterialForm({ initial, unidades, proveedores }: Props) {
   const [sugerencia, setSugerencia] = useState<{ factor: number; coincidencias: number } | null>(null);
   const [pendingSug, startSug] = useTransition();
   const usuarioTocoFactor = useRef(false);
+
+  // Modal inline de "nueva unidad". Tracking de cuál dropdown lo abrió para
+  // auto-seleccionar la nueva unidad al cerrarlo.
+  const [modalOpen, setModalOpen] = useState(false);
+  const [modalTarget, setModalTarget] = useState<'compra' | 'consumo' | null>(null);
+
+  function abrirModal(target: 'compra' | 'consumo') {
+    setModalTarget(target);
+    setModalOpen(true);
+  }
+
+  function onUnidadCreada(u: UnidadCreada) {
+    const opt: Lookup = { id: u.id, codigo: u.codigo, nombre: u.nombre };
+    setUnidadesLocal((prev) => {
+      // Insertamos ordenada por código (igual que la query del server).
+      const next = [...prev, opt].sort((a, b) => (a.codigo ?? '').localeCompare(b.codigo ?? ''));
+      return next;
+    });
+    if (modalTarget === 'compra') {
+      setUnidadCompraId(u.id);
+      usuarioTocoFactor.current = false;
+    } else if (modalTarget === 'consumo') {
+      setUnidadConsumoId(u.id);
+      usuarioTocoFactor.current = false;
+    }
+  }
 
   useEffect(() => {
     // No pisar lo que el usuario escribió manualmente
@@ -134,43 +165,68 @@ export function MaterialForm({ initial, unidades, proveedores }: Props) {
 
       <FormSection title="Unidades y precio">
         <p className="-mt-2 text-xs text-slate-500">
-          ¿No encontrás la unidad que necesitás?{' '}
+          ¿No encontrás la unidad? Tocá el botón <Plus className="inline h-3 w-3" /> para crearla sin salir del form, o
+          {' '}
           <a
             href="/configuracion/unidades"
             target="_blank"
             className="font-medium text-happy-600 hover:underline"
           >
-            Gestionar unidades →
+            gestionalas todas →
           </a>
         </p>
         <FormGrid cols={3}>
           <FormRow label="Unidad de compra">
-            <select
-              name="unidad_compra_id"
-              value={unidadCompraId}
-              onChange={(e) => {
-                setUnidadCompraId(e.target.value);
-                usuarioTocoFactor.current = false;
-              }}
-              className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
-            >
-              <option value="">—</option>
-              {unidades.map((u) => <option key={u.id} value={u.id}>{u.codigo} · {u.nombre}</option>)}
-            </select>
+            <div className="flex gap-1">
+              <select
+                name="unidad_compra_id"
+                value={unidadCompraId}
+                onChange={(e) => {
+                  setUnidadCompraId(e.target.value);
+                  usuarioTocoFactor.current = false;
+                }}
+                className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
+              >
+                <option value="">—</option>
+                {unidadesLocal.map((u) => <option key={u.id} value={u.id}>{u.codigo} · {u.nombre}</option>)}
+              </select>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => abrirModal('compra')}
+                title="Crear nueva unidad"
+                className="h-10 shrink-0 px-2"
+              >
+                <Plus className="h-4 w-4" />
+              </Button>
+            </div>
           </FormRow>
           <FormRow label="Unidad de consumo" hint="Si difiere de la compra (ej. Rollo → m)">
-            <select
-              name="unidad_consumo_id"
-              value={unidadConsumoId}
-              onChange={(e) => {
-                setUnidadConsumoId(e.target.value);
-                usuarioTocoFactor.current = false;
-              }}
-              className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
-            >
-              <option value="">— Igual a la de compra —</option>
-              {unidades.map((u) => <option key={u.id} value={u.id}>{u.codigo} · {u.nombre}</option>)}
-            </select>
+            <div className="flex gap-1">
+              <select
+                name="unidad_consumo_id"
+                value={unidadConsumoId}
+                onChange={(e) => {
+                  setUnidadConsumoId(e.target.value);
+                  usuarioTocoFactor.current = false;
+                }}
+                className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
+              >
+                <option value="">— Igual a la de compra —</option>
+                {unidadesLocal.map((u) => <option key={u.id} value={u.id}>{u.codigo} · {u.nombre}</option>)}
+              </select>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => abrirModal('consumo')}
+                title="Crear nueva unidad"
+                className="h-10 shrink-0 px-2"
+              >
+                <Plus className="h-4 w-4" />
+              </Button>
+            </div>
           </FormRow>
           <FormRow
             label="Factor conversión"
@@ -254,6 +310,12 @@ export function MaterialForm({ initial, unidades, proveedores }: Props) {
         <Link href="/materiales"><Button variant="outline" type="button">Cancelar</Button></Link>
         <SubmitButton variant="premium" size="lg">{isEdit ? 'Guardar cambios' : 'Crear material'}</SubmitButton>
       </div>
+
+      <NuevaUnidadInlineModal
+        open={modalOpen}
+        onOpenChange={setModalOpen}
+        onCreated={onUnidadCreada}
+      />
     </form>
   );
 }

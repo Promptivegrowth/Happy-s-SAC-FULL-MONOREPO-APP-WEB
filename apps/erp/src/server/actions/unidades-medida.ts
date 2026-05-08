@@ -20,7 +20,9 @@ const schema = z.object({
   activo: z.boolean().default(true),
 });
 
-export async function crearUnidad(input: z.input<typeof schema>): Promise<ActionResult<{ id: string }>> {
+export async function crearUnidad(
+  input: z.input<typeof schema>,
+): Promise<ActionResult<{ id: string; codigo: string; nombre: string }>> {
   const r = await runAction(async () => {
     const data = schema.parse(input);
     const { sb } = await requireUser();
@@ -39,13 +41,17 @@ export async function crearUnidad(input: z.input<typeof schema>): Promise<Action
         unidad_base: data.unidad_base?.trim() || null,
         activo: data.activo,
       })
-      .select('id')
+      .select('id, codigo, nombre')
       .single();
     if (error) {
       if (error.code === '23505') throw new Error('Ya existe una unidad con ese código');
       throw new Error(error.message);
     }
-    return { id: row.id as string };
+    return {
+      id: row.id as string,
+      codigo: row.codigo as string,
+      nombre: row.nombre as string,
+    };
   });
   if (r.ok) await bumpPaths('/configuracion/unidades', '/materiales');
   return r;
