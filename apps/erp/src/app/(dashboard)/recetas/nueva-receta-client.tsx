@@ -13,7 +13,8 @@ import {
 } from '@happy/ui/dialog';
 import { Input } from '@happy/ui/input';
 import { Label } from '@happy/ui/label';
-import { Plus, Loader2, Search } from 'lucide-react';
+import { Badge } from '@happy/ui/badge';
+import { Plus, Loader2, Search, ArrowRight } from 'lucide-react';
 import { toast } from 'sonner';
 import { crearReceta } from '@/server/actions/recetas';
 
@@ -21,8 +22,8 @@ type ProductoOption = {
   id: string;
   codigo: string;
   nombre: string;
-  /** Indica si ya tiene receta activa (se deshabilita en la lista) */
-  tieneReceta: boolean;
+  /** Si tiene receta activa, este es el id de esa receta (para link directo) */
+  recetaActivaId: string | null;
 };
 
 export function NuevaRecetaButton({ productos }: { productos: ProductoOption[] }) {
@@ -32,11 +33,12 @@ export function NuevaRecetaButton({ productos }: { productos: ProductoOption[] }
   const [search, setSearch] = useState('');
   const [productoId, setProductoId] = useState<string>('');
 
+  // Mostramos TODOS los productos (con receta y sin), pero los marcamos
+  // para que el usuario vea cuáles ya tienen y pueda saltar al editor.
   const filtrados = useMemo(() => {
     const t = search.trim().toLowerCase();
-    const base = productos.filter((p) => !p.tieneReceta); // solo los que no tienen receta activa
-    if (!t) return base.slice(0, 50);
-    return base
+    if (!t) return productos.slice(0, 50);
+    return productos
       .filter((p) => p.codigo.toLowerCase().includes(t) || p.nombre.toLowerCase().includes(t))
       .slice(0, 50);
   }, [search, productos]);
@@ -53,9 +55,19 @@ export function NuevaRecetaButton({ productos }: { productos: ProductoOption[] }
     if (!v) reset();
   }
 
+  function abrirReceta(recetaId: string) {
+    setOpen(false);
+    router.push(`/recetas/${recetaId}`);
+  }
+
   function submit() {
     if (!productoId) {
       toast.error('Seleccioná un producto');
+      return;
+    }
+    if (seleccionado?.recetaActivaId) {
+      // Ya tiene → ir al editor en vez de crear
+      abrirReceta(seleccionado.recetaActivaId);
       return;
     }
     start(async () => {
@@ -81,8 +93,8 @@ export function NuevaRecetaButton({ productos }: { productos: ProductoOption[] }
           <DialogHeader>
             <DialogTitle>Nueva receta (BOM)</DialogTitle>
             <DialogDescription>
-              Crea una receta vacía v1.0 para un producto que aún no tiene receta activa.
-              Después agregás las líneas (material × talla × cantidad) en el editor.
+              Si el producto aún no tiene receta, se crea v1.0 vacía. Si ya tiene, te llevamos
+              directo al editor.
             </DialogDescription>
           </DialogHeader>
 
@@ -106,40 +118,55 @@ export function NuevaRecetaButton({ productos }: { productos: ProductoOption[] }
 
               <div className="max-h-60 overflow-y-auto rounded border bg-white">
                 {filtrados.length === 0 ? (
-                  <p className="p-3 text-xs text-slate-500">
-                    {search ? 'Sin coincidencias entre productos sin receta activa' : 'Todos los productos ya tienen receta activa'}
-                  </p>
+                  <p className="p-3 text-xs text-slate-500">Sin coincidencias</p>
                 ) : (
-                  filtrados.map((p) => (
-                    <button
-                      key={p.id}
-                      type="button"
-                      onClick={() => {
-                        setProductoId(p.id);
-                        setSearch(`${p.codigo} · ${p.nombre}`);
-                      }}
-                      className={`flex w-full items-center justify-between border-b px-3 py-2 text-left text-xs transition hover:bg-happy-50 ${
-                        productoId === p.id ? 'bg-happy-100 font-semibold' : ''
-                      }`}
-                    >
-                      <span>
-                        <span className="font-mono text-slate-500">{p.codigo}</span> · {p.nombre}
-                      </span>
-                    </button>
-                  ))
+                  filtrados.map((p) => {
+                    const tieneReceta = p.recetaActivaId !== null;
+                    const isSelected = productoId === p.id;
+                    return (
+                      <button
+                        key={p.id}
+                        type="button"
+                        onClick={() => {
+                          if (tieneReceta) {
+                            abrirReceta(p.recetaActivaId!);
+                            return;
+                          }
+                          setProductoId(p.id);
+                          setSearch(`${p.codigo} · ${p.nombre}`);
+                        }}
+                        className={`flex w-full items-center justify-between gap-2 border-b px-3 py-2 text-left text-xs transition hover:bg-happy-50 ${
+                          isSelected ? 'bg-happy-100 font-semibold' : ''
+                        }`}
+                      >
+                        <span className="flex-1 truncate">
+                          <span className="font-mono text-slate-500">{p.codigo}</span> · {p.nombre}
+                        </span>
+                        {tieneReceta ? (
+                          <Badge variant="success" className="gap-1 text-[9px]">
+                            Ver receta <ArrowRight className="h-3 w-3" />
+                          </Badge>
+                        ) : (
+                          <Badge variant="outline" className="text-[9px] text-slate-500">
+                            Sin receta
+                          </Badge>
+                        )}
+                      </button>
+                    );
+                  })
                 )}
               </div>
-              {seleccionado && (
+              {seleccionado && !seleccionado.recetaActivaId && (
                 <p className="text-xs text-emerald-700">
-                  ✓ {seleccionado.codigo} · {seleccionado.nombre}
+                  ✓ Listo para crear receta para {seleccionado.codigo} · {seleccionado.nombre}
                 </p>
               )}
             </div>
 
             <p className="rounded bg-slate-50 p-3 text-xs text-slate-600">
-              <strong>Tip:</strong> Si ya tenés una receta parecida (ej. otro modelo de princesa),
-              en el editor podés usar <strong>"Duplicar receta"</strong> para copiar todas las
-              líneas y luego ajustar.
+              <strong>Tip:</strong> los productos con badge verde &quot;Ver receta&quot; ya tienen
+              una — click directo te lleva al editor. Si querés copiar de otra receta similar,
+              andá al editor y usá <strong>&quot;Duplicar receta&quot;</strong>.
             </p>
           </div>
 
@@ -147,11 +174,18 @@ export function NuevaRecetaButton({ productos }: { productos: ProductoOption[] }
             <Button variant="ghost" onClick={() => setOpen(false)} disabled={pending}>
               Cancelar
             </Button>
-            <Button onClick={submit} disabled={pending || !productoId}>
+            <Button
+              onClick={submit}
+              disabled={pending || !productoId || Boolean(seleccionado?.recetaActivaId)}
+              title={
+                seleccionado?.recetaActivaId
+                  ? 'Este producto ya tiene receta — usá "Ver receta" arriba'
+                  : ''
+              }
+            >
               {pending ? (
                 <>
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                  Creando…
+                  <Loader2 className="h-4 w-4 animate-spin" /> Creando…
                 </>
               ) : (
                 'Crear receta'

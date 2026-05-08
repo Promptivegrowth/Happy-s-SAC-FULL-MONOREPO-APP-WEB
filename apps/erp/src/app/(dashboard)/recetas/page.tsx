@@ -36,7 +36,7 @@ export default async function RecetasPage({ searchParams }: { searchParams: Prom
       .eq('activo', true)
       .order('nombre')
       .limit(2000),
-    sb.from('recetas').select('producto_id').eq('activa', true),
+    sb.from('recetas').select('id, producto_id').eq('activa', true),
   ]);
   const indexItems = (indexData ?? [])
     .map((r) => {
@@ -51,12 +51,15 @@ export default async function RecetasPage({ searchParams }: { searchParams: Prom
     })
     .filter((x): x is NonNullable<typeof x> => x !== null);
 
-  const conReceta = new Set((recetasActivas ?? []).map((r) => r.producto_id as string));
+  const recetaPorProducto = new Map<string, string>();
+  for (const r of recetasActivas ?? []) {
+    recetaPorProducto.set(r.producto_id as string, r.id as string);
+  }
   const productosParaModal = (productosAll ?? []).map((p) => ({
     id: p.id as string,
     codigo: p.codigo as string,
     nombre: p.nombre as string,
-    tieneReceta: conReceta.has(p.id as string),
+    recetaActivaId: recetaPorProducto.get(p.id as string) ?? null,
   }));
 
   function chipUrl(params: Record<string, string | undefined>) {

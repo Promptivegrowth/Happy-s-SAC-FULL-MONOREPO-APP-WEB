@@ -85,6 +85,48 @@ export async function upsertReceta(_prev: unknown, fd: FormData): Promise<Action
   return r;
 }
 
+/**
+ * Inserta la misma línea (mismo material+cantidad+config) en MÚLTIPLES tallas
+ * de una sola vez. Si una talla ya tenía esa línea, se hace upsert (sobrescribe).
+ * Útil para evitar el ingreso uno por uno cuando el material aplica igual a
+ * varias tallas (ej. botón en T6, T8, T10, T12).
+ */
+const upsertMultiSchema = z.object({
+  receta_id: z.string().uuid(),
+  material_id: z.string().uuid(),
+  tallas: z.array(z.enum(TALLAS)).min(1, 'Seleccioná al menos una talla'),
+  cantidad: z.coerce.number().min(0),
+  sale_a_servicio: z.boolean().default(false),
+  cantidad_almacen: z.coerce.number().min(0).default(0),
+  unidad_id: z.string().uuid().optional().or(z.literal('')),
+  observacion: z.string().optional().or(z.literal('')),
+});
+export async function upsertRecetaMulti(
+  input: z.input<typeof upsertMultiSchema>,
+): Promise<ActionResult<{ insertadas: number }>> {
+  const r = await runAction(async () => {
+    const data = upsertMultiSchema.parse(input);
+    const { sb } = await requireUser();
+    const filas = data.tallas.map((t) => ({
+      receta_id: data.receta_id,
+      material_id: data.material_id,
+      talla: t,
+      cantidad: data.cantidad,
+      sale_a_servicio: data.sale_a_servicio,
+      cantidad_almacen: data.cantidad_almacen,
+      unidad_id: data.unidad_id || null,
+      observacion: data.observacion || null,
+    }));
+    const { error } = await sb
+      .from('recetas_lineas')
+      .upsert(filas, { onConflict: 'receta_id,material_id,talla' });
+    if (error) throw new Error(error.message);
+    return { insertadas: filas.length };
+  });
+  if (r.ok) await bumpPaths('/recetas');
+  return r;
+}
+
 export async function eliminarLinea(id: string): Promise<ActionResult> {
   const r = await runAction(async () => {
     const { sb } = await requireUser();

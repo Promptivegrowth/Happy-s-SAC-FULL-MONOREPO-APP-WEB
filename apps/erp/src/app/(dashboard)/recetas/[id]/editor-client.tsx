@@ -13,6 +13,7 @@ import { Plus, Trash2, Loader2, Search, X, Copy, Scissors, Clock, ListOrdered } 
 import { toast } from 'sonner';
 import {
   upsertReceta,
+  upsertRecetaMulti,
   eliminarLinea,
   toggleSaleAServicio,
   duplicarReceta,
@@ -30,6 +31,25 @@ const PROCESOS = [
   'SUBLIMADO','PLISADO','ACABADO','PLANCHADO','OJAL_BOTON','CONTROL_CALIDAD',
   'EMBALAJE','DECORADO',
 ] as const;
+
+/** Mapping de qué procesos pertenecen a cada área (por código de área).
+ *  Cuando se elige un área en el form, el dropdown de proceso se filtra. */
+const PROCESOS_POR_AREA: Record<string, readonly (typeof PROCESOS)[number][]> = {
+  CORTE:     ['TRAZADO', 'TENDIDO', 'CORTE', 'HABILITADO'],
+  COSTURA:   ['COSTURA', 'OJAL_BOTON'],
+  DECORADO:  ['BORDADO', 'ESTAMPADO', 'SUBLIMADO', 'PLISADO', 'DECORADO'],
+  BORDADO:   ['BORDADO'],
+  ESTAMPADO: ['ESTAMPADO'],
+  SUBLIMADO: ['SUBLIMADO'],
+  PLISADO:   ['PLISADO'],
+  ACABADO:   ['ACABADO', 'CONTROL_CALIDAD', 'EMBALAJE'],
+  PLANCHADO: ['PLANCHADO'],
+  TALLER:    ['COSTURA', 'BORDADO', 'ESTAMPADO', 'SUBLIMADO', 'PLISADO', 'DECORADO', 'ACABADO', 'PLANCHADO', 'OJAL_BOTON'],
+};
+function procesosDeArea(areaCodigo: string | null): readonly (typeof PROCESOS)[number][] {
+  if (!areaCodigo) return PROCESOS;
+  return PROCESOS_POR_AREA[areaCodigo.toUpperCase()] ?? PROCESOS;
+}
 
 type Mat = { id: string; codigo: string; nombre: string; categoria: string; precio_unitario?: number | null };
 type Linea = {
@@ -128,19 +148,65 @@ function BomEditor({
   const [openDup, setOpenDup] = useState(false);
   const [openDupTalla, setOpenDupTalla] = useState<string | null>(null);
   const [pending, start] = useTransition();
-  const [saleAServicio, setSaleAServicio] = useState(true);
+  // Default OFF: la mayoría de avíos NO sale al taller (decoración interna,
+  // botones, broches, etc.). El usuario lo activa cuando corresponda.
+  const [saleAServicio, setSaleAServicio] = useState(false);
+  // Tallas seleccionadas en el form de Nueva línea (multi-select).
+  // Default: si hay filtro de talla activo, esa talla; sino vacío.
+  const [tallasNueva, setTallasNueva] = useState<Set<string>>(() => new Set());
 
   const filtrado = lineas.filter((l) => !filtroTalla || l.talla === filtroTalla);
 
+  function abrirFormNuevaLinea() {
+    // Si hay filtro de talla activo, pre-seleccionar esa talla
+    setTallasNueva(filtroTalla ? new Set([filtroTalla]) : new Set());
+    setOpenForm(true);
+  }
+  function toggleTallaNueva(t: string) {
+    setTallasNueva((prev) => {
+      const next = new Set(prev);
+      if (next.has(t)) next.delete(t);
+      else next.add(t);
+      return next;
+    });
+  }
+  function todasLasTallas() {
+    setTallasNueva(new Set(TALLAS as readonly string[]));
+  }
+  function ningunaTalla() {
+    setTallasNueva(new Set());
+  }
+
   function onSubmit(fd: FormData) {
-    fd.append('receta_id', recetaId);
-    fd.set('sale_a_servicio', saleAServicio ? 'on' : 'off');
+    if (tallasNueva.size === 0) {
+      toast.error('Seleccioná al menos una talla');
+      return;
+    }
+    const materialId = String(fd.get('material_id') ?? '');
+    const cantidad = Number(fd.get('cantidad') ?? 0);
+    const cantidadAlmacen = Number(fd.get('cantidad_almacen') ?? 0);
+    const unidadId = String(fd.get('unidad_id') ?? '');
+    const observacion = String(fd.get('observacion') ?? '');
+    if (!materialId) {
+      toast.error('Seleccioná un material');
+      return;
+    }
     start(async () => {
-      const r = await upsertReceta(null, fd);
+      const r = await upsertRecetaMulti({
+        receta_id: recetaId,
+        material_id: materialId,
+        tallas: Array.from(tallasNueva) as ('T0' | 'T2' | 'T4' | 'T6' | 'T8' | 'T10' | 'T12' | 'T14' | 'T16' | 'TS' | 'TAD')[],
+        cantidad,
+        sale_a_servicio: saleAServicio,
+        cantidad_almacen: cantidadAlmacen,
+        unidad_id: unidadId,
+        observacion,
+      });
       if (r.ok) {
-        toast.success('Línea agregada/actualizada');
+        toast.success(`${r.data?.insertadas ?? 0} línea${(r.data?.insertadas ?? 0) === 1 ? '' : 's'} agregada${(r.data?.insertadas ?? 0) === 1 ? '' : 's'}`);
         setOpenForm(false);
-        setSaleAServicio(true);
+        setSaleAServicio(false);
+        setTallasNueva(new Set());
       } else toast.error(r.error);
     });
   }
@@ -217,7 +283,7 @@ function BomEditor({
             >
               <Copy className="h-3.5 w-3.5" /> Duplicar a otro producto
             </Button>
-            <Button variant="premium" size="sm" onClick={() => setOpenForm(true)}>
+            <Button variant="premium" size="sm" onClick={abrirFormNuevaLinea}>
               <Plus className="h-4 w-4" /> Agregar línea
             </Button>
           </div>
@@ -234,13 +300,60 @@ function BomEditor({
 
             <MaterialCombobox materiales={materiales} />
 
-            <FormGrid cols={3}>
-              <FormRow label="Talla" required>
-                <select name="talla" required className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm">
-                  {TALLAS.map((t) => <option key={t} value={t}>{t.replace('T', '')}</option>)}
-                </select>
-              </FormRow>
-              <FormRow label="Cantidad" required>
+            {/* Multi-talla: checkboxes para agregar la misma línea a varias tallas a la vez */}
+            <div>
+              <div className="mb-1.5 flex items-center justify-between">
+                <label className="text-xs font-medium text-slate-700">
+                  Tallas <span className="text-danger">*</span>
+                  <span className="ml-1 font-normal text-slate-400">— marcá todas las que aplican</span>
+                </label>
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={todasLasTallas}
+                    className="text-[10px] text-happy-600 hover:underline"
+                  >
+                    Todas
+                  </button>
+                  <span className="text-[10px] text-slate-300">·</span>
+                  <button
+                    type="button"
+                    onClick={ningunaTalla}
+                    className="text-[10px] text-slate-500 hover:underline"
+                  >
+                    Ninguna
+                  </button>
+                </div>
+              </div>
+              <div className="flex flex-wrap gap-1.5 rounded-md border border-dashed border-slate-200 p-2">
+                {TALLAS.map((t) => {
+                  const sel = tallasNueva.has(t);
+                  return (
+                    <button
+                      key={t}
+                      type="button"
+                      onClick={() => toggleTallaNueva(t)}
+                      className={`rounded-full border px-3 py-1 text-xs font-medium transition ${
+                        sel
+                          ? 'border-happy-500 bg-happy-500 text-white shadow-sm'
+                          : 'border-slate-300 bg-white text-slate-700 hover:border-happy-400 hover:bg-happy-50'
+                      }`}
+                    >
+                      {sel && '✓ '}
+                      {t.replace('T', '')}
+                    </button>
+                  );
+                })}
+              </div>
+              {tallasNueva.size > 0 && (
+                <p className="mt-1 text-[10px] text-emerald-700">
+                  Se creará 1 línea por cada talla ({tallasNueva.size} en total).
+                </p>
+              )}
+            </div>
+
+            <FormGrid cols={2}>
+              <FormRow label="Cantidad por unidad" required>
                 <Input name="cantidad" type="number" step="0.0001" min="0" required defaultValue={1} />
               </FormRow>
               <FormRow label="Unidad">
@@ -329,6 +442,18 @@ function BomEditor({
   );
 }
 
+/** Peso de orden por categoría: TELA primero, luego AVÍOS, luego INSUMO, otros al final. */
+const PESO_CATEGORIA: Record<string, number> = {
+  TELA: 1,
+  AVIO: 2,
+  AVIOS: 2,
+  INSUMO: 3,
+  INSUMOS: 3,
+};
+function pesoCategoria(cat: string | undefined | null): number {
+  return PESO_CATEGORIA[(cat ?? '').toUpperCase()] ?? 99;
+}
+
 function RecetaTabla({
   lineas,
   onDelete,
@@ -343,6 +468,14 @@ function RecetaTabla({
   compact?: boolean;
 }) {
   const [, start] = useTransition();
+  // Orden estable: por categoría (TELA → AVIO → INSUMO → otros) y dentro de
+  // cada categoría por nombre del material.
+  const lineasOrdenadas = [...lineas].sort((a, b) => {
+    const pa = pesoCategoria(a.materiales?.categoria);
+    const pb = pesoCategoria(b.materiales?.categoria);
+    if (pa !== pb) return pa - pb;
+    return (a.materiales?.nombre ?? '').localeCompare(b.materiales?.nombre ?? '');
+  });
   if (lineas.length === 0) {
     return <div className="px-4 py-6 text-center text-sm text-slate-400">Sin líneas para esta talla</div>;
   }
@@ -368,7 +501,7 @@ function RecetaTabla({
         <TableHead></TableHead>
       </TableRow></TableHeader>
       <TableBody>
-        {lineas.map((l) => {
+        {lineasOrdenadas.map((l) => {
           const costo = l.materiales?.precio_unitario ? Number(l.materiales.precio_unitario) * Number(l.cantidad) : 0;
           return (
             <TableRow key={l.id}>
@@ -882,26 +1015,36 @@ function ProcesosEditor({
         <Card className="border-happy-300 bg-happy-50/40 p-4">
           <h3 className="mb-3 font-display text-sm font-semibold">Nueva operación</h3>
           <FormGrid cols={3}>
-            <FormRow label="Proceso" required>
+            <FormRow label="Área" required hint="Define el costo/minuto y filtra los procesos disponibles">
+              <select
+                value={areaId}
+                onChange={(e) => {
+                  setAreaId(e.target.value);
+                  // Si el proceso actual no aplica al área nueva, resetear al primero válido
+                  const areaCod = areas.find((a) => a.id === e.target.value)?.codigo ?? null;
+                  const procesosValidos = procesosDeArea(areaCod);
+                  if (!procesosValidos.includes(proceso)) {
+                    setProceso(procesosValidos[0] ?? 'CORTE');
+                  }
+                }}
+                className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
+              >
+                <option value="">— sin asignar (todos los procesos) —</option>
+                {areas.map((a) => (
+                  <option key={a.id} value={a.id}>
+                    {a.nombre} {a.valor_minuto ? `(S/${Number(a.valor_minuto).toFixed(3)}/min)` : ''}
+                  </option>
+                ))}
+              </select>
+            </FormRow>
+            <FormRow label="Proceso" required hint={areaId ? 'Filtrado por el área elegida' : 'Mostrando todos'}>
               <select
                 value={proceso}
                 onChange={(e) => setProceso(e.target.value as (typeof PROCESOS)[number])}
                 className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
               >
-                {PROCESOS.map((p) => <option key={p} value={p}>{p.replace('_', ' ')}</option>)}
-              </select>
-            </FormRow>
-            <FormRow label="Área" hint="De aquí sale el costo/minuto">
-              <select
-                value={areaId}
-                onChange={(e) => setAreaId(e.target.value)}
-                className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
-              >
-                <option value="">— sin asignar —</option>
-                {areas.map((a) => (
-                  <option key={a.id} value={a.id}>
-                    {a.nombre} {a.valor_minuto ? `(S/${Number(a.valor_minuto).toFixed(3)}/min)` : ''}
-                  </option>
+                {procesosDeArea(areas.find((a) => a.id === areaId)?.codigo ?? null).map((p) => (
+                  <option key={p} value={p}>{p.replace('_', ' ')}</option>
                 ))}
               </select>
             </FormRow>

@@ -1,6 +1,9 @@
+import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { createClient } from '@happy/db/server';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@happy/ui/tabs';
+import { Button } from '@happy/ui/button';
+import { FileText } from 'lucide-react';
 import { PageShell } from '@/components/page-shell';
 import { ProductoForm } from '@/components/forms/producto-form';
 import { VariantesSection } from '@/components/forms/variantes-section';
@@ -14,7 +17,7 @@ export const dynamic = 'force-dynamic';
 export default async function Page({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const sb = await createClient();
-  const [{ data: prod }, { data: cats }, { data: camps }, { data: vars }, { data: pub }, { data: imgs }, { data: extras }] = await Promise.all([
+  const [{ data: prod }, { data: cats }, { data: camps }, { data: vars }, { data: pub }, { data: imgs }, { data: extras }, { data: recetaActiva }] = await Promise.all([
     sb.from('productos').select('*').eq('id', id).single(),
     sb.from('categorias').select('id, nombre, codigo').eq('activo', true).order('nombre'),
     sb.from('campanas').select('id, nombre, codigo').eq('activa', true).order('nombre'),
@@ -26,6 +29,8 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
       .from('productos_categorias_extra')
       .select('categoria_id')
       .eq('producto_id', id),
+    // Receta activa (para el botón "Ver receta BOM")
+    sb.from('recetas').select('id').eq('producto_id', id).eq('activa', true).maybeSingle(),
   ]);
   if (!prod) notFound();
   const categoriasExtraIniciales = ((extras ?? []) as { categoria_id: string }[]).map((e) => e.categoria_id);
@@ -36,7 +41,18 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
     <PageShell
       title={prod.nombre}
       description={`Código ${prod.codigo} · ficha ${prod.version_ficha}`}
-      actions={<DeleteButton action={onDelete} itemName="este producto" />}
+      actions={
+        <div className="flex items-center gap-2">
+          {recetaActiva?.id && (
+            <Link href={`/recetas/${recetaActiva.id}`}>
+              <Button variant="outline" className="gap-2">
+                <FileText className="h-4 w-4" /> Ver receta BOM
+              </Button>
+            </Link>
+          )}
+          <DeleteButton action={onDelete} itemName="este producto" />
+        </div>
+      }
     >
       <Tabs defaultValue="datos">
         <TabsList>
