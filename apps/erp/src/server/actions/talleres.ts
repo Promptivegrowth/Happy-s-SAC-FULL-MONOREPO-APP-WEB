@@ -1,7 +1,6 @@
 'use server';
 
 import { z } from 'zod';
-import { redirect } from 'next/navigation';
 import { runAction, requireUser, bumpPaths, type ActionResult } from './_helpers';
 
 const ESPECIALIDADES = ['CORTE','DECORADO','ESTAMPADO','BORDADO','SUBLIMADO','PLISADO','ACABADO','PLANCHADO','COSTURA','OJAL_BOTON'] as const;
@@ -80,7 +79,9 @@ export async function crearTaller(_prev: unknown, fd: FormData): Promise<ActionR
     if (error) throw new Error(error.message);
     return { id: row.id };
   });
-  if (r.ok) { await bumpPaths('/talleres'); redirect('/talleres'); }
+  // Sin redirect server-side: el cliente navega tras el toast con redirectTo
+  // del useActionForm. Evita que el redirect interrumpa el toast de éxito.
+  if (r.ok) await bumpPaths('/talleres');
   return r;
 }
 
@@ -92,7 +93,7 @@ export async function actualizarTaller(id: string, _prev: unknown, fd: FormData)
     if (error) throw new Error(error.message);
     return null;
   });
-  if (r.ok) { await bumpPaths('/talleres', `/talleres/${id}`); redirect('/talleres'); }
+  if (r.ok) await bumpPaths('/talleres', `/talleres/${id}`);
   return r;
 }
 

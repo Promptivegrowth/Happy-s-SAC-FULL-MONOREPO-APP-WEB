@@ -48,7 +48,11 @@ type Taller = {
 export function TallerForm({ initial }: { initial?: Taller }) {
   const isEdit = Boolean(initial?.id);
   const action = isEdit ? actualizarTaller.bind(null, initial!.id!) : crearTaller;
-  const { formAction, state } = useActionForm(action, isEdit ? 'Taller actualizado' : 'Taller creado');
+  const { formAction, state } = useActionForm(
+    action,
+    isEdit ? 'Taller actualizado' : 'Taller creado',
+    { redirectTo: '/talleres' },
+  );
 
   const [emite, setEmite] = useState<boolean>(initial?.emite_comprobante ?? false);
   const [activo, setActivo] = useState<boolean>(initial?.activo ?? true);
