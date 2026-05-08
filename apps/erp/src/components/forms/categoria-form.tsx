@@ -7,10 +7,12 @@ import { Textarea } from '@happy/ui/textarea';
 import { Switch } from '@happy/ui/switch';
 import { FormGrid, FormRow, FormSection } from '@happy/ui/form-row';
 import { Button } from '@happy/ui/button';
+import { Badge } from '@happy/ui/badge';
+import { Loader2, Sparkles } from 'lucide-react';
 import Link from 'next/link';
-import { crearCategoria, actualizarCategoria } from '@/server/actions/categorias';
+import { crearCategoria, actualizarCategoria, sugerirCodigoCategoria } from '@/server/actions/categorias';
 import { ImageUploader } from './image-uploader';
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 type Categoria = {
   id?: string;
@@ -49,15 +51,77 @@ export function CategoriaForm({ initial }: { initial?: Categoria }) {
   const [icono, setIcono] = useState(initial?.icono ?? '');
   const [imagenUrl, setImagenUrl] = useState<string | null>(initial?.imagen_url ?? null);
 
+  // Estado controlado de nombre + código para el preview/autocompletar.
+  const [nombre, setNombre] = useState(initial?.nombre ?? '');
+  const [codigo, setCodigo] = useState((initial?.codigo ?? '').toUpperCase());
+  const [sugiriendo, setSugiriendo] = useState(false);
+  const [codigoEditadoManualmente, setCodigoEditadoManualmente] = useState(isEdit);
+  const ultimaSug = useRef('');
+
+  // Autocompletar: cuando cambia el nombre, debounce 400ms y pedir sugerencia
+  // al server (que detecta colisiones). Solo si:
+  //   - estamos creando (no editando una categoría existente)
+  //   - el usuario no tocó manualmente el campo "código"
+  useEffect(() => {
+    if (isEdit) return;
+    if (codigoEditadoManualmente) return;
+    if (!nombre || nombre.trim().length < 2) {
+      setCodigo('');
+      return;
+    }
+    setSugiriendo(true);
+    const t = setTimeout(async () => {
+      const r = await sugerirCodigoCategoria(nombre);
+      if (r.ok && r.data?.codigo && !codigoEditadoManualmente) {
+        setCodigo(r.data.codigo);
+        ultimaSug.current = r.data.codigo;
+      }
+      setSugiriendo(false);
+    }, 400);
+    return () => { clearTimeout(t); setSugiriendo(false); };
+  }, [nombre, isEdit, codigoEditadoManualmente]);
+
+  function onCodigoChange(v: string) {
+    const up = v.toUpperCase();
+    setCodigo(up);
+    // Si el usuario lo cambia respecto a la última sugerencia, dejamos de
+    // pisarlo automáticamente al cambiar el nombre.
+    if (up !== ultimaSug.current) setCodigoEditadoManualmente(true);
+  }
+
   return (
     <form action={formAction} className="space-y-6">
       <FormSection title="Datos de la categoría" description="Las categorías agrupan los disfraces y se muestran en la web.">
         <FormGrid cols={2}>
-          <FormRow label="Código" required error={state.fields?.codigo} hint="Ej: HALLOWEEN">
-            <Input name="codigo" defaultValue={initial?.codigo ?? ''} required maxLength={20} />
-          </FormRow>
           <FormRow label="Nombre" required error={state.fields?.nombre}>
-            <Input name="nombre" defaultValue={initial?.nombre ?? ''} required />
+            <Input
+              name="nombre"
+              value={nombre}
+              onChange={(e) => setNombre(e.target.value)}
+              required
+              placeholder="Ej: Halloween, Día de la Madre…"
+            />
+          </FormRow>
+          <FormRow
+            label="Código"
+            error={state.fields?.codigo}
+            hint={isEdit
+              ? 'Cambiar este código rompe los SKUs ya emitidos. Editá solo si sabés lo que hacés.'
+              : 'Se autocompleta del nombre. Editable si querés override.'}
+          >
+            <div className="relative">
+              <Input
+                name="codigo"
+                value={codigo}
+                onChange={(e) => onCodigoChange(e.target.value)}
+                maxLength={20}
+                placeholder={sugiriendo ? 'Buscando código libre…' : 'Ej: HLW'}
+                className="font-mono uppercase"
+              />
+              {sugiriendo && (
+                <Loader2 className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 animate-spin text-slate-400" />
+              )}
+            </div>
           </FormRow>
           <FormRow label="Slug (URL)" error={state.fields?.slug} hint="Solo minúsculas, números y guiones. Se autogenera del nombre.">
             <Input name="slug" defaultValue={initial?.slug ?? ''} placeholder="halloween" />
@@ -66,6 +130,24 @@ export function CategoriaForm({ initial }: { initial?: Categoria }) {
             <Input name="orden_web" type="number" defaultValue={initial?.orden_web ?? 100} min={0} />
           </FormRow>
         </FormGrid>
+
+        {!isEdit && codigo && (
+          <div className="flex items-start gap-2 rounded-md border border-happy-200 bg-happy-50/50 px-3 py-2 text-xs text-corp-800">
+            <Sparkles className="mt-0.5 h-3.5 w-3.5 shrink-0 text-happy-600" />
+            <div className="flex-1 space-y-1">
+              <p>
+                Los productos creados en esta categoría tendrán códigos como{' '}
+                <Badge variant="secondary" className="ml-0.5 font-mono text-[10px]">{codigo}M0001</Badge>
+                {' '}(modelo) y SKUs visibles al cliente como{' '}
+                <Badge variant="secondary" className="ml-0.5 font-mono text-[10px]">{codigo}0001</Badge>,
+                {' '}<span className="font-mono text-[10px]">{codigo}0002</span>…
+              </p>
+              <p className="text-[11px] text-slate-500">
+                El correlativo es independiente por categoría. Podés cambiar el código si preferís otra abreviatura.
+              </p>
+            </div>
+          </div>
+        )}
 
         <FormRow label="Descripción">
           <Textarea name="descripcion" defaultValue={initial?.descripcion ?? ''} rows={2} placeholder="Descripción corta para SEO y banners" />

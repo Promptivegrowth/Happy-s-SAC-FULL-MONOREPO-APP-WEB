@@ -5,7 +5,8 @@ import { redirect } from 'next/navigation';
 import { runAction, requireUser, bumpPaths, type ActionResult } from './_helpers';
 
 const schema = z.object({
-  codigo: z.string().min(1, 'Código requerido').max(20),
+  // codigo opcional: si vacío al submit, se autogenera desde el nombre.
+  codigo: z.string().max(20).optional().or(z.literal('')),
   nombre: z.string().min(2, 'Mínimo 2 caracteres').max(100),
   descripcion: z.string().optional().or(z.literal('')),
   slug: z.string().regex(/^[a-z0-9-]+$/, 'Solo minúsculas, números y guiones').optional().or(z.literal('')),
@@ -18,7 +19,7 @@ const schema = z.object({
 
 function parseForm(fd: FormData) {
   return schema.parse({
-    codigo: fd.get('codigo'),
+    codigo: fd.get('codigo') || '',
     nombre: fd.get('nombre'),
     descripcion: fd.get('descripcion') || '',
     slug: fd.get('slug') || '',
@@ -30,12 +31,112 @@ function parseForm(fd: FormData) {
   });
 }
 
+/**
+ * Normaliza un texto: mayúsculas, sin acentos, solo letras A-Z.
+ * "Día de la Madre" → "DIADELAMADRE"
+ */
+function normalizar(s: string): string {
+  return s
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/g, '')
+    .toUpperCase()
+    .replace(/[^A-Z]/g, '');
+}
+
+/**
+ * Genera candidatos de prefijo de 3 letras desde un nombre, ordenados por
+ * preferencia. Estrategia escalonada para evitar colisiones:
+ *   1. 1ra letra + 2 primeras consonantes distintas    "HALLOWEEN" → HLW
+ *   2. 1ra letra + 2 primeras consonantes (con repes)  "HALLOWEEN" → HLL
+ *   3. 1ra letra + 1 consonante + 1 vocal              "HALLOWEEN" → HLA
+ *   4. Primeras 3 letras tal cual                      "HALLOWEEN" → HAL
+ *   5. Sufijo numérico sobre el primer candidato       "HLW" + 2 → HLW2
+ */
+function generarCandidatos(nombre: string): string[] {
+  const norm = normalizar(nombre);
+  if (norm.length === 0) return ['PRD'];
+  if (norm.length <= 3) return [norm.padEnd(3, 'X')];
+
+  const primera = norm[0]!;
+  const resto = norm.slice(1);
+  const consonantes = resto.replace(/[AEIOU]/g, '');
+  const consonantesUnicas = Array.from(new Set(consonantes));
+  const vocales = resto.replace(/[^AEIOU]/g, '');
+
+  const candidatos = new Set<string>();
+  // 1. 1ra + 2 consonantes únicas
+  if (consonantesUnicas.length >= 2) {
+    candidatos.add(primera + consonantesUnicas[0] + consonantesUnicas[1]);
+  }
+  // 2. 1ra + 2 consonantes (con repes)
+  if (consonantes.length >= 2) {
+    candidatos.add(primera + consonantes[0] + consonantes[1]);
+  }
+  // 3. 1ra + 1 consonante + 1 vocal
+  if (consonantes.length >= 1 && vocales.length >= 1) {
+    candidatos.add(primera + consonantes[0] + vocales[0]);
+  }
+  // 4. Primeras 3 letras tal cual
+  candidatos.add(norm.slice(0, 3));
+  return Array.from(candidatos);
+}
+
+/**
+ * Devuelve un código de 3 letras libre para una categoría nueva, basado en
+ * el nombre. Si todos los candidatos chocan, sufija con número (HLW2, HLW3).
+ * `excluirId`: al editar, ignora la categoría actual al chequear duplicados.
+ */
+export async function sugerirCodigoCategoria(
+  nombre: string,
+  excluirId?: string,
+): Promise<ActionResult<{ codigo: string; alternativo: boolean }>> {
+  const r = await runAction(async () => {
+    if (!nombre || nombre.trim().length < 2) {
+      return { codigo: '', alternativo: false };
+    }
+    const { sb } = await requireUser();
+    const candidatos = generarCandidatos(nombre);
+
+    // Chequea cada candidato contra la base; el primero libre gana.
+    let q = sb.from('categorias').select('codigo').in('codigo', candidatos);
+    if (excluirId) q = q.neq('id', excluirId);
+    const { data: ocupados } = await q;
+    const tomados = new Set((ocupados ?? []).map((r) => r.codigo as string));
+    const libre = candidatos.find((c) => !tomados.has(c));
+    if (libre) return { codigo: libre, alternativo: libre !== candidatos[0] };
+
+    // Todos chocan: sufija el primero con un número incremental.
+    const base = candidatos[0]!.slice(0, 3);
+    for (let n = 2; n <= 99; n++) {
+      const intento = `${base}${n}`;
+      let q2 = sb.from('categorias').select('id').eq('codigo', intento);
+      if (excluirId) q2 = q2.neq('id', excluirId);
+      const { data: hit } = await q2.maybeSingle();
+      if (!hit) return { codigo: intento, alternativo: true };
+    }
+    throw new Error('No se pudo generar un código libre. Ingresá uno manualmente.');
+  });
+  return r;
+}
+
 export async function crearCategoria(_prev: unknown, fd: FormData): Promise<ActionResult<{ id: string }>> {
   const r = await runAction(async () => {
     const data = parseForm(fd);
     const { sb } = await requireUser();
+
+    // Si vino sin código, autogenerar uno libre desde el nombre.
+    let codigo = (data.codigo ?? '').trim().toUpperCase();
+    if (!codigo) {
+      const sug = await sugerirCodigoCategoria(data.nombre);
+      if (!sug.ok || !sug.data?.codigo) {
+        throw new Error(sug.error ?? 'No se pudo generar el código automáticamente');
+      }
+      codigo = sug.data.codigo;
+    }
+
     const { data: row, error } = await sb.from('categorias').insert({
       ...data,
+      codigo,
       slug: data.slug || data.nombre.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, ''),
       descripcion: data.descripcion || null,
       icono: data.icono || null,
@@ -54,9 +155,16 @@ export async function crearCategoria(_prev: unknown, fd: FormData): Promise<Acti
 export async function actualizarCategoria(id: string, _prev: unknown, fd: FormData): Promise<ActionResult> {
   const r = await runAction(async () => {
     const data = parseForm(fd);
+    const codigo = (data.codigo ?? '').trim().toUpperCase();
+    if (!codigo) {
+      // En edición el código no se regenera automáticamente: protege la
+      // trazabilidad de los SKUs existentes que ya derivan de él.
+      throw new Error('El código no puede quedar vacío al editar una categoría existente.');
+    }
     const { sb } = await requireUser();
     const { error } = await sb.from('categorias').update({
       ...data,
+      codigo,
       slug: data.slug || data.nombre.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, ''),
       descripcion: data.descripcion || null,
       icono: data.icono || null,
