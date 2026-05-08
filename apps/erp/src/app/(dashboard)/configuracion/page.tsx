@@ -1,8 +1,11 @@
+import Link from 'next/link';
 import { createClient } from '@happy/db/server';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@happy/ui/card';
 import { Badge } from '@happy/ui/badge';
+import { Button } from '@happy/ui/button';
 import { PageShell } from '@/components/page-shell';
 import { requireRol } from '@/server/session';
+import { Ruler, Receipt } from 'lucide-react';
 
 export const metadata = { title: 'Configuración' };
 export const dynamic = 'force-dynamic';
@@ -15,6 +18,35 @@ export default async function ConfiguracionPage() {
 
   return (
     <PageShell title="Configuración" description="Datos de la empresa, parámetros del sistema, integraciones.">
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+        <Link href="/configuracion/unidades">
+          <Card className="group cursor-pointer transition hover:-translate-y-0.5 hover:border-happy-300 hover:shadow-md">
+            <CardContent className="flex items-center gap-3 p-4">
+              <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-happy-50 text-happy-600 transition group-hover:bg-happy-500 group-hover:text-white">
+                <Ruler className="h-5 w-5" />
+              </div>
+              <div className="flex-1">
+                <p className="font-display text-sm font-semibold text-corp-900">Unidades de medida</p>
+                <p className="text-xs text-slate-500">Gestionar unidades de compra y consumo</p>
+              </div>
+            </CardContent>
+          </Card>
+        </Link>
+        <Link href="/configuracion/sunat">
+          <Card className="group cursor-pointer transition hover:-translate-y-0.5 hover:border-happy-300 hover:shadow-md">
+            <CardContent className="flex items-center gap-3 p-4">
+              <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-happy-50 text-happy-600 transition group-hover:bg-happy-500 group-hover:text-white">
+                <Receipt className="h-5 w-5" />
+              </div>
+              <div className="flex-1">
+                <p className="font-display text-sm font-semibold text-corp-900">SUNAT</p>
+                <p className="text-xs text-slate-500">Series, comprobantes y emisión</p>
+              </div>
+            </CardContent>
+          </Card>
+        </Link>
+      </div>
+
       <div className="grid gap-6 lg:grid-cols-2">
         <Card>
           <CardHeader>

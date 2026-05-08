@@ -133,6 +133,16 @@ export function MaterialForm({ initial, unidades, proveedores }: Props) {
       </FormSection>
 
       <FormSection title="Unidades y precio">
+        <p className="-mt-2 text-xs text-slate-500">
+          ¿No encontrás la unidad que necesitás?{' '}
+          <a
+            href="/configuracion/unidades"
+            target="_blank"
+            className="font-medium text-happy-600 hover:underline"
+          >
+            Gestionar unidades →
+          </a>
+        </p>
         <FormGrid cols={3}>
           <FormRow label="Unidad de compra">
             <select
