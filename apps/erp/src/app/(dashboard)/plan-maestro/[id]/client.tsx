@@ -44,8 +44,9 @@ export function LineasEditor({
   const [busca, setBusca] = useState('');
   const [productoSel, setProductoSel] = useState('');
   const [prioridad, setPrioridad] = useState(100);
-  // Map de talla → cantidad. Si la talla no está, no se incluye.
-  const [tallasSel, setTallasSel] = useState<Record<string, number>>({});
+  // Map de talla → cantidad (string para permitir vacío mientras se escribe).
+  // '' = aún no ingresada (bloqueará el submit con un toast claro).
+  const [tallasSel, setTallasSel] = useState<Record<string, string>>({});
 
   const filtrados = useMemo(
     () =>
@@ -71,19 +72,20 @@ export function LineasEditor({
     setTallasSel((prev) => {
       const copy = { ...prev };
       if (t in copy) delete copy[t];
-      else copy[t] = 50;
+      else copy[t] = ''; // vacío: el usuario tiene que ingresar la cantidad
       return copy;
     });
   }
 
-  function setCantidad(t: string, c: number) {
-    setTallasSel((prev) => ({ ...prev, [t]: Math.max(1, c) }));
+  function setCantidad(t: string, raw: string) {
+    // Permitir borrar completamente o escribir libremente; sólo se valida al submit.
+    setTallasSel((prev) => ({ ...prev, [t]: raw }));
   }
 
   function aplicarCantidadATodas(c: number) {
     setTallasSel((prev) => {
       const copy = { ...prev };
-      for (const t of Object.keys(copy)) copy[t] = Math.max(1, c);
+      for (const t of Object.keys(copy)) copy[t] = String(c);
       return copy;
     });
   }
@@ -97,10 +99,18 @@ export function LineasEditor({
 
   function submit() {
     if (!productoSel) return toast.error('Selecciona un producto');
-    const tallas = Object.entries(tallasSel)
-      .filter(([, c]) => c > 0)
-      .map(([talla, cantidad]) => ({ talla: talla as (typeof TALLAS)[number], cantidad }));
-    if (tallas.length === 0) return toast.error('Selecciona al menos una talla con cantidad');
+    const seleccionadas = Object.entries(tallasSel);
+    if (seleccionadas.length === 0) return toast.error('Selecciona al menos una talla');
+    // Validar: toda talla seleccionada tiene que tener cantidad numérica > 0.
+    const sinCantidad = seleccionadas.filter(([, c]) => c === '' || Number(c) <= 0 || !Number.isFinite(Number(c)));
+    if (sinCantidad.length > 0) {
+      const tallasFalt = sinCantidad.map(([t]) => t.replace('T', '')).join(', ');
+      return toast.error(`Falta cantidad en talla(s): ${tallasFalt}`);
+    }
+    const tallas = seleccionadas.map(([talla, c]) => ({
+      talla: talla as (typeof TALLAS)[number],
+      cantidad: Number(c),
+    }));
 
     start(async () => {
       const r = await agregarLineasPlanBatch({
@@ -132,7 +142,7 @@ export function LineasEditor({
     });
   }
 
-  const totalUnidadesNuevas = Object.values(tallasSel).reduce((a, b) => a + (b || 0), 0);
+  const totalUnidadesNuevas = Object.values(tallasSel).reduce((a, b) => a + (Number(b) || 0), 0);
   const productoElegido = productos.find((p) => p.id === productoSel);
 
   return (
@@ -264,13 +274,15 @@ export function LineasEditor({
                             type="number"
                             min={1}
                             value={c}
-                            onChange={(e) => setCantidad(t, Number(e.target.value))}
+                            onChange={(e) => setCantidad(t, e.target.value)}
+                            placeholder="Cantidad"
                             className="h-8 text-sm"
                           />
                           <button
                             type="button"
                             onClick={() => toggleTalla(t)}
                             className="text-slate-400 hover:text-danger"
+                            title="Quitar talla"
                           >
                             <X className="h-3.5 w-3.5" />
                           </button>
@@ -360,7 +372,17 @@ export function LineasEditor({
   );
 }
 
-export function AccionesPlan({ planId, estado, hayLineas }: { planId: string; estado: string; hayLineas: boolean }) {
+export function AccionesPlan({
+  planId,
+  estado,
+  hayLineas,
+  lineasSinReceta = 0,
+}: {
+  planId: string;
+  estado: string;
+  hayLineas: boolean;
+  lineasSinReceta?: number;
+}) {
   const [pending, start] = useTransition();
 
   function aprobar() {
@@ -395,10 +417,16 @@ export function AccionesPlan({ planId, estado, hayLineas }: { planId: string; es
     );
   }
   if (estado === 'APROBADO') {
+    const bloqueado = lineasSinReceta > 0;
     return (
-      <Button onClick={generar} disabled={pending} variant="premium">
+      <Button
+        onClick={generar}
+        disabled={pending || bloqueado}
+        variant="premium"
+        title={bloqueado ? `Faltan recetas en ${lineasSinReceta} línea(s) — revisá la pestaña "Explosión materiales"` : 'Generar OTs'}
+      >
         {pending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Factory className="h-4 w-4" />}
-        Generar OTs
+        {bloqueado ? `Generar OTs (faltan ${lineasSinReceta} receta${lineasSinReceta === 1 ? '' : 's'})` : 'Generar OTs'}
       </Button>
     );
   }

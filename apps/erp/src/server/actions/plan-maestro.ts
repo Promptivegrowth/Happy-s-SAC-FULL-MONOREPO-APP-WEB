@@ -238,6 +238,40 @@ export async function generarOTsDelPlan(planId: string): Promise<ActionResult<{ 
       porProducto.set(l.producto_id, arr);
     }
 
+    // Validar cobertura de receta a nivel (producto, talla): si una línea del
+    // plan no tiene receta activa con líneas para esa talla, no se puede
+    // explosionar materiales ni costear correctamente — bloqueamos la
+    // generación antes de crear ninguna OT.
+    const productoIds = Array.from(porProducto.keys());
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const sbAny = sb as unknown as { from: (t: string) => any };
+    const { data: rl } = await sbAny
+      .from('recetas_lineas')
+      .select('talla, recetas!inner(producto_id, activa)')
+      .in('recetas.producto_id', productoIds)
+      .eq('recetas.activa', true);
+    const cobertura = new Set(
+      ((rl ?? []) as Array<{ talla: string; recetas: { producto_id: string } | null }>)
+        .filter((r) => r.recetas)
+        .map((r) => `${r.recetas!.producto_id}|${r.talla}`),
+    );
+    const lineasSinReceta = lineas.filter((l) => !cobertura.has(`${l.producto_id}|${l.talla}`));
+    if (lineasSinReceta.length > 0) {
+      const { data: prods } = await sb
+        .from('productos')
+        .select('id, codigo, nombre')
+        .in('id', Array.from(new Set(lineasSinReceta.map((l) => l.producto_id))));
+      const nombrePorId = new Map((prods ?? []).map((p) => [p.id as string, `${p.codigo} ${p.nombre}`]));
+      const detalle = lineasSinReceta
+        .map((l) => `${nombrePorId.get(l.producto_id) ?? l.producto_id} (T${l.talla.replace('T', '')})`)
+        .slice(0, 6)
+        .join(', ');
+      const extra = lineasSinReceta.length > 6 ? ` y ${lineasSinReceta.length - 6} más` : '';
+      throw new Error(
+        `No se pueden generar las OTs: ${lineasSinReceta.length} línea(s) sin receta activa: ${detalle}${extra}. Cargá las recetas faltantes desde la pestaña "Explosión materiales" antes de continuar.`,
+      );
+    }
+
     // Almacén de producción default
     const { data: alm } = await sb.from('almacenes').select('id').eq('codigo', 'ALM-SB').maybeSingle();
 

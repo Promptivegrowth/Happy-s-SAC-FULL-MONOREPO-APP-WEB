@@ -70,7 +70,7 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
     <PageShell
       title={`Plan ${plan.codigo}`}
       description={`Semana ${plan.semana ?? '-'}/${plan.anio ?? '-'} · ${formatDate(plan.fecha_inicio)} a ${formatDate(plan.fecha_fin)}`}
-      actions={<AccionesPlan planId={id} estado={plan.estado ?? 'BORRADOR'} hayLineas={lineas.length > 0} />}
+      actions={<AccionesPlan planId={id} estado={plan.estado ?? 'BORRADOR'} hayLineas={lineas.length > 0} lineasSinReceta={lineasSinReceta.length} />}
     >
       {codigoCorrupto && (
         <div className="flex items-start gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
