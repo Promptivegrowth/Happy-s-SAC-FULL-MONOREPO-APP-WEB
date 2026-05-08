@@ -1,26 +1,33 @@
 name: DB migrate (Supabase)
 
+# Aplica migraciones pendientes via Management API + las registra en
+# supabase_migrations.schema_migrations. Es idempotente: si todas ya están
+# aplicadas (caso normal cuando se aplican localmente con apply-migration.ts)
+# el job no hace nada. Si por alguna razón no se aplicó local antes del push,
+# este job lo cubre.
 on:
   workflow_dispatch:
   push:
     branches: [main]
     paths:
       - 'supabase/migrations/**'
-      - 'supabase/config.toml'
 
 jobs:
   migrate:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: supabase/setup-cli@v1
-        with: { version: latest }
-      - name: Link project
-        run: supabase link --project-ref ${{ secrets.SUPABASE_PROJECT_REF }}
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'pnpm'
+      - name: Install tsx
+        run: pnpm add -g tsx
+      - name: Apply pending migrations
+        run: tsx supabase/seed/ci-apply-pending.ts
         env:
           SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
-      - name: Push migrations
-        run: supabase db push
-        env:
-          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
-          SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+          SUPABASE_PROJECT_REF: ${{ secrets.SUPABASE_PROJECT_REF }}
