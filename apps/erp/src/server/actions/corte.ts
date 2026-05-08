@@ -1,7 +1,6 @@
 'use server';
 
 import { z } from 'zod';
-import { redirect } from 'next/navigation';
 import { runAction, requireUser, bumpPaths, type ActionResult } from './_helpers';
 
 const TALLAS = ['T0','T2','T4','T6','T8','T10','T12','T14','T16','TS','TAD'] as const;
@@ -324,10 +323,11 @@ export async function crearOS(
 
     return { id: row.id as string, ...extras };
   });
-  if (r.ok && r.data) {
-    await bumpPaths('/servicios');
-    redirect(`/servicios/${r.data.id}`);
-  }
+  // Sin redirect server-side: el cliente navega después de mostrar el toast
+  // con el resumen (líneas + avíos cargados). Patrón consistente con
+  // crearCorte y eliminarTaller — evita que el redirect interrumpa el
+  // useTransition antes de que el toast se renderice.
+  if (r.ok) await bumpPaths('/servicios');
   return r;
 }
 

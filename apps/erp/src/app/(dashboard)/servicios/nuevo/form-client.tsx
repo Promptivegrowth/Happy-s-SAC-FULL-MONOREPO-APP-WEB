@@ -171,10 +171,11 @@ export function NuevaOSForm({
     }
     start(async () => {
       const r = await crearOS(null, fd);
-      if (r.ok) {
+      if (r.ok && r.data) {
         toast.success(
-          `OS creada · ${r.data?.lineas ?? 0} líneas y ${r.data?.avios ?? 0} avíos cargados desde el corte`,
+          `OS creada · ${r.data.lineas ?? 0} líneas y ${r.data.avios ?? 0} avíos cargados desde el corte`,
         );
+        router.push(`/servicios/${r.data.id}`);
       } else {
         toast.error(r.error ?? 'No se pudo crear la OS');
       }
