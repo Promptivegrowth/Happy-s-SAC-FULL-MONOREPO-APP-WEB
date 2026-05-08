@@ -72,8 +72,8 @@ export function TallerForm({ initial }: { initial?: Taller }) {
     <form action={formAction} className="space-y-6">
       <FormSection title="Identificación" description="Si el taller emite RUC, autocompleta con SUNAT.">
         <FormGrid cols={3}>
-          <FormRow label="Código" required error={state.fields?.codigo}>
-            <Input name="codigo" defaultValue={initial?.codigo ?? ''} required maxLength={20} placeholder="TAL-001" />
+          <FormRow label="Código" hint={initial?.codigo ? 'Editable' : 'Dejá vacío para autogenerar (TAL-NNN)'} error={state.fields?.codigo}>
+            <Input name="codigo" defaultValue={initial?.codigo ?? ''} maxLength={20} placeholder={initial?.codigo ? 'TAL-001' : 'Se autogenera'} />
           </FormRow>
           <FormRow label="Tipo doc" hint="Opcional si no formaliza">
             <select name="tipo_documento" defaultValue={tipoDoc} className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm">

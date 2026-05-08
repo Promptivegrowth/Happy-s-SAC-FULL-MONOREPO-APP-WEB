@@ -7,7 +7,8 @@ import { runAction, requireUser, bumpPaths, type ActionResult } from './_helpers
 const ESPECIALIDADES = ['CORTE','DECORADO','ESTAMPADO','BORDADO','SUBLIMADO','PLISADO','ACABADO','PLANCHADO','COSTURA','OJAL_BOTON'] as const;
 
 const schema = z.object({
-  codigo: z.string().min(1).max(20),
+  // Opcional: si está vacío, el server lo autogenera como TAL-NNN
+  codigo: z.string().max(20).optional().or(z.literal('')),
   nombre: z.string().min(2).max(200),
   tipo_documento: z.enum(['DNI','RUC','CE','PASAPORTE']).optional().or(z.literal('')),
   numero_documento: z.string().optional().or(z.literal('')),
@@ -46,7 +47,7 @@ function parseForm(fd: FormData) {
 
 function clean(d: ReturnType<typeof parseForm>) {
   return {
-    codigo: d.codigo.trim().toUpperCase(),
+    codigo: (d.codigo ?? '').trim().toUpperCase(),
     nombre: d.nombre.trim(),
     tipo_documento: d.tipo_documento || null,
     numero_documento: d.numero_documento || null,
@@ -68,7 +69,14 @@ export async function crearTaller(_prev: unknown, fd: FormData): Promise<ActionR
   const r = await runAction(async () => {
     const data = parseForm(fd);
     const { sb } = await requireUser();
-    const { data: row, error } = await sb.from('talleres').insert(clean(data)).select('id').single();
+    const cleaned = clean(data);
+    // Auto-código si vino vacío: TAL-NNN con el siguiente correlativo.
+    if (!cleaned.codigo) {
+      const { data: nro, error: errNro } = await sb.rpc('next_correlativo', { p_clave: 'TALLER', p_padding: 3 });
+      if (errNro) throw new Error(errNro.message);
+      cleaned.codigo = `TAL-${nro}`;
+    }
+    const { data: row, error } = await sb.from('talleres').insert(cleaned).select('id').single();
     if (error) throw new Error(error.message);
     return { id: row.id };
   });

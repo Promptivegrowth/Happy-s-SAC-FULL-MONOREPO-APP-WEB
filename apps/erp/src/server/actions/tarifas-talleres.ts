@@ -87,6 +87,13 @@ export async function consultarTarifa(
 /**
  * Calcula el monto sugerido para una OS a partir del corte: por cada talla
  * con cantidad_real > 0, busca la tarifa más específica y multiplica.
+ *
+ * Cascada de búsqueda (más específica primero):
+ *   1. talleres_tarifas (override por taller) — si existe un precio
+ *      específico negociado con ese taller, gana.
+ *   2. tarifas_servicios (estándar central) — la tarifa por
+ *      proceso/producto/talla que vale para todos los talleres.
+ *
  * Devuelve breakdown por talla y total.
  */
 export async function calcularMontoSugeridoOS(
@@ -100,20 +107,33 @@ export async function calcularMontoSugeridoOS(
   faltantes: string[];
 }>> {
   const r = await runAction(async () => {
+    // Import dinámico para evitar ciclo de imports server-actions.
+    const { consultarTarifaServicio } = await import('./tarifas-servicios');
+
     const detalle: { talla: string; cantidad: number; tarifa: number; subtotal: number; fuente: string }[] = [];
     const faltantes: string[] = [];
     let total = 0;
 
     for (const [talla, cantidad] of Object.entries(cantidadesPorTalla)) {
       if (cantidad <= 0) continue;
-      const t = await consultarTarifa(tallerId, productoId, proceso, talla);
+      // 1. Intentar override del taller
+      let t = await consultarTarifa(tallerId, productoId, proceso, talla);
+      let fuente = t ? `override del taller · ${t.fuente}` : '';
+      // 2. Si no hay override, usar tarifa central (servicios)
+      if (!t) {
+        const ts = await consultarTarifaServicio(proceso, productoId, talla);
+        if (ts) {
+          t = { tarifa: ts.tarifa, observacion: ts.observacion, fuente: ts.especificidad };
+          fuente = `central · ${ts.especificidad}`;
+        }
+      }
       if (!t) {
         faltantes.push(talla);
         continue;
       }
       const subtotal = Math.round(t.tarifa * cantidad * 100) / 100;
       total += subtotal;
-      detalle.push({ talla, cantidad, tarifa: t.tarifa, subtotal, fuente: t.fuente });
+      detalle.push({ talla, cantidad, tarifa: t.tarifa, subtotal, fuente: fuente || t.fuente });
     }
 
     return { total: Math.round(total * 100) / 100, detalle, faltantes };
