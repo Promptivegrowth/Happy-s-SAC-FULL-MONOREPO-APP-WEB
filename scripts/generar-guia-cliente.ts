@@ -264,7 +264,7 @@ docContent.push(
   new Paragraph({
     alignment: AlignmentType.CENTER,
     spacing: { before: 120, after: 120 },
-    children: [new TextRun({ text: 'Catálogo · Personas · Configuración · Producción', size: 22, color: COLOR_MUTED, font: 'Calibri' })],
+    children: [new TextRun({ text: 'Catálogo · Personas · Configuración · Producción · Resto del sistema', size: 22, color: COLOR_MUTED, font: 'Calibri' })],
   }),
   new Paragraph({
     alignment: AlignmentType.CENTER,
@@ -299,7 +299,7 @@ docContent.push(
   bulletBold('Tarifas centralizadas: ', 'nueva pantalla en Configuración. Cargás una vez la tarifa por proceso × producto × talla y vale para todos los talleres.'),
   p(' '),
   h3('Cómo está organizado'),
-  bullet('Cada módulo tiene su capítulo (Catálogo, Personas, Configuración, Producción).'),
+  bullet('Cada módulo tiene su capítulo (Catálogo, Personas, Configuración, Producción, Resto del sistema).'),
   bullet('Cada pantalla del módulo tiene su sección.'),
   bullet('Para cada pantalla: para qué sirve, cómo se usa, qué significan los campos y una prueba sugerida.'),
   bullet('Al final de cada módulo hay un espacio para tus observaciones.'),
@@ -360,9 +360,9 @@ docContent.push(
   bullet('Productos sin categoría aparecen resaltados (no se pueden publicar sin categoría asignada).'),
   p(' '),
   h4('Crear / editar un producto'),
-  p('Click en "Nuevo producto" o sobre cualquier fila. Pestañas: Datos · Variantes · Galería · Publicación web.'),
+  p('Click en "Nuevo producto" o sobre cualquier fila. Pestañas: Datos del modelo · Variantes · Galería · Publicación web.'),
   p(' '),
-  h4('Pestaña Datos — campos principales'),
+  h4('Pestaña "Datos del modelo" — campos principales'),
   fieldsTable([
     { campo: 'Código', descripcion: 'Identificador único. Si lo dejás vacío se autogenera con el patrón <ABV>M<NNNN> a partir de la categoría (ej. HLWM0001 para Halloween).' },
     { campo: 'Nombre', descripcion: 'Nombre comercial del modelo (ej. "Bella New", "Pirata Adulto").', obligatorio: true },
@@ -443,7 +443,7 @@ docContent.push(
   ),
   ...pruebaSugerida('Crear una categoría con autocompletado', [
     'Andá a /categorias → "Nueva categoría".',
-    'Tipeá "Día de la Madre" en Nombre. Esperá 1 segundo.',
+    'Tipeá "Día de la Madre" en Nombre. Esperá un momento (el sistema espera ~400 ms tras tu última tecla para evitar consultas innecesarias).',
     'Verificá que el campo Código se llenó solo (probablemente "DDM" o similar) y que aparece el preview "HLWM0001"… con el nuevo código.',
     'Cambialo a "MOM" manualmente y verificá que el preview se actualiza.',
     'Tipeá una palabra que ya existe (ej. "Halloween" si ya creaste una). Verificá que se ofrece un código alternativo y no choca.',
@@ -655,10 +655,17 @@ docContent.push(
     { campo: 'Emite comprobante', descripcion: 'Toggle. Si está ON, el taller te factura; si está OFF, es trabajo informal y se manejan recibos internos.' },
   ]),
   p(' '),
-  h4('Acciones por taller'),
-  bullet('Tarifas: pantalla de OVERRIDES de tarifas para ese taller específico (ver Configuración → Tarifas de servicios para la tarifa central).'),
-  bullet('Pagos: registro y liquidación de pagos al taller.'),
-  bullet('Desactivar: soft-delete. El taller se oculta del selector pero el histórico se conserva.'),
+  h4('Acciones por taller (botones en el header del detalle)'),
+  bulletBold('Tarifas (/talleres/[id]/tarifas): ', 'pantalla de OVERRIDES. Solo cargá acá tarifas si ESTE taller específico cobra distinto a la tarifa estándar (Configuración → Tarifas de servicios). El sistema usa el override si existe, sino cae a la tarifa central.'),
+  bulletBold('Pagos (/talleres/[id]/pagos): ', 'registro y liquidación de pagos al taller. Listado de OS pendientes de pago + pagos hechos. Podés registrar un pago nuevo (efectivo, transferencia, Yape, Plin) y eliminar un pago si te equivocaste.'),
+  bulletBold('Desactivar: ', 'soft-delete. El taller se oculta del selector pero el histórico se conserva.'),
+  p(' '),
+  h4('Pagos al taller — flujo'),
+  step(1, 'Andá al detalle del taller → botón "Ver pagos".'),
+  step(2, 'Arriba ves un resumen: total facturado por OS, total pagado, saldo pendiente.'),
+  step(3, 'Para registrar un pago: click "Nuevo pago". Elegí monto, método, fecha y notas opcionales.'),
+  step(4, 'Para vincular el pago a una OS específica: lo elegís del listado de OS pendientes.'),
+  step(5, 'Si te equivocaste, podés eliminar un pago con el ícono papelera (revierte el saldo).'),
   ...pruebaSugerida('Crear un taller con auto-código', [
     'Andá a /talleres → "Nuevo taller".',
     'Dejá Código vacío. Verificá que el placeholder dice "Se autogenera".',
@@ -917,12 +924,15 @@ docContent.push(
   p('Cada OT representa la producción de UN modelo (con todas sus tallas) dentro de un plan. Es la unidad de trabajo principal: corte, costura, acabado giran alrededor de la OT.'),
   p(' '),
   h4('Estados'),
-  bullet('PLANIFICADA: recién generada, sin trabajo todavía.'),
+  bullet('BORRADOR: la OT existe pero no fue activada.'),
+  bullet('PLANIFICADA: lista para producir, generada desde el plan maestro.'),
   bullet('EN_CORTE: ya se inició al menos un corte para esta OT.'),
-  bullet('CORTADA: corte completado, listo para mandar a coser.'),
-  bullet('EN_TALLER: tiene OS abiertas con talleres.'),
-  bullet('TERMINADA: producción terminada y recibida.'),
-  bullet('COMPLETADA / CANCELADA: estados finales.'),
+  bullet('EN_HABILITADO: el corte está terminado y los avíos se están preparando para el taller.'),
+  bullet('EN_SERVICIO: la OT está con un taller externo (cosiendo, bordando…).'),
+  bullet('EN_DECORADO: las prendas volvieron del taller y están en decoración interna.'),
+  bullet('EN_CONTROL_CALIDAD: revisión final antes de pasar a inventario.'),
+  bullet('COMPLETADA: producción cerrada, prendas en stock.'),
+  bullet('CANCELADA: OT descartada en cualquier momento.'),
   p(' '),
   h4('Pestañas dentro de la OT'),
   bulletBold('Líneas / Producción: ', 'avance por talla — cuánto está planificado, cortado, fallado, terminado.'),
@@ -1077,6 +1087,69 @@ docContent.push(
   h4('Para qué sirve'),
   p('Vista cronológica de todo lo que le pasó a una OT, un corte o una OS. Línea de tiempo con cambios de estado, eventos, anomalías y notas.'),
   ...observacionesBox('Trazabilidad'),
+);
+
+// ====================================================================
+// MÓDULO 5: RESTO DEL SISTEMA (sin cambios en V2)
+// ====================================================================
+
+docContent.push(
+  h1('Módulo 5 — RESTO DEL SISTEMA'),
+  p(
+    'Estos módulos no tuvieron cambios fuertes en esta versión 2 — siguen funcionando como en la primera entrega. Los listamos acá para que ' +
+      'tengas el mapa completo del sistema y puedas probarlos también si querés.',
+  ),
+  note('Si encontrás bugs o sugerencias en estos módulos, anotalos igual en la sección de observaciones de cada uno. Toda mejora es bienvenida.'),
+);
+
+// 5.1 Inventario
+docContent.push(
+  h2('5.1 Inventario'),
+  p(' '),
+  h4('Pantallas que incluye'),
+  bulletBold('Stock actual (/inventario): ', 'cuánto hay de cada material y producto terminado por almacén. Filtros por categoría y búsqueda.'),
+  bulletBold('Kardex (/kardex): ', 'historial de movimientos de cada item (entradas, salidas, traslados). Útil para auditar diferencias.'),
+  bulletBold('Traslados (/traslados): ', 'mover stock entre almacenes (ej. de Santa Bárbara a Tienda 1).'),
+  bulletBold('Alertas stock bajo (/inventario/alertas): ', 'lista de materiales que están por debajo de su stock mínimo. Sirve para disparar órdenes de compra.'),
+  ...observacionesBox('Inventario'),
+);
+
+// 5.2 Compras
+docContent.push(
+  h2('5.2 Compras'),
+  p(' '),
+  h4('Pantallas que incluye'),
+  bulletBold('Órdenes de Compra (/oc): ', 'creación y gestión de OCs a proveedores. Estados: BORRADOR, ENVIADA, RECIBIDA_PARCIAL, COMPLETADA, CANCELADA.'),
+  bulletBold('Recepciones (/compras): ', 'cuando el proveedor entrega, registrás la recepción. Actualiza stock automáticamente.'),
+  bulletBold('Importaciones (/compras/importaciones): ', 'tracking de importaciones (con DUA, embarques, llegadas).'),
+  bulletBold('Cuentas por pagar (/compras/cxp): ', 'qué le debés a cada proveedor. Registro de pagos.'),
+  ...observacionesBox('Compras'),
+);
+
+// 5.3 Ventas
+docContent.push(
+  h2('5.3 Ventas'),
+  p(' '),
+  h4('Pantallas que incluye'),
+  bulletBold('Ventas (/ventas): ', 'todas las ventas (POS, web, B2B) en un solo listado. Filtros por canal, cliente, fecha.'),
+  bulletBold('POS / Punto de venta (/pos): ', 'pantalla de venta presencial. Buscás producto por código de barras o nombre, agregás al carrito, cobrás (efectivo, tarjeta, Yape, Plin) y emite comprobante SUNAT.'),
+  bulletBold('Pedidos Web (/pedidos-web): ', 'pedidos que llegaron desde la tienda online (catálogo público). Gestión de despacho.'),
+  bulletBold('Pedidos B2B (/b2b): ', 'pedidos de clientes mayoristas. Aplica precios mayorista A/B/C según el tipo de cliente.'),
+  bulletBold('Comprobantes SUNAT (/comprobantes): ', 'boletas, facturas, notas de crédito emitidas. Estado de envío a SUNAT (aceptado / rechazado / pendiente).'),
+  ...observacionesBox('Ventas'),
+);
+
+// 5.4 Reportes y soporte
+docContent.push(
+  h2('5.4 Reportes, soporte y administración'),
+  p(' '),
+  h4('Pantallas que incluye'),
+  bulletBold('Reportes (/reportes): ', 'dashboards e informes. Incluye Pagos a talleres (/reportes/pagos-talleres) con totales por mes y proveedor.'),
+  bulletBold('Reclamos INDECOPI (/reclamos): ', 'gestión del libro de reclamaciones requerido por ley. Registro y seguimiento.'),
+  bulletBold('Usuarios y Roles (/usuarios, solo gerente): ', 'alta de usuarios del sistema y asignación de roles (gerente, jefe_produccion, almacenero, vendedor, cajero, contador, operario).'),
+  bulletBold('Configuración SUNAT (/configuracion/sunat): ', 'series de comprobantes, certificados digitales, datos de emisión.'),
+  bulletBold('Datos de empresa (/configuracion): ', 'razón social, RUC, dirección fiscal, email, teléfono, IGV %.'),
+  ...observacionesBox('Reportes y administración'),
 );
 
 // CIERRE
