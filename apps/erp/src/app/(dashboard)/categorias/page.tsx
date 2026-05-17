@@ -3,16 +3,20 @@ import { createClient } from '@happy/db/server';
 import { Badge } from '@happy/ui/badge';
 import { Button } from '@happy/ui/button';
 import { Card, CardContent } from '@happy/ui/card';
+import { Input } from '@happy/ui/input';
 import { EmptyState } from '@happy/ui/empty-state';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@happy/ui/table';
 import { PageShell } from '@/components/page-shell';
-import { Plus, Tags, Pencil, Globe, Info, AlertTriangle, ArrowRight } from 'lucide-react';
+import { FilterChip } from '@/components/filter-chip';
+import { Plus, Tags, Pencil, Globe, Info, AlertTriangle, ArrowRight, Search } from 'lucide-react';
 import { ToggleCategoriaActivo } from './toggle-activo-client';
 import { AccionesMasivasCategoria } from './acciones-masivas-client';
 import { PublicarTodoElCatalogoButton } from './publicar-todo-client';
 
 export const metadata = { title: 'Categorías' };
 export const dynamic = 'force-dynamic';
+
+type SP = { q?: string; vista?: string };
 
 type CategoriaRow = {
   id: string;
@@ -25,13 +29,26 @@ type CategoriaRow = {
   activo: boolean | null;
 };
 
-export default async function CategoriasPage() {
+export default async function CategoriasPage({ searchParams }: { searchParams: Promise<SP> }) {
+  const sp = await searchParams;
   const sb = await createClient();
 
-  // Cargamos categorías + productos (id, categoria_id) y publicaciones por separado.
-  // Mergeamos in-memory para evitar problemas de RLS con embedded joins.
+  // Query de categorías con filtro por vista (activos por default) y búsqueda
+  // por nombre o código. Reusa el mismo patrón que /talleres.
+  let catsQuery = sb
+    .from('categorias')
+    .select('id, codigo, nombre, slug, icono, publicar_en_web, orden_web, activo')
+    .order('orden_web');
+  if (sp.vista === 'inactivos') catsQuery = catsQuery.eq('activo', false);
+  else if (sp.vista !== 'todos') catsQuery = catsQuery.eq('activo', true);
+  if (sp.q && sp.q.trim()) {
+    const term = sp.q.trim().replace(/[%_]/g, '');
+    catsQuery = catsQuery.or(`nombre.ilike.%${term}%,codigo.ilike.%${term}%`);
+  }
+
+  // Productos y publicaciones para las métricas globales (no afectados por filtros).
   const [{ data: cats }, { data: prods }, { data: pubs }] = await Promise.all([
-    sb.from('categorias').select('id, codigo, nombre, slug, icono, publicar_en_web, orden_web, activo').order('orden_web'),
+    catsQuery,
     sb.from('productos').select('id, categoria_id').eq('activo', true),
     sb.from('productos_publicacion').select('producto_id, publicado'),
   ]);
@@ -65,6 +82,20 @@ export default async function CategoriasPage() {
   // Para el botón "Publicar todo el catálogo" descontamos los huérfanos del total
   // (ellos no son publicables hasta tener categoría).
   const sinPublicarPublicables = Math.max(0, (totalProductos - huerfanos) - totalPublicados);
+
+  // Helper para componer URLs preservando los filtros vigentes.
+  function chipUrl(params: Record<string, string | undefined>) {
+    const sp2 = new URLSearchParams();
+    if (sp.q) sp2.set('q', sp.q);
+    if (sp.vista) sp2.set('vista', sp.vista);
+    for (const [k, v] of Object.entries(params)) {
+      if (v === undefined || v === '') sp2.delete(k);
+      else sp2.set(k, v);
+    }
+    const s = sp2.toString();
+    return s ? `/categorias?${s}` : '/categorias';
+  }
+  const filtrosActivos = Boolean(sp.q || sp.vista);
 
   return (
     <PageShell
@@ -151,17 +182,62 @@ export default async function CategoriasPage() {
         </Card>
       </div>
 
+      {/* Buscador + filtros de vista */}
+      <div className="flex flex-wrap items-center gap-3">
+        <form method="GET" action="/categorias" className="relative w-full sm:w-72">
+          <Search className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" />
+          {/* Preservar vista actual al enviar la búsqueda */}
+          {sp.vista && <input type="hidden" name="vista" value={sp.vista} />}
+          <Input
+            name="q"
+            defaultValue={sp.q ?? ''}
+            placeholder="Buscar por nombre o código…"
+            className="pl-9"
+          />
+        </form>
+        <div className="flex flex-wrap items-center gap-1.5">
+          <span className="self-center text-xs font-medium text-slate-500">Vista:</span>
+          <FilterChip href={chipUrl({ vista: '' })} active={!sp.vista} variant="default">
+            Activas
+          </FilterChip>
+          <FilterChip href={chipUrl({ vista: 'inactivos' })} active={sp.vista === 'inactivos'} variant="secondary">
+            Inactivas
+          </FilterChip>
+          <FilterChip href={chipUrl({ vista: 'todos' })} active={sp.vista === 'todos'}>
+            Todas
+          </FilterChip>
+        </div>
+      </div>
+
       {categorias.length === 0 ? (
         <EmptyState
           icon={<Tags className="h-6 w-6" />}
-          title="Aún no hay categorías"
-          description="Crea categorías para organizar los disfraces y mostrarlos en la tienda."
+          title={
+            filtrosActivos
+              ? sp.q
+                ? `Sin resultados para "${sp.q}"`
+                : sp.vista === 'inactivos'
+                  ? 'Sin categorías inactivas'
+                  : 'Sin categorías con esos filtros'
+              : 'Aún no hay categorías'
+          }
+          description={
+            filtrosActivos
+              ? 'Probá con otra búsqueda o cambiá el filtro de vista.'
+              : 'Crea categorías para organizar los disfraces y mostrarlos en la tienda.'
+          }
           action={
-            <Link href="/categorias/nuevo">
-              <Button variant="premium">
-                <Plus className="h-4 w-4" /> Crear primera categoría
-              </Button>
-            </Link>
+            filtrosActivos ? (
+              <Link href="/categorias">
+                <Button variant="outline">Limpiar filtros</Button>
+              </Link>
+            ) : (
+              <Link href="/categorias/nuevo">
+                <Button variant="premium">
+                  <Plus className="h-4 w-4" /> Crear primera categoría
+                </Button>
+              </Link>
+            )
           }
         />
       ) : (
