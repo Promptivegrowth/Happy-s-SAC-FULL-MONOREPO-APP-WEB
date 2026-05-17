@@ -150,6 +150,24 @@ function getPub(p: ProdRow): PubRef | null {
 
 async function ProductosTable({ q, cat, estado, web, sin_categoria }: SP) {
   const sb = await createClient();
+
+  // Si hay filtro de categoría: traer también los productos que tengan esa
+  // categoría como EXTRA (productos_categorias_extra), no solo los que la
+  // tienen como principal. De lo contrario, un producto con principal=Halloween
+  // y extra=Ejemplo no aparecería al filtrar por Ejemplo.
+  let idsConExtraEnCategoria: string[] = [];
+  if (cat) {
+    try {
+      const { data: extras } = await (sb as unknown as { from: (t: string) => any }) // eslint-disable-line @typescript-eslint/no-explicit-any
+        .from('productos_categorias_extra')
+        .select('producto_id')
+        .eq('categoria_id', cat);
+      idsConExtraEnCategoria = ((extras ?? []) as { producto_id: string }[]).map((e) => e.producto_id);
+    } catch {
+      /* tabla productos_categorias_extra puede no existir todavía (mig 31) — sin extras */
+    }
+  }
+
   let query = sb
     .from('productos')
     .select(
@@ -158,7 +176,14 @@ async function ProductosTable({ q, cat, estado, web, sin_categoria }: SP) {
     .order('nombre')
     .limit(500);
   if (q) query = query.ilike('nombre', `%${q}%`);
-  if (cat) query = query.eq('categoria_id', cat);
+  if (cat) {
+    if (idsConExtraEnCategoria.length > 0) {
+      // PostgREST .or() acepta listas .in.(uuid1,uuid2,...). UUIDs no necesitan comillas.
+      query = query.or(`categoria_id.eq.${cat},id.in.(${idsConExtraEnCategoria.join(',')})`);
+    } else {
+      query = query.eq('categoria_id', cat);
+    }
+  }
   if (sin_categoria === '1') query = query.is('categoria_id', null);
   if (estado === 'activo') query = query.eq('activo', true);
   if (estado === 'inactivo') query = query.eq('activo', false);

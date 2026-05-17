@@ -27,7 +27,25 @@ type Variante = {
   activo: boolean;
 };
 
-export function VariantesSection({ productoId, variantes }: { productoId: string; variantes: Variante[] }) {
+/** Costo real de la última OS cerrada que incluyó esta talla. */
+type UltimoCosto = {
+  costoUnitario: number;
+  pagoTaller: number;
+  materiales: number;
+  osNumero: string;
+  osFecha: string | null;
+};
+
+export function VariantesSection({
+  productoId,
+  variantes,
+  ultimosCostos = {},
+}: {
+  productoId: string;
+  variantes: Variante[];
+  /** Map talla → último costo real (calculado en el server). Opcional. */
+  ultimosCostos?: Record<string, UltimoCosto>;
+}) {
   const [open, setOpen] = useState(false);
   const [pending, start] = useTransition();
   const [skuPrefix, setSkuPrefix] = useState('');
@@ -95,7 +113,7 @@ export function VariantesSection({ productoId, variantes }: { productoId: string
               <Input name="codigo_barras" placeholder="opcional" />
             </FormRow>
             <FormRow label="Precio público (S/)" required>
-              <Input name="precio_publico" type="number" step="0.01" min="0" required defaultValue={50} />
+              <Input name="precio_publico" type="number" step="0.01" min="0" required placeholder="Ej. 49.90" />
             </FormRow>
             <FormRow label="Precio mayorista A (S/)" hint="6+ unidades">
               <Input name="precio_mayorista_a" type="number" step="0.01" min="0" />
@@ -124,27 +142,48 @@ export function VariantesSection({ productoId, variantes }: { productoId: string
             <TableHead>Talla</TableHead><TableHead>SKU</TableHead><TableHead>Código barras</TableHead>
             <TableHead className="text-right">Precio público</TableHead>
             <TableHead className="text-right">Mayorista A</TableHead>
-            <TableHead className="text-right">Costo</TableHead>
+            <TableHead className="text-right">Costo estándar</TableHead>
+            <TableHead className="text-right">Última producción</TableHead>
             <TableHead>Estado</TableHead>
             <TableHead></TableHead>
           </TableRow></TableHeader>
           <TableBody>
-            {variantes.map((v) => (
-              <TableRow key={v.id}>
-                <TableCell><Badge variant="outline">{v.talla.replace('T', '')}</Badge></TableCell>
-                <TableCell className="font-mono text-xs">{v.sku}</TableCell>
-                <TableCell className="font-mono text-xs text-slate-500">{v.codigo_barras ?? '—'}</TableCell>
-                <TableCell className="text-right font-medium">{formatPEN(Number(v.precio_publico ?? 0))}</TableCell>
-                <TableCell className="text-right text-sm">{v.precio_mayorista_a ? formatPEN(Number(v.precio_mayorista_a)) : '—'}</TableCell>
-                <TableCell className="text-right text-sm text-slate-500">{v.precio_costo_estandar ? formatPEN(Number(v.precio_costo_estandar)) : '—'}</TableCell>
-                <TableCell>{v.activo ? <Badge variant="success">Activa</Badge> : <Badge variant="secondary">Inactiva</Badge>}</TableCell>
-                <TableCell className="text-right">
-                  <Button variant="ghost" size="sm" onClick={() => onDelete(v.id)} disabled={pending}>
-                    <Trash2 className="h-3.5 w-3.5 text-danger" />
-                  </Button>
-                </TableCell>
-              </TableRow>
-            ))}
+            {variantes.map((v) => {
+              const u = ultimosCostos[v.talla];
+              const estandar = Number(v.precio_costo_estandar ?? 0);
+              // Comparar último real vs estándar para resaltar diferencias > 5%
+              const diff = u && estandar > 0 ? (u.costoUnitario - estandar) / estandar : 0;
+              const sube = diff > 0.05;
+              const baja = diff < -0.05;
+              return (
+                <TableRow key={v.id}>
+                  <TableCell><Badge variant="outline">{v.talla.replace('T', '')}</Badge></TableCell>
+                  <TableCell className="font-mono text-xs">{v.sku}</TableCell>
+                  <TableCell className="font-mono text-xs text-slate-500">{v.codigo_barras ?? '—'}</TableCell>
+                  <TableCell className="text-right font-medium">{formatPEN(Number(v.precio_publico ?? 0))}</TableCell>
+                  <TableCell className="text-right text-sm">{v.precio_mayorista_a ? formatPEN(Number(v.precio_mayorista_a)) : '—'}</TableCell>
+                  <TableCell className="text-right text-sm text-slate-500">{v.precio_costo_estandar ? formatPEN(estandar) : '—'}</TableCell>
+                  <TableCell className="text-right text-sm">
+                    {u ? (
+                      <span
+                        className={sube ? 'font-medium text-danger' : baja ? 'font-medium text-emerald-600' : 'text-slate-700'}
+                        title={`OS ${u.osNumero}${u.osFecha ? ` (${u.osFecha})` : ''}\nTaller: ${formatPEN(u.pagoTaller)}\nMateriales: ${formatPEN(u.materiales)}`}
+                      >
+                        {formatPEN(u.costoUnitario)}
+                      </span>
+                    ) : (
+                      <span className="text-slate-300">—</span>
+                    )}
+                  </TableCell>
+                  <TableCell>{v.activo ? <Badge variant="success">Activa</Badge> : <Badge variant="secondary">Inactiva</Badge>}</TableCell>
+                  <TableCell className="text-right">
+                    <Button variant="ghost" size="sm" onClick={() => onDelete(v.id)} disabled={pending}>
+                      <Trash2 className="h-3.5 w-3.5 text-danger" />
+                    </Button>
+                  </TableCell>
+                </TableRow>
+              );
+            })}
           </TableBody>
         </Table>
       )}
