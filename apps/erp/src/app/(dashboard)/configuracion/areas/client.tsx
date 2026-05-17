@@ -1,9 +1,11 @@
 'use client';
 
-import { useState, useTransition } from 'react';
+import { useEffect, useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
+import { createClient as createBrowserClient } from '@happy/db/browser';
 import { Button } from '@happy/ui/button';
 import { Switch } from '@happy/ui/switch';
+import { Badge } from '@happy/ui/badge';
 import {
   Dialog,
   DialogContent,
@@ -14,7 +16,7 @@ import {
 } from '@happy/ui/dialog';
 import { Input } from '@happy/ui/input';
 import { Label } from '@happy/ui/label';
-import { Plus, Pencil, Trash2, Loader2 } from 'lucide-react';
+import { Plus, Pencil, Trash2, Loader2, History } from 'lucide-react';
 import { toast } from 'sonner';
 import {
   crearArea,
@@ -235,9 +237,142 @@ function ToggleActiva({ areaId, activa }: { areaId: string; activa: boolean }) {
   return <Switch checked={val} onCheckedChange={onChange} disabled={pending} />;
 }
 
+/**
+ * Botón "Histórico": muestra cronología de cambios del valor por minuto.
+ * Carga on-demand al abrir el modal (no impacta la página principal).
+ */
+type HistorialRow = {
+  id: string;
+  valor_minuto: number;
+  notas: string | null;
+  created_at: string;
+};
+
+function HistoricoButton({ areaId, areaNombre }: { areaId: string; areaNombre: string }) {
+  const [open, setOpen] = useState(false);
+  const [cargando, setCargando] = useState(false);
+  const [filas, setFilas] = useState<HistorialRow[]>([]);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    let cancelado = false;
+    setCargando(true);
+    setError(null);
+    (async () => {
+      const sb = createBrowserClient();
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const sbAny = sb as unknown as { from: (t: string) => any };
+      const { data, error: err } = await sbAny
+        .from('areas_valor_minuto_historial')
+        .select('id, valor_minuto, notas, created_at')
+        .eq('area_id', areaId)
+        .order('created_at', { ascending: false });
+      if (cancelado) return;
+      if (err) {
+        setError(err.message);
+        setFilas([]);
+      } else {
+        setFilas((data ?? []) as HistorialRow[]);
+      }
+      setCargando(false);
+    })();
+    return () => { cancelado = true; };
+  }, [open, areaId]);
+
+  // Calcular delta vs versión previa para resaltar subidas/bajadas
+  const filasConDelta = filas.map((f, i) => {
+    const prev = filas[i + 1]; // la siguiente en orden desc = la anterior cronológica
+    const delta = prev ? Number(f.valor_minuto) - Number(prev.valor_minuto) : 0;
+    return { ...f, delta };
+  });
+
+  return (
+    <>
+      <Button
+        variant="ghost"
+        size="sm"
+        onClick={() => setOpen(true)}
+        title="Ver histórico de valor por minuto"
+      >
+        <History className="h-3.5 w-3.5" />
+      </Button>
+      <Dialog open={open} onOpenChange={setOpen}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Histórico de valor por minuto — {areaNombre}</DialogTitle>
+            <DialogDescription>
+              Cada vez que se actualiza el valor del área, se guarda automáticamente una entrada acá.
+              El primero (más arriba) es el valor vigente hoy.
+            </DialogDescription>
+          </DialogHeader>
+
+          {cargando ? (
+            <div className="flex items-center justify-center py-8 text-slate-500">
+              <Loader2 className="mr-2 h-4 w-4 animate-spin" /> Cargando…
+            </div>
+          ) : error ? (
+            <div className="rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+              No se pudo cargar el histórico: {error}
+            </div>
+          ) : filasConDelta.length === 0 ? (
+            <div className="rounded-md border border-dashed border-slate-200 bg-slate-50 p-6 text-center text-sm text-slate-500">
+              Aún no hay cambios registrados.
+            </div>
+          ) : (
+            <div className="max-h-96 overflow-auto rounded-md border">
+              <table className="w-full text-sm">
+                <thead className="sticky top-0 bg-slate-50 text-xs text-slate-600">
+                  <tr>
+                    <th className="px-3 py-2 text-left">Fecha</th>
+                    <th className="px-3 py-2 text-right">Valor / min</th>
+                    <th className="px-3 py-2 text-right">Δ vs anterior</th>
+                    <th className="px-3 py-2 text-left">Notas</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filasConDelta.map((f, idx) => (
+                    <tr key={f.id} className={`border-t ${idx === 0 ? 'bg-emerald-50/40' : ''}`}>
+                      <td className="px-3 py-2 text-xs text-slate-600">
+                        {new Date(f.created_at).toLocaleString('es-PE', {
+                          year: 'numeric', month: '2-digit', day: '2-digit',
+                          hour: '2-digit', minute: '2-digit',
+                        })}
+                        {idx === 0 && <Badge variant="success" className="ml-2 text-[9px]">Vigente</Badge>}
+                      </td>
+                      <td className="px-3 py-2 text-right font-mono font-semibold text-emerald-700">
+                        S/ {Number(f.valor_minuto).toFixed(3)}
+                      </td>
+                      <td className="px-3 py-2 text-right font-mono text-xs">
+                        {f.delta === 0 ? (
+                          <span className="text-slate-400">—</span>
+                        ) : f.delta > 0 ? (
+                          <span className="text-red-600">+S/ {f.delta.toFixed(3)}</span>
+                        ) : (
+                          <span className="text-emerald-600">−S/ {Math.abs(f.delta).toFixed(3)}</span>
+                        )}
+                      </td>
+                      <td className="px-3 py-2 text-xs text-slate-500">{f.notas ?? '—'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setOpen(false)}>Cerrar</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </>
+  );
+}
+
 export const AreasTable = {
   NewButton,
   EditButton,
   DeleteButton,
   ToggleActiva,
+  HistoricoButton,
 };

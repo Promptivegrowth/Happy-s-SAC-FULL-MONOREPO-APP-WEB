@@ -72,6 +72,10 @@ export default async function Page() {
             <strong>Eliminar vs Desactivar</strong>: eliminar borra la fila (solo si no la usa ningún proceso).
             Desactivar la oculta del selector pero mantiene los procesos que ya la tienen asignada.
           </li>
+          <li>
+            <strong>Histórico de valor por minuto</strong>: cada vez que cambiás el valor de un área queda
+            registrado con fecha. Tocá el ícono del reloj 🕒 para ver la evolución y comparar contra valores anteriores.
+          </li>
         </ul>
       </div>
 
@@ -124,6 +128,7 @@ export default async function Page() {
                     </TableCell>
                     <TableCell className="text-right">
                       <div className="flex justify-end gap-1">
+                        <AreasTable.HistoricoButton areaId={a.id} areaNombre={a.nombre} />
                         <AreasTable.EditButton area={a} />
                         <AreasTable.DeleteButton areaId={a.id} usos={a.usos} />
                       </div>
