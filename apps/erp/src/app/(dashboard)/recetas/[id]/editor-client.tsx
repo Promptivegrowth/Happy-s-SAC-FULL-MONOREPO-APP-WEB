@@ -67,7 +67,7 @@ function procesosDeArea(areaCodigo: string | null): readonly (typeof PROCESOS)[n
   return PROCESOS_POR_AREA[areaCodigo.toUpperCase()] ?? PROCESOS;
 }
 
-type Mat = { id: string; codigo: string; nombre: string; categoria: string; precio_unitario?: number | null };
+type Mat = { id: string; codigo: string; nombre: string; categoria: string; precio_unitario?: number | null; unidad_consumo_id?: string | null };
 type Linea = {
   id: string;
   material_id: string;
@@ -170,12 +170,22 @@ function BomEditor({
   // Tallas seleccionadas en el form de Nueva línea (multi-select).
   // Default: si hay filtro de talla activo, esa talla; sino vacío.
   const [tallasNueva, setTallasNueva] = useState<Set<string>>(() => new Set());
+  // Material elegido en el form actual: necesitamos su unidad_consumo_id para
+  // mostrarla (solo lectura) y enviarla al server. Sin esto, el dropdown de
+  // unidad permitía elegir cualquier unidad, lo que generaba inconsistencias.
+  const [materialNuevo, setMaterialNuevo] = useState<Mat | null>(null);
+  // Lookup rápido de unidad por id para mostrar código y nombre.
+  const unidadById = useMemo(() => new Map(unidades.map((u) => [u.id, u])), [unidades]);
+  const unidadDelMaterial = materialNuevo?.unidad_consumo_id
+    ? unidadById.get(materialNuevo.unidad_consumo_id) ?? null
+    : null;
 
   const filtrado = lineas.filter((l) => !filtroTalla || l.talla === filtroTalla);
 
   function abrirFormNuevaLinea() {
     // Si hay filtro de talla activo, pre-seleccionar esa talla
     setTallasNueva(filtroTalla ? new Set([filtroTalla]) : new Set());
+    setMaterialNuevo(null);
     setOpenForm(true);
   }
   function toggleTallaNueva(t: string) {
@@ -205,6 +215,10 @@ function BomEditor({
     const observacion = String(fd.get('observacion') ?? '');
     if (!materialId) {
       toast.error('Seleccioná un material');
+      return;
+    }
+    if (materialNuevo && !materialNuevo.unidad_consumo_id) {
+      toast.error('Este material no tiene unidad de consumo configurada. Andá a /materiales y completala antes de usarlo en una receta.');
       return;
     }
     start(async () => {
@@ -314,7 +328,7 @@ function BomEditor({
           <form action={onSubmit} className="space-y-4">
             <h3 className="font-display text-sm font-semibold">Nueva línea de receta</h3>
 
-            <MaterialCombobox materiales={materiales} />
+            <MaterialCombobox materiales={materiales} onMaterialChange={setMaterialNuevo} />
 
             {/* Multi-talla: checkboxes para agregar la misma línea a varias tallas a la vez */}
             <div>
@@ -370,13 +384,37 @@ function BomEditor({
 
             <FormGrid cols={2}>
               <FormRow label="Cantidad por unidad" required>
-                <Input name="cantidad" type="number" step="0.0001" min="0" required defaultValue={1} />
+                <Input name="cantidad" type="number" step="0.0001" min="0" required placeholder="Ej. 1.5" />
               </FormRow>
-              <FormRow label="Unidad">
-                <select name="unidad_id" className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm">
-                  <option value="">—</option>
-                  {unidades.map((u) => <option key={u.id} value={u.id}>{u.codigo}</option>)}
-                </select>
+              <FormRow
+                label="Unidad"
+                hint={!materialNuevo ? 'Se toma de la unidad de consumo del material' : undefined}
+              >
+                {/* La unidad NO se elige: viene de la unidad_consumo del material
+                    seleccionado. Si el material no tiene unidad configurada,
+                    avisamos al usuario y bloqueamos el envío hasta arreglarlo. */}
+                <input type="hidden" name="unidad_id" value={unidadDelMaterial?.id ?? ''} />
+                <div className="flex h-10 w-full items-center rounded-md border border-input bg-slate-50 px-3 text-sm">
+                  {!materialNuevo ? (
+                    <span className="text-slate-400">Elegí un material primero</span>
+                  ) : unidadDelMaterial ? (
+                    <span className="text-corp-900">
+                      <span className="font-medium">{unidadDelMaterial.codigo}</span>
+                      <span className="ml-2 text-slate-500">· {unidadDelMaterial.nombre}</span>
+                    </span>
+                  ) : (
+                    <span className="text-amber-700">
+                      ⚠️ El material no tiene unidad de consumo configurada. Definila en{' '}
+                      <a
+                        href={`/materiales/${materialNuevo.id}`}
+                        target="_blank"
+                        className="font-medium underline hover:text-amber-900"
+                      >
+                        /materiales/{materialNuevo.codigo}
+                      </a>
+                    </span>
+                  )}
+                </div>
               </FormRow>
             </FormGrid>
 
@@ -604,7 +642,15 @@ function InlineNumber({
   );
 }
 
-function MaterialCombobox({ materiales }: { materiales: Mat[] }) {
+function MaterialCombobox({
+  materiales,
+  onMaterialChange,
+}: {
+  materiales: Mat[];
+  /** Notifica al form padre cuando se elige o limpia un material.
+   *  Permite leer la unidad de consumo del material para mostrarla en el form. */
+  onMaterialChange?: (m: Mat | null) => void;
+}) {
   const [text, setText] = useState('');
   const [open, setOpen] = useState(false);
   const [highlight, setHighlight] = useState(0);
@@ -639,12 +685,14 @@ function MaterialCombobox({ materiales }: { materiales: Mat[] }) {
     setSeleccionado(m);
     setText(`${m.codigo} · ${m.nombre}`);
     setOpen(false);
+    onMaterialChange?.(m);
   }
 
   function limpiar() {
     setSeleccionado(null);
     setText('');
     setOpen(true);
+    onMaterialChange?.(null);
   }
 
   return (
@@ -740,8 +788,12 @@ function DuplicarRecetaModal({
   const [tallaOrigen, setTallaOrigen] = useState('');
   const [tallaDestino, setTallaDestino] = useState('');
 
+  // Antes excluíamos el producto actual; ahora lo incluimos para soportar
+  // el caso "duplicar líneas a otra talla del MISMO producto" desde este modal
+  // (además del modal específico DuplicarTallaModal). El server (duplicarReceta)
+  // ya soporta este caso: si el destino es el mismo producto y la talla destino
+  // difiere, hace upsert correctamente.
   const filtrados = productos
-    .filter((p) => p.id !== productoActualId)
     .filter((p) => !busca || p.nombre.toLowerCase().includes(busca.toLowerCase()) || p.codigo.toLowerCase().includes(busca.toLowerCase()))
     .slice(0, 30);
 
@@ -786,22 +838,30 @@ function DuplicarRecetaModal({
               {filtrados.length === 0 ? (
                 <p className="p-3 text-center text-xs text-slate-400">Sin productos</p>
               ) : (
-                filtrados.map((p) => (
-                  <button
-                    key={p.id}
-                    type="button"
-                    onClick={() => setSeleccionadoId(p.id)}
-                    className={`flex w-full items-center justify-between border-b px-3 py-2 text-left text-sm last:border-0 hover:bg-happy-50 ${
-                      seleccionadoId === p.id ? 'bg-happy-100 ring-1 ring-happy-400' : ''
-                    }`}
-                  >
-                    <span>
-                      <span className="font-medium">{p.nombre}</span>
-                      <span className="ml-2 font-mono text-[10px] text-slate-500">{p.codigo}</span>
-                    </span>
-                    {seleccionadoId === p.id && <Badge variant="success" className="text-[9px]">Elegido</Badge>}
-                  </button>
-                ))
+                filtrados.map((p) => {
+                  const esMismo = p.id === productoActualId;
+                  return (
+                    <button
+                      key={p.id}
+                      type="button"
+                      onClick={() => setSeleccionadoId(p.id)}
+                      className={`flex w-full items-center justify-between border-b px-3 py-2 text-left text-sm last:border-0 hover:bg-happy-50 ${
+                        seleccionadoId === p.id ? 'bg-happy-100 ring-1 ring-happy-400' : ''
+                      }`}
+                    >
+                      <span>
+                        <span className="font-medium">{p.nombre}</span>
+                        <span className="ml-2 font-mono text-[10px] text-slate-500">{p.codigo}</span>
+                        {esMismo && (
+                          <Badge variant="outline" className="ml-2 border-happy-300 text-[9px] text-happy-700">
+                            este producto
+                          </Badge>
+                        )}
+                      </span>
+                      {seleccionadoId === p.id && <Badge variant="success" className="text-[9px]">Elegido</Badge>}
+                    </button>
+                  );
+                })
               )}
             </div>
           </div>
@@ -935,7 +995,9 @@ function ProcesosEditor({
   const [pending, start] = useTransition();
   const [orderBy, setOrderBy] = useState<'orden' | 'area' | 'tiempo'>('orden');
 
-  const [proceso, setProceso] = useState<(typeof PROCESOS)[number]>('CORTE');
+  // Arranca vacío: el usuario debe elegir explícitamente el proceso.
+  // Antes salía 'CORTE' por default y eso confundía (cliente lo reportó).
+  const [proceso, setProceso] = useState<(typeof PROCESOS)[number] | ''>('');
   const [areaId, setAreaId] = useState('');
   const [tallaProc, setTallaProc] = useState<string>('');
   const [tiempo, setTiempo] = useState<string>('');
@@ -943,7 +1005,7 @@ function ProcesosEditor({
   const [obs, setObs] = useState('');
 
   function reset() {
-    setProceso('CORTE');
+    setProceso('');
     setAreaId('');
     setTallaProc('');
     setTiempo('');
@@ -952,6 +1014,10 @@ function ProcesosEditor({
   }
 
   function agregar() {
+    if (!proceso) {
+      toast.error('Elegí un proceso');
+      return;
+    }
     start(async () => {
       const r = await agregarProceso(productoId, {
         producto_id: productoId,
@@ -1036,11 +1102,12 @@ function ProcesosEditor({
                 value={areaId}
                 onChange={(e) => {
                   setAreaId(e.target.value);
-                  // Si el proceso actual no aplica al área nueva, resetear al primero válido
+                  // Si el proceso actual no aplica al área nueva, vaciar para
+                  // que el usuario elija nuevamente (en lugar de forzar uno).
                   const areaCod = areas.find((a) => a.id === e.target.value)?.codigo ?? null;
                   const procesosValidos = procesosDeArea(areaCod);
-                  if (!procesosValidos.includes(proceso)) {
-                    setProceso(procesosValidos[0] ?? 'CORTE');
+                  if (proceso && !procesosValidos.includes(proceso as (typeof PROCESOS)[number])) {
+                    setProceso('');
                   }
                 }}
                 className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
@@ -1056,9 +1123,11 @@ function ProcesosEditor({
             <FormRow label="Proceso" required hint={areaId ? 'Filtrado por el área elegida' : 'Mostrando todos'}>
               <select
                 value={proceso}
-                onChange={(e) => setProceso(e.target.value as (typeof PROCESOS)[number])}
+                onChange={(e) => setProceso(e.target.value as (typeof PROCESOS)[number] | '')}
                 className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
+                required
               >
+                <option value="">— Elegí un proceso —</option>
                 {procesosDeArea(areas.find((a) => a.id === areaId)?.codigo ?? null).map((p) => (
                   <option key={p} value={p}>{p.replace('_', ' ')}</option>
                 ))}
@@ -1204,8 +1273,8 @@ function ProcesosTabla({
             <TableRow>
               <TableHead className="w-8"></TableHead>
               <TableHead className="w-16">Orden</TableHead>
-              <TableHead>Proceso</TableHead>
               <TableHead>Área</TableHead>
+              <TableHead>Proceso</TableHead>
               <TableHead>Talla</TableHead>
               <TableHead className="text-right">Tiempo (min)</TableHead>
               <TableHead className="text-right">Costo</TableHead>
@@ -1280,7 +1349,6 @@ function ProcesoFila({
         </button>
       </TableCell>
       <TableCell className="font-mono text-xs">{p.orden}</TableCell>
-      <TableCell className="font-medium">{p.proceso.replace('_', ' ')}</TableCell>
       <TableCell>
         {p.areas_produccion ? (
           <Badge variant="secondary">{p.areas_produccion.nombre}</Badge>
@@ -1288,6 +1356,7 @@ function ProcesoFila({
           <span className="text-xs text-slate-400">—</span>
         )}
       </TableCell>
+      <TableCell className="font-medium">{p.proceso.replace('_', ' ')}</TableCell>
       <TableCell>
         {p.talla ? (
           <Badge variant="outline">{p.talla.replace('T', '')}</Badge>
