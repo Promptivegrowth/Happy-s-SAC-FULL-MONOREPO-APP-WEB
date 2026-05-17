@@ -489,7 +489,7 @@ docContent.push(
   p(' '),
   h4('Sección "Identificación"'),
   fieldsTable([
-    { campo: 'Código', descripcion: 'Opcional. Si lo dejás vacío se autogenera según categoría (TEL0001, AVI0001, INS0001, EMP0001).' },
+    { campo: 'Código', descripcion: 'Opcional. Si lo dejás vacío se autogenera según categoría (TELN0001 para tela, AVIN0001 para avío, INSN0001 para insumo, EMPN0001 para empaque). La "N" final indica "Nuevo" — distingue los materiales creados desde el ERP de los importados del sistema viejo (que tienen códigos como TEL0000057).' },
     { campo: 'Categoría', descripcion: 'TELA / AVIO / INSUMO / EMPAQUE.', obligatorio: true },
     { campo: 'Sub-categoría', descripcion: 'Texto libre para agrupar dentro de la categoría (ej. SERMAT, BOTÓN, GRECA).' },
     { campo: 'Nombre', descripcion: 'Descripción comercial (ej. "Lycra brillo dorada").', obligatorio: true },

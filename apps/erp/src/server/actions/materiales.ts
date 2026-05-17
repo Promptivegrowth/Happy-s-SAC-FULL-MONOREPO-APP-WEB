@@ -4,12 +4,19 @@ import { z } from 'zod';
 import { redirect } from 'next/navigation';
 import { runAction, requireUser, bumpPaths, type ActionResult } from './_helpers';
 
-// Mapeo categoría → prefijo de 3 letras para el código auto.
+// Mapeo categoría → prefijo de 4 letras para el código auto.
+// La "N" final = "Nuevo" (creado desde la UI del ERP, no importado del
+// sistema viejo). Los códigos importados (ej. TEL0000057, TEL2320007) usan
+// los prefijos cortos TEL/AVI/INS/EMP y NO se tocan — quedan como están
+// para preservar la trazabilidad con planillas/Excel del cliente.
+// Decisión tomada con el cliente tras detectar que los códigos importados
+// están dispersos por todo el rango 1..9.6M sin patrón consecutivo, lo que
+// hacía imposible sincronizar el contador a un "rango limpio".
 const PREFIJO_CAT: Record<'TELA' | 'AVIO' | 'INSUMO' | 'EMPAQUE', string> = {
-  TELA: 'TEL',
-  AVIO: 'AVI',
-  INSUMO: 'INS',
-  EMPAQUE: 'EMP',
+  TELA: 'TELN',
+  AVIO: 'AVIN',
+  INSUMO: 'INSN',
+  EMPAQUE: 'EMPN',
 };
 
 const schema = z.object({
