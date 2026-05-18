@@ -23,12 +23,15 @@ export default async function ProductosPage({ searchParams }: { searchParams: Pr
   const sb = await createClient();
 
   // Datos para filtros + autocomplete (no dependen de los chips, queries pequeñas).
+  // Traemos TODAS las categorías (activas + inactivas) para que apagar una para
+  // la web no la haga desaparecer del filtro interno del ERP. Las inactivas se
+  // marcan visualmente con tono gris + "off".
   const [{ data: catsData }, { data: campsData }, { data: indexData }] = await Promise.all([
-    sb.from('categorias').select('id, nombre').eq('activo', true).order('nombre'),
+    sb.from('categorias').select('id, nombre, activo').order('nombre'),
     sb.from('campanas').select('id, nombre, activa').eq('activa', true).order('nombre'),
     sb.from('productos').select('id, codigo, nombre, categorias!productos_categoria_id_fkey(nombre)').eq('activo', true).order('nombre').limit(500),
   ]);
-  const categorias = (catsData ?? []) as { id: string; nombre: string }[];
+  const categorias = (catsData ?? []) as { id: string; nombre: string; activo: boolean | null }[];
   const campanas = (campsData ?? []) as { id: string; nombre: string }[];
   const indexItems = (indexData ?? []).map((p) => {
     const c = (p as unknown as { categorias?: { nombre: string } | null }).categorias;
@@ -105,11 +108,22 @@ export default async function ProductosPage({ searchParams }: { searchParams: Pr
         <FilterChip href={chipUrl({ cat: '' })} active={!sp.cat}>
           Todas
         </FilterChip>
-        {categorias.map((c) => (
-          <FilterChip key={c.id} href={chipUrl({ cat: c.id })} active={sp.cat === c.id}>
-            {c.nombre}
-          </FilterChip>
-        ))}
+        {categorias.map((c) => {
+          const inactiva = !c.activo;
+          return (
+            <FilterChip
+              key={c.id}
+              href={chipUrl({ cat: c.id })}
+              active={sp.cat === c.id}
+              className={inactiva ? 'opacity-50 grayscale' : ''}
+            >
+              <span title={inactiva ? 'Apagada para web — solo gestión interna' : undefined}>
+                {c.nombre}
+                {inactiva && <span className="ml-1 text-[9px] uppercase">off</span>}
+              </span>
+            </FilterChip>
+          );
+        })}
       </div>
 
       {campanas.length > 0 && (
