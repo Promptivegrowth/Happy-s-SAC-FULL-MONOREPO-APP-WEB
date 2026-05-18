@@ -43,13 +43,18 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
   const tallasUsadas = Array.from(new Set((lineas ?? []).map((l) => l.talla))).sort();
   const tallasFaltantes = TALLAS.filter((t) => !tallasUsadas.includes(t));
 
-  // Editabilidad: si el producto ya tiene OTs generadas, la receta está
-  // congelada y solo se puede editar creando una nueva versión.
+  // Editabilidad:
+  //  - Si la receta es HISTÓRICA (activa=false) → bloqueada siempre. Las
+  //    OTs viejas la usaron y modificarla alteraría reportes históricos.
+  //  - Si es ACTIVA y el producto ya tiene OTs generadas → congelada con
+  //    opción de "crear nueva versión".
+  //  - Si es ACTIVA y el producto no tiene OTs → totalmente editable.
   const { count: cantidadOts } = await sb
     .from('ot_lineas')
     .select('id', { count: 'exact', head: true })
     .eq('producto_id', prod.id);
-  const recetaCongelada = (cantidadOts ?? 0) > 0;
+  const esHistorica = !receta.activa;
+  const recetaCongelada = esHistorica || (cantidadOts ?? 0) > 0;
 
   return (
     <PageShell
@@ -96,6 +101,7 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
         areas={(areas ?? []) as Parameters<typeof RecetaEditor>[0]['areas']}
         procesos={(procesos ?? []) as Parameters<typeof RecetaEditor>[0]['procesos']}
         congelada={recetaCongelada}
+        esHistorica={esHistorica}
         cantidadOts={cantidadOts ?? 0}
         versionMateriales={(receta.version as string) ?? 'v1.0'}
         versionProcesos={((procesos ?? [])[0]?.version as string | undefined) ?? 'v1.0'}

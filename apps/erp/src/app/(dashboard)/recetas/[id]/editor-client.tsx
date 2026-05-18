@@ -112,6 +112,7 @@ export function RecetaEditor({
   areas = [],
   procesos = [],
   congelada = false,
+  esHistorica = false,
   cantidadOts = 0,
   versionMateriales = 'v1.0',
   versionProcesos = 'v1.0',
@@ -124,22 +125,26 @@ export function RecetaEditor({
   productos?: Producto[];
   areas?: Area[];
   procesos?: Proceso[];
-  /** Si true, la receta está bloqueada para edición (ya hay producción). */
+  /** Si true, la receta está bloqueada para edición. */
   congelada?: boolean;
+  /** Si true, es una versión histórica (activa=false). Bloquea sin botones de versionar. */
+  esHistorica?: boolean;
   cantidadOts?: number;
   versionMateriales?: string;
   versionProcesos?: string;
 }) {
   return (
     <div className="space-y-3">
-      {congelada && (
+      {esHistorica ? (
+        <HistoricaBanner versionMateriales={versionMateriales} versionProcesos={versionProcesos} />
+      ) : congelada ? (
         <CongeladoBanner
           productoId={productoId}
           cantidadOts={cantidadOts}
           versionMateriales={versionMateriales}
           versionProcesos={versionProcesos}
         />
-      )}
+      ) : null}
       <Tabs defaultValue="materiales">
         <TabsList>
           <TabsTrigger value="materiales">
@@ -172,6 +177,37 @@ export function RecetaEditor({
           />
         </TabsContent>
       </Tabs>
+    </div>
+  );
+}
+
+/**
+ * Banner para recetas HISTÓRICAS (activa=false). Solo lectura, sin botones de
+ * versionar — esa receta ya fue reemplazada por una más nueva. Modificarla
+ * alteraría los reportes históricos de las OTs que la consumieron.
+ */
+function HistoricaBanner({
+  versionMateriales,
+  versionProcesos,
+}: {
+  versionMateriales: string;
+  versionProcesos: string;
+}) {
+  return (
+    <div className="rounded-lg border-2 border-slate-300 bg-slate-50 p-4">
+      <div className="flex items-start gap-3">
+        <div className="text-2xl">📚</div>
+        <div className="flex-1 text-sm">
+          <p className="font-bold text-slate-700">
+            Versión histórica · solo lectura
+          </p>
+          <p className="mt-1 text-xs text-slate-600">
+            Esta es una versión anterior de la receta (materiales {versionMateriales} · procesos {versionProcesos}).
+            Las OTs históricas la consumieron, así que no se puede editar para preservar la trazabilidad
+            de costos y movimientos pasados. Para hacer cambios, andá a la versión vigente del producto.
+          </p>
+        </div>
+      </div>
     </div>
   );
 }
