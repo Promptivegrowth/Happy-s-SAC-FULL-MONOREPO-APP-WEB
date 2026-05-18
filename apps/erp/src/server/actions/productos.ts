@@ -283,6 +283,51 @@ export async function crearVariante(_prev: unknown, fd: FormData): Promise<Actio
   return r;
 }
 
+/**
+ * Actualiza campos editables de una variante (SKU, código barras, precios,
+ * activo). La talla NO se edita — para cambiarla hay que eliminar y crear
+ * (la talla es parte de la identidad del SKU y afecta stock/movimientos).
+ */
+const actualizarVarianteSchema = z.object({
+  sku: z.string().min(1, 'SKU requerido').max(50),
+  codigo_barras: z.string().optional().or(z.literal('')),
+  precio_publico: z.coerce.number().min(0),
+  precio_mayorista_a: z.coerce.number().min(0).optional().or(z.literal('')),
+  precio_mayorista_b: z.coerce.number().min(0).optional().or(z.literal('')),
+  precio_mayorista_c: z.coerce.number().min(0).optional().or(z.literal('')),
+  precio_costo_estandar: z.coerce.number().min(0).optional().or(z.literal('')),
+  activo: z.boolean().default(true),
+});
+
+export async function actualizarVariante(
+  varianteId: string,
+  productoId: string,
+  input: z.input<typeof actualizarVarianteSchema>,
+): Promise<ActionResult> {
+  const r = await runAction(async () => {
+    const data = actualizarVarianteSchema.parse(input);
+    const { sb } = await requireUser();
+    const payload = {
+      sku: data.sku.trim().toUpperCase(),
+      codigo_barras: data.codigo_barras || null,
+      precio_publico: Number(data.precio_publico),
+      precio_mayorista_a: data.precio_mayorista_a === '' ? null : Number(data.precio_mayorista_a),
+      precio_mayorista_b: data.precio_mayorista_b === '' ? null : Number(data.precio_mayorista_b),
+      precio_mayorista_c: data.precio_mayorista_c === '' ? null : Number(data.precio_mayorista_c),
+      precio_costo_estandar: data.precio_costo_estandar === '' ? null : Number(data.precio_costo_estandar),
+      activo: data.activo,
+    };
+    const { error } = await sb.from('productos_variantes').update(payload).eq('id', varianteId);
+    if (error) {
+      if (error.code === '23505') throw new Error(`SKU "${payload.sku}" ya existe en otra variante`);
+      throw new Error(error.message);
+    }
+    return null;
+  });
+  if (r.ok) await bumpPaths(`/productos/${productoId}`);
+  return r;
+}
+
 export async function eliminarVariante(varianteId: string, productoId: string): Promise<ActionResult> {
   const r = await runAction(async () => {
     const { sb } = await requireUser();

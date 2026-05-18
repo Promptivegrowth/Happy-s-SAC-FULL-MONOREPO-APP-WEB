@@ -7,10 +7,10 @@ import { Badge } from '@happy/ui/badge';
 import { Card } from '@happy/ui/card';
 import { FormRow } from '@happy/ui/form-row';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@happy/ui/table';
-import { Plus, Trash2, Loader2 } from 'lucide-react';
+import { Plus, Trash2, Loader2, Pencil, Save, X } from 'lucide-react';
 import { toast } from 'sonner';
 import { formatPEN } from '@happy/lib';
-import { crearVariante, eliminarVariante } from '@/server/actions/productos';
+import { crearVariante, actualizarVariante, eliminarVariante } from '@/server/actions/productos';
 
 const TALLAS = ['T0','T2','T4','T6','T8','T10','T12','T14','T16','TS','TAD'] as const;
 
@@ -145,48 +145,161 @@ export function VariantesSection({
             <TableHead className="text-right">Costo estándar</TableHead>
             <TableHead className="text-right">Última producción</TableHead>
             <TableHead>Estado</TableHead>
-            <TableHead></TableHead>
+            <TableHead className="w-[100px]"></TableHead>
           </TableRow></TableHeader>
           <TableBody>
-            {variantes.map((v) => {
-              const u = ultimosCostos[v.talla];
-              const estandar = Number(v.precio_costo_estandar ?? 0);
-              // Comparar último real vs estándar para resaltar diferencias > 5%
-              const diff = u && estandar > 0 ? (u.costoUnitario - estandar) / estandar : 0;
-              const sube = diff > 0.05;
-              const baja = diff < -0.05;
-              return (
-                <TableRow key={v.id}>
-                  <TableCell><Badge variant="outline">{v.talla.replace('T', '')}</Badge></TableCell>
-                  <TableCell className="font-mono text-xs">{v.sku}</TableCell>
-                  <TableCell className="font-mono text-xs text-slate-500">{v.codigo_barras ?? '—'}</TableCell>
-                  <TableCell className="text-right font-medium">{formatPEN(Number(v.precio_publico ?? 0))}</TableCell>
-                  <TableCell className="text-right text-sm">{v.precio_mayorista_a ? formatPEN(Number(v.precio_mayorista_a)) : '—'}</TableCell>
-                  <TableCell className="text-right text-sm text-slate-500">{v.precio_costo_estandar ? formatPEN(estandar) : '—'}</TableCell>
-                  <TableCell className="text-right text-sm">
-                    {u ? (
-                      <span
-                        className={sube ? 'font-medium text-danger' : baja ? 'font-medium text-emerald-600' : 'text-slate-700'}
-                        title={`OS ${u.osNumero}${u.osFecha ? ` (${u.osFecha})` : ''}\nTaller: ${formatPEN(u.pagoTaller)}\nMateriales: ${formatPEN(u.materiales)}`}
-                      >
-                        {formatPEN(u.costoUnitario)}
-                      </span>
-                    ) : (
-                      <span className="text-slate-300">—</span>
-                    )}
-                  </TableCell>
-                  <TableCell>{v.activo ? <Badge variant="success">Activa</Badge> : <Badge variant="secondary">Inactiva</Badge>}</TableCell>
-                  <TableCell className="text-right">
-                    <Button variant="ghost" size="sm" onClick={() => onDelete(v.id)} disabled={pending}>
-                      <Trash2 className="h-3.5 w-3.5 text-danger" />
-                    </Button>
-                  </TableCell>
-                </TableRow>
-              );
-            })}
+            {variantes.map((v) => (
+              <VarianteRow
+                key={v.id}
+                productoId={productoId}
+                variante={v}
+                ultimoCosto={ultimosCostos[v.talla]}
+                onDelete={onDelete}
+              />
+            ))}
           </TableBody>
         </Table>
       )}
     </Card>
+  );
+}
+
+/** Fila individual con modo lectura / edición inline. */
+function VarianteRow({
+  productoId,
+  variante: v,
+  ultimoCosto: u,
+  onDelete,
+}: {
+  productoId: string;
+  variante: Variante;
+  ultimoCosto: UltimoCosto | undefined;
+  onDelete: (id: string) => void;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [pending, start] = useTransition();
+  const [sku, setSku] = useState(v.sku);
+  const [codigoBarras, setCodigoBarras] = useState(v.codigo_barras ?? '');
+  const [precioPublico, setPrecioPublico] = useState(String(v.precio_publico ?? ''));
+  const [mayoristaA, setMayoristaA] = useState(v.precio_mayorista_a != null ? String(v.precio_mayorista_a) : '');
+  const [costoEstandar, setCostoEstandar] = useState(v.precio_costo_estandar != null ? String(v.precio_costo_estandar) : '');
+  const [activo, setActivo] = useState(v.activo);
+
+  function cancel() {
+    setSku(v.sku);
+    setCodigoBarras(v.codigo_barras ?? '');
+    setPrecioPublico(String(v.precio_publico ?? ''));
+    setMayoristaA(v.precio_mayorista_a != null ? String(v.precio_mayorista_a) : '');
+    setCostoEstandar(v.precio_costo_estandar != null ? String(v.precio_costo_estandar) : '');
+    setActivo(v.activo);
+    setEditing(false);
+  }
+
+  function save() {
+    if (!sku.trim()) {
+      toast.error('SKU requerido');
+      return;
+    }
+    if (!precioPublico.trim() || Number(precioPublico) < 0) {
+      toast.error('Precio público inválido');
+      return;
+    }
+    start(async () => {
+      const r = await actualizarVariante(v.id, productoId, {
+        sku: sku.trim().toUpperCase(),
+        codigo_barras: codigoBarras.trim(),
+        precio_publico: Number(precioPublico),
+        precio_mayorista_a: mayoristaA.trim() === '' ? '' : Number(mayoristaA),
+        precio_costo_estandar: costoEstandar.trim() === '' ? '' : Number(costoEstandar),
+        activo,
+      });
+      if (r.ok) {
+        toast.success('Variante actualizada');
+        setEditing(false);
+      } else {
+        toast.error(r.error ?? 'No se pudo actualizar');
+      }
+    });
+  }
+
+  const estandar = Number(v.precio_costo_estandar ?? 0);
+  const diff = u && estandar > 0 ? (u.costoUnitario - estandar) / estandar : 0;
+  const sube = diff > 0.05;
+  const baja = diff < -0.05;
+
+  if (!editing) {
+    return (
+      <TableRow>
+        <TableCell><Badge variant="outline">{v.talla.replace('T', '')}</Badge></TableCell>
+        <TableCell className="font-mono text-xs">{v.sku}</TableCell>
+        <TableCell className="font-mono text-xs text-slate-500">{v.codigo_barras ?? '—'}</TableCell>
+        <TableCell className="text-right font-medium">{formatPEN(Number(v.precio_publico ?? 0))}</TableCell>
+        <TableCell className="text-right text-sm">{v.precio_mayorista_a ? formatPEN(Number(v.precio_mayorista_a)) : '—'}</TableCell>
+        <TableCell className="text-right text-sm text-slate-500">{v.precio_costo_estandar ? formatPEN(estandar) : '—'}</TableCell>
+        <TableCell className="text-right text-sm">
+          {u ? (
+            <span
+              className={sube ? 'font-medium text-danger' : baja ? 'font-medium text-emerald-600' : 'text-slate-700'}
+              title={`OS ${u.osNumero}${u.osFecha ? ` (${u.osFecha})` : ''}\nTaller: ${formatPEN(u.pagoTaller)}\nMateriales: ${formatPEN(u.materiales)}`}
+            >
+              {formatPEN(u.costoUnitario)}
+            </span>
+          ) : (
+            <span className="text-slate-300">—</span>
+          )}
+        </TableCell>
+        <TableCell>{v.activo ? <Badge variant="success">Activa</Badge> : <Badge variant="secondary">Inactiva</Badge>}</TableCell>
+        <TableCell>
+          <div className="flex items-center justify-end gap-1">
+            <Button variant="ghost" size="sm" onClick={() => setEditing(true)} title="Editar variante">
+              <Pencil className="h-3.5 w-3.5" />
+            </Button>
+            <Button variant="ghost" size="sm" onClick={() => onDelete(v.id)} title="Eliminar variante">
+              <Trash2 className="h-3.5 w-3.5 text-danger" />
+            </Button>
+          </div>
+        </TableCell>
+      </TableRow>
+    );
+  }
+
+  return (
+    <TableRow className="bg-happy-50/40">
+      <TableCell><Badge variant="outline">{v.talla.replace('T', '')}</Badge></TableCell>
+      <TableCell>
+        <Input value={sku} onChange={(e) => setSku(e.target.value.toUpperCase())} className="h-8 font-mono text-xs" disabled={pending} />
+      </TableCell>
+      <TableCell>
+        <Input value={codigoBarras} onChange={(e) => setCodigoBarras(e.target.value)} placeholder="opcional" className="h-8 font-mono text-xs" disabled={pending} />
+      </TableCell>
+      <TableCell className="text-right">
+        <Input type="number" step="0.01" min="0" value={precioPublico} onChange={(e) => setPrecioPublico(e.target.value)} className="h-8 w-24 text-right text-xs ml-auto" disabled={pending} />
+      </TableCell>
+      <TableCell className="text-right">
+        <Input type="number" step="0.01" min="0" value={mayoristaA} onChange={(e) => setMayoristaA(e.target.value)} placeholder="—" className="h-8 w-24 text-right text-xs ml-auto" disabled={pending} />
+      </TableCell>
+      <TableCell className="text-right">
+        <Input type="number" step="0.01" min="0" value={costoEstandar} onChange={(e) => setCostoEstandar(e.target.value)} placeholder="—" className="h-8 w-24 text-right text-xs ml-auto" disabled={pending} />
+      </TableCell>
+      <TableCell className="text-right text-xs text-slate-400">
+        {u ? formatPEN(u.costoUnitario) : '—'}
+      </TableCell>
+      <TableCell>
+        <label className="flex items-center gap-1.5 text-xs">
+          <input type="checkbox" checked={activo} onChange={(e) => setActivo(e.target.checked)} disabled={pending} />
+          {activo ? 'Activa' : 'Inactiva'}
+        </label>
+      </TableCell>
+      <TableCell>
+        <div className="flex items-center justify-end gap-1">
+          <Button variant="premium" size="sm" onClick={save} disabled={pending} className="h-8 px-2" title="Guardar">
+            {pending ? <Loader2 className="h-3 w-3 animate-spin" /> : <Save className="h-3 w-3" />}
+          </Button>
+          <Button variant="ghost" size="sm" onClick={cancel} disabled={pending} className="h-8 px-1" title="Cancelar">
+            <X className="h-3 w-3" />
+          </Button>
+        </div>
+      </TableCell>
+    </TableRow>
   );
 }
