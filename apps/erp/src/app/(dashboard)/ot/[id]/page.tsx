@@ -8,6 +8,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { PageShell } from '@/components/page-shell';
 import { OtAcciones, OtNotaForm, OtLineaProduccion, AgregarLineaOTForm, EliminarLineaOT } from './client';
 import { TiemposCostoTab } from './tiempos-client';
+import { EstadoBanner } from './estado-banner';
 import { formatDate, formatDateTime, formatNumber } from '@happy/lib';
 import { Calendar, AlertTriangle, User } from 'lucide-react';
 
@@ -97,11 +98,16 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
       }
       actions={<OtAcciones otId={id} estado={ot.estado} almacenes={almacenes ?? []} />}
     >
+      <EstadoBanner estado={ot.estado} />
+
       <div className="grid gap-3 sm:grid-cols-4">
         <Stat label="Estado" value={<Badge variant={COLOR[ot.estado] ?? 'secondary'}>{ot.estado.replace('_', ' ')}</Badge>} />
         <Stat label="Planificado" value={formatNumber(totalPlan)} />
         <Stat label="Cortado" value={formatNumber(totalCortado)} />
-        <Stat label="Terminado" value={formatNumber(totalTerminado)} />
+        <Stat
+          label={ot.estado === 'COMPLETADA' ? 'Terminado' : 'Terminado (est.)'}
+          value={formatNumber(ot.estado === 'COMPLETADA' ? totalTerminado : Math.max(totalCortado - (lineas ?? []).reduce((a, l) => a + Number(l.cantidad_fallas ?? 0), 0), 0))}
+        />
       </div>
 
       <Tabs defaultValue="lineas">
@@ -133,7 +139,7 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
                     <TableHead className="text-right" title="Unidades planificadas a producir">Plan</TableHead>
                     <TableHead className="text-right" title="Unidades cortadas (acumulado)">Cortado</TableHead>
                     <TableHead className="text-right" title="Unidades descartadas durante producción">Fallas</TableHead>
-                    <TableHead className="text-right" title="Unidades que terminaron como PT — se completa al cerrar la OT">Terminado</TableHead>
+                    <TableHead className="text-right" title="Unidades que terminaron como PT. Durante el proceso muestra estimación (cortado − fallas); se confirma al cerrar la OT.">Terminado</TableHead>
                     <TableHead className="text-right" title="Plan − Cortado">Falta cortar</TableHead>
                     <TableHead className="w-[200px]" title="Registrar avance: unidades cortadas y fallas (acumulado, no incremento)">Declarar</TableHead>
                     <TableHead className="w-[40px]"></TableHead>
@@ -143,7 +149,14 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
                       const p = (l as unknown as { productos?: { codigo: string; nombre: string } }).productos;
                       const plan = Number(l.cantidad_planificada ?? 0);
                       const cortada = Number(l.cantidad_cortada ?? 0);
+                      const fallas = Number(l.cantidad_fallas ?? 0);
+                      const terminadaReal = Number(l.cantidad_terminada ?? 0);
                       const faltaCortar = Math.max(plan - cortada, 0);
+                      // Durante el proceso mostramos estimación (cortado − fallas).
+                      // Al cerrar la OT, cantidad_terminada se llena vía close_ot_atomic
+                      // y prevalece. Distinguimos visualmente con sufijo "est.".
+                      const otCerrada = ot.estado === 'COMPLETADA';
+                      const terminadaMostrada = otCerrada ? terminadaReal : Math.max(cortada - fallas, 0);
                       return (
                         <TableRow key={l.id}>
                           <TableCell>
@@ -154,7 +167,12 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
                           <TableCell className="text-right font-mono">{l.cantidad_planificada}</TableCell>
                           <TableCell className="text-right font-mono">{l.cantidad_cortada ?? 0}</TableCell>
                           <TableCell className="text-right font-mono text-danger">{l.cantidad_fallas ?? 0}</TableCell>
-                          <TableCell className="text-right font-mono font-semibold">{l.cantidad_terminada ?? 0}</TableCell>
+                          <TableCell className="text-right font-mono font-semibold">
+                            {terminadaMostrada}
+                            {!otCerrada && terminadaMostrada > 0 && (
+                              <span className="ml-1 text-[9px] font-normal uppercase text-slate-400" title="Estimado: cortado − fallas. Se confirma al cerrar la OT.">est.</span>
+                            )}
+                          </TableCell>
                           <TableCell className="text-right font-mono">
                             {faltaCortar === 0 ? (
                               <Badge variant="success" className="text-[10px]">Completo</Badge>
