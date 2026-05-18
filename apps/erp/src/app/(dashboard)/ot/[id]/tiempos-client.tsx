@@ -14,7 +14,8 @@ type Proceso = {
   id: string;
   producto_id: string;
   proceso: string;
-  talla: string;
+  /** null o '' = aplica a todas las tallas. */
+  talla: string | null;
   orden: number;
   tiempo_estandar_min: number;
   area: { id: string; codigo: string; nombre: string; valor_minuto: number | null } | null;
@@ -128,7 +129,9 @@ export function TiemposCostoTab({ otId, procesos, lineas, tiemposReales, disable
     );
   }
 
-  const procesosTalla = procesosProducto.filter((p) => p.talla === tallaSel);
+  // Un proceso aplica a la talla seleccionada si: es específico de esa talla,
+  // O si su talla es null/'' (significa "aplica a todas las tallas").
+  const procesosTalla = procesosProducto.filter((p) => p.talla === tallaSel || !p.talla);
   const lineaTalla = lineasProducto.find((l) => l.talla === tallaSel);
   // Para el cálculo de costo MO se usan unidades cortadas (lo que realmente
   // pasó por el proceso). Si está en 0 mostramos el costo unitario igual.
