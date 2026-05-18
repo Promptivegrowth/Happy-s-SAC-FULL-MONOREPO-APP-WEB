@@ -136,13 +136,14 @@ export function TallerForm({ initial }: { initial?: Taller }) {
 
       <FormSection title="Pagos">
         <FormGrid cols={2}>
-          <FormRow label="Banco" hint="Donde se le deposita al taller. Si no figura el suyo, elegí 'Otro' y aclaralo en notas.">
+          <FormRow label="Banco / medio de pago" hint="Cómo se le paga al taller. Si es en efectivo elegí 'Efectivo' (no requiere cuenta).">
             <select
               name="banco"
               defaultValue={initial?.banco ?? ''}
               className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
             >
-              <option value="">— Sin banco asignado —</option>
+              <option value="">— Sin medio asignado —</option>
+              <option value="EFECTIVO">Efectivo</option>
               <option value="BCP">BCP</option>
               <option value="BBVA">BBVA</option>
               <option value="INTERBANK">Interbank</option>
