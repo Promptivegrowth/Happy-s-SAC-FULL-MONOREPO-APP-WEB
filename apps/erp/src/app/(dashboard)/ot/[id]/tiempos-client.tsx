@@ -12,6 +12,7 @@ import { upsertTiempoRealOT } from '@/server/actions/ot';
 
 type Proceso = {
   id: string;
+  producto_id: string;
   proceso: string;
   talla: string;
   orden: number;
@@ -21,6 +22,9 @@ type Proceso = {
 
 type Linea = {
   id: string;
+  producto_id: string;
+  producto_nombre: string;
+  producto_codigo: string;
   talla: string;
   cantidad_planificada: number;
   cantidad_cortada: number;
@@ -44,12 +48,45 @@ type Props = {
 const PEN = (n: number) => `S/ ${n.toFixed(2)}`;
 
 export function TiemposCostoTab({ otId, procesos, lineas, tiemposReales, disabled }: Props) {
+  // Productos únicos presentes en las líneas de la OT.
+  const productos = useMemo(() => {
+    const map = new Map<string, { id: string; nombre: string; codigo: string }>();
+    for (const l of lineas) {
+      if (!map.has(l.producto_id)) {
+        map.set(l.producto_id, { id: l.producto_id, nombre: l.producto_nombre, codigo: l.producto_codigo });
+      }
+    }
+    return Array.from(map.values()).sort((a, b) => a.nombre.localeCompare(b.nombre));
+  }, [lineas]);
+  const [productoSel, setProductoSel] = useState<string>(productos[0]?.id ?? '');
+
+  // Líneas y procesos filtrados al producto seleccionado.
+  const lineasProducto = useMemo(() => lineas.filter((l) => l.producto_id === productoSel), [lineas, productoSel]);
+  const procesosProducto = useMemo(() => procesos.filter((p) => p.producto_id === productoSel), [procesos, productoSel]);
+
+  // Mapa producto_id → boolean (true si ese producto tiene procesos definidos).
+  // Sirve para mostrar ✓ / ⚠ en el selector y que el usuario vea de un vistazo
+  // qué productos están listos y cuáles necesitan cargar receta.
+  const tieneProcesosPorProducto = useMemo(() => {
+    const m = new Map<string, boolean>();
+    for (const p of productos) m.set(p.id, false);
+    for (const pr of procesos) m.set(pr.producto_id, true);
+    return m;
+  }, [productos, procesos]);
+
   const tallasDisponibles = useMemo(() => {
     const set = new Set<string>();
-    for (const l of lineas) set.add(l.talla);
+    for (const l of lineasProducto) set.add(l.talla);
     return Array.from(set).sort();
-  }, [lineas]);
-  const [tallaSel, setTallaSel] = useState<string>(tallasDisponibles[0] ?? '');
+  }, [lineasProducto]);
+  const [tallaSel, setTallaSel] = useState<string>('');
+  // Reset talla cuando cambia producto y la talla actual ya no existe.
+  if (tallaSel && !tallasDisponibles.includes(tallaSel)) {
+    setTallaSel(tallasDisponibles[0] ?? '');
+  }
+  if (!tallaSel && tallasDisponibles.length > 0) {
+    setTallaSel(tallasDisponibles[0]!);
+  }
 
   // Mapa rápido (proceso_id|talla) → tiempo real
   const overrideMap = useMemo(() => {
@@ -58,7 +95,7 @@ export function TiemposCostoTab({ otId, procesos, lineas, tiemposReales, disable
     return m;
   }, [tiemposReales]);
 
-  if (tallasDisponibles.length === 0) {
+  if (productos.length === 0) {
     return (
       <Card>
         <CardContent className="py-10 text-center text-sm text-slate-400">
@@ -68,18 +105,31 @@ export function TiemposCostoTab({ otId, procesos, lineas, tiemposReales, disable
     );
   }
 
-  if (procesos.length === 0) {
+  if (procesosProducto.length === 0) {
+    const prodSelInfo = productos.find((p) => p.id === productoSel);
     return (
-      <Card>
-        <CardContent className="py-10 text-center text-sm text-slate-400">
-          El producto no tiene operaciones definidas. Crealas desde la receta del producto.
-        </CardContent>
-      </Card>
+      <div className="space-y-4">
+        {productos.length > 1 && (
+          <SelectorProducto
+            productos={productos}
+            productoSel={productoSel}
+            setProductoSel={setProductoSel}
+            tieneProcesosPorProducto={tieneProcesosPorProducto}
+          />
+        )}
+        <Card>
+          <CardContent className="py-10 text-center text-sm text-slate-500">
+            <strong>{prodSelInfo?.nombre ?? 'Este producto'}</strong> no tiene operaciones definidas en su receta.
+            <br />
+            Andá a <span className="font-mono text-xs">Recetas (BOM) → {prodSelInfo?.nombre} → Procesos / Operaciones</span> para crearlas.
+          </CardContent>
+        </Card>
+      </div>
     );
   }
 
-  const procesosTalla = procesos.filter((p) => p.talla === tallaSel);
-  const lineaTalla = lineas.find((l) => l.talla === tallaSel);
+  const procesosTalla = procesosProducto.filter((p) => p.talla === tallaSel);
+  const lineaTalla = lineasProducto.find((l) => l.talla === tallaSel);
   // Para el cálculo de costo MO se usan unidades cortadas (lo que realmente
   // pasó por el proceso). Si está en 0 mostramos el costo unitario igual.
   const unidades = Number(lineaTalla?.cantidad_cortada ?? 0);
@@ -107,6 +157,16 @@ export function TiemposCostoTab({ otId, procesos, lineas, tiemposReales, disable
 
   return (
     <div className="space-y-4">
+      {/* Selector de producto (solo si hay varios) */}
+      {productos.length > 1 && (
+        <SelectorProducto
+          productos={productos}
+          productoSel={productoSel}
+          setProductoSel={setProductoSel}
+          tieneProcesosPorProducto={tieneProcesosPorProducto}
+        />
+      )}
+
       {/* Selector de talla */}
       <div className="flex flex-wrap items-center gap-2">
         <span className="text-xs font-medium text-slate-500">Talla:</span>
@@ -145,7 +205,9 @@ export function TiemposCostoTab({ otId, procesos, lineas, tiemposReales, disable
 
       <Card>
         <CardHeader>
-          <CardTitle className="text-base">Operaciones · Talla {tallaSel.replace('T', '')}</CardTitle>
+          <CardTitle className="text-base">
+            Operaciones · {productos.find((p) => p.id === productoSel)?.nombre ?? ''} · Talla {tallaSel.replace('T', '')}
+          </CardTitle>
         </CardHeader>
         <CardContent className="p-0">
           {procesosTalla.length === 0 ? (
@@ -192,6 +254,44 @@ export function TiemposCostoTab({ otId, procesos, lineas, tiemposReales, disable
           <li>Los totales se multiplican por unidades <strong>cortadas</strong> (no planificadas) para reflejar producción real.</li>
         </ul>
       </div>
+    </div>
+  );
+}
+
+function SelectorProducto({
+  productos,
+  productoSel,
+  setProductoSel,
+  tieneProcesosPorProducto,
+}: {
+  productos: { id: string; nombre: string; codigo: string }[];
+  productoSel: string;
+  setProductoSel: (id: string) => void;
+  tieneProcesosPorProducto: Map<string, boolean>;
+}) {
+  return (
+    <div className="flex flex-wrap items-center gap-2 rounded-md border border-dashed border-slate-200 bg-slate-50/50 p-3">
+      <span className="text-xs font-medium text-slate-500">Producto:</span>
+      {productos.map((p) => {
+        const ok = tieneProcesosPorProducto.get(p.id) === true;
+        return (
+          <button
+            key={p.id}
+            type="button"
+            onClick={() => setProductoSel(p.id)}
+            title={ok ? 'Tiene operaciones definidas' : 'Sin operaciones — necesita cargar receta de procesos'}
+            className={`flex items-center gap-1 rounded-md border px-2.5 py-1 text-xs font-medium transition ${
+              productoSel === p.id
+                ? 'border-happy-500 bg-happy-500 text-white'
+                : 'border-slate-200 bg-white text-slate-700 hover:border-happy-300'
+            }`}
+          >
+            <span className={ok ? 'text-emerald-500' : 'text-amber-500'}>{ok ? '●' : '⚠'}</span>
+            {p.nombre}
+            {p.codigo && <span className={`ml-1 font-mono text-[9px] ${productoSel === p.id ? 'text-happy-100' : 'text-slate-400'}`}>{p.codigo}</span>}
+          </button>
+        );
+      })}
     </div>
   );
 }

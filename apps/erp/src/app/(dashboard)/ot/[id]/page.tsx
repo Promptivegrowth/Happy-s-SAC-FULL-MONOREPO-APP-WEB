@@ -49,18 +49,18 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
   const productosEnLineas = Array.from(new Set((lineas ?? []).map((l) => l.producto_id)));
   const productoIdDefault = productosEnLineas.length === 1 ? productosEnLineas[0] : undefined;
 
-  // Procesos del producto + tiempos reales registrados para esta OT.
-  // Si la OT es mono-producto (caso típico) traemos los procesos vigentes
-  // para mostrarlos en el tab "Tiempos & costo".
+  // Procesos vigentes de TODOS los productos en líneas + tiempos reales de
+  // esta OT. Si hay varios productos, el cliente muestra un selector.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const sbAny = sb as unknown as { from: (t: string) => any };
   const [{ data: procesosRaw }, { data: tiemposRaw }] = await Promise.all([
-    productoIdDefault
+    productosEnLineas.length > 0
       ? sbAny
           .from('productos_procesos')
-          .select('id, proceso, talla, orden, tiempo_estandar_min, areas_produccion(id, codigo, nombre, valor_minuto)')
-          .eq('producto_id', productoIdDefault)
+          .select('id, producto_id, proceso, talla, orden, tiempo_estandar_min, areas_produccion(id, codigo, nombre, valor_minuto)')
+          .in('producto_id', productosEnLineas)
           .eq('activo', true)
+          .order('producto_id')
           .order('orden')
       : Promise.resolve({ data: [] }),
     sbAny
@@ -69,10 +69,11 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
       .eq('ot_id', id),
   ]);
   const procesos = ((procesosRaw ?? []) as Array<{
-    id: string; proceso: string; talla: string; orden: number; tiempo_estandar_min: number;
+    id: string; producto_id: string; proceso: string; talla: string; orden: number; tiempo_estandar_min: number;
     areas_produccion: { id: string; codigo: string; nombre: string; valor_minuto: number | null } | null;
   }>).map((p) => ({
     id: p.id,
+    producto_id: p.producto_id,
     proceso: p.proceso,
     talla: p.talla,
     orden: p.orden,
@@ -207,12 +208,18 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
           <TiemposCostoTab
             otId={id}
             procesos={procesos}
-            lineas={(lineas ?? []).map((l) => ({
-              id: l.id,
-              talla: l.talla,
-              cantidad_planificada: Number(l.cantidad_planificada ?? 0),
-              cantidad_cortada: Number(l.cantidad_cortada ?? 0),
-            }))}
+            lineas={(lineas ?? []).map((l) => {
+              const p = (l as unknown as { productos?: { codigo: string; nombre: string } }).productos;
+              return {
+                id: l.id,
+                producto_id: l.producto_id,
+                producto_nombre: p?.nombre ?? l.producto_id,
+                producto_codigo: p?.codigo ?? '',
+                talla: l.talla,
+                cantidad_planificada: Number(l.cantidad_planificada ?? 0),
+                cantidad_cortada: Number(l.cantidad_cortada ?? 0),
+              };
+            })}
             tiemposReales={tiemposReales}
             disabled={!puedeEditarLineas}
           />
