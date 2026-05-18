@@ -8,6 +8,7 @@ import { Button } from '@happy/ui/button';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@happy/ui/table';
 import { PageShell } from '@/components/page-shell';
 import { LineasEditor, AccionesPlan } from './client';
+import { DescargarPdfButton } from './descargar-pdf-button';
 import { formatDate, formatNumber } from '@happy/lib';
 import { Factory, AlertTriangle, FileWarning, FlaskConical } from 'lucide-react';
 
@@ -165,7 +166,7 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
             )}
 
             <Card>
-              <CardHeader>
+              <CardHeader className="flex flex-row items-center justify-between gap-3">
                 <CardTitle className="text-base">
                   Materiales requeridos
                   {lineasConReceta.length > 0 && lineasConReceta.length < lineas.length && (
@@ -174,6 +175,12 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
                     </span>
                   )}
                 </CardTitle>
+                <DescargarPdfButton
+                  planCodigo={plan.codigo ?? '-'}
+                  totalLineas={lineas.length}
+                  totalUnidades={totalUnidades}
+                  materiales={(explosion ?? []) as Parameters<typeof DescargarPdfButton>[0]['materiales']}
+                />
               </CardHeader>
               <CardContent className="p-0">
                 {!explosion || (explosion as unknown[]).length === 0 ? (

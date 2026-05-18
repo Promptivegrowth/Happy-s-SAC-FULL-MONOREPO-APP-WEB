@@ -137,7 +137,11 @@ export function OtLineaProduccion({ otId, lineaId, planificada, cortada, fallas,
 }) {
   const [open, setOpen] = useState(false);
   const [pending, start] = useTransition();
-  const [c, setC] = useState(cortada);
+  // El campo es ACUMULADO (no incremento). Pre-popular con el plan sugiere
+  // "completar todo": el usuario solo modifica si no completó. Si ya está
+  // todo cortado, se mantiene cortada (no fuerza overshoot).
+  const sugerido = Math.max(planificada, cortada);
+  const [c, setC] = useState(sugerido);
   const [f, setF] = useState(fallas);
 
   function save() {
@@ -162,14 +166,34 @@ export function OtLineaProduccion({ otId, lineaId, planificada, cortada, fallas,
     return <Button variant="ghost" size="sm" onClick={() => setOpen(true)}>Editar</Button>;
   }
 
+  const faltaCortar = Math.max(planificada - cortada, 0);
   return (
     <div className="flex items-center gap-1">
-      <Input type="number" value={c} onChange={(e) => setC(Number(e.target.value))} min={0} max={planificada} className="h-8 w-16 text-xs" placeholder="Cort." title={`Máx. ${planificada}`} />
-      <Input type="number" value={f} onChange={(e) => setF(Number(e.target.value))} min={0} max={c} className="h-8 w-14 text-xs" placeholder="Fall." />
-      <Button variant="premium" size="sm" onClick={save} disabled={pending} className="h-8 px-2">
+      <Input
+        type="number"
+        value={c}
+        onChange={(e) => setC(Number(e.target.value))}
+        min={0}
+        max={planificada}
+        className="h-8 w-16 text-xs"
+        placeholder="Cort."
+        title={`Acumulado. Plan ${planificada}. Falta cortar ${faltaCortar}.`}
+        autoFocus
+      />
+      <Input
+        type="number"
+        value={f}
+        onChange={(e) => setF(Number(e.target.value))}
+        min={0}
+        max={c}
+        className="h-8 w-14 text-xs"
+        placeholder="Fall."
+        title="Fallas (acumulado)"
+      />
+      <Button variant="premium" size="sm" onClick={save} disabled={pending} className="h-8 px-2" title="Guardar">
         {pending ? <Loader2 className="h-3 w-3 animate-spin" /> : <Save className="h-3 w-3" />}
       </Button>
-      <Button variant="ghost" size="sm" onClick={() => setOpen(false)} className="h-8 px-1"><X className="h-3 w-3" /></Button>
+      <Button variant="ghost" size="sm" onClick={() => { setC(cortada); setF(fallas); setOpen(false); }} className="h-8 px-1" title="Cancelar"><X className="h-3 w-3" /></Button>
     </div>
   );
 }
@@ -178,9 +202,18 @@ const TALLAS_OPCIONES = ['T0','T2','T4','T6','T8','T10','T12','T14','T16','TS','
 
 type ProductoOpcion = { id: string; codigo: string; nombre: string };
 
-export function AgregarLineaOTForm({ otId, productos }: { otId: string; productos: ProductoOpcion[] }) {
+export function AgregarLineaOTForm({
+  otId,
+  productos,
+  productoIdDefault,
+}: {
+  otId: string;
+  productos: ProductoOpcion[];
+  /** Producto a pre-seleccionar (típicamente el único producto que ya está en la OT). */
+  productoIdDefault?: string;
+}) {
   const [pending, start] = useTransition();
-  const [productoId, setProductoId] = useState('');
+  const [productoId, setProductoId] = useState(productoIdDefault ?? '');
   const [talla, setTalla] = useState<(typeof TALLAS_OPCIONES)[number]>('T8');
   const [cantidad, setCantidad] = useState<number>(1);
 
@@ -198,7 +231,10 @@ export function AgregarLineaOTForm({ otId, productos }: { otId: string; producto
       const r = await agregarLineaOT(otId, null, fd);
       if (r.ok) {
         toast.success('Línea agregada');
-        setProductoId('');
+        // Mantener el producto seleccionado si fue el default (típicamente OT
+        // mono-producto). Esto deja al usuario en condiciones de seguir
+        // agregando tallas sin volver a elegir el producto.
+        if (!productoIdDefault) setProductoId('');
         setCantidad(1);
       } else {
         toast.error(r.error ?? 'Error al agregar línea');

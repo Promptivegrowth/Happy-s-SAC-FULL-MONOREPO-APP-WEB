@@ -40,6 +40,12 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
   const totalPlan = (lineas ?? []).reduce((a, l) => a + Number(l.cantidad_planificada ?? 0), 0);
   const totalCortado = (lineas ?? []).reduce((a, l) => a + Number(l.cantidad_cortada ?? 0), 0);
   const totalTerminado = (lineas ?? []).reduce((a, l) => a + Number(l.cantidad_terminada ?? 0), 0);
+
+  // Si todas las líneas existentes son del mismo producto, pre-seleccionamos
+  // ese producto en el formulario "Agregar línea" (caso típico: una OT por
+  // producto, varias tallas). Si hay múltiples productos no fijamos default.
+  const productosEnLineas = Array.from(new Set((lineas ?? []).map((l) => l.producto_id)));
+  const productoIdDefault = productosEnLineas.length === 1 ? productosEnLineas[0] : undefined;
   const atrasada = ot.fecha_entrega_objetivo && new Date(ot.fecha_entrega_objetivo) < new Date() && !['COMPLETADA','CANCELADA'].includes(ot.estado);
 
   const plan = (ot as unknown as { plan_maestro?: { codigo: string } | null }).plan_maestro;
@@ -76,7 +82,7 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
             </CardHeader>
             <CardContent className={puedeEditarLineas ? 'space-y-4' : 'p-0'}>
               {puedeEditarLineas && (
-                <AgregarLineaOTForm otId={id} productos={productos ?? []} />
+                <AgregarLineaOTForm otId={id} productos={productos ?? []} productoIdDefault={productoIdDefault} />
               )}
               {(lineas ?? []).length === 0 ? (
                 <div className="px-6 py-10 text-center text-sm text-slate-400">
@@ -92,12 +98,16 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
                     <TableHead className="text-right">Cortado</TableHead>
                     <TableHead className="text-right">Fallas</TableHead>
                     <TableHead className="text-right">Terminado</TableHead>
+                    <TableHead className="text-right">Falta cortar</TableHead>
                     <TableHead className="w-[200px]">Declarar</TableHead>
                     <TableHead className="w-[40px]"></TableHead>
                   </TableRow></TableHeader>
                   <TableBody>
                     {lineas?.map((l) => {
                       const p = (l as unknown as { productos?: { codigo: string; nombre: string } }).productos;
+                      const plan = Number(l.cantidad_planificada ?? 0);
+                      const cortada = Number(l.cantidad_cortada ?? 0);
+                      const faltaCortar = Math.max(plan - cortada, 0);
                       return (
                         <TableRow key={l.id}>
                           <TableCell>
@@ -109,6 +119,13 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
                           <TableCell className="text-right font-mono">{l.cantidad_cortada ?? 0}</TableCell>
                           <TableCell className="text-right font-mono text-danger">{l.cantidad_fallas ?? 0}</TableCell>
                           <TableCell className="text-right font-mono font-semibold">{l.cantidad_terminada ?? 0}</TableCell>
+                          <TableCell className="text-right font-mono">
+                            {faltaCortar === 0 ? (
+                              <Badge variant="success" className="text-[10px]">Completo</Badge>
+                            ) : (
+                              <span className="font-semibold text-amber-700">{faltaCortar}</span>
+                            )}
+                          </TableCell>
                           <TableCell>
                             <OtLineaProduccion
                               otId={id}
