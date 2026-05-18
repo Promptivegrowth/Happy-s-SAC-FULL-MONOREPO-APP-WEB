@@ -14,7 +14,9 @@ const schema = z.object({
   activa: z.boolean().default(true),
 });
 
-export async function crearArea(input: z.input<typeof schema>): Promise<ActionResult<{ id: string }>> {
+export async function crearArea(
+  input: z.input<typeof schema>,
+): Promise<ActionResult<{ id: string; codigo: string; nombre: string; valor_minuto: number | null }>> {
   const r = await runAction(async () => {
     const data = schema.parse(input);
     const { sb } = await requireUser();
@@ -30,13 +32,18 @@ export async function crearArea(input: z.input<typeof schema>): Promise<ActionRe
         valor_minuto: valor,
         activa: data.activa,
       })
-      .select('id')
+      .select('id, codigo, nombre, valor_minuto')
       .single();
     if (error) {
       if (error.code === '23505') throw new Error('Ya existe un área con ese código');
       throw new Error(error.message);
     }
-    return { id: row.id as string };
+    return {
+      id: row.id as string,
+      codigo: row.codigo as string,
+      nombre: row.nombre as string,
+      valor_minuto: row.valor_minuto as number | null,
+    };
   });
   if (r.ok) await bumpPaths('/configuracion/areas', '/recetas');
   return r;
@@ -76,10 +83,13 @@ export async function actualizarArea(id: string, input: z.input<typeof schema>):
 export async function eliminarArea(id: string): Promise<ActionResult> {
   const r = await runAction(async () => {
     const { sb } = await requireUser();
-    const { count } = await sb
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const sbAny = sb as unknown as { from: (t: string) => any };
+    const { count } = await sbAny
       .from('productos_procesos')
       .select('id', { count: 'exact', head: true })
-      .eq('area_id', id);
+      .eq('area_id', id)
+      .eq('activo', true); // solo bloquea eliminar si hay procesos VIGENTES
     if ((count ?? 0) > 0) {
       throw new Error(
         `No se puede eliminar: ${count} proceso(s) la usan. Desactivala con el toggle en su lugar.`,

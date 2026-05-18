@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState, useTransition } from 'react';
+import { useRouter } from 'next/navigation';
 import { Button } from '@happy/ui/button';
 import { Input } from '@happy/ui/input';
 import { Card } from '@happy/ui/card';
@@ -11,6 +12,7 @@ import { FormGrid, FormRow } from '@happy/ui/form-row';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@happy/ui/table';
 import { Plus, Trash2, Loader2, Search, X, Copy, Scissors, Clock, ListOrdered, GripVertical } from 'lucide-react';
 import { toast } from 'sonner';
+import { NuevaAreaInlineModal, type AreaCreada } from '@/components/forms/nueva-area-inline-modal';
 import {
   DndContext,
   closestCenter,
@@ -38,6 +40,9 @@ import {
   actualizarProceso,
   eliminarProceso,
   reordenarProcesos,
+  duplicarProcesos,
+  versionarRecetaMateriales,
+  versionarProcesosProducto,
 } from '@/server/actions/recetas';
 
 const TALLAS = ['T0','T2','T4','T6','T8','T10','T12','T14','T16','TS','TAD'] as const;
@@ -52,7 +57,7 @@ const PROCESOS = [
  *  Cuando se elige un área en el form, el dropdown de proceso se filtra. */
 const PROCESOS_POR_AREA: Record<string, readonly (typeof PROCESOS)[number][]> = {
   CORTE:     ['TRAZADO', 'TENDIDO', 'CORTE', 'HABILITADO'],
-  COSTURA:   ['COSTURA', 'OJAL_BOTON'],
+  COSTURA:   ['COSTURA'],
   DECORADO:  ['BORDADO', 'ESTAMPADO', 'SUBLIMADO', 'PLISADO', 'DECORADO'],
   BORDADO:   ['BORDADO'],
   ESTAMPADO: ['ESTAMPADO'],
@@ -60,7 +65,9 @@ const PROCESOS_POR_AREA: Record<string, readonly (typeof PROCESOS)[number][]> = 
   PLISADO:   ['PLISADO'],
   ACABADO:   ['ACABADO', 'CONTROL_CALIDAD', 'EMBALAJE'],
   PLANCHADO: ['PLANCHADO'],
-  TALLER:    ['COSTURA', 'BORDADO', 'ESTAMPADO', 'SUBLIMADO', 'PLISADO', 'DECORADO', 'ACABADO', 'PLANCHADO', 'OJAL_BOTON'],
+  // Solo procesos que efectivamente se tercerizan (confirmado con cliente).
+  // ACABADO y PLANCHADO son internos — no aparecen acá.
+  TALLER:    ['COSTURA', 'BORDADO', 'ESTAMPADO', 'SUBLIMADO', 'PLISADO', 'DECORADO', 'OJAL_BOTON'],
 };
 function procesosDeArea(areaCodigo: string | null): readonly (typeof PROCESOS)[number][] {
   if (!areaCodigo) return PROCESOS;
@@ -91,6 +98,7 @@ type Proceso = {
   tiempo_estandar_min: number | null;
   es_tercerizado: boolean;
   observacion: string | null;
+  version?: string;
   areas_produccion?: { id: string; codigo: string; nombre: string; valor_minuto: number | null } | null;
 };
 
@@ -103,6 +111,10 @@ export function RecetaEditor({
   productos = [],
   areas = [],
   procesos = [],
+  congelada = false,
+  cantidadOts = 0,
+  versionMateriales = 'v1.0',
+  versionProcesos = 'v1.0',
 }: {
   recetaId: string;
   productoId: string;
@@ -112,31 +124,126 @@ export function RecetaEditor({
   productos?: Producto[];
   areas?: Area[];
   procesos?: Proceso[];
+  /** Si true, la receta está bloqueada para edición (ya hay producción). */
+  congelada?: boolean;
+  cantidadOts?: number;
+  versionMateriales?: string;
+  versionProcesos?: string;
 }) {
   return (
-    <Tabs defaultValue="materiales">
-      <TabsList>
-        <TabsTrigger value="materiales">Materiales (BOM)</TabsTrigger>
-        <TabsTrigger value="procesos">
-          Procesos / Operaciones <Badge variant="secondary" className="ml-1.5 text-[9px]">{procesos.length}</Badge>
-        </TabsTrigger>
-      </TabsList>
-
-      <TabsContent value="materiales">
-        <BomEditor
-          recetaId={recetaId}
+    <div className="space-y-3">
+      {congelada && (
+        <CongeladoBanner
           productoId={productoId}
-          materiales={materiales}
-          unidades={unidades}
-          lineas={lineas}
-          productos={productos}
+          cantidadOts={cantidadOts}
+          versionMateriales={versionMateriales}
+          versionProcesos={versionProcesos}
         />
-      </TabsContent>
+      )}
+      <Tabs defaultValue="materiales">
+        <TabsList>
+          <TabsTrigger value="materiales">
+            Materiales (BOM) <Badge variant="secondary" className="ml-1.5 text-[9px]">{versionMateriales}</Badge>
+          </TabsTrigger>
+          <TabsTrigger value="procesos">
+            Procesos / Operaciones <Badge variant="secondary" className="ml-1.5 text-[9px]">{procesos.length} · {versionProcesos}</Badge>
+          </TabsTrigger>
+        </TabsList>
 
-      <TabsContent value="procesos">
-        <ProcesosEditor productoId={productoId} areas={areas} procesos={procesos} />
-      </TabsContent>
-    </Tabs>
+        <TabsContent value="materiales">
+          <BomEditor
+            recetaId={recetaId}
+            productoId={productoId}
+            materiales={materiales}
+            unidades={unidades}
+            lineas={lineas}
+            productos={productos}
+            congelada={congelada}
+          />
+        </TabsContent>
+
+        <TabsContent value="procesos">
+          <ProcesosEditor
+            productoId={productoId}
+            areas={areas}
+            procesos={procesos}
+            productos={productos}
+            congelada={congelada}
+          />
+        </TabsContent>
+      </Tabs>
+    </div>
+  );
+}
+
+/**
+ * Banner que se muestra cuando la receta está congelada (ya hay OTs generadas).
+ * Ofrece botones para crear una nueva versión de materiales y/o procesos
+ * de forma independiente.
+ */
+function CongeladoBanner({
+  productoId,
+  cantidadOts,
+  versionMateriales,
+  versionProcesos,
+}: {
+  productoId: string;
+  cantidadOts: number;
+  versionMateriales: string;
+  versionProcesos: string;
+}) {
+  const router = useRouter();
+  const [pending, start] = useTransition();
+
+  function nuevaVerMateriales() {
+    if (!confirm(`Vas a crear una nueva versión de la receta de MATERIALES (a partir de ${versionMateriales}). La actual queda congelada para histórico. ¿Continuar?`)) return;
+    start(async () => {
+      const r = await versionarRecetaMateriales(productoId);
+      if (r.ok && r.data) {
+        toast.success(`✨ Versión ${r.data.version} creada (${r.data.lineas} líneas copiadas)`);
+        // Navegar al detalle de la nueva receta para que el usuario edite ahí.
+        router.push(`/recetas/${r.data.recetaId}`);
+      } else toast.error(r.error ?? 'Error');
+    });
+  }
+
+  function nuevaVerProcesos() {
+    if (!confirm(`Vas a crear una nueva versión de la receta de PROCESOS (a partir de ${versionProcesos}). La actual queda congelada para histórico. ¿Continuar?`)) return;
+    start(async () => {
+      const r = await versionarProcesosProducto(productoId);
+      if (r.ok && r.data) {
+        toast.success(`✨ Versión ${r.data.version} creada (${r.data.procesos} operaciones copiadas)`);
+        router.refresh();
+      } else toast.error(r.error ?? 'Error');
+    });
+  }
+
+  return (
+    <div className="rounded-lg border-2 border-amber-300 bg-amber-50 p-4">
+      <div className="flex items-start gap-3">
+        <div className="text-2xl">🔒</div>
+        <div className="flex-1 space-y-2 text-sm">
+          <p className="font-bold text-amber-900">
+            Receta congelada · {cantidadOts} línea{cantidadOts === 1 ? '' : 's'} de OT generada{cantidadOts === 1 ? '' : 's'}
+          </p>
+          <p className="text-xs text-amber-800">
+            Este producto ya entró a producción, así que la receta vigente (materiales {versionMateriales} · procesos {versionProcesos})
+            no se puede editar directamente. Esto preserva la trazabilidad con las OTs y avíos ya despachados.
+            Para hacer ajustes, creá una versión nueva — la actual queda guardada como histórico.
+          </p>
+          <div className="flex flex-wrap gap-2 pt-1">
+            <Button variant="outline" size="sm" onClick={nuevaVerMateriales} disabled={pending} className="border-amber-400">
+              {pending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Copy className="h-3.5 w-3.5" />}
+              Crear nueva versión de Materiales
+            </Button>
+            <Button variant="outline" size="sm" onClick={nuevaVerProcesos} disabled={pending} className="border-amber-400">
+              {pending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Copy className="h-3.5 w-3.5" />}
+              Crear nueva versión de Procesos
+            </Button>
+          </div>
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -151,6 +258,7 @@ function BomEditor({
   unidades,
   lineas,
   productos,
+  congelada = false,
 }: {
   recetaId: string;
   productoId: string;
@@ -158,6 +266,7 @@ function BomEditor({
   unidades: Unidad[];
   lineas: Linea[];
   productos: Producto[];
+  congelada?: boolean;
 }) {
   const [filtroTalla, setFiltroTalla] = useState<string>('');
   const [openForm, setOpenForm] = useState(false);
@@ -308,12 +417,24 @@ function BomEditor({
               variant="outline"
               size="sm"
               onClick={() => setOpenDup(true)}
-              disabled={lineas.length === 0}
-              title={lineas.length === 0 ? 'Agregá al menos una línea para poder duplicar' : 'Duplicar a otro producto'}
+              disabled={lineas.length === 0 || congelada}
+              title={
+                congelada
+                  ? 'Receta congelada — usá "Crear nueva versión" del banner para editar'
+                  : lineas.length === 0
+                    ? 'Agregá al menos una línea para poder duplicar'
+                    : 'Duplicar a otro producto'
+              }
             >
               <Copy className="h-3.5 w-3.5" /> Duplicar a otro producto
             </Button>
-            <Button variant="premium" size="sm" onClick={abrirFormNuevaLinea}>
+            <Button
+              variant="premium"
+              size="sm"
+              onClick={abrirFormNuevaLinea}
+              disabled={congelada}
+              title={congelada ? 'Receta congelada — usá "Crear nueva versión" del banner para editar' : 'Agregar línea'}
+            >
               <Plus className="h-4 w-4" /> Agregar línea
             </Button>
           </div>
@@ -986,14 +1107,25 @@ function ProcesosEditor({
   productoId,
   areas,
   procesos,
+  productos = [],
+  congelada = false,
 }: {
   productoId: string;
   areas: Area[];
   procesos: Proceso[];
+  productos?: Producto[];
+  congelada?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const [pending, start] = useTransition();
   const [orderBy, setOrderBy] = useState<'orden' | 'area' | 'tiempo'>('orden');
+
+  // Lista local de áreas: arranca con las del server pero se puede expandir
+  // si el usuario crea una nueva inline desde el modal (obs cliente A).
+  const [areasLocal, setAreasLocal] = useState<Area[]>(areas);
+  const [openNuevaArea, setOpenNuevaArea] = useState(false);
+  // Modal para duplicar la secuencia de procesos a otro producto (obs cliente).
+  const [openDupProcesos, setOpenDupProcesos] = useState(false);
 
   // Arranca vacío: el usuario debe elegir explícitamente el proceso.
   // Antes salía 'CORTE' por default y eso confundía (cliente lo reportó).
@@ -1001,7 +1133,9 @@ function ProcesosEditor({
   const [areaId, setAreaId] = useState('');
   const [tallaProc, setTallaProc] = useState<string>('');
   const [tiempo, setTiempo] = useState<string>('');
-  const [tercerizado, setTercerizado] = useState(false);
+  // es_tercerizado se quita del form (obs cliente: pertenece a planeamiento,
+  // no a la definición de la receta). Se envía false por default al server
+  // para mantener la columna en BD funcionando.
   const [obs, setObs] = useState('');
 
   function reset() {
@@ -1009,7 +1143,6 @@ function ProcesosEditor({
     setAreaId('');
     setTallaProc('');
     setTiempo('');
-    setTercerizado(false);
     setObs('');
   }
 
@@ -1026,7 +1159,7 @@ function ProcesosEditor({
         talla: (tallaProc || '') as (typeof TALLAS)[number] | '',
         orden: 0,
         tiempo_estandar_min: tiempo === '' ? '' : Number(tiempo),
-        es_tercerizado: tercerizado,
+        es_tercerizado: false, // siempre false desde la receta (ver nota arriba)
         observacion: obs,
       });
       if (r.ok) {
@@ -1087,7 +1220,26 @@ function ProcesosEditor({
               <option value="tiempo">Tiempo (mayor primero)</option>
             </select>
           </div>
-          <Button variant="premium" size="sm" onClick={() => setOpen(true)}>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setOpenDupProcesos(true)}
+            disabled={procesos.length === 0}
+            title={
+              procesos.length === 0
+                ? 'Agregá al menos una operación para poder duplicar'
+                : 'Duplicar secuencia de operaciones a otro producto (también funciona si el destino está congelado solo si el origen tiene procesos)'
+            }
+          >
+            <Copy className="h-3.5 w-3.5" /> Duplicar a otro producto
+          </Button>
+          <Button
+            variant="premium"
+            size="sm"
+            onClick={() => setOpen(true)}
+            disabled={congelada}
+            title={congelada ? 'Receta de procesos congelada — usá "Crear nueva versión" del banner' : 'Agregar operación'}
+          >
             <Plus className="h-4 w-4" /> Agregar operación
           </Button>
         </div>
@@ -1098,27 +1250,39 @@ function ProcesosEditor({
           <h3 className="mb-3 font-display text-sm font-semibold">Nueva operación</h3>
           <FormGrid cols={3}>
             <FormRow label="Área" required hint="Define el costo/minuto y filtra los procesos disponibles">
-              <select
-                value={areaId}
-                onChange={(e) => {
-                  setAreaId(e.target.value);
-                  // Si el proceso actual no aplica al área nueva, vaciar para
-                  // que el usuario elija nuevamente (en lugar de forzar uno).
-                  const areaCod = areas.find((a) => a.id === e.target.value)?.codigo ?? null;
-                  const procesosValidos = procesosDeArea(areaCod);
-                  if (proceso && !procesosValidos.includes(proceso as (typeof PROCESOS)[number])) {
-                    setProceso('');
-                  }
-                }}
-                className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
-              >
-                <option value="">— sin asignar (todos los procesos) —</option>
-                {areas.map((a) => (
-                  <option key={a.id} value={a.id}>
-                    {a.nombre} {a.valor_minuto ? `(S/${Number(a.valor_minuto).toFixed(3)}/min)` : ''}
-                  </option>
-                ))}
-              </select>
+              <div className="flex gap-1">
+                <select
+                  value={areaId}
+                  onChange={(e) => {
+                    setAreaId(e.target.value);
+                    // Si el proceso actual no aplica al área nueva, vaciar para
+                    // que el usuario elija nuevamente (en lugar de forzar uno).
+                    const areaCod = areasLocal.find((a) => a.id === e.target.value)?.codigo ?? null;
+                    const procesosValidos = procesosDeArea(areaCod);
+                    if (proceso && !procesosValidos.includes(proceso as (typeof PROCESOS)[number])) {
+                      setProceso('');
+                    }
+                  }}
+                  className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
+                >
+                  <option value="">— sin asignar (todos los procesos) —</option>
+                  {areasLocal.map((a) => (
+                    <option key={a.id} value={a.id}>
+                      {a.nombre} {a.valor_minuto ? `(S/${Number(a.valor_minuto).toFixed(3)}/min)` : ''}
+                    </option>
+                  ))}
+                </select>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setOpenNuevaArea(true)}
+                  title="Crear nueva área"
+                  className="h-10 shrink-0 px-2"
+                >
+                  <Plus className="h-4 w-4" />
+                </Button>
+              </div>
             </FormRow>
             <FormRow label="Proceso" required hint={areaId ? 'Filtrado por el área elegida' : 'Mostrando todos'}>
               <select
@@ -1153,12 +1317,9 @@ function ProcesosEditor({
                 {TALLAS.map((t) => <option key={t} value={t}>{t.replace('T', '')}</option>)}
               </select>
             </FormRow>
-            <div className="flex items-end">
-              <label className="flex items-center gap-2 text-sm">
-                <Switch checked={tercerizado} onCheckedChange={(v) => setTercerizado(!!v)} />
-                <span>Tercerizado (taller externo)</span>
-              </label>
-            </div>
+            {/* Quitado el toggle "Tercerizado": no pertenece a la definición
+                de la receta. Si en un futuro se agrega esa decisión, debería
+                vivir en el módulo de planeamiento/OT, no acá. */}
           </FormGrid>
           <FormRow label="Observación">
             <Input value={obs} onChange={(e) => setObs(e.target.value)} />
@@ -1214,6 +1375,139 @@ function ProcesosEditor({
           </div>
         </Card>
       )}
+
+      <NuevaAreaInlineModal
+        open={openNuevaArea}
+        onOpenChange={setOpenNuevaArea}
+        onCreated={(a: AreaCreada) => {
+          // Inyectar el área nueva en el dropdown local y auto-seleccionarla.
+          // Insertamos ordenada alfabéticamente por nombre (igual que el server).
+          setAreasLocal((prev) => {
+            const next = [...prev, { id: a.id, codigo: a.codigo, nombre: a.nombre, valor_minuto: a.valor_minuto }];
+            return next.sort((x, y) => x.nombre.localeCompare(y.nombre));
+          });
+          setAreaId(a.id);
+          // Si había proceso elegido pero no aplica a la nueva área, vaciarlo.
+          const procesosValidos = procesosDeArea(a.codigo);
+          if (proceso && !procesosValidos.includes(proceso as (typeof PROCESOS)[number])) {
+            setProceso('');
+          }
+        }}
+      />
+
+      {openDupProcesos && (
+        <DuplicarProcesosModal
+          productoActualId={productoId}
+          productos={productos}
+          cantidadProcesos={procesos.length}
+          onClose={() => setOpenDupProcesos(false)}
+        />
+      )}
+    </div>
+  );
+}
+
+// ============================================================================
+// Modal: duplicar secuencia de procesos a otro producto
+// ============================================================================
+
+function DuplicarProcesosModal({
+  productoActualId,
+  productos,
+  cantidadProcesos,
+  onClose,
+}: {
+  productoActualId: string;
+  productos: Producto[];
+  cantidadProcesos: number;
+  onClose: () => void;
+}) {
+  const [pending, start] = useTransition();
+  const [busca, setBusca] = useState('');
+  const [seleccionadoId, setSeleccionadoId] = useState('');
+
+  // Excluimos el producto actual: duplicar las propias operaciones al mismo
+  // producto duplicaría todas las filas (no tiene sentido, no hay "talla
+  // destino" como en materiales).
+  const filtrados = productos
+    .filter((p) => p.id !== productoActualId)
+    .filter((p) =>
+      !busca ||
+      p.nombre.toLowerCase().includes(busca.toLowerCase()) ||
+      p.codigo.toLowerCase().includes(busca.toLowerCase()),
+    )
+    .slice(0, 30);
+
+  function ejecutar() {
+    if (!seleccionadoId) return toast.error('Elegí un producto destino');
+    start(async () => {
+      const r = await duplicarProcesos(productoActualId, seleccionadoId);
+      if (r.ok && r.data) {
+        toast.success(`✨ ${r.data.procesos} operación(es) duplicada(s)`);
+        onClose();
+      } else toast.error(r.error ?? 'Error');
+    });
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4" onClick={onClose}>
+      <Card className="w-full max-w-lg p-5" onClick={(e) => e.stopPropagation()}>
+        <div className="mb-4 flex items-start justify-between">
+          <div>
+            <h3 className="font-display text-base font-semibold">Duplicar secuencia de procesos</h3>
+            <p className="text-xs text-slate-500">
+              Copia las {cantidadProcesos} operación{cantidadProcesos === 1 ? '' : 'es'} de este producto a otro,
+              preservando proceso, área, talla, tiempo y observaciones. Si el destino ya tenía
+              operaciones, las nuevas se agregan al final (no reemplaza).
+            </p>
+          </div>
+          <button onClick={onClose} className="rounded p-1 text-slate-400 hover:bg-slate-100">
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+
+        <div className="space-y-3">
+          <div>
+            <label className="mb-1 block text-xs font-medium text-slate-700">Producto destino</label>
+            <Input
+              placeholder="Buscar producto destino…"
+              value={busca}
+              onChange={(e) => setBusca(e.target.value)}
+              className="mb-2"
+            />
+            <div className="max-h-44 overflow-auto rounded-md border">
+              {filtrados.length === 0 ? (
+                <p className="p-3 text-center text-xs text-slate-400">Sin productos</p>
+              ) : (
+                filtrados.map((p) => (
+                  <button
+                    key={p.id}
+                    type="button"
+                    onClick={() => setSeleccionadoId(p.id)}
+                    className={`flex w-full items-center justify-between border-b px-3 py-2 text-left text-sm last:border-0 hover:bg-happy-50 ${
+                      seleccionadoId === p.id ? 'bg-happy-100 ring-1 ring-happy-400' : ''
+                    }`}
+                  >
+                    <span>
+                      <span className="font-medium">{p.nombre}</span>
+                      <span className="ml-2 font-mono text-[10px] text-slate-500">{p.codigo}</span>
+                    </span>
+                    {seleccionadoId === p.id && <Badge variant="success" className="text-[9px]">Elegido</Badge>}
+                  </button>
+                ))
+              )}
+            </div>
+          </div>
+        </div>
+
+        <div className="mt-4 flex justify-end gap-2">
+          <Button variant="ghost" onClick={onClose} disabled={pending}>Cancelar</Button>
+          <Button variant="premium" onClick={ejecutar} disabled={pending || !seleccionadoId}>
+            {pending && <Loader2 className="h-4 w-4 animate-spin" />}
+            <Copy className="h-4 w-4" /> Duplicar
+          </Button>
+        </div>
+      </Card>
     </div>
   );
 }
@@ -1278,7 +1572,6 @@ function ProcesosTabla({
               <TableHead>Talla</TableHead>
               <TableHead className="text-right">Tiempo (min)</TableHead>
               <TableHead className="text-right">Costo</TableHead>
-              <TableHead>Tercerizado</TableHead>
               <TableHead>Observación</TableHead>
               <TableHead></TableHead>
             </TableRow>
@@ -1369,13 +1662,6 @@ function ProcesoFila({
       </TableCell>
       <TableCell className="text-right text-sm">
         {valorMin > 0 ? `S/ ${costo.toFixed(2)}` : <span className="text-xs text-slate-400">—</span>}
-      </TableCell>
-      <TableCell>
-        {p.es_tercerizado ? (
-          <Badge variant="default" className="bg-amber-500 text-[10px]">Externo</Badge>
-        ) : (
-          <Badge variant="secondary" className="text-[10px]">Interno</Badge>
-        )}
       </TableCell>
       <TableCell className="max-w-xs truncate text-xs text-slate-500">{p.observacion}</TableCell>
       <TableCell className="text-right">

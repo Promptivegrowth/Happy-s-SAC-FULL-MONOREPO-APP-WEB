@@ -31,9 +31,12 @@ export default async function Page() {
   // Conteo de uso
   const usosMap = new Map<string, number>();
   if (areas.length > 0) {
-    const { data: procesos } = await sb
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const sbAny = sb as unknown as { from: (t: string) => any };
+    const { data: procesos } = await sbAny
       .from('productos_procesos')
       .select('area_id')
+      .eq('activo', true) // contar solo procesos vigentes (mig 38)
       .in('area_id', areas.map((a) => a.id));
     for (const p of procesos ?? []) {
       const id = p.area_id as string;

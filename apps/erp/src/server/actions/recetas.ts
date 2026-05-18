@@ -11,6 +11,86 @@ const PROCESOS = [
   'EMBALAJE','DECORADO',
 ] as const;
 
+// ============================================================================
+// Versionado: detección de "producto en producción"
+// ============================================================================
+
+/**
+ * Devuelve true si el producto ya entró a producción (existe al menos una OT).
+ * Se usa para bloquear ediciones a la receta vigente — el usuario debe
+ * crear una versión nueva (v2.0, v3.0…) en lugar de modificar la actual.
+ *
+ * Definición operativa acordada con el cliente:
+ *   Las OTs nacen en estado PLANIFICADA desde un plan APROBADO. Apenas
+ *   existe una OT ya hay compromiso de producción real → bloquear edición.
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function productoEnProduccion(sb: any, productoId: string): Promise<boolean> {
+  const { count } = await sb
+    .from('ot_lineas')
+    .select('id', { count: 'exact', head: true })
+    .eq('producto_id', productoId);
+  return (count ?? 0) > 0;
+}
+
+/**
+ * Siguiente versión de receta: "v1.0" → "v2.0", "v2.0" → "v3.0", etc.
+ * Si el formato es raro, cae al siguiente entero después del último número
+ * encontrado en cualquier versión existente.
+ */
+function siguienteVersion(versionesExistentes: string[]): string {
+  let max = 0;
+  for (const v of versionesExistentes) {
+    const m = v.match(/v?(\d+)/);
+    if (m && m[1]) {
+      const n = parseInt(m[1], 10);
+      if (n > max) max = n;
+    }
+  }
+  return `v${max + 1}.0`;
+}
+
+const MSG_CONGELADA =
+  'La receta de este producto está congelada porque ya entró a producción (hay OTs generadas). ' +
+  'Para hacer cambios, creá una nueva versión desde el botón "Versionar" en el detalle de la receta.';
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function bloquearSiProductoEnProduccion(sb: any, productoId: string) {
+  if (await productoEnProduccion(sb, productoId)) throw new Error(MSG_CONGELADA);
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function bloquearSiRecetaEnProduccion(sb: any, recetaId: string) {
+  const { data } = await sb.from('recetas').select('producto_id').eq('id', recetaId).maybeSingle();
+  const pid = (data?.producto_id as string | undefined) ?? '';
+  if (!pid) return; // no encontrada, dejamos que el insert/update reviente con error real
+  await bloquearSiProductoEnProduccion(sb, pid);
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function bloquearSiLineaEnProduccion(sb: any, lineaId: string) {
+  const { data } = await sb
+    .from('recetas_lineas')
+    .select('recetas(producto_id)')
+    .eq('id', lineaId)
+    .maybeSingle();
+  const pid = (data?.recetas?.producto_id as string | undefined) ?? '';
+  if (!pid) return;
+  await bloquearSiProductoEnProduccion(sb, pid);
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function bloquearSiProcesoEnProduccion(sb: any, procesoId: string) {
+  const { data } = await sb
+    .from('productos_procesos')
+    .select('producto_id')
+    .eq('id', procesoId)
+    .maybeSingle();
+  const pid = (data?.producto_id as string | undefined) ?? '';
+  if (!pid) return;
+  await bloquearSiProductoEnProduccion(sb, pid);
+}
+
 const lineaSchema = z.object({
   receta_id: z.string().uuid(),
   material_id: z.string().uuid(),
@@ -67,7 +147,11 @@ export async function upsertReceta(_prev: unknown, fd: FormData): Promise<Action
       unidad_id: fd.get('unidad_id') || '',
       observacion: fd.get('observacion') || '',
     });
+    // Bloquear si el producto de esta receta ya está en producción.
+    // upsertReceta puede ejecutarse desde formularios legacy — aplicamos
+    // la guarda igual que el resto.
     const { sb } = await requireUser();
+    await bloquearSiRecetaEnProduccion(sb, data.receta_id);
     const { error } = await sb.from('recetas_lineas').upsert({
       receta_id: data.receta_id,
       material_id: data.material_id,
@@ -107,6 +191,7 @@ export async function upsertRecetaMulti(
   const r = await runAction(async () => {
     const data = upsertMultiSchema.parse(input);
     const { sb } = await requireUser();
+    await bloquearSiRecetaEnProduccion(sb, data.receta_id);
     const filas = data.tallas.map((t) => ({
       receta_id: data.receta_id,
       material_id: data.material_id,
@@ -130,6 +215,7 @@ export async function upsertRecetaMulti(
 export async function eliminarLinea(id: string): Promise<ActionResult> {
   const r = await runAction(async () => {
     const { sb } = await requireUser();
+    await bloquearSiLineaEnProduccion(sb, id);
     const { error } = await sb.from('recetas_lineas').delete().eq('id', id);
     if (error) throw new Error(error.message);
     return null;
@@ -142,6 +228,7 @@ export async function eliminarLinea(id: string): Promise<ActionResult> {
 export async function toggleSaleAServicio(id: string, valor: boolean): Promise<ActionResult> {
   const r = await runAction(async () => {
     const { sb } = await requireUser();
+    await bloquearSiLineaEnProduccion(sb, id);
     const { error } = await sb.from('recetas_lineas').update({ sale_a_servicio: valor }).eq('id', id);
     if (error) throw new Error(error.message);
     return null;
@@ -202,6 +289,10 @@ export async function duplicarReceta(
         .single();
       if (errR) throw new Error(errR.message);
       recetaDestId = nueva.id;
+    } else {
+      // Si el destino YA tenía receta activa, chequear que no esté en producción.
+      // Sino, duplicar líneas equivale a editar una receta congelada.
+      await bloquearSiProductoEnProduccion(sb, productoDestinoId);
     }
 
     // 3. Insertar líneas con la nueva receta_id (override talla destino si aplica)
@@ -241,7 +332,9 @@ export async function actualizarLineaReceta(
   }>,
 ): Promise<ActionResult> {
   const r = await runAction(async () => {
+    // chequeo de versionado: bloquear si el producto está en producción
     const { sb } = await requireUser();
+    await bloquearSiLineaEnProduccion(sb, id);
     const { error } = await sb.from('recetas_lineas').update(patch).eq('id', id);
     if (error) throw new Error(error.message);
     return null;
@@ -264,6 +357,7 @@ export async function duplicarLineasTalla(
   const r = await runAction(async () => {
     if (tallaOrigen === tallaDestino) throw new Error('Talla origen y destino son iguales');
     const { sb } = await requireUser();
+    await bloquearSiRecetaEnProduccion(sb, recetaId);
     const { data: lineas, error: errL } = await sb
       .from('recetas_lineas')
       .select('material_id, cantidad, sale_a_servicio, cantidad_almacen, unidad_id, observacion')
@@ -314,14 +408,18 @@ export async function agregarProceso(
   const r = await runAction(async () => {
     const data = procesoSchema.parse({ ...input, producto_id: productoId });
     const { sb } = await requireUser();
+    await bloquearSiProductoEnProduccion(sb, productoId);
 
-    // orden auto: el siguiente disponible para ese producto
+    // orden auto: el siguiente disponible para ese producto (solo procesos activos)
     let orden = data.orden;
     if (orden === 0) {
-      const { data: maxRow } = await sb
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const sbAny = sb as unknown as { from: (t: string) => any };
+      const { data: maxRow } = await sbAny
         .from('productos_procesos')
         .select('orden')
         .eq('producto_id', productoId)
+        .eq('activo', true)
         .order('orden', { ascending: false })
         .limit(1)
         .maybeSingle();
@@ -355,6 +453,7 @@ export async function actualizarProceso(
 ): Promise<ActionResult> {
   const r = await runAction(async () => {
     const { sb } = await requireUser();
+    await bloquearSiProcesoEnProduccion(sb, id);
     const { error } = await sb.from('productos_procesos').update(patch).eq('id', id);
     if (error) throw new Error(error.message);
     return null;
@@ -375,6 +474,7 @@ export async function reordenarProcesos(
   const r = await runAction(async () => {
     if (idsEnOrden.length === 0) return { actualizadas: 0 };
     const { sb } = await requireUser();
+    await bloquearSiProductoEnProduccion(sb, productoId);
     let count = 0;
     // Una transacción real requiere PL/pgSQL; acá hacemos updates secuenciales
     // que son seguros porque solo tocan el campo `orden` y no hay constraints
@@ -399,10 +499,257 @@ export async function reordenarProcesos(
 export async function eliminarProceso(id: string): Promise<ActionResult> {
   const r = await runAction(async () => {
     const { sb } = await requireUser();
+    await bloquearSiProcesoEnProduccion(sb, id);
     const { error } = await sb.from('productos_procesos').delete().eq('id', id);
     if (error) throw new Error(error.message);
     return null;
   });
   if (r.ok) await bumpPaths('/recetas');
   return r;
+}
+
+/**
+ * Duplica la SECUENCIA DE PROCESOS de un producto a otro.
+ *
+ * - Copia todos los productos_procesos del origen al destino preservando
+ *   proceso, area_id, talla, tiempo_estandar_min, es_tercerizado y
+ *   observacion.
+ * - Los órdenes se re-asignan a partir del último orden del destino (+10 c/u)
+ *   para no chocar con procesos existentes.
+ * - Por diseño NO sobrescribe: si el destino ya tenía procesos, los del
+ *   origen se agregan al final. Si el cliente quiere "reemplazar todo",
+ *   debe eliminar manualmente los del destino primero.
+ */
+export async function duplicarProcesos(
+  productoOrigenId: string,
+  productoDestinoId: string,
+): Promise<ActionResult<{ procesos: number }>> {
+  const r = await runAction(async () => {
+    if (productoOrigenId === productoDestinoId) {
+      throw new Error('El producto origen y destino no pueden ser el mismo.');
+    }
+    const { sb } = await requireUser();
+    // El destino es el que se va a modificar — bloquear si está en producción.
+    await bloquearSiProductoEnProduccion(sb, productoDestinoId);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const sbAny = sb as unknown as { from: (t: string) => any };
+
+    // 1) Cargar todos los procesos ACTIVOS del origen (no copiar versiones viejas)
+    const { data: origen, error: errO } = await sbAny
+      .from('productos_procesos')
+      .select('proceso, area_id, talla, tiempo_estandar_min, es_tercerizado, observacion')
+      .eq('producto_id', productoOrigenId)
+      .eq('activo', true)
+      .order('orden');
+    if (errO) throw new Error(errO.message);
+    if (!origen || origen.length === 0) {
+      throw new Error('El producto origen no tiene operaciones que duplicar.');
+    }
+
+    // 2) Calcular el orden base del destino (siguiente disponible entre activos)
+    const { data: maxRow } = await sbAny
+      .from('productos_procesos')
+      .select('orden')
+      .eq('producto_id', productoDestinoId)
+      .eq('activo', true)
+      .order('orden', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    const ordenBase = ((maxRow?.orden as number | undefined) ?? 0);
+
+    // 3) Insertar copias con orden incremental
+    type OrigenRow = { proceso: string; area_id: string | null; talla: string | null; tiempo_estandar_min: number | null; es_tercerizado: boolean; observacion: string | null };
+    const filas = (origen as OrigenRow[]).map((p, i) => ({
+      producto_id: productoDestinoId,
+      proceso: p.proceso,
+      area_id: p.area_id,
+      talla: p.talla,
+      orden: ordenBase + (i + 1) * 10,
+      tiempo_estandar_min: p.tiempo_estandar_min,
+      es_tercerizado: p.es_tercerizado,
+      observacion: p.observacion,
+    }));
+    const { error: errIns } = await sbAny.from('productos_procesos').insert(filas);
+    if (errIns) throw new Error(errIns.message);
+
+    return { procesos: filas.length };
+  });
+  if (r.ok) await bumpPaths(`/productos/${productoDestinoId}`, '/recetas');
+  return r;
+}
+
+// ============================================================================
+// Versionado
+// ============================================================================
+
+/**
+ * Crea una nueva versión (v2.0, v3.0…) de la receta de MATERIALES de un
+ * producto. La versión anterior queda inactiva (preservada para histórico).
+ * La nueva queda como copia exacta de la anterior — el usuario edita lo que
+ * necesite sobre esa copia.
+ *
+ * Devuelve el id de la nueva receta para que el cliente navegue a ella.
+ */
+export async function versionarRecetaMateriales(
+  productoId: string,
+): Promise<ActionResult<{ recetaId: string; version: string; lineas: number }>> {
+  const r = await runAction(async () => {
+    const { sb } = await requireUser();
+
+    // 1) Receta activa actual
+    const { data: actual, error: errA } = await sb
+      .from('recetas')
+      .select('id, version')
+      .eq('producto_id', productoId)
+      .eq('activa', true)
+      .maybeSingle();
+    if (errA) throw new Error(errA.message);
+    if (!actual) throw new Error('Este producto no tiene receta activa para versionar.');
+
+    // 2) Todas las versiones existentes (activas + históricas) para calcular siguiente
+    const { data: todas } = await sb
+      .from('recetas')
+      .select('version')
+      .eq('producto_id', productoId);
+    const nuevaVersion = siguienteVersion((todas ?? []).map((r) => r.version as string));
+
+    // 3) Líneas a copiar
+    const { data: lineas, error: errL } = await sb
+      .from('recetas_lineas')
+      .select('material_id, talla, cantidad, sale_a_servicio, cantidad_almacen, unidad_id, observacion, orden')
+      .eq('receta_id', actual.id);
+    if (errL) throw new Error(errL.message);
+
+    // 4) Desactivar la vigente. IMPORTANTE: hacerlo ANTES de insertar la nueva
+    //    porque hay un índice único parcial recetas_unica_activa_idx (mig 09)
+    //    que solo permite UNA fila con activa=true por producto.
+    {
+      const { error } = await sb
+        .from('recetas')
+        .update({ activa: false })
+        .eq('id', actual.id);
+      if (error) throw new Error(`desactivar v anterior: ${error.message}`);
+    }
+
+    // 5) Crear receta nueva activa
+    const { data: nueva, error: errN } = await sb
+      .from('recetas')
+      .insert({
+        producto_id: productoId,
+        version: nuevaVersion,
+        activa: true,
+        notas: `Clonada desde ${actual.version}`,
+      })
+      .select('id')
+      .single();
+    if (errN) throw new Error(`crear v nueva: ${errN.message}`);
+
+    // 6) Copiar líneas (si la receta vieja tenía)
+    if (lineas && lineas.length > 0) {
+      const copias = lineas.map((l) => ({
+        receta_id: nueva.id,
+        material_id: l.material_id,
+        talla: l.talla as (typeof TALLAS)[number],
+        cantidad: l.cantidad,
+        sale_a_servicio: l.sale_a_servicio,
+        cantidad_almacen: l.cantidad_almacen,
+        unidad_id: l.unidad_id,
+        observacion: l.observacion,
+        orden: l.orden,
+      }));
+      const { error: errIns } = await sb.from('recetas_lineas').insert(copias);
+      if (errIns) throw new Error(`copiar líneas: ${errIns.message}`);
+    }
+
+    return { recetaId: nueva.id as string, version: nuevaVersion, lineas: lineas?.length ?? 0 };
+  });
+  if (r.ok) await bumpPaths('/recetas', `/productos/${productoId}`);
+  return r;
+}
+
+/**
+ * Crea una nueva versión de la receta de PROCESOS de un producto. Las filas
+ * vigentes se duplican con la nueva versión y las viejas pasan a activo=false.
+ * No cambia de "tabla" — es la misma productos_procesos con campo version.
+ */
+export async function versionarProcesosProducto(
+  productoId: string,
+): Promise<ActionResult<{ procesos: number; version: string }>> {
+  const r = await runAction(async () => {
+    const { sb } = await requireUser();
+
+    // 1) Procesos vigentes
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const sbAny = sb as unknown as { from: (t: string) => any };
+    const { data: vigentes, error: errV } = await sbAny
+      .from('productos_procesos')
+      .select('proceso, area_id, talla, orden, tiempo_estandar_min, es_tercerizado, observacion, version')
+      .eq('producto_id', productoId)
+      .eq('activo', true);
+    if (errV) throw new Error(errV.message);
+    if (!vigentes || vigentes.length === 0) {
+      throw new Error('Este producto no tiene procesos activos para versionar.');
+    }
+
+    // 2) Todas las versiones (vigentes + históricas) para calcular siguiente
+    const { data: todas } = await sbAny
+      .from('productos_procesos')
+      .select('version')
+      .eq('producto_id', productoId);
+    const nuevaVersion = siguienteVersion(((todas ?? []) as { version: string }[]).map((p) => p.version));
+
+    // 3) Desactivar vigentes
+    {
+      const { error } = await sbAny
+        .from('productos_procesos')
+        .update({ activo: false })
+        .eq('producto_id', productoId)
+        .eq('activo', true);
+      if (error) throw new Error(`desactivar vigentes: ${error.message}`);
+    }
+
+    // 4) Insertar copias con nueva versión
+    type Fila = { proceso: string; area_id: string | null; talla: string | null; orden: number; tiempo_estandar_min: number | null; es_tercerizado: boolean; observacion: string | null };
+    const copias = (vigentes as Fila[]).map((p) => ({
+      producto_id: productoId,
+      proceso: p.proceso,
+      area_id: p.area_id,
+      talla: p.talla,
+      orden: p.orden,
+      tiempo_estandar_min: p.tiempo_estandar_min,
+      es_tercerizado: p.es_tercerizado,
+      observacion: p.observacion,
+      version: nuevaVersion,
+      activo: true,
+    }));
+    const { error: errIns } = await sbAny.from('productos_procesos').insert(copias);
+    if (errIns) throw new Error(`copiar procesos: ${errIns.message}`);
+
+    return { procesos: copias.length, version: nuevaVersion };
+  });
+  if (r.ok) await bumpPaths('/recetas', `/productos/${productoId}`);
+  return r;
+}
+
+/**
+ * Indica si una receta puede editarse libremente. Devuelve el motivo del
+ * bloqueo si no se puede (para mostrar en UI).
+ */
+export async function estadoEditabilidadReceta(
+  productoId: string,
+): Promise<{ editable: boolean; motivo: string | null; cantidadOts: number }> {
+  const { sb } = await requireUser();
+  const { count } = await sb
+    .from('ot_lineas')
+    .select('id', { count: 'exact', head: true })
+    .eq('producto_id', productoId);
+  const cantidadOts = count ?? 0;
+  if (cantidadOts > 0) {
+    return {
+      editable: false,
+      motivo: `Hay ${cantidadOts} línea(s) de OT generadas con esta receta. Para cambiarla, creá una versión nueva.`,
+      cantidadOts,
+    };
+  }
+  return { editable: true, motivo: null, cantidadOts: 0 };
 }

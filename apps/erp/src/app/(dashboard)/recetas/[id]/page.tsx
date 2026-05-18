@@ -26,19 +26,30 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
   const prod = (receta as unknown as { productos: { id: string; nombre: string; codigo: string } }).productos;
 
   // Carga adicional para los nuevos features: duplicar receta y procesos.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const sbAny = sb as unknown as { from: (t: string) => any };
   const [{ data: productosTodos }, { data: areas }, { data: procesos }] = await Promise.all([
     sb.from('productos').select('id, codigo, nombre').eq('activo', true).order('nombre').limit(1000),
     sb.from('areas_produccion').select('id, codigo, nombre, valor_minuto').eq('activa', true).order('nombre'),
-    sb
+    sbAny
       .from('productos_procesos')
-      .select('id, proceso, area_id, talla, orden, tiempo_estandar_min, es_tercerizado, observacion, areas_produccion(id, codigo, nombre, valor_minuto)')
+      .select('id, proceso, area_id, talla, orden, tiempo_estandar_min, es_tercerizado, observacion, version, areas_produccion(id, codigo, nombre, valor_minuto)')
       .eq('producto_id', prod.id)
+      .eq('activo', true) // solo la versión vigente (mig 38)
       .order('orden'),
   ]);
 
   // Tallas presentes en la receta
   const tallasUsadas = Array.from(new Set((lineas ?? []).map((l) => l.talla))).sort();
   const tallasFaltantes = TALLAS.filter((t) => !tallasUsadas.includes(t));
+
+  // Editabilidad: si el producto ya tiene OTs generadas, la receta está
+  // congelada y solo se puede editar creando una nueva versión.
+  const { count: cantidadOts } = await sb
+    .from('ot_lineas')
+    .select('id', { count: 'exact', head: true })
+    .eq('producto_id', prod.id);
+  const recetaCongelada = (cantidadOts ?? 0) > 0;
 
   return (
     <PageShell
@@ -84,6 +95,10 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
         productos={(productosTodos ?? []) as Parameters<typeof RecetaEditor>[0]['productos']}
         areas={(areas ?? []) as Parameters<typeof RecetaEditor>[0]['areas']}
         procesos={(procesos ?? []) as Parameters<typeof RecetaEditor>[0]['procesos']}
+        congelada={recetaCongelada}
+        cantidadOts={cantidadOts ?? 0}
+        versionMateriales={(receta.version as string) ?? 'v1.0'}
+        versionProcesos={((procesos ?? [])[0]?.version as string | undefined) ?? 'v1.0'}
       />
     </PageShell>
   );
