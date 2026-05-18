@@ -27,7 +27,7 @@ const TALLAS = ['T0','T2','T4','T6','T8','T10','T12','T14','T16','TS','TAD'] as 
 
 type Producto = { id: string; codigo: string; nombre: string };
 
-function NewButton({ productos }: { productos: Producto[] }) {
+export function NewButton({ productos }: { productos: Producto[] }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [pending, start] = useTransition();
@@ -189,7 +189,7 @@ function NewButton({ productos }: { productos: Producto[] }) {
   );
 }
 
-function DeleteButton({ tarifaId }: { tarifaId: string }) {
+export function DeleteButton({ tarifaId }: { tarifaId: string }) {
   const router = useRouter();
   const [pending, start] = useTransition();
 
@@ -213,7 +213,6 @@ function DeleteButton({ tarifaId }: { tarifaId: string }) {
   );
 }
 
-export const TarifasTable = {
-  NewButton,
-  DeleteButton,
-};
+// Cada componente se exporta de forma individual arriba. NO usar el patrón de
+// objeto con propiedades: en client-component boundaries de Next.js 15 las
+// propiedades se serializan vacías y el componente sale undefined.

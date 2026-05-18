@@ -210,7 +210,7 @@ function FormModal({
   );
 }
 
-function NewButton() {
+export function NewButton() {
   const [open, setOpen] = useState(false);
   return (
     <>
@@ -222,7 +222,7 @@ function NewButton() {
   );
 }
 
-function EditButton({ unidad }: { unidad: Unidad }) {
+export function EditButton({ unidad }: { unidad: Unidad }) {
   const [open, setOpen] = useState(false);
   return (
     <>
@@ -234,7 +234,7 @@ function EditButton({ unidad }: { unidad: Unidad }) {
   );
 }
 
-function DeleteButton({ unidadId, usos }: { unidadId: string; usos: number }) {
+export function DeleteButton({ unidadId, usos }: { unidadId: string; usos: number }) {
   const router = useRouter();
   const [pending, start] = useTransition();
   const deshabilitado = usos > 0;
@@ -270,7 +270,7 @@ function DeleteButton({ unidadId, usos }: { unidadId: string; usos: number }) {
   );
 }
 
-function ToggleActivo({ unidadId, activo }: { unidadId: string; activo: boolean }) {
+export function ToggleActivo({ unidadId, activo }: { unidadId: string; activo: boolean }) {
   const router = useRouter();
   const [pending, start] = useTransition();
   const [val, setVal] = useState(activo);
@@ -292,9 +292,6 @@ function ToggleActivo({ unidadId, activo }: { unidadId: string; activo: boolean 
   return <Switch checked={val} onCheckedChange={onChange} disabled={pending} />;
 }
 
-export const UnidadesTable = {
-  NewButton,
-  EditButton,
-  DeleteButton,
-  ToggleActivo,
-};
+// Cada componente se exporta de forma individual arriba. NO usar el patrón de
+// objeto con propiedades: en client-component boundaries de Next.js 15 las
+// propiedades se serializan vacías y el componente sale undefined.

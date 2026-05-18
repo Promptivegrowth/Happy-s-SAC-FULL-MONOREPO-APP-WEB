@@ -7,7 +7,7 @@ import { EmptyState } from '@happy/ui/empty-state';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@happy/ui/table';
 import { PageShell } from '@/components/page-shell';
 import { ArrowLeft, Ruler } from 'lucide-react';
-import { UnidadesTable } from './client';
+import { NewButton, EditButton, DeleteButton, ToggleActivo } from './client';
 
 export const metadata = { title: 'Unidades de medida' };
 export const dynamic = 'force-dynamic';
@@ -70,7 +70,7 @@ export default async function Page() {
               <ArrowLeft className="h-4 w-4" /> Volver
             </Button>
           </Link>
-          <UnidadesTable.NewButton />
+          <NewButton />
         </div>
       }
     >
@@ -101,7 +101,7 @@ export default async function Page() {
           icon={<Ruler className="h-6 w-6" />}
           title="Sin unidades configuradas"
           description="Agregá la primera unidad para poder cargar materiales."
-          action={<UnidadesTable.NewButton />}
+          action={<NewButton />}
         />
       ) : (
         <Card>
@@ -151,12 +151,12 @@ export default async function Page() {
                         )}
                       </TableCell>
                       <TableCell>
-                        <UnidadesTable.ToggleActivo unidadId={u.id} activo={u.activo} />
+                        <ToggleActivo unidadId={u.id} activo={u.activo} />
                       </TableCell>
                       <TableCell className="text-right">
                         <div className="flex justify-end gap-1">
-                          <UnidadesTable.EditButton unidad={u} />
-                          <UnidadesTable.DeleteButton unidadId={u.id} usos={totalUsos} />
+                          <EditButton unidad={u} />
+                          <DeleteButton unidadId={u.id} usos={totalUsos} />
                         </div>
                       </TableCell>
                     </TableRow>

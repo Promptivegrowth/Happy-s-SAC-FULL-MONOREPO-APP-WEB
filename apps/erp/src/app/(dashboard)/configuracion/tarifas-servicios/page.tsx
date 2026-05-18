@@ -7,7 +7,7 @@ import { EmptyState } from '@happy/ui/empty-state';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@happy/ui/table';
 import { PageShell } from '@/components/page-shell';
 import { ArrowLeft, Tags } from 'lucide-react';
-import { TarifasTable } from './client';
+import { NewButton, DeleteButton } from './client';
 import { formatPEN, formatDate } from '@happy/lib';
 
 export const metadata = { title: 'Tarifas de servicios' };
@@ -51,7 +51,7 @@ export default async function Page() {
               <ArrowLeft className="h-4 w-4" /> Volver
             </Button>
           </Link>
-          <TarifasTable.NewButton
+          <NewButton
             productos={(productos ?? []).map((p) => ({
               id: p.id as string,
               codigo: p.codigo as string,
@@ -138,7 +138,7 @@ export default async function Page() {
                     </TableCell>
                     <TableCell className="max-w-xs truncate text-xs text-slate-500">{t.observacion ?? ''}</TableCell>
                     <TableCell className="text-right">
-                      <TarifasTable.DeleteButton tarifaId={t.id} />
+                      <DeleteButton tarifaId={t.id} />
                     </TableCell>
                   </TableRow>
                 ))}

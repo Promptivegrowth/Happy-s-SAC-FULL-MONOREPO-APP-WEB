@@ -155,7 +155,7 @@ function FormModal({
   );
 }
 
-function NewButton() {
+export function NewButton() {
   const [open, setOpen] = useState(false);
   return (
     <>
@@ -167,7 +167,7 @@ function NewButton() {
   );
 }
 
-function EditButton({ area }: { area: Area }) {
+export function EditButton({ area }: { area: Area }) {
   const [open, setOpen] = useState(false);
   return (
     <>
@@ -179,7 +179,7 @@ function EditButton({ area }: { area: Area }) {
   );
 }
 
-function DeleteButton({ areaId, usos }: { areaId: string; usos: number }) {
+export function DeleteButton({ areaId, usos }: { areaId: string; usos: number }) {
   const router = useRouter();
   const [pending, start] = useTransition();
   const deshabilitado = usos > 0;
@@ -215,7 +215,7 @@ function DeleteButton({ areaId, usos }: { areaId: string; usos: number }) {
   );
 }
 
-function ToggleActiva({ areaId, activa }: { areaId: string; activa: boolean }) {
+export function ToggleActiva({ areaId, activa }: { areaId: string; activa: boolean }) {
   const router = useRouter();
   const [pending, start] = useTransition();
   const [val, setVal] = useState(activa);
@@ -248,7 +248,7 @@ type HistorialRow = {
   created_at: string;
 };
 
-function HistoricoButton({ areaId, areaNombre }: { areaId: string; areaNombre: string }) {
+export function HistoricoButton({ areaId, areaNombre }: { areaId: string; areaNombre: string }) {
   const [open, setOpen] = useState(false);
   const [cargando, setCargando] = useState(false);
   const [filas, setFilas] = useState<HistorialRow[]>([]);
@@ -369,10 +369,6 @@ function HistoricoButton({ areaId, areaNombre }: { areaId: string; areaNombre: s
   );
 }
 
-export const AreasTable = {
-  NewButton,
-  EditButton,
-  DeleteButton,
-  ToggleActiva,
-  HistoricoButton,
-};
+// Nota: cada componente se exporta de forma individual arriba. NO usar el
+// patrón de objeto con propiedades: en client-component boundaries de Next.js
+// 15 las propiedades se serializan vacías y el componente sale undefined.

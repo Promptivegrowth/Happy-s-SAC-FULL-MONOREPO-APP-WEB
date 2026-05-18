@@ -7,7 +7,7 @@ import { EmptyState } from '@happy/ui/empty-state';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@happy/ui/table';
 import { PageShell } from '@/components/page-shell';
 import { ArrowLeft, Factory } from 'lucide-react';
-import { AreasTable } from './client';
+import { NewButton, EditButton, DeleteButton, ToggleActiva, HistoricoButton } from './client';
 
 export const metadata = { title: 'Áreas de producción' };
 export const dynamic = 'force-dynamic';
@@ -56,7 +56,7 @@ export default async function Page() {
               <ArrowLeft className="h-4 w-4" /> Volver
             </Button>
           </Link>
-          <AreasTable.NewButton />
+          <NewButton />
         </div>
       }
     >
@@ -87,7 +87,7 @@ export default async function Page() {
           icon={<Factory className="h-6 w-6" />}
           title="Sin áreas configuradas"
           description="Agregá las áreas para que las recetas puedan asignar procesos y calcular costos MO."
-          action={<AreasTable.NewButton />}
+          action={<NewButton />}
         />
       ) : (
         <Card>
@@ -127,13 +127,13 @@ export default async function Page() {
                       )}
                     </TableCell>
                     <TableCell>
-                      <AreasTable.ToggleActiva areaId={a.id} activa={a.activa} />
+                      <ToggleActiva areaId={a.id} activa={a.activa} />
                     </TableCell>
                     <TableCell className="text-right">
                       <div className="flex justify-end gap-1">
-                        <AreasTable.HistoricoButton areaId={a.id} areaNombre={a.nombre} />
-                        <AreasTable.EditButton area={a} />
-                        <AreasTable.DeleteButton areaId={a.id} usos={a.usos} />
+                        <HistoricoButton areaId={a.id} areaNombre={a.nombre} />
+                        <EditButton area={a} />
+                        <DeleteButton areaId={a.id} usos={a.usos} />
                       </div>
                     </TableCell>
                   </TableRow>
