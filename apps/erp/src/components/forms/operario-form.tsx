@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { useActionForm } from './use-action-form';
 import { SubmitButton } from './submit-button';
 import { SunatLookup } from './sunat-lookup';
+import { PhoneInput } from './phone-input';
 import { Input } from '@happy/ui/input';
 import { Textarea } from '@happy/ui/textarea';
 import { Switch } from '@happy/ui/switch';
@@ -319,8 +320,8 @@ export function OperarioForm({ initial, areas, jornadaEstandar }: {
 
       <FormSection title="Contacto y notas">
         <FormGrid cols={2}>
-          <FormRow label="Teléfono">
-            <Input name="telefono" defaultValue={initial?.telefono ?? ''} />
+          <FormRow label="Teléfono" hint="9 dígitos (móvil Perú)">
+            <PhoneInput name="telefono" defaultValue={initial?.telefono} />
           </FormRow>
           <FormRow label="Email">
             <Input name="email" type="email" defaultValue={initial?.email ?? ''} />
