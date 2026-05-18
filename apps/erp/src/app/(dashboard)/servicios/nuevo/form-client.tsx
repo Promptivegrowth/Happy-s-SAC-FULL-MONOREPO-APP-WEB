@@ -373,27 +373,34 @@ export function NuevaOSForm({
           <FormRow label="Fecha entrega esperada">
             <Input name="fecha_entrega_esperada" type="date" />
           </FormRow>
-          <FormRow
-            label="Monto base (S/)"
-            hint={
-              tarifaInfo && tarifaInfo.detalle.length > 0
-                ? `Calculado desde la tabla de tarifas del taller (proceso × producto × talla). Para ajustar, editá las tarifas en /talleres/${tallerId}/tarifas.`
-                : tallerId
-                  ? '⚠️ Sin tarifas configuradas para este taller. Cargálas en /talleres/[id]/tarifas para que se autocalcule.'
-                  : 'Se autocalcula al elegir corte + taller + proceso.'
-            }
-          >
-            <Input
-              type="number"
-              step="0.01"
-              min={0}
-              value={montoBase}
-              readOnly
-              disabled
-              className="bg-slate-50 text-slate-700 cursor-not-allowed"
-              title="Auto-calculado desde la tabla de tarifas del taller"
-            />
-          </FormRow>
+          {(() => {
+            const tieneTarifa = !!(tarifaInfo && tarifaInfo.detalle.length > 0);
+            return (
+              <FormRow
+                label="Monto base (S/)"
+                hint={
+                  tieneTarifa
+                    ? `✓ Calculado desde la tabla de tarifas del taller (proceso × producto × talla). Para ajustar, editá las tarifas en /talleres/${tallerId}/tarifas.`
+                    : tallerId
+                      ? '⚠️ Sin tarifas configuradas para este taller — ingresá el monto manualmente. Para autocalcular en el futuro, cargá las tarifas en /talleres/[id]/tarifas o /configuracion/tarifas-servicios.'
+                      : 'Se autocalcula al elegir corte + taller + proceso. Si no hay tarifa configurada, podés ingresarlo manualmente.'
+                }
+              >
+                <Input
+                  type="number"
+                  step="0.01"
+                  min={0}
+                  value={montoBase}
+                  onChange={(e) => !tieneTarifa && setMontoBase(e.target.value)}
+                  readOnly={tieneTarifa}
+                  disabled={tieneTarifa}
+                  className={tieneTarifa ? 'bg-slate-50 text-slate-700 cursor-not-allowed' : ''}
+                  title={tieneTarifa ? 'Auto-calculado desde la tabla de tarifas del taller' : 'Sin tarifa configurada — ingresá monto manual'}
+                  placeholder={tieneTarifa ? undefined : 'Ej. 150.00'}
+                />
+              </FormRow>
+            );
+          })()}
           <FormRow
             label="Movilidad por unidad (S/)"
             hint={totalPrendasSeleccionadas > 0 ? `Total movilidad ≈ S/ ${(Number(movilidadUnit || 0) * totalPrendasSeleccionadas).toFixed(2)} (${totalPrendasSeleccionadas} unid)` : 'S/ por unidad enviada'}
