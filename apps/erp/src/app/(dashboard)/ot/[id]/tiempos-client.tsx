@@ -195,14 +195,18 @@ export function TiemposCostoTab({ otId, procesos, lineas, tiemposReales, disable
         <StatBox label="Tiempo estándar" value={`${totalEstandarMin.toFixed(2)} min`} sub="por unidad" />
         <StatBox label="Tiempo real" value={`${totalRealMin.toFixed(2)} min`} sub={`por unidad${totalRealMin !== totalEstandarMin ? ` · Δ ${(totalRealMin - totalEstandarMin).toFixed(2)}` : ''}`} />
         <StatBox
-          label="Costo MO OT"
-          value={PEN(totalCostoReal)}
+          label={unidades > 0 ? 'Costo MO OT' : 'Costo MO por unidad'}
+          value={PEN(unidades > 0 ? totalCostoReal : totalCostoRealUnit)}
           sub={
-            totalCostoEstandar > 0
-              ? `vs estándar ${PEN(totalCostoEstandar)} (${variacionPct > 0 ? '+' : ''}${variacionPct.toFixed(1)}%)`
-              : 'sin estándar configurado'
+            unidades === 0
+              ? totalCostoRealUnit > 0
+                ? `× 0 cortadas = S/ 0.00 total · declará avance para ver el total real`
+                : 'sin costo configurado (¿áreas sin valor/min?)'
+              : totalCostoEstandar > 0
+                ? `unitario ${PEN(totalCostoRealUnit)} · vs estándar ${PEN(totalCostoEstandar)} (${variacionPct > 0 ? '+' : ''}${variacionPct.toFixed(1)}%)`
+                : `unitario ${PEN(totalCostoRealUnit)} · sin estándar configurado`
           }
-          highlight={Math.abs(variacionPct) > 5}
+          highlight={unidades > 0 && Math.abs(variacionPct) > 5}
         />
       </div>
 
