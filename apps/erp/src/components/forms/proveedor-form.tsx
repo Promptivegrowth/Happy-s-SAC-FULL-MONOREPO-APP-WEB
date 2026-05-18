@@ -6,6 +6,7 @@ import { useActionForm } from './use-action-form';
 import { SubmitButton } from './submit-button';
 import { SunatLookup } from './sunat-lookup';
 import { UbigeoSelect } from './ubigeo-select';
+import { PhoneInput } from './phone-input';
 import { Input } from '@happy/ui/input';
 import { Textarea } from '@happy/ui/textarea';
 import { Switch } from '@happy/ui/switch';
@@ -39,17 +40,37 @@ export function ProveedorForm({ initial }: { initial?: Proveedor }) {
 
   const [numero, setNumero] = useState(initial?.numero_documento ?? '');
   const [razon, setRazon] = useState(initial?.razon_social ?? '');
+  const [nombreComercial, setNombreComercial] = useState(initial?.nombre_comercial ?? '');
   const [direccion, setDireccion] = useState(initial?.direccion ?? '');
+  const [ubigeo, setUbigeo] = useState<string | null>(initial?.ubigeo ?? null);
   const [imp, setImp] = useState(initial?.es_importacion ?? false);
   const [activo, setActivo] = useState(initial?.activo ?? true);
-  const [tipoDoc, setTipoDoc] = useState<'DNI' | 'RUC' | 'CE'>(
+  const [tipoDoc, setTipoDocRaw] = useState<'DNI' | 'RUC' | 'CE'>(
     (initial?.tipo_documento as 'DNI' | 'RUC' | 'CE' | null) ?? 'RUC',
   );
 
-  function applyLookup(d: { numero?: string; razonSocial?: string; direccion?: string }) {
+  // Al cambiar tipo de documento limpiamos campos del tipo previo para no
+  // arrastrar datos residuales (p.ej. nombre comercial de un DNI anterior).
+  function setTipoDoc(t: 'DNI' | 'RUC' | 'CE') {
+    setTipoDocRaw(t);
+    setRazon('');
+    setNombreComercial('');
+  }
+
+  function applyLookup(d: {
+    numero?: string;
+    razonSocial?: string;
+    nombreComercial?: string;
+    nombreCompleto?: string;
+    direccion?: string;
+    ubigeo?: string;
+  }) {
     if (d.numero) setNumero(d.numero);
-    if (d.razonSocial) setRazon(d.razonSocial);
+    // Para DNI usamos el nombre completo como razón social del proveedor.
+    setRazon(d.razonSocial ?? d.nombreCompleto ?? '');
+    setNombreComercial(d.nombreComercial ?? '');
     if (d.direccion) setDireccion(d.direccion);
+    if (d.ubigeo) setUbigeo(d.ubigeo);
   }
 
   return (
@@ -96,7 +117,11 @@ export function ProveedorForm({ initial }: { initial?: Proveedor }) {
             <Input name="razon_social" value={razon} onChange={(e) => setRazon(e.target.value)} required />
           </FormRow>
           <FormRow label="Nombre comercial">
-            <Input name="nombre_comercial" defaultValue={initial?.nombre_comercial ?? ''} />
+            <Input
+              name="nombre_comercial"
+              value={nombreComercial}
+              onChange={(e) => setNombreComercial(e.target.value)}
+            />
           </FormRow>
         </FormGrid>
       </FormSection>
@@ -107,10 +132,10 @@ export function ProveedorForm({ initial }: { initial?: Proveedor }) {
         </FormRow>
         <FormGrid cols={2}>
           <FormRow label="Ubigeo">
-            <UbigeoSelect name="ubigeo" value={initial?.ubigeo ?? null} />
+            <UbigeoSelect name="ubigeo" value={ubigeo} />
           </FormRow>
-          <FormRow label="Teléfono">
-            <Input name="telefono" defaultValue={initial?.telefono ?? ''} />
+          <FormRow label="Teléfono" hint="9 dígitos (móvil Perú)">
+            <PhoneInput name="telefono" defaultValue={initial?.telefono} />
           </FormRow>
           <FormRow label="Email">
             <Input name="email" type="email" defaultValue={initial?.email ?? ''} />
@@ -119,7 +144,7 @@ export function ProveedorForm({ initial }: { initial?: Proveedor }) {
             <Input name="contacto_nombre" defaultValue={initial?.contacto_nombre ?? ''} />
           </FormRow>
           <FormRow label="Tel. del contacto">
-            <Input name="contacto_telefono" defaultValue={initial?.contacto_telefono ?? ''} />
+            <PhoneInput name="contacto_telefono" defaultValue={initial?.contacto_telefono} />
           </FormRow>
         </FormGrid>
       </FormSection>

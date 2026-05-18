@@ -6,6 +6,7 @@ import { useActionForm } from './use-action-form';
 import { SubmitButton } from './submit-button';
 import { SunatLookup } from './sunat-lookup';
 import { UbigeoSelect } from './ubigeo-select';
+import { PhoneInput } from './phone-input';
 import { Input } from '@happy/ui/input';
 import { Textarea } from '@happy/ui/textarea';
 import { Switch } from '@happy/ui/switch';
@@ -38,26 +39,55 @@ export function ClienteForm({ initial }: { initial?: Cliente }) {
   const action = isEdit ? actualizarCliente.bind(null, initial!.id!) : crearCliente;
   const { formAction, state } = useActionForm(action, isEdit ? 'Cliente actualizado' : 'Cliente creado');
 
-  const [tipoDoc, setTipoDoc] = useState<'DNI' | 'RUC' | 'CE' | 'PASAPORTE'>(initial?.tipo_documento ?? 'DNI');
+  const [tipoDoc, setTipoDocRaw] = useState<'DNI' | 'RUC' | 'CE' | 'PASAPORTE'>(initial?.tipo_documento ?? 'DNI');
   const [numero, setNumero] = useState(initial?.numero_documento ?? '');
   const [razon, setRazon] = useState(initial?.razon_social ?? '');
   const [nombres, setNombres] = useState(initial?.nombres ?? '');
   const [apPat, setApPat] = useState(initial?.apellido_paterno ?? '');
   const [apMat, setApMat] = useState(initial?.apellido_materno ?? '');
+  const [nombreComercial, setNombreComercial] = useState(initial?.nombre_comercial ?? '');
   const [direccion, setDireccion] = useState(initial?.direccion ?? '');
+  const [ubigeo, setUbigeo] = useState<string | null>(initial?.ubigeo ?? null);
   const [activo, setActivo] = useState(initial?.activo ?? true);
 
   const isRUC = tipoDoc === 'RUC';
 
-  function applyLookup(d: { numero?: string; razonSocial?: string; nombres?: string; apellidoPaterno?: string; apellidoMaterno?: string; direccion?: string; nombreCompleto?: string }) {
+  // Al cambiar el tipo de documento, limpiar valores específicos del tipo
+  // anterior — evita arrastrar "CASTILLEJO" (apellido de un DNI previo)
+  // como nombre comercial cuando el usuario después consulta un RUC.
+  function setTipoDoc(t: 'DNI' | 'RUC' | 'CE' | 'PASAPORTE') {
+    setTipoDocRaw(t);
+    setRazon('');
+    setNombreComercial('');
+    setNombres('');
+    setApPat('');
+    setApMat('');
+  }
+
+  function applyLookup(d: {
+    numero?: string;
+    razonSocial?: string;
+    nombreComercial?: string;
+    nombres?: string;
+    apellidoPaterno?: string;
+    apellidoMaterno?: string;
+    direccion?: string;
+    ubigeo?: string;
+    nombreCompleto?: string;
+  }) {
     if (d.numero) setNumero(d.numero);
-    if (isRUC && d.razonSocial) setRazon(d.razonSocial);
-    if (!isRUC) {
-      if (d.nombres) setNombres(d.nombres);
-      if (d.apellidoPaterno) setApPat(d.apellidoPaterno);
-      if (d.apellidoMaterno) setApMat(d.apellidoMaterno);
+    if (isRUC) {
+      setRazon(d.razonSocial ?? '');
+      // SUNAT casi nunca devuelve nombre comercial — lo limpiamos siempre que
+      // no venga, así no queda un valor residual de búsquedas previas.
+      setNombreComercial(d.nombreComercial ?? '');
+    } else {
+      setNombres(d.nombres ?? '');
+      setApPat(d.apellidoPaterno ?? '');
+      setApMat(d.apellidoMaterno ?? '');
     }
     if (d.direccion) setDireccion(d.direccion);
+    if (d.ubigeo) setUbigeo(d.ubigeo);
   }
 
   return (
@@ -95,7 +125,11 @@ export function ClienteForm({ initial }: { initial?: Cliente }) {
               <Input name="razon_social" value={razon} onChange={(e) => setRazon(e.target.value)} required />
             </FormRow>
             <FormRow label="Nombre comercial">
-              <Input name="nombre_comercial" defaultValue={initial?.nombre_comercial ?? ''} />
+              <Input
+                name="nombre_comercial"
+                value={nombreComercial}
+                onChange={(e) => setNombreComercial(e.target.value)}
+              />
             </FormRow>
           </FormGrid>
         ) : (
@@ -128,11 +162,11 @@ export function ClienteForm({ initial }: { initial?: Cliente }) {
           <FormRow label="Email">
             <Input name="email" type="email" defaultValue={initial?.email ?? ''} />
           </FormRow>
-          <FormRow label="Teléfono">
-            <Input name="telefono" defaultValue={initial?.telefono ?? ''} />
+          <FormRow label="Teléfono" hint="9 dígitos (móvil Perú)">
+            <PhoneInput name="telefono" defaultValue={initial?.telefono} />
           </FormRow>
           <FormRow label="Teléfono secundario">
-            <Input name="telefono_secundario" defaultValue={initial?.telefono_secundario ?? ''} />
+            <PhoneInput name="telefono_secundario" defaultValue={initial?.telefono_secundario} />
           </FormRow>
           <FormRow label="Descuento por defecto (%)">
             <Input name="descuento_default" type="number" step="0.01" defaultValue={initial?.descuento_default ?? 0} min={0} max={100} />
@@ -141,7 +175,7 @@ export function ClienteForm({ initial }: { initial?: Cliente }) {
             <Input name="direccion" value={direccion} onChange={(e) => setDireccion(e.target.value)} />
           </FormRow>
           <FormRow label="Ubigeo" className="sm:col-span-2">
-            <UbigeoSelect name="ubigeo" value={initial?.ubigeo ?? null} />
+            <UbigeoSelect name="ubigeo" value={ubigeo} />
           </FormRow>
         </FormGrid>
       </FormSection>

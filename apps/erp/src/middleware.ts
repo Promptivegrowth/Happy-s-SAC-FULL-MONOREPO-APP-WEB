@@ -1,7 +1,16 @@
 import { createServerClient, type CookieOptions } from '@supabase/ssr';
 import { NextResponse, type NextRequest } from 'next/server';
 
-const PUBLIC_PATHS = ['/login', '/auth/callback', '/forgot-password', '/reset-password'];
+const PUBLIC_PATHS = [
+  '/login',
+  '/auth/callback',
+  '/forgot-password',
+  '/reset-password',
+  // Endpoint de catálogo INEI — data pública sin riesgo. Si requiriera auth,
+  // una sesión expirada lo hace devolver HTML del /login en vez de JSON y
+  // los dropdowns de ubigeo quedan mudos en el cliente.
+  '/api/ubigeo',
+];
 
 export async function middleware(request: NextRequest) {
   const response = NextResponse.next({ request });

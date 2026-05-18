@@ -16,6 +16,25 @@ type Props = {
   required?: boolean;
 };
 
+// Helper que valida que la respuesta sea JSON. Si /api/ubigeo cayera por algún
+// motivo (sesión expirada redirigiendo a /login, 500, etc.) la respuesta vendría
+// como HTML y r.json() tiraría. Capturamos y logueamos para que el dropdown no
+// quede mudo sin pista.
+async function fetchJson<T>(url: string): Promise<T | null> {
+  try {
+    const r = await fetch(url);
+    const ct = r.headers.get('content-type') ?? '';
+    if (!r.ok || !ct.includes('application/json')) {
+      console.warn(`[ubigeo] ${url} → ${r.status} (${ct || 'sin content-type'})`);
+      return null;
+    }
+    return (await r.json()) as T;
+  } catch (e) {
+    console.warn(`[ubigeo] ${url} → ${(e as Error).message}`);
+    return null;
+  }
+}
+
 export function UbigeoSelect({ value, defaultLabel, name, required }: Props) {
   const [codigo, setCodigo] = useState<string | null>(value ?? null);
   const [label, setLabel] = useState<string>(defaultLabel ?? '');
@@ -28,35 +47,50 @@ export function UbigeoSelect({ value, defaultLabel, name, required }: Props) {
   const [dists, setDists] = useState<Dist[]>([]);
   const [depSel, setDepSel] = useState<string>('');
   const [provSel, setProvSel] = useState<string>('');
+  const [loadingProvs, setLoadingProvs] = useState(false);
+  const [loadingDists, setLoadingDists] = useState(false);
 
   useEffect(() => {
     void cargarDeps();
-    // Auto-resolver label si viene codigo sin label
-    if (value && !defaultLabel) {
-      void fetch(`/api/ubigeo?q=${value}`).then(async (r) => {
-        if (r.ok) {
-          const list: UbigeoRow[] = await r.json();
-          const m = list.find((x) => x.codigo === value);
-          if (m) setLabel(m.ruta);
-        }
-      });
-    }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Reaccionar a cambios de `value` desde el padre (p.ej. autocompletado SUNAT).
+  useEffect(() => {
+    if (value && value !== codigo) {
+      setCodigo(value);
+      void (async () => {
+        const list = await fetchJson<UbigeoRow[]>(`/api/ubigeo?q=${value}`);
+        const m = list?.find((x) => x.codigo === value);
+        if (m) setLabel(m.ruta);
+      })();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [value]);
+
   async function cargarDeps() {
-    const r = await fetch('/api/ubigeo');
-    if (r.ok) setDeps(await r.json());
+    const data = await fetchJson<Dep[]>('/api/ubigeo');
+    if (data) setDeps(data);
   }
   async function cargarProvs(dep: string) {
-    setDepSel(dep); setProvSel(''); setDists([]);
-    const r = await fetch(`/api/ubigeo?dep=${dep}`);
-    if (r.ok) setProvs(await r.json());
+    setDepSel(dep); setProvSel(''); setDists([]); setProvs([]);
+    setLoadingProvs(true);
+    try {
+      const data = await fetchJson<Prov[]>(`/api/ubigeo?dep=${dep}`);
+      if (data) setProvs(data);
+    } finally {
+      setLoadingProvs(false);
+    }
   }
   async function cargarDists(prov: string) {
-    setProvSel(prov);
-    const r = await fetch(`/api/ubigeo?prov=${prov}`);
-    if (r.ok) setDists(await r.json());
+    setProvSel(prov); setDists([]);
+    setLoadingDists(true);
+    try {
+      const data = await fetchJson<Dist[]>(`/api/ubigeo?prov=${prov}`);
+      if (data) setDists(data);
+    } finally {
+      setLoadingDists(false);
+    }
   }
 
   // Búsqueda libre (debounced)
@@ -64,8 +98,8 @@ export function UbigeoSelect({ value, defaultLabel, name, required }: Props) {
     if (busca.length < 3) { setResultados([]); return; }
     const t = setTimeout(async () => {
       setLoading(true);
-      const r = await fetch(`/api/ubigeo?q=${encodeURIComponent(busca)}`);
-      if (r.ok) setResultados(await r.json());
+      const data = await fetchJson<UbigeoRow[]>(`/api/ubigeo?q=${encodeURIComponent(busca)}`);
+      setResultados(data ?? []);
       setLoading(false);
     }, 250);
     return () => clearTimeout(t);
@@ -137,7 +171,9 @@ export function UbigeoSelect({ value, defaultLabel, name, required }: Props) {
               {/* Departamentos */}
               <div className="max-h-56 overflow-auto rounded border">
                 <p className="sticky top-0 bg-corp-50 px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-corp-700">Departamento</p>
-                {deps.map((d) => (
+                {deps.length === 0 ? (
+                  <p className="p-2 text-xs text-slate-400">Cargando…</p>
+                ) : deps.map((d) => (
                   <button
                     key={d.departamento_codigo}
                     type="button"
@@ -151,8 +187,12 @@ export function UbigeoSelect({ value, defaultLabel, name, required }: Props) {
               {/* Provincias */}
               <div className="max-h-56 overflow-auto rounded border">
                 <p className="sticky top-0 bg-corp-50 px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-corp-700">Provincia</p>
-                {provs.length === 0 ? (
-                  <p className="p-2 text-xs text-slate-400">←</p>
+                {!depSel ? (
+                  <p className="p-2 text-xs italic text-slate-400">Elegí un departamento</p>
+                ) : loadingProvs ? (
+                  <p className="flex items-center gap-1 p-2 text-xs text-slate-500"><Loader2 className="h-3 w-3 animate-spin" /> Cargando…</p>
+                ) : provs.length === 0 ? (
+                  <p className="p-2 text-xs text-slate-400">Sin provincias</p>
                 ) : provs.map((p) => (
                   <button
                     key={p.provincia_codigo}
@@ -167,8 +207,12 @@ export function UbigeoSelect({ value, defaultLabel, name, required }: Props) {
               {/* Distritos */}
               <div className="max-h-56 overflow-auto rounded border">
                 <p className="sticky top-0 bg-corp-50 px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-corp-700">Distrito</p>
-                {dists.length === 0 ? (
-                  <p className="p-2 text-xs text-slate-400">←</p>
+                {!provSel ? (
+                  <p className="p-2 text-xs italic text-slate-400">Elegí una provincia</p>
+                ) : loadingDists ? (
+                  <p className="flex items-center gap-1 p-2 text-xs text-slate-500"><Loader2 className="h-3 w-3 animate-spin" /> Cargando…</p>
+                ) : dists.length === 0 ? (
+                  <p className="p-2 text-xs text-slate-400">Sin distritos</p>
                 ) : dists.map((d) => {
                   const dep = deps.find((x) => x.departamento_codigo === depSel)?.departamento ?? '';
                   const prov = provs.find((x) => x.provincia_codigo === provSel)?.provincia ?? '';
