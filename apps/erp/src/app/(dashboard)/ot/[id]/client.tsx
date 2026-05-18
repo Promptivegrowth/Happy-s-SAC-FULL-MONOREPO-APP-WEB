@@ -168,28 +168,34 @@ export function OtLineaProduccion({ otId, lineaId, planificada, cortada, fallas,
 
   const faltaCortar = Math.max(planificada - cortada, 0);
   return (
-    <div className="flex items-center gap-1">
-      <Input
-        type="number"
-        value={c}
-        onChange={(e) => setC(Number(e.target.value))}
-        min={0}
-        max={planificada}
-        className="h-8 w-16 text-xs"
-        placeholder="Cort."
-        title={`Acumulado. Plan ${planificada}. Falta cortar ${faltaCortar}.`}
-        autoFocus
-      />
-      <Input
-        type="number"
-        value={f}
-        onChange={(e) => setF(Number(e.target.value))}
-        min={0}
-        max={c}
-        className="h-8 w-14 text-xs"
-        placeholder="Fall."
-        title="Fallas (acumulado)"
-      />
+    <div className="flex items-end gap-1">
+      <div className="flex flex-col">
+        <label className="text-[9px] font-semibold uppercase tracking-wide text-slate-500">Cortado</label>
+        <Input
+          type="number"
+          value={c}
+          onChange={(e) => setC(Number(e.target.value))}
+          min={0}
+          max={planificada}
+          className="h-8 w-16 text-xs"
+          placeholder="0"
+          title={`Acumulado. Plan ${planificada}. Falta cortar ${faltaCortar}.`}
+          autoFocus
+        />
+      </div>
+      <div className="flex flex-col">
+        <label className="text-[9px] font-semibold uppercase tracking-wide text-slate-500">Fallas</label>
+        <Input
+          type="number"
+          value={f}
+          onChange={(e) => setF(Number(e.target.value))}
+          min={0}
+          max={c}
+          className="h-8 w-14 text-xs"
+          placeholder="0"
+          title="Unidades descartadas (acumulado)"
+        />
+      </div>
       <Button variant="premium" size="sm" onClick={save} disabled={pending} className="h-8 px-2" title="Guardar">
         {pending ? <Loader2 className="h-3 w-3 animate-spin" /> : <Save className="h-3 w-3" />}
       </Button>

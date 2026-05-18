@@ -130,12 +130,12 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
                 <Table>
                   <TableHeader><TableRow>
                     <TableHead>Producto</TableHead><TableHead>Talla</TableHead>
-                    <TableHead className="text-right">Plan</TableHead>
-                    <TableHead className="text-right">Cortado</TableHead>
-                    <TableHead className="text-right">Fallas</TableHead>
-                    <TableHead className="text-right">Terminado</TableHead>
-                    <TableHead className="text-right">Falta cortar</TableHead>
-                    <TableHead className="w-[200px]">Declarar</TableHead>
+                    <TableHead className="text-right" title="Unidades planificadas a producir">Plan</TableHead>
+                    <TableHead className="text-right" title="Unidades cortadas (acumulado)">Cortado</TableHead>
+                    <TableHead className="text-right" title="Unidades descartadas durante producción">Fallas</TableHead>
+                    <TableHead className="text-right" title="Unidades que terminaron como PT — se completa al cerrar la OT">Terminado</TableHead>
+                    <TableHead className="text-right" title="Plan − Cortado">Falta cortar</TableHead>
+                    <TableHead className="w-[200px]" title="Registrar avance: unidades cortadas y fallas (acumulado, no incremento)">Declarar</TableHead>
                     <TableHead className="w-[40px]"></TableHead>
                   </TableRow></TableHeader>
                   <TableBody>

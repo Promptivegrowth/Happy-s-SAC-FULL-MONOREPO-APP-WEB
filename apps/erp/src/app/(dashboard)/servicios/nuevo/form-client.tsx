@@ -375,14 +375,23 @@ export function NuevaOSForm({
           </FormRow>
           <FormRow
             label="Monto base (S/)"
-            hint={tarifaInfo && tarifaInfo.detalle.length > 0 ? `Sugerido: S/ ${tarifaInfo.total.toFixed(2)} (calculado por tarifas)` : 'Pago acordado al taller'}
+            hint={
+              tarifaInfo && tarifaInfo.detalle.length > 0
+                ? `Calculado desde la tabla de tarifas del taller (proceso × producto × talla). Para ajustar, editá las tarifas en /talleres/${tallerId}/tarifas.`
+                : tallerId
+                  ? '⚠️ Sin tarifas configuradas para este taller. Cargálas en /talleres/[id]/tarifas para que se autocalcule.'
+                  : 'Se autocalcula al elegir corte + taller + proceso.'
+            }
           >
             <Input
               type="number"
               step="0.01"
               min={0}
               value={montoBase}
-              onChange={(e) => setMontoBase(e.target.value)}
+              readOnly
+              disabled
+              className="bg-slate-50 text-slate-700 cursor-not-allowed"
+              title="Auto-calculado desde la tabla de tarifas del taller"
             />
           </FormRow>
           <FormRow
