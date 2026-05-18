@@ -46,6 +46,40 @@ export async function crearTarifaServicio(input: z.input<typeof schema>): Promis
   return r;
 }
 
+/**
+ * Actualiza una tarifa existente. Permite editar todos los campos (proceso,
+ * producto, talla, precio, vigencia, observación). Si el cliente quiere
+ * cambiar el scope (p.ej. de "solo proceso" a "proceso+talla"), simplemente
+ * setea/limpia los campos que correspondan.
+ */
+export async function actualizarTarifaServicio(
+  id: string,
+  input: z.input<typeof schema>,
+): Promise<ActionResult> {
+  const r = await runAction(async () => {
+    const data = schema.parse(input);
+    const { sb } = await requireUser();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const sbAny = sb as unknown as { from: (t: string) => any };
+    const { error } = await sbAny
+      .from('tarifas_servicios')
+      .update({
+        proceso: (data.proceso || null) as (typeof PROCESOS)[number] | null,
+        producto_id: data.producto_id || null,
+        talla: (data.talla || null) as (typeof TALLAS)[number] | null,
+        precio_unitario: data.precio_unitario,
+        vigente_desde: data.vigente_desde || null,
+        vigente_hasta: data.vigente_hasta || null,
+        observacion: data.observacion || null,
+      })
+      .eq('id', id);
+    if (error) throw new Error(error.message);
+    return null;
+  });
+  if (r.ok) await bumpPaths('/configuracion/tarifas-servicios');
+  return r;
+}
+
 export async function eliminarTarifaServicio(id: string): Promise<ActionResult> {
   const r = await runAction(async () => {
     const { sb } = await requireUser();

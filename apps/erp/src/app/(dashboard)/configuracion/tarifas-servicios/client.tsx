@@ -13,10 +13,10 @@ import {
 } from '@happy/ui/dialog';
 import { Input } from '@happy/ui/input';
 import { Label } from '@happy/ui/label';
-import { Plus, Trash2, Loader2 } from 'lucide-react';
+import { Plus, Trash2, Loader2, Pencil } from 'lucide-react';
 import { toast } from 'sonner';
 import { ComboboxBusqueda } from '../../corte/nuevo/form-client';
-import { crearTarifaServicio, eliminarTarifaServicio } from '@/server/actions/tarifas-servicios';
+import { crearTarifaServicio, actualizarTarifaServicio, eliminarTarifaServicio } from '@/server/actions/tarifas-servicios';
 
 const PROCESOS = [
   'TRAZADO', 'TENDIDO', 'CORTE', 'HABILITADO', 'COSTURA', 'BORDADO', 'ESTAMPADO',
@@ -27,28 +27,34 @@ const TALLAS = ['T0','T2','T4','T6','T8','T10','T12','T14','T16','TS','TAD'] as 
 
 type Producto = { id: string; codigo: string; nombre: string };
 
-export function NewButton({ productos }: { productos: Producto[] }) {
+export type TarifaInicial = {
+  id: string;
+  proceso: string | null;
+  producto_id: string | null;
+  talla: string | null;
+  precio_unitario: number;
+  observacion: string | null;
+};
+
+function TarifaModal({
+  productos,
+  open,
+  onOpenChange,
+  inicial,
+}: {
+  productos: Producto[];
+  open: boolean;
+  onOpenChange: (v: boolean) => void;
+  inicial?: TarifaInicial;
+}) {
   const router = useRouter();
-  const [open, setOpen] = useState(false);
   const [pending, start] = useTransition();
-  const [proceso, setProceso] = useState('');
-  const [productoId, setProductoId] = useState('');
-  const [talla, setTalla] = useState('');
-  const [precio, setPrecio] = useState('');
-  const [observacion, setObservacion] = useState('');
-
-  function reset() {
-    setProceso('');
-    setProductoId('');
-    setTalla('');
-    setPrecio('');
-    setObservacion('');
-  }
-
-  function onOpenChange(v: boolean) {
-    setOpen(v);
-    if (!v) reset();
-  }
+  const esEdit = Boolean(inicial?.id);
+  const [proceso, setProceso] = useState(inicial?.proceso ?? '');
+  const [productoId, setProductoId] = useState(inicial?.producto_id ?? '');
+  const [talla, setTalla] = useState(inicial?.talla ?? '');
+  const [precio, setPrecio] = useState(inicial ? String(inicial.precio_unitario) : '');
+  const [observacion, setObservacion] = useState(inicial?.observacion ?? '');
 
   function submit() {
     const p = Number(precio);
@@ -56,20 +62,23 @@ export function NewButton({ productos }: { productos: Producto[] }) {
       toast.error('Tarifa inválida');
       return;
     }
+    const input = {
+      proceso: (proceso || '') as (typeof PROCESOS)[number] | '',
+      producto_id: productoId || '',
+      talla: (talla || '') as (typeof TALLAS)[number] | '',
+      precio_unitario: p,
+      observacion,
+    };
     start(async () => {
-      const r = await crearTarifaServicio({
-        proceso: (proceso || '') as (typeof PROCESOS)[number] | '',
-        producto_id: productoId || '',
-        talla: (talla || '') as (typeof TALLAS)[number] | '',
-        precio_unitario: p,
-        observacion,
-      });
+      const r = esEdit
+        ? await actualizarTarifaServicio(inicial!.id, input)
+        : await crearTarifaServicio(input);
       if (r.ok) {
-        toast.success('Tarifa creada');
-        setOpen(false);
+        toast.success(esEdit ? 'Tarifa actualizada' : 'Tarifa creada');
+        onOpenChange(false);
         router.refresh();
       } else {
-        toast.error(r.error ?? 'Error al crear tarifa');
+        toast.error(r.error ?? 'Error al guardar tarifa');
       }
     });
   }
@@ -81,110 +90,123 @@ export function NewButton({ productos }: { productos: Producto[] }) {
   }));
 
   return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-lg">
+        <DialogHeader>
+          <DialogTitle>{esEdit ? 'Editar tarifa de servicio' : 'Nueva tarifa de servicio'}</DialogTitle>
+          <DialogDescription>
+            Tarifa estándar central — vale para TODOS los talleres.
+            Dejá un campo vacío para que aplique a CUALQUIER valor de ese campo.
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="space-y-3">
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-1.5">
+              <Label htmlFor="proceso">Proceso (opcional)</Label>
+              <select
+                id="proceso"
+                value={proceso}
+                onChange={(e) => setProceso(e.target.value)}
+                disabled={pending}
+                className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+              >
+                <option value="">— Cualquier proceso —</option>
+                {PROCESOS.map((p) => (
+                  <option key={p} value={p}>{p.replace('_', ' ')}</option>
+                ))}
+              </select>
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="talla">Talla (opcional)</Label>
+              <select
+                id="talla"
+                value={talla}
+                onChange={(e) => setTalla(e.target.value)}
+                disabled={pending}
+                className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+              >
+                <option value="">— Cualquier talla —</option>
+                {TALLAS.map((t) => (
+                  <option key={t} value={t}>{t.replace('T', '')}</option>
+                ))}
+              </select>
+            </div>
+          </div>
+
+          <div className="space-y-1.5">
+            <Label>Producto (opcional, vacío = todos)</Label>
+            <ComboboxBusqueda
+              options={productoOptions}
+              value={productoId}
+              onChange={setProductoId}
+              placeholder="Buscar producto…"
+            />
+          </div>
+
+          <div className="space-y-1.5">
+            <Label htmlFor="precio">Tarifa por unidad (S/)</Label>
+            <Input
+              id="precio"
+              type="number"
+              step="0.01"
+              min="0"
+              value={precio}
+              onChange={(e) => setPrecio(e.target.value)}
+              disabled={pending}
+              placeholder="4.50"
+            />
+          </div>
+
+          <div className="space-y-1.5">
+            <Label htmlFor="obs">Notas (opcional)</Label>
+            <Input
+              id="obs"
+              value={observacion}
+              onChange={(e) => setObservacion(e.target.value)}
+              disabled={pending}
+              placeholder="Ej: incluye plancha. Vigente Q2 2026."
+              maxLength={300}
+            />
+          </div>
+        </div>
+
+        <DialogFooter>
+          <Button variant="ghost" onClick={() => onOpenChange(false)} disabled={pending}>
+            Cancelar
+          </Button>
+          <Button variant="premium" onClick={submit} disabled={pending}>
+            {pending ? (
+              <><Loader2 className="h-4 w-4 animate-spin" /> {esEdit ? 'Guardando…' : 'Creando…'}</>
+            ) : esEdit ? 'Guardar cambios' : 'Crear tarifa'}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+export function NewButton({ productos }: { productos: Producto[] }) {
+  const [open, setOpen] = useState(false);
+  return (
     <>
       <Button variant="premium" className="gap-2" onClick={() => setOpen(true)}>
         <Plus className="h-4 w-4" /> Nueva tarifa
       </Button>
+      {/* Remontamos el modal cada vez que abre para resetear el state inicial */}
+      {open && <TarifaModal productos={productos} open={open} onOpenChange={setOpen} />}
+    </>
+  );
+}
 
-      <Dialog open={open} onOpenChange={onOpenChange}>
-        <DialogContent className="max-w-lg">
-          <DialogHeader>
-            <DialogTitle>Nueva tarifa de servicio</DialogTitle>
-            <DialogDescription>
-              Tarifa estándar central — vale para TODOS los talleres.
-              Dejá un campo vacío para que aplique a CUALQUIER valor de ese campo.
-            </DialogDescription>
-          </DialogHeader>
-
-          <div className="space-y-3">
-            <div className="grid grid-cols-2 gap-3">
-              <div className="space-y-1.5">
-                <Label htmlFor="proceso">Proceso (opcional)</Label>
-                <select
-                  id="proceso"
-                  value={proceso}
-                  onChange={(e) => setProceso(e.target.value)}
-                  disabled={pending}
-                  className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
-                >
-                  <option value="">— Cualquier proceso —</option>
-                  {PROCESOS.map((p) => (
-                    <option key={p} value={p}>
-                      {p.replace('_', ' ')}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="talla">Talla (opcional)</Label>
-                <select
-                  id="talla"
-                  value={talla}
-                  onChange={(e) => setTalla(e.target.value)}
-                  disabled={pending}
-                  className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
-                >
-                  <option value="">— Cualquier talla —</option>
-                  {TALLAS.map((t) => (
-                    <option key={t} value={t}>{t.replace('T', '')}</option>
-                  ))}
-                </select>
-              </div>
-            </div>
-
-            <div className="space-y-1.5">
-              <Label>Producto (opcional, vacío = todos)</Label>
-              <ComboboxBusqueda
-                options={productoOptions}
-                value={productoId}
-                onChange={setProductoId}
-                placeholder="Buscar producto…"
-              />
-            </div>
-
-            <div className="space-y-1.5">
-              <Label htmlFor="precio">Tarifa por unidad (S/)</Label>
-              <Input
-                id="precio"
-                type="number"
-                step="0.01"
-                min="0"
-                value={precio}
-                onChange={(e) => setPrecio(e.target.value)}
-                disabled={pending}
-                placeholder="4.50"
-              />
-            </div>
-
-            <div className="space-y-1.5">
-              <Label htmlFor="obs">Notas (opcional)</Label>
-              <Input
-                id="obs"
-                value={observacion}
-                onChange={(e) => setObservacion(e.target.value)}
-                disabled={pending}
-                placeholder="Ej: incluye plancha. Vigente Q2 2026."
-                maxLength={300}
-              />
-            </div>
-          </div>
-
-          <DialogFooter>
-            <Button variant="ghost" onClick={() => setOpen(false)} disabled={pending}>
-              Cancelar
-            </Button>
-            <Button variant="premium" onClick={submit} disabled={pending}>
-              {pending ? (
-                <>
-                  <Loader2 className="h-4 w-4 animate-spin" /> Creando…
-                </>
-              ) : (
-                'Crear tarifa'
-              )}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+export function EditButton({ productos, tarifa }: { productos: Producto[]; tarifa: TarifaInicial }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <>
+      <Button variant="ghost" size="sm" onClick={() => setOpen(true)} title="Editar tarifa">
+        <Pencil className="h-3.5 w-3.5" />
+      </Button>
+      {open && <TarifaModal productos={productos} open={open} onOpenChange={setOpen} inicial={tarifa} />}
     </>
   );
 }
