@@ -375,15 +375,18 @@ export function NuevaOSForm({
           </FormRow>
           {(() => {
             const tieneTarifa = !!(tarifaInfo && tarifaInfo.detalle.length > 0);
+            const productoNombre = corteSel?.producto_nombre ?? '';
             return (
               <FormRow
                 label="Monto base (S/)"
                 hint={
                   tieneTarifa
                     ? `✓ Calculado desde la tabla de tarifas del taller (proceso × producto × talla). Para ajustar, editá las tarifas en /talleres/${tallerId}/tarifas.`
-                    : tallerId
-                      ? '⚠️ Sin tarifas configuradas para este taller — ingresá el monto manualmente. Para autocalcular en el futuro, cargá las tarifas en /talleres/[id]/tarifas o /configuracion/tarifas-servicios.'
-                      : 'Se autocalcula al elegir corte + taller + proceso. Si no hay tarifa configurada, podés ingresarlo manualmente.'
+                    : tallerId && corteSel
+                      ? `⚠️ No hay tarifa configurada para esta combinación: ${proceso} + ${productoNombre} + tallas seleccionadas (ni override del taller ni tarifa central aplicable). Ingresá el monto manualmente o cargá la tarifa en /configuracion/tarifas-servicios para autocalcular en el futuro.`
+                      : tallerId
+                        ? '⚠️ Elegí un corte para calcular la tarifa.'
+                        : 'Se autocalcula al elegir corte + taller + proceso. Si no hay tarifa configurada, podés ingresarlo manualmente.'
                 }
               >
                 <Input
