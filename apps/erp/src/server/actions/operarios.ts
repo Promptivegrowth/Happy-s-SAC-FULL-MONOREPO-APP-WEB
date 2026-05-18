@@ -8,14 +8,20 @@ const TIPOS_OPERARIO = ['OPERARIO','AYUDANTE','SUPERVISOR','JEFE_AREA','ADMINIST
 const TIPOS_CONTRATO = ['PLANILLA','DESTAJO','MIXTO','HONORARIOS'] as const;
 const DIAS = ['LUN','MAR','MIE','JUE','VIE','SAB','DOM'] as const;
 
+const horarioDiaSchema = z.object({
+  dia: z.enum(DIAS),
+  inicio: z.string().regex(/^\d{2}:\d{2}$/, 'Hora inicio inválida'),
+  fin: z.string().regex(/^\d{2}:\d{2}$/, 'Hora fin inválida'),
+});
+
 const schema = z.object({
   codigo: z.string().max(20).optional().or(z.literal('')),
-  nombres: z.string().min(2).max(120),
+  nombres: z.string().min(2, 'Nombres requeridos').max(120),
   apellido_paterno: z.string().max(80).optional().or(z.literal('')),
   apellido_materno: z.string().max(80).optional().or(z.literal('')),
   dni: z.string().regex(/^\d{8}$/, 'DNI debe tener 8 dígitos').optional().or(z.literal('')),
   telefono: z.string().max(30).optional().or(z.literal('')),
-  email: z.string().email().optional().or(z.literal('')),
+  email: z.string().email('Email inválido').optional().or(z.literal('')),
   area_id: z.string().uuid().optional().or(z.literal('')),
   tipo_operario: z.enum(TIPOS_OPERARIO).default('OPERARIO'),
   tipo_contrato: z.enum(TIPOS_CONTRATO).optional().or(z.literal('')),
@@ -23,15 +29,23 @@ const schema = z.object({
   sueldo_base: z.coerce.number().nonnegative().optional().or(z.literal('')),
   fecha_ingreso: z.string().min(8).optional().or(z.literal('')),
   jornada_personalizada: z.boolean().default(false),
-  jornada_inicio: z.string().regex(/^\d{2}:\d{2}$/).optional().or(z.literal('')),
-  jornada_fin: z.string().regex(/^\d{2}:\d{2}$/).optional().or(z.literal('')),
+  jornada_horarios: z.array(horarioDiaSchema).default([]),
   notas: z.string().max(500).optional().or(z.literal('')),
   activo: z.boolean().default(true),
 });
 
 function parseForm(fd: FormData) {
-  const dias = fd.getAll('jornada_dias').filter((d) => DIAS.includes(String(d) as typeof DIAS[number])) as string[];
-  const data = schema.parse({
+  // El form serializa los horarios por día como JSON en jornada_horarios.
+  let horarios: unknown = [];
+  const rawHorarios = String(fd.get('jornada_horarios') ?? '').trim();
+  if (rawHorarios) {
+    try {
+      horarios = JSON.parse(rawHorarios);
+    } catch {
+      horarios = [];
+    }
+  }
+  return schema.parse({
     codigo: fd.get('codigo') || '',
     nombres: fd.get('nombres') || '',
     apellido_paterno: fd.get('apellido_paterno') || '',
@@ -46,15 +60,18 @@ function parseForm(fd: FormData) {
     sueldo_base: fd.get('sueldo_base') || '',
     fecha_ingreso: fd.get('fecha_ingreso') || '',
     jornada_personalizada: fd.get('jornada_personalizada') === 'on',
-    jornada_inicio: fd.get('jornada_inicio') || '',
-    jornada_fin: fd.get('jornada_fin') || '',
+    jornada_horarios: horarios,
     notas: fd.get('notas') || '',
     activo: fd.get('activo') !== 'off',
   });
-  return { ...data, jornada_dias: dias };
 }
 
 function clean(d: ReturnType<typeof parseForm>) {
+  const usaHorarios = d.jornada_personalizada && d.jornada_horarios.length > 0;
+  // Compatibilidad: mantenemos jornada_inicio/fin/dias para queries legacy.
+  // Derivamos del primer horario y unimos los días configurados.
+  const primer = usaHorarios ? d.jornada_horarios[0]! : null;
+  const dias = usaHorarios ? d.jornada_horarios.map((h) => h.dia) : null;
   return {
     codigo: (d.codigo ?? '').trim().toUpperCase(),
     nombres: d.nombres.trim(),
@@ -70,9 +87,10 @@ function clean(d: ReturnType<typeof parseForm>) {
     sueldo_base: d.sueldo_base === '' ? null : Number(d.sueldo_base),
     fecha_ingreso: d.fecha_ingreso || null,
     jornada_personalizada: d.jornada_personalizada,
-    jornada_inicio: d.jornada_personalizada ? (d.jornada_inicio || null) : null,
-    jornada_fin: d.jornada_personalizada ? (d.jornada_fin || null) : null,
-    jornada_dias: d.jornada_personalizada && d.jornada_dias.length > 0 ? d.jornada_dias : null,
+    jornada_inicio: primer?.inicio ?? null,
+    jornada_fin: primer?.fin ?? null,
+    jornada_dias: dias,
+    jornada_horarios: usaHorarios ? d.jornada_horarios : null,
     notas: d.notas || null,
     activo: d.activo,
   };

@@ -2,7 +2,7 @@
  *  para que la CLI del CI no intente reaplicarla. Uso: tsx _register-mig.ts <version> <name> */
 import dotenv from 'dotenv';
 import path from 'node:path';
-dotenv.config({ path: path.resolve(process.cwd(), '.env') });
+dotenv.config({ path: path.resolve(process.cwd(), '.env'), override: true });
 const TOKEN = process.env.SUPABASE_ACCESS_TOKEN!;
 const REF = process.env.SUPABASE_PROJECT_REF!;
 const [version, name] = process.argv.slice(2);

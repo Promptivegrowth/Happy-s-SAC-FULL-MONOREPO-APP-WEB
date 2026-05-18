@@ -29,7 +29,9 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
       actions={<DeleteButton action={onDelete} label="Desactivar" itemName="este operario" redirectTo="/operarios" />}
     >
       <OperarioForm
-        initial={data}
+        // jornada_horarios es jsonb — los tipos generados aún no lo incluyen,
+        // así que lo casteamos. El form valida la forma al renderizar.
+        initial={data as typeof data & { jornada_horarios?: { dia: string; inicio: string; fin: string }[] | null }}
         areas={(areas ?? []).map((a) => ({ id: a.id as string, nombre: a.nombre as string }))}
         jornadaEstandar={jornada}
       />

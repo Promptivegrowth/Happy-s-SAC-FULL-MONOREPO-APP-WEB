@@ -14,6 +14,8 @@ import { crearOperario, actualizarOperario } from '@/server/actions/operarios';
 
 type Area = { id: string; nombre: string };
 
+type HorarioDia = { dia: string; inicio: string; fin: string };
+
 type Operario = {
   id?: string;
   codigo?: string | null;
@@ -33,6 +35,7 @@ type Operario = {
   jornada_inicio?: string | null;
   jornada_fin?: string | null;
   jornada_dias?: string[] | null;
+  jornada_horarios?: HorarioDia[] | null;
   notas?: string | null;
   activo?: boolean | null;
 };
@@ -76,7 +79,32 @@ export function OperarioForm({ initial, areas, jornadaEstandar }: {
   const [apMat, setApMat] = useState(initial?.apellido_materno ?? '');
   const [tipoContrato, setTipoContrato] = useState(initial?.tipo_contrato ?? 'PLANILLA');
   const [jornadaPersonalizada, setJornadaPersonalizada] = useState<boolean>(initial?.jornada_personalizada ?? false);
-  const [jornadaDias, setJornadaDias] = useState<string[]>(initial?.jornada_dias ?? jornadaEstandar.dias);
+
+  // Cada día puede tener su propio horario. El estado se mantiene como un Map
+  // dia->{inicio,fin} por día, así al apagar/prender un día no se pierde el
+  // horario que el usuario haya configurado previamente.
+  const inicialHorarios = (): Record<string, { inicio: string; fin: string }> => {
+    const map: Record<string, { inicio: string; fin: string }> = {};
+    // Pre-carga la jornada estándar para todos los días (fallback cuando se
+    // marca un día sin tocar las horas).
+    for (const d of DIAS) {
+      map[d.v] = { inicio: jornadaEstandar.inicio, fin: jornadaEstandar.fin };
+    }
+    if (initial?.jornada_horarios?.length) {
+      for (const h of initial.jornada_horarios) map[h.dia] = { inicio: h.inicio, fin: h.fin };
+    } else if (initial?.jornada_inicio && initial?.jornada_fin && initial?.jornada_dias) {
+      for (const d of initial.jornada_dias) {
+        map[d] = { inicio: initial.jornada_inicio, fin: initial.jornada_fin };
+      }
+    }
+    return map;
+  };
+  const [horariosPorDia, setHorariosPorDia] = useState<Record<string, { inicio: string; fin: string }>>(inicialHorarios);
+  const [diasActivos, setDiasActivos] = useState<string[]>(
+    initial?.jornada_horarios?.length
+      ? initial.jornada_horarios.map((h) => h.dia)
+      : (initial?.jornada_dias ?? jornadaEstandar.dias),
+  );
 
   function applyLookup(d: { numero?: string; nombres?: string; apellidoPaterno?: string; apellidoMaterno?: string }) {
     if (d.numero) setDni(d.numero);
@@ -86,7 +114,23 @@ export function OperarioForm({ initial, areas, jornadaEstandar }: {
   }
 
   function toggleDia(v: string) {
-    setJornadaDias((arr) => arr.includes(v) ? arr.filter((x) => x !== v) : [...arr, v]);
+    setDiasActivos((arr) => (arr.includes(v) ? arr.filter((x) => x !== v) : [...arr, v]));
+  }
+
+  function setHoraDia(dia: string, campo: 'inicio' | 'fin', valor: string) {
+    setHorariosPorDia((m) => ({ ...m, [dia]: { ...m[dia]!, [campo]: valor } }));
+  }
+
+  /** Atajo: copia el horario del primer día activo al resto de días activos. */
+  function aplicarATodos() {
+    if (diasActivos.length === 0) return;
+    const ref = horariosPorDia[diasActivos[0]!];
+    if (!ref) return;
+    setHorariosPorDia((m) => {
+      const next = { ...m };
+      for (const d of diasActivos) next[d] = { ...ref };
+      return next;
+    });
   }
 
   const contratoSel = TIPOS_CONTRATO.find((c) => c.v === tipoContrato);
@@ -178,44 +222,97 @@ export function OperarioForm({ initial, areas, jornadaEstandar }: {
 
       <FormSection
         title="Jornada de trabajo"
-        description={`Por defecto usa la jornada estándar (${jornadaEstandar.inicio} a ${jornadaEstandar.fin}, ${jornadaEstandar.dias.join('-')}). Activá el switch sólo si este operario tiene un horario distinto.`}
+        description={`Por defecto usa la jornada estándar (${jornadaEstandar.inicio} a ${jornadaEstandar.fin}, ${jornadaEstandar.dias.join('-')}). Activá el switch sólo si este operario tiene un horario distinto. Cada día puede tener su propio horario.`}
       >
         <label className="flex items-center gap-3 text-sm">
           <Switch checked={jornadaPersonalizada} onCheckedChange={setJornadaPersonalizada} />
           <input type="hidden" name="jornada_personalizada" value={jornadaPersonalizada ? 'on' : 'off'} />
           <span>Jornada personalizada</span>
         </label>
+
         {jornadaPersonalizada && (
-          <div className="mt-3 rounded-lg border bg-slate-50 p-3 space-y-3">
-            <FormGrid cols={2}>
-              <FormRow label="Hora de entrada" required>
-                <Input name="jornada_inicio" type="time" defaultValue={initial?.jornada_inicio ?? jornadaEstandar.inicio} required={jornadaPersonalizada} />
-              </FormRow>
-              <FormRow label="Hora de salida" required>
-                <Input name="jornada_fin" type="time" defaultValue={initial?.jornada_fin ?? jornadaEstandar.fin} required={jornadaPersonalizada} />
-              </FormRow>
-            </FormGrid>
-            <div>
-              <p className="mb-1.5 text-xs font-medium text-slate-700">Días laborables</p>
-              <div className="flex flex-wrap gap-1.5">
-                {DIAS.map((d) => {
-                  const on = jornadaDias.includes(d.v);
+          <div className="mt-3 space-y-3 rounded-lg border bg-slate-50 p-3">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div>
+                <p className="text-xs font-medium text-slate-700">Días laborables</p>
+                <p className="text-[11px] text-slate-500">Tocá para activar/desactivar. Cada día activo configura su propia entrada/salida abajo.</p>
+              </div>
+              {diasActivos.length > 1 && (
+                <button
+                  type="button"
+                  onClick={aplicarATodos}
+                  className="rounded-md border border-slate-300 bg-white px-2.5 py-1 text-[11px] font-medium text-slate-600 transition hover:border-happy-400 hover:text-happy-700"
+                  title="Copia el horario del primer día activo al resto"
+                >
+                  Aplicar horario del 1° día a todos
+                </button>
+              )}
+            </div>
+            <div className="flex flex-wrap gap-1.5">
+              {DIAS.map((d) => {
+                const on = diasActivos.includes(d.v);
+                return (
+                  <button
+                    key={d.v}
+                    type="button"
+                    onClick={() => toggleDia(d.v)}
+                    className={`flex h-9 w-9 items-center justify-center rounded-md border text-sm font-semibold transition ${on ? 'border-happy-500 bg-happy-500 text-white' : 'border-slate-200 bg-white text-slate-500 hover:border-happy-300'}`}
+                  >
+                    {d.l}
+                  </button>
+                );
+              })}
+            </div>
+
+            {/* Inputs ocultos: serializamos los horarios por día como JSON para
+                que el server action los reciba en un solo campo. */}
+            <input
+              type="hidden"
+              name="jornada_horarios"
+              value={JSON.stringify(diasActivos.map((dia) => ({ dia, inicio: horariosPorDia[dia]?.inicio ?? '', fin: horariosPorDia[dia]?.fin ?? '' })))}
+            />
+
+            {diasActivos.length === 0 ? (
+              <p className="rounded border border-dashed border-slate-300 bg-white p-3 text-center text-xs italic text-slate-400">
+                Seleccioná al menos un día arriba para configurar su horario.
+              </p>
+            ) : (
+              <div className="space-y-1.5">
+                {DIAS.filter((d) => diasActivos.includes(d.v)).map((d) => {
+                  const h = horariosPorDia[d.v] ?? { inicio: jornadaEstandar.inicio, fin: jornadaEstandar.fin };
                   return (
-                    <label key={d.v} className={`flex h-9 w-9 cursor-pointer items-center justify-center rounded-md border text-sm font-semibold transition ${on ? 'border-happy-500 bg-happy-500 text-white' : 'border-slate-200 bg-white text-slate-500 hover:border-happy-300'}`}>
-                      <input
-                        type="checkbox"
-                        name="jornada_dias"
-                        value={d.v}
-                        checked={on}
-                        onChange={() => toggleDia(d.v)}
-                        className="sr-only"
-                      />
-                      {d.l}
-                    </label>
+                    <div key={d.v} className="grid grid-cols-[80px_1fr_1fr] items-center gap-2 rounded-md border border-slate-200 bg-white px-3 py-2">
+                      <span className="text-xs font-semibold text-slate-700">
+                        {d.l} <span className="ml-1 text-[10px] uppercase text-slate-400">{d.v}</span>
+                      </span>
+                      <label className="flex items-center gap-2 text-[11px] text-slate-500">
+                        Entrada
+                        <Input
+                          type="time"
+                          value={h.inicio}
+                          onChange={(e) => setHoraDia(d.v, 'inicio', e.target.value)}
+                          className="h-8 text-xs"
+                          required
+                        />
+                      </label>
+                      <label className="flex items-center gap-2 text-[11px] text-slate-500">
+                        Salida
+                        <Input
+                          type="time"
+                          value={h.fin}
+                          onChange={(e) => setHoraDia(d.v, 'fin', e.target.value)}
+                          className="h-8 text-xs"
+                          required
+                        />
+                      </label>
+                    </div>
                   );
                 })}
               </div>
-            </div>
+            )}
+            <p className="text-[11px] text-slate-500">
+              Sin límite de duración: cada día puede tener jornada completa, media o parcial.
+            </p>
           </div>
         )}
       </FormSection>

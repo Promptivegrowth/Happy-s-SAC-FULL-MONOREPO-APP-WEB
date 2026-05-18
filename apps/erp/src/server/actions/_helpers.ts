@@ -29,7 +29,12 @@ export async function runAction<T>(fn: () => Promise<T>): Promise<ActionResult<T
         const key = issue.path.join('.') || '_form';
         fields[key] = issue.message;
       }
-      return { ok: false, error: 'Datos inválidos', fields };
+      // Mostrar el primer detalle en el mensaje principal para que el usuario
+      // sepa qué corregir sin tener que cazar el campo con error en pantalla.
+      const primero = e.errors[0];
+      const campo = primero?.path.join('.') || 'datos';
+      const error = primero ? `Datos inválidos · ${campo}: ${primero.message}` : 'Datos inválidos';
+      return { ok: false, error, fields };
     }
     const msg = (e as Error).message ?? 'Error desconocido';
     return { ok: false, error: msg };
