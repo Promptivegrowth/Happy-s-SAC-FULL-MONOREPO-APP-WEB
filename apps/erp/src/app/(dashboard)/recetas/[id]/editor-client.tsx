@@ -613,7 +613,7 @@ function BomEditor({
       )}
 
       {filtroTalla ? (
-        <RecetaTabla lineas={porTalla[filtroTalla] ?? []} onDelete={onDelete} onToggleSale={onToggleSale} pending={pending} />
+        <RecetaTabla lineas={porTalla[filtroTalla] ?? []} onDelete={onDelete} onToggleSale={onToggleSale} pending={pending} congelada={congelada} />
       ) : (
         TALLAS.filter((t) => porTalla[t]!.length > 0).map((t) => (
           <Card key={t} className="overflow-hidden">
@@ -626,7 +626,7 @@ function BomEditor({
                 </Button>
               </div>
             </div>
-            <RecetaTabla lineas={porTalla[t]!} onDelete={onDelete} onToggleSale={onToggleSale} pending={pending} compact />
+            <RecetaTabla lineas={porTalla[t]!} onDelete={onDelete} onToggleSale={onToggleSale} pending={pending} compact congelada={congelada} />
           </Card>
         ))
       )}
@@ -671,12 +671,15 @@ function RecetaTabla({
   onToggleSale,
   pending,
   compact,
+  congelada = false,
 }: {
   lineas: Linea[];
   onDelete: (id: string) => void;
   onToggleSale: (id: string, valor: boolean) => void;
   pending: boolean;
   compact?: boolean;
+  /** Si true, deshabilita inputs de cantidad, toggle y botón eliminar. */
+  congelada?: boolean;
 }) {
   const [, start] = useTransition();
   // Orden estable: por categoría (TELA → AVIO → INSUMO → otros) y dentro de
@@ -727,6 +730,7 @@ function RecetaTabla({
                   valor={Number(l.cantidad)}
                   step={0.0001}
                   onChange={(v) => actualizarCampo(l.id, { cantidad: v })}
+                  disabled={congelada}
                 />
               </TableCell>
               <TableCell className="text-right text-sm">S/ {costo.toFixed(2)}</TableCell>
@@ -735,7 +739,7 @@ function RecetaTabla({
                   <Switch
                     checked={l.sale_a_servicio}
                     onCheckedChange={(v) => onToggleSale(l.id, !!v)}
-                    disabled={pending}
+                    disabled={pending || congelada}
                   />
                   <span className={l.sale_a_servicio ? 'font-medium text-emerald-700' : 'text-slate-500'}>
                     {l.sale_a_servicio ? 'Sí' : 'No'}
@@ -748,13 +752,21 @@ function RecetaTabla({
                     valor={Number(l.cantidad_almacen ?? 0)}
                     step={0.0001}
                     onChange={(v) => actualizarCampo(l.id, { cantidad_almacen: v })}
+                    disabled={congelada}
                   />
                 ) : (
                   <span className="text-xs text-slate-400">—</span>
                 )}
               </TableCell>
               <TableCell className="text-right">
-                <Button variant="ghost" size="sm" onClick={() => onDelete(l.id)} disabled={pending}>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => onDelete(l.id)}
+                  disabled={pending || congelada}
+                  title={congelada ? 'Receta bloqueada para edición' : 'Eliminar línea'}
+                  className={congelada ? 'opacity-30 cursor-not-allowed' : ''}
+                >
                   <Trash2 className="h-3.5 w-3.5 text-danger" />
                 </Button>
               </TableCell>
@@ -771,10 +783,12 @@ function InlineNumber({
   valor,
   step = 1,
   onChange,
+  disabled = false,
 }: {
   valor: number;
   step?: number;
   onChange: (v: number) => void;
+  disabled?: boolean;
 }) {
   const [v, setV] = useState(String(valor));
   useEffect(() => {
@@ -786,6 +800,7 @@ function InlineNumber({
       step={step}
       min={0}
       value={v}
+      disabled={disabled}
       onChange={(e) => setV(e.target.value)}
       onBlur={() => {
         const n = Number(v);
@@ -794,7 +809,7 @@ function InlineNumber({
       onKeyDown={(e) => {
         if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
       }}
-      className="h-8 w-24 rounded border border-slate-200 bg-white px-2 text-right font-mono text-xs focus:border-happy-400 focus:outline-none focus:ring-2 focus:ring-happy-100"
+      className={`h-8 w-24 rounded border border-slate-200 px-2 text-right font-mono text-xs focus:border-happy-400 focus:outline-none focus:ring-2 focus:ring-happy-100 ${disabled ? 'bg-slate-100 text-slate-500 cursor-not-allowed' : 'bg-white'}`}
     />
   );
 }

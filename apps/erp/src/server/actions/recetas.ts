@@ -52,7 +52,17 @@ function siguienteVersion(versionesExistentes: string[]): string {
 
 const MSG_CONGELADA =
   'La receta de este producto está congelada porque ya entró a producción (hay OTs generadas). ' +
-  'Para hacer cambios, creá una nueva versión desde el botón "Versionar" en el detalle de la receta.';
+  'Para hacer cambios, creá una nueva versión desde el botón "Crear nueva versión" en el banner de la receta.';
+
+const MSG_HISTORICA =
+  'Esta receta es una versión histórica (solo lectura). No se puede editar para preservar la trazabilidad ' +
+  'de costos y movimientos de OTs pasadas que la consumieron. Andá a la versión vigente del producto para hacer cambios.';
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function recetaActiva(sb: any, recetaId: string): Promise<boolean> {
+  const { data } = await sb.from('recetas').select('activa').eq('id', recetaId).maybeSingle();
+  return !!data?.activa;
+}
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 async function bloquearSiProductoEnProduccion(sb: any, productoId: string) {
@@ -61,6 +71,9 @@ async function bloquearSiProductoEnProduccion(sb: any, productoId: string) {
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 async function bloquearSiRecetaEnProduccion(sb: any, recetaId: string) {
+  // Primero histórica: si la receta ya no es la activa, no se edita NUNCA,
+  // sin importar OTs (las OTs viejas la consumieron y debe quedar inmutable).
+  if (!(await recetaActiva(sb, recetaId))) throw new Error(MSG_HISTORICA);
   const { data } = await sb.from('recetas').select('producto_id').eq('id', recetaId).maybeSingle();
   const pid = (data?.producto_id as string | undefined) ?? '';
   if (!pid) return; // no encontrada, dejamos que el insert/update reviente con error real
@@ -71,10 +84,13 @@ async function bloquearSiRecetaEnProduccion(sb: any, recetaId: string) {
 async function bloquearSiLineaEnProduccion(sb: any, lineaId: string) {
   const { data } = await sb
     .from('recetas_lineas')
-    .select('recetas(producto_id)')
+    .select('receta_id, recetas(producto_id, activa)')
     .eq('id', lineaId)
     .maybeSingle();
-  const pid = (data?.recetas?.producto_id as string | undefined) ?? '';
+  const rec = data?.recetas as { producto_id?: string; activa?: boolean } | null;
+  if (!rec) return;
+  if (rec.activa === false) throw new Error(MSG_HISTORICA);
+  const pid = rec.producto_id ?? '';
   if (!pid) return;
   await bloquearSiProductoEnProduccion(sb, pid);
 }
