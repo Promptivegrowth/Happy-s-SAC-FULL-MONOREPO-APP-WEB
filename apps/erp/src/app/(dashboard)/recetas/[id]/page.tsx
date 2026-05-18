@@ -46,13 +46,26 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
   // Editabilidad:
   //  - Si la receta es HISTÓRICA (activa=false) → bloqueada siempre. Las
   //    OTs viejas la usaron y modificarla alteraría reportes históricos.
-  //  - Si es ACTIVA y el producto ya tiene OTs generadas → congelada con
-  //    opción de "crear nueva versión".
-  //  - Si es ACTIVA y el producto no tiene OTs → totalmente editable.
-  const { count: cantidadOts } = await sb
+  //  - Si es ACTIVA y tiene OTs generadas DESPUÉS de su creación → congelada
+  //    con opción de "crear nueva versión". Las OTs anteriores a la receta
+  //    no la bloquean (corresponden a versiones previas del producto, no a
+  //    esta versión nueva).
+  //  - Si es ACTIVA y no hay OTs posteriores → totalmente editable.
+  const recetaCreatedAt = (receta as { created_at?: string }).created_at;
+  // Traemos las ot_lineas del producto con la fecha de su OT padre y
+  // filtramos en JS. PostgREST no aplica bien filtros gte() sobre columnas
+  // embedded en COUNT(head:true), así que preferimos la versión simple.
+  const { data: otLineasRaw } = await sb
     .from('ot_lineas')
-    .select('id', { count: 'exact', head: true })
-    .eq('producto_id', prod.id);
+    .select('id, ot:ot_id(created_at)')
+    .eq('producto_id', prod.id)
+    .limit(2000);
+  const cantidadOts = recetaCreatedAt
+    ? (otLineasRaw ?? []).filter((l) => {
+        const otCreated = (l as unknown as { ot?: { created_at?: string } | null }).ot?.created_at;
+        return otCreated ? otCreated >= recetaCreatedAt : true;
+      }).length
+    : (otLineasRaw ?? []).length;
   const esHistorica = !receta.activa;
   const recetaCongelada = esHistorica || (cantidadOts ?? 0) > 0;
 

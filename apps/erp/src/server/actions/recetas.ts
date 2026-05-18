@@ -34,6 +34,33 @@ async function productoEnProduccion(sb: any, productoId: string): Promise<boolea
 }
 
 /**
+ * Variante: ¿hay OTs del producto creadas DESPUÉS de la receta indicada?
+ * Las OTs anteriores corresponden a versiones previas y NO deben bloquear
+ * esta receta (sirve para que una v2.0 recién creada quede editable
+ * aunque la v1.0 vieja tenga OTs históricas).
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function recetaConOtsPosteriores(sb: any, recetaId: string, productoId: string): Promise<boolean> {
+  const { data: rec } = await sb
+    .from('recetas')
+    .select('created_at')
+    .eq('id', recetaId)
+    .maybeSingle();
+  const createdAt = rec?.created_at as string | undefined;
+  if (!createdAt) return await productoEnProduccion(sb, productoId);
+  const { data } = await sb
+    .from('ot_lineas')
+    .select('id, ot:ot_id(created_at)')
+    .eq('producto_id', productoId)
+    .limit(2000);
+  return ((data ?? []) as { ot?: { created_at?: string } | null }[])
+    .some((l) => {
+      const oc = l.ot?.created_at;
+      return oc ? oc >= createdAt : true;
+    });
+}
+
+/**
  * Siguiente versión de receta: "v1.0" → "v2.0", "v2.0" → "v3.0", etc.
  * Si el formato es raro, cae al siguiente entero después del último número
  * encontrado en cualquier versión existente.
@@ -71,13 +98,13 @@ async function bloquearSiProductoEnProduccion(sb: any, productoId: string) {
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 async function bloquearSiRecetaEnProduccion(sb: any, recetaId: string) {
-  // Primero histórica: si la receta ya no es la activa, no se edita NUNCA,
-  // sin importar OTs (las OTs viejas la consumieron y debe quedar inmutable).
+  // 1) Histórica → bloqueada siempre.
   if (!(await recetaActiva(sb, recetaId))) throw new Error(MSG_HISTORICA);
+  // 2) Activa con OTs creadas DESPUÉS de la receta → congelada.
   const { data } = await sb.from('recetas').select('producto_id').eq('id', recetaId).maybeSingle();
   const pid = (data?.producto_id as string | undefined) ?? '';
-  if (!pid) return; // no encontrada, dejamos que el insert/update reviente con error real
-  await bloquearSiProductoEnProduccion(sb, pid);
+  if (!pid) return;
+  if (await recetaConOtsPosteriores(sb, recetaId, pid)) throw new Error(MSG_CONGELADA);
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -88,11 +115,12 @@ async function bloquearSiLineaEnProduccion(sb: any, lineaId: string) {
     .eq('id', lineaId)
     .maybeSingle();
   const rec = data?.recetas as { producto_id?: string; activa?: boolean } | null;
+  const recId = data?.receta_id as string | undefined;
   if (!rec) return;
   if (rec.activa === false) throw new Error(MSG_HISTORICA);
   const pid = rec.producto_id ?? '';
-  if (!pid) return;
-  await bloquearSiProductoEnProduccion(sb, pid);
+  if (!pid || !recId) return;
+  if (await recetaConOtsPosteriores(sb, recId, pid)) throw new Error(MSG_CONGELADA);
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
