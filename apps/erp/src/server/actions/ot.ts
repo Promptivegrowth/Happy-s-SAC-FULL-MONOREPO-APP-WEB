@@ -280,3 +280,58 @@ export async function cerrarOT(otId: string, almacenDestinoId: string): Promise<
   if (r.ok) await bumpPaths(`/ot/${otId}`, '/ot', '/inventario', '/kardex');
   return r;
 }
+
+/**
+ * Upsert del tiempo real de una operación (proceso × talla) en una OT.
+ * Si tiempoRealMin es null/NaN o vacío, ELIMINA el override (vuelve al
+ * tiempo estándar). Esto evita filas-cero que confundan los cálculos.
+ */
+const tiempoRealSchema = z.object({
+  proceso_id: z.string().uuid(),
+  talla: z.string().min(1).max(10),
+  tiempo_real_min: z.coerce.number().nonnegative().nullable().optional(),
+  notas: z.string().max(500).optional().nullable(),
+});
+
+export async function upsertTiempoRealOT(
+  otId: string,
+  input: z.input<typeof tiempoRealSchema>,
+): Promise<ActionResult> {
+  const r = await runAction(async () => {
+    const data = tiempoRealSchema.parse(input);
+    const { sb, userId } = await requireUser();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const sbAny = sb as unknown as { from: (t: string) => any };
+    const valor = typeof data.tiempo_real_min === 'number' && !Number.isNaN(data.tiempo_real_min)
+      ? data.tiempo_real_min
+      : null;
+    // Borrar override si el valor es null/vacío.
+    if (valor === null) {
+      const { error } = await sbAny
+        .from('ot_tiempos_reales')
+        .delete()
+        .eq('ot_id', otId)
+        .eq('proceso_id', data.proceso_id)
+        .eq('talla', data.talla);
+      if (error) throw new Error(error.message);
+      return null;
+    }
+    const { error } = await sbAny
+      .from('ot_tiempos_reales')
+      .upsert(
+        {
+          ot_id: otId,
+          proceso_id: data.proceso_id,
+          talla: data.talla,
+          tiempo_real_min: valor,
+          notas: data.notas ?? null,
+          registrado_por: userId,
+        },
+        { onConflict: 'ot_id,proceso_id,talla' },
+      );
+    if (error) throw new Error(error.message);
+    return null;
+  });
+  if (r.ok) await bumpPaths(`/ot/${otId}`);
+  return r;
+}

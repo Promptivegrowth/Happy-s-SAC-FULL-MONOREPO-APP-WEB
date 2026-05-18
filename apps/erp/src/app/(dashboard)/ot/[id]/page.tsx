@@ -7,6 +7,7 @@ import { Badge } from '@happy/ui/badge';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@happy/ui/table';
 import { PageShell } from '@/components/page-shell';
 import { OtAcciones, OtNotaForm, OtLineaProduccion, AgregarLineaOTForm, EliminarLineaOT } from './client';
+import { TiemposCostoTab } from './tiempos-client';
 import { formatDate, formatDateTime, formatNumber } from '@happy/lib';
 import { Calendar, AlertTriangle, User } from 'lucide-react';
 
@@ -46,6 +47,40 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
   // producto, varias tallas). Si hay múltiples productos no fijamos default.
   const productosEnLineas = Array.from(new Set((lineas ?? []).map((l) => l.producto_id)));
   const productoIdDefault = productosEnLineas.length === 1 ? productosEnLineas[0] : undefined;
+
+  // Procesos del producto + tiempos reales registrados para esta OT.
+  // Si la OT es mono-producto (caso típico) traemos los procesos vigentes
+  // para mostrarlos en el tab "Tiempos & costo".
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const sbAny = sb as unknown as { from: (t: string) => any };
+  const [{ data: procesosRaw }, { data: tiemposRaw }] = await Promise.all([
+    productoIdDefault
+      ? sbAny
+          .from('productos_procesos')
+          .select('id, proceso, talla, orden, tiempo_estandar_min, areas_produccion(id, codigo, nombre, valor_minuto)')
+          .eq('producto_id', productoIdDefault)
+          .eq('activo', true)
+          .order('orden')
+      : Promise.resolve({ data: [] }),
+    sbAny
+      .from('ot_tiempos_reales')
+      .select('proceso_id, talla, tiempo_real_min, notas')
+      .eq('ot_id', id),
+  ]);
+  const procesos = ((procesosRaw ?? []) as Array<{
+    id: string; proceso: string; talla: string; orden: number; tiempo_estandar_min: number;
+    areas_produccion: { id: string; codigo: string; nombre: string; valor_minuto: number | null } | null;
+  }>).map((p) => ({
+    id: p.id,
+    proceso: p.proceso,
+    talla: p.talla,
+    orden: p.orden,
+    tiempo_estandar_min: Number(p.tiempo_estandar_min ?? 0),
+    area: p.areas_produccion,
+  }));
+  const tiemposReales = (tiemposRaw ?? []) as Array<{
+    proceso_id: string; talla: string; tiempo_real_min: number | null; notas: string | null;
+  }>;
   const atrasada = ot.fecha_entrega_objetivo && new Date(ot.fecha_entrega_objetivo) < new Date() && !['COMPLETADA','CANCELADA'].includes(ot.estado);
 
   const plan = (ot as unknown as { plan_maestro?: { codigo: string } | null }).plan_maestro;
@@ -72,6 +107,7 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
       <Tabs defaultValue="lineas">
         <TabsList>
           <TabsTrigger value="lineas">Líneas / Producción</TabsTrigger>
+          <TabsTrigger value="tiempos">Tiempos &amp; costo MO</TabsTrigger>
           <TabsTrigger value="eventos">Bitácora ({(eventos ?? []).length})</TabsTrigger>
         </TabsList>
 
@@ -147,6 +183,21 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
               )}
             </CardContent>
           </Card>
+        </TabsContent>
+
+        <TabsContent value="tiempos">
+          <TiemposCostoTab
+            otId={id}
+            procesos={procesos}
+            lineas={(lineas ?? []).map((l) => ({
+              id: l.id,
+              talla: l.talla,
+              cantidad_planificada: Number(l.cantidad_planificada ?? 0),
+              cantidad_cortada: Number(l.cantidad_cortada ?? 0),
+            }))}
+            tiemposReales={tiemposReales}
+            disabled={!puedeEditarLineas}
+          />
         </TabsContent>
 
         <TabsContent value="eventos">
