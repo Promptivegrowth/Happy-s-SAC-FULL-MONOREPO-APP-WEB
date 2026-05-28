@@ -109,7 +109,17 @@ export async function crearOperario(_prev: unknown, fd: FormData): Promise<Actio
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const sbAny = sb as unknown as { from: (t: string) => any };
     const { data: row, error } = await sbAny.from('operarios').insert(cleaned).select('id').single();
-    if (error) throw new Error(error.message);
+    if (error) {
+      // Duplicado de DNI entre operarios ACTIVOS (mig 44 cambió el unique
+      // global por uno parcial). Mensaje claro: el cliente puede tener
+      // varios inactivos con el mismo DNI (historial), pero solo 1 activo.
+      if (error.code === '23505' && /dni/i.test(error.message)) {
+        throw new Error(
+          `Ya existe un operario ACTIVO con DNI ${cleaned.dni}. Si es la misma persona reingresando, reactivá su ficha vieja en /operarios (filtro Inactivos) en vez de crear una nueva.`,
+        );
+      }
+      throw new Error(error.message);
+    }
     return { id: row.id as string };
   });
   if (r.ok) { await bumpPaths('/operarios'); redirect('/operarios'); }
