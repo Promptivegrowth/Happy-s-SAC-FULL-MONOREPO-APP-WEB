@@ -49,11 +49,11 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
   const productosEnLineas = Array.from(new Set((lineas ?? []).map((l) => l.producto_id)));
   const productoIdDefault = productosEnLineas.length === 1 ? productosEnLineas[0] : undefined;
 
-  // Procesos vigentes de TODOS los productos en líneas + tiempos reales de
-  // esta OT. Si hay varios productos, el cliente muestra un selector.
+  // Procesos vigentes de TODOS los productos en líneas + registros de tiempo
+  // de esta OT (mig 43) + operarios activos para el dropdown.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const sbAny = sb as unknown as { from: (t: string) => any };
-  const [{ data: procesosRaw }, { data: tiemposRaw }] = await Promise.all([
+  const [{ data: procesosRaw }, { data: registrosRaw }, { data: operariosRaw }] = await Promise.all([
     productosEnLineas.length > 0
       ? sbAny
           .from('productos_procesos')
@@ -64,9 +64,15 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
           .order('orden')
       : Promise.resolve({ data: [] }),
     sbAny
-      .from('ot_tiempos_reales')
-      .select('proceso_id, talla, tiempo_real_min, notas')
-      .eq('ot_id', id),
+      .from('ot_registros_tiempo')
+      .select('id, proceso_id, talla, fecha_inicio, fecha_fin, tiempo_total_min, unidades_procesadas, operario_id, notas, created_at, operarios(nombres, apellido_paterno)')
+      .eq('ot_id', id)
+      .order('created_at', { ascending: false }),
+    sbAny
+      .from('operarios')
+      .select('id, nombres, apellido_paterno, apellido_materno')
+      .eq('activo', true)
+      .order('nombres'),
   ]);
   const procesos = ((procesosRaw ?? []) as Array<{
     id: string; producto_id: string; proceso: string; talla: string; orden: number; tiempo_estandar_min: number;
@@ -80,9 +86,35 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
     tiempo_estandar_min: Number(p.tiempo_estandar_min ?? 0),
     area: p.areas_produccion,
   }));
-  const tiemposReales = (tiemposRaw ?? []) as Array<{
-    proceso_id: string; talla: string; tiempo_real_min: number | null; notas: string | null;
-  }>;
+  const registros = ((registrosRaw ?? []) as Array<{
+    id: string;
+    proceso_id: string;
+    talla: string;
+    fecha_inicio: string | null;
+    fecha_fin: string | null;
+    tiempo_total_min: number;
+    unidades_procesadas: number | null;
+    operario_id: string | null;
+    notas: string | null;
+    created_at: string;
+    operarios: { nombres: string; apellido_paterno: string | null } | null;
+  }>).map((r) => ({
+    id: r.id,
+    proceso_id: r.proceso_id,
+    talla: r.talla,
+    fecha_inicio: r.fecha_inicio,
+    fecha_fin: r.fecha_fin,
+    tiempo_total_min: Number(r.tiempo_total_min ?? 0),
+    unidades_procesadas: r.unidades_procesadas,
+    operario_id: r.operario_id,
+    operario_nombre: r.operarios ? [r.operarios.nombres, r.operarios.apellido_paterno].filter(Boolean).join(' ') : null,
+    notas: r.notas,
+    created_at: r.created_at,
+  }));
+  const operarios = ((operariosRaw ?? []) as Array<{ id: string; nombres: string; apellido_paterno: string | null; apellido_materno: string | null }>).map((o) => ({
+    id: o.id,
+    nombre: [o.nombres, o.apellido_paterno, o.apellido_materno].filter(Boolean).join(' '),
+  }));
   const atrasada = ot.fecha_entrega_objetivo && new Date(ot.fecha_entrega_objetivo) < new Date() && !['COMPLETADA','CANCELADA'].includes(ot.estado);
 
   const plan = (ot as unknown as { plan_maestro?: { codigo: string } | null }).plan_maestro;
@@ -220,7 +252,8 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
                 cantidad_cortada: Number(l.cantidad_cortada ?? 0),
               };
             })}
-            tiemposReales={tiemposReales}
+            registros={registros}
+            operarios={operarios}
             disabled={!puedeEditarLineas}
           />
         </TabsContent>

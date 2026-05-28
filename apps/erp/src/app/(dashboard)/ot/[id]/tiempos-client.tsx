@@ -6,15 +6,14 @@ import { Badge } from '@happy/ui/badge';
 import { Input } from '@happy/ui/input';
 import { Button } from '@happy/ui/button';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@happy/ui/table';
-import { Loader2, Save, RotateCcw } from 'lucide-react';
+import { Loader2, Plus, Trash2, Clock, X } from 'lucide-react';
 import { toast } from 'sonner';
-import { upsertTiempoRealOT } from '@/server/actions/ot';
+import { crearRegistroTiempoOT, eliminarRegistroTiempoOT } from '@/server/actions/ot';
 
 type Proceso = {
   id: string;
   producto_id: string;
   proceso: string;
-  /** null o '' = aplica a todas las tallas. */
   talla: string | null;
   orden: number;
   tiempo_estandar_min: number;
@@ -31,43 +30,56 @@ type Linea = {
   cantidad_cortada: number;
 };
 
-type TiempoReal = {
+type RegistroTiempo = {
+  id: string;
   proceso_id: string;
   talla: string;
-  tiempo_real_min: number | null;
+  fecha_inicio: string | null;
+  fecha_fin: string | null;
+  tiempo_total_min: number;
+  unidades_procesadas: number | null;
+  operario_id: string | null;
+  operario_nombre: string | null;
   notas: string | null;
+  created_at: string;
 };
+
+type Operario = { id: string; nombre: string };
 
 type Props = {
   otId: string;
   procesos: Proceso[];
   lineas: Linea[];
-  tiemposReales: TiempoReal[];
+  registros: RegistroTiempo[];
+  operarios: Operario[];
   disabled: boolean;
 };
 
 const PEN = (n: number) => `S/ ${n.toFixed(2)}`;
 
-export function TiemposCostoTab({ otId, procesos, lineas, tiemposReales, disabled }: Props) {
-  // Productos únicos presentes en las líneas de la OT.
+export function TiemposCostoTab({ otId, procesos, lineas, registros, operarios, disabled }: Props) {
+  // Productos únicos en las líneas de la OT
   const productos = useMemo(() => {
     const map = new Map<string, { id: string; nombre: string; codigo: string }>();
     for (const l of lineas) {
-      if (!map.has(l.producto_id)) {
-        map.set(l.producto_id, { id: l.producto_id, nombre: l.producto_nombre, codigo: l.producto_codigo });
-      }
+      if (!map.has(l.producto_id)) map.set(l.producto_id, { id: l.producto_id, nombre: l.producto_nombre, codigo: l.producto_codigo });
     }
-    return Array.from(map.values()).sort((a, b) => a.nombre.localeCompare(b.nombre));
+    return [...map.values()].sort((a, b) => a.nombre.localeCompare(b.nombre));
   }, [lineas]);
-  const [productoSel, setProductoSel] = useState<string>(productos[0]?.id ?? '');
+  const [productoSel, setProductoSel] = useState(productos[0]?.id ?? '');
 
-  // Líneas y procesos filtrados al producto seleccionado.
   const lineasProducto = useMemo(() => lineas.filter((l) => l.producto_id === productoSel), [lineas, productoSel]);
   const procesosProducto = useMemo(() => procesos.filter((p) => p.producto_id === productoSel), [procesos, productoSel]);
 
-  // Mapa producto_id → boolean (true si ese producto tiene procesos definidos).
-  // Sirve para mostrar ✓ / ⚠ en el selector y que el usuario vea de un vistazo
-  // qué productos están listos y cuáles necesitan cargar receta.
+  const tallasDisponibles = useMemo(() => {
+    const set = new Set<string>();
+    for (const l of lineasProducto) set.add(l.talla);
+    return [...set].sort();
+  }, [lineasProducto]);
+  const [tallaSel, setTallaSel] = useState('');
+  if (tallaSel && !tallasDisponibles.includes(tallaSel)) setTallaSel(tallasDisponibles[0] ?? '');
+  if (!tallaSel && tallasDisponibles.length > 0) setTallaSel(tallasDisponibles[0]!);
+
   const tieneProcesosPorProducto = useMemo(() => {
     const m = new Map<string, boolean>();
     for (const p of productos) m.set(p.id, false);
@@ -75,102 +87,81 @@ export function TiemposCostoTab({ otId, procesos, lineas, tiemposReales, disable
     return m;
   }, [productos, procesos]);
 
-  const tallasDisponibles = useMemo(() => {
-    const set = new Set<string>();
-    for (const l of lineasProducto) set.add(l.talla);
-    return Array.from(set).sort();
-  }, [lineasProducto]);
-  const [tallaSel, setTallaSel] = useState<string>('');
-  // Reset talla cuando cambia producto y la talla actual ya no existe.
-  if (tallaSel && !tallasDisponibles.includes(tallaSel)) {
-    setTallaSel(tallasDisponibles[0] ?? '');
-  }
-  if (!tallaSel && tallasDisponibles.length > 0) {
-    setTallaSel(tallasDisponibles[0]!);
-  }
-
-  // Mapa rápido (proceso_id|talla) → tiempo real
-  const overrideMap = useMemo(() => {
-    const m = new Map<string, TiempoReal>();
-    for (const t of tiemposReales) m.set(`${t.proceso_id}|${t.talla}`, t);
-    return m;
-  }, [tiemposReales]);
-
   if (productos.length === 0) {
     return (
       <Card>
         <CardContent className="py-10 text-center text-sm text-slate-400">
-          La OT aún no tiene líneas — agrega líneas para ver el costo MO por talla.
+          La OT aún no tiene líneas — agregá líneas para registrar tiempos.
         </CardContent>
       </Card>
     );
   }
 
   if (procesosProducto.length === 0) {
-    const prodSelInfo = productos.find((p) => p.id === productoSel);
+    const prodInfo = productos.find((p) => p.id === productoSel);
     return (
       <div className="space-y-4">
         {productos.length > 1 && (
-          <SelectorProducto
-            productos={productos}
-            productoSel={productoSel}
-            setProductoSel={setProductoSel}
-            tieneProcesosPorProducto={tieneProcesosPorProducto}
-          />
+          <SelectorProducto productos={productos} productoSel={productoSel} setProductoSel={setProductoSel} tieneProcesosPorProducto={tieneProcesosPorProducto} />
         )}
         <Card>
           <CardContent className="py-10 text-center text-sm text-slate-500">
-            <strong>{prodSelInfo?.nombre ?? 'Este producto'}</strong> no tiene operaciones definidas en su receta.
-            <br />
-            Andá a <span className="font-mono text-xs">Recetas (BOM) → {prodSelInfo?.nombre} → Procesos / Operaciones</span> para crearlas.
+            <strong>{prodInfo?.nombre}</strong> no tiene operaciones en su receta. Cargalas desde Recetas (BOM).
           </CardContent>
         </Card>
       </div>
     );
   }
 
-  // Un proceso aplica a la talla seleccionada si: es específico de esa talla,
-  // O si su talla es null/'' (significa "aplica a todas las tallas").
+  // Procesos de esta talla (los con talla null aplican a todas)
   const procesosTalla = procesosProducto.filter((p) => p.talla === tallaSel || !p.talla);
   const lineaTalla = lineasProducto.find((l) => l.talla === tallaSel);
-  // Para el cálculo de costo MO se usan unidades cortadas (lo que realmente
-  // pasó por el proceso). Si está en 0 mostramos el costo unitario igual.
   const unidades = Number(lineaTalla?.cantidad_cortada ?? 0);
   const unidadesPlan = Number(lineaTalla?.cantidad_planificada ?? 0);
 
+  // Agrupar procesos por área (área puede repetirse, cada operación es única)
+  const procesosPorArea = useMemo(() => {
+    const map = new Map<string, Proceso[]>();
+    for (const p of procesosTalla) {
+      const k = p.area?.codigo ?? 'SIN_AREA';
+      if (!map.has(k)) map.set(k, []);
+      map.get(k)!.push(p);
+    }
+    for (const list of map.values()) list.sort((a, b) => a.orden - b.orden);
+    return map;
+  }, [procesosTalla]);
+
+  // Registros filtrados a la talla seleccionada
+  const registrosTalla = useMemo(() => registros.filter((r) => r.talla === tallaSel), [registros, tallaSel]);
+
+  // Totales para el resumen
   let totalEstandarMin = 0;
   let totalRealMin = 0;
   let totalCostoEstandarUnit = 0;
   let totalCostoRealUnit = 0;
   for (const p of procesosTalla) {
     const std = Number(p.tiempo_estandar_min ?? 0);
-    const ov = overrideMap.get(`${p.id}|${tallaSel}`);
-    const real = ov?.tiempo_real_min != null ? Number(ov.tiempo_real_min) : std;
     const vmin = Number(p.area?.valor_minuto ?? 0);
+    const regs = registrosTalla.filter((r) => r.proceso_id === p.id);
+    const tiempoTotal = regs.reduce((s, r) => s + Number(r.tiempo_total_min), 0);
+    // tiempo "real por unidad" = total registrado / unidades, si hay
+    const tiempoRealUnit = unidades > 0 ? tiempoTotal / unidades : 0;
     totalEstandarMin += std;
-    totalRealMin += real;
+    totalRealMin += tiempoRealUnit > 0 ? tiempoRealUnit : std;
     totalCostoEstandarUnit += std * vmin;
-    totalCostoRealUnit += real * vmin;
+    totalCostoRealUnit += (tiempoRealUnit > 0 ? tiempoRealUnit : std) * vmin;
   }
   const totalCostoEstandar = totalCostoEstandarUnit * unidades;
   const totalCostoReal = totalCostoRealUnit * unidades;
-  const variacionPct = totalCostoEstandar > 0
-    ? ((totalCostoReal - totalCostoEstandar) / totalCostoEstandar) * 100
-    : 0;
+  const variacionPct = totalCostoEstandar > 0 ? ((totalCostoReal - totalCostoEstandar) / totalCostoEstandar) * 100 : 0;
 
   return (
     <div className="space-y-4">
-      {/* Selector de producto (solo si hay varios) */}
       {productos.length > 1 && (
-        <SelectorProducto
-          productos={productos}
-          productoSel={productoSel}
-          setProductoSel={setProductoSel}
-          tieneProcesosPorProducto={tieneProcesosPorProducto}
-        />
+        <SelectorProducto productos={productos} productoSel={productoSel} setProductoSel={setProductoSel} tieneProcesosPorProducto={tieneProcesosPorProducto} />
       )}
 
-      {/* Selector de talla */}
+      {/* Selector talla */}
       <div className="flex flex-wrap items-center gap-2">
         <span className="text-xs font-medium text-slate-500">Talla:</span>
         {tallasDisponibles.map((t) => (
@@ -179,9 +170,7 @@ export function TiemposCostoTab({ otId, procesos, lineas, tiemposReales, disable
             type="button"
             onClick={() => setTallaSel(t)}
             className={`flex h-8 min-w-[2.5rem] items-center justify-center rounded-md border px-2 text-xs font-semibold transition ${
-              tallaSel === t
-                ? 'border-happy-500 bg-happy-500 text-white'
-                : 'border-slate-200 bg-white text-slate-600 hover:border-happy-300'
+              tallaSel === t ? 'border-happy-500 bg-happy-500 text-white' : 'border-slate-200 bg-white text-slate-600 hover:border-happy-300'
             }`}
           >
             {t.replace('T', '')}
@@ -189,7 +178,7 @@ export function TiemposCostoTab({ otId, procesos, lineas, tiemposReales, disable
         ))}
       </div>
 
-      {/* Stats por talla */}
+      {/* Stats agregadas */}
       <div className="grid gap-3 sm:grid-cols-4">
         <StatBox label="Unidades cortadas" value={`${unidades} / ${unidadesPlan}`} sub="planificadas" />
         <StatBox label="Tiempo estándar" value={`${totalEstandarMin.toFixed(2)} min`} sub="por unidad" />
@@ -200,65 +189,114 @@ export function TiemposCostoTab({ otId, procesos, lineas, tiemposReales, disable
           sub={
             unidades === 0
               ? totalCostoRealUnit > 0
-                ? `× 0 cortadas = S/ 0.00 total · declará avance para ver el total real`
-                : 'sin costo configurado (¿áreas sin valor/min?)'
+                ? `× 0 cortadas = S/ 0.00 total · declará avance para ver total real`
+                : 'sin costo configurado'
               : totalCostoEstandar > 0
                 ? `unitario ${PEN(totalCostoRealUnit)} · vs estándar ${PEN(totalCostoEstandar)} (${variacionPct > 0 ? '+' : ''}${variacionPct.toFixed(1)}%)`
-                : `unitario ${PEN(totalCostoRealUnit)} · sin estándar configurado`
+                : `unitario ${PEN(totalCostoRealUnit)}`
           }
           highlight={unidades > 0 && Math.abs(variacionPct) > 5}
         />
       </div>
 
+      {/* Vista jerárquica área → operación → registros */}
       <Card>
         <CardHeader>
           <CardTitle className="text-base">
-            Operaciones · {productos.find((p) => p.id === productoSel)?.nombre ?? ''} · Talla {tallaSel.replace('T', '')}
+            Registro de avance · {productos.find((p) => p.id === productoSel)?.nombre} · Talla {tallaSel.replace('T', '')}
           </CardTitle>
+          <p className="text-xs text-slate-500">
+            Por cada operación podés cargar uno o varios registros: fecha/hora inicio + fin (calcula duración) o tiempo total directo en minutos.
+          </p>
+        </CardHeader>
+        <CardContent className="space-y-3 p-3">
+          {[...procesosPorArea.entries()].map(([areaCodigo, procs]) => {
+            const area = procs[0]!.area;
+            return (
+              <div key={areaCodigo} className="rounded-md border border-slate-200 bg-slate-50/50 p-3">
+                <div className="mb-2 flex items-center gap-2">
+                  <Badge variant="default" className="bg-corp-600 text-[10px]">{areaCodigo}</Badge>
+                  <span className="text-xs text-slate-500">{area?.nombre ?? areaCodigo}</span>
+                  {area?.valor_minuto != null && (
+                    <span className="ml-2 font-mono text-[10px] text-slate-400">S/ {Number(area.valor_minuto).toFixed(3)}/min</span>
+                  )}
+                </div>
+                <div className="space-y-2">
+                  {procs.map((p) => (
+                    <OperacionBlock
+                      key={p.id}
+                      otId={otId}
+                      proceso={p}
+                      talla={tallaSel}
+                      registros={registrosTalla.filter((r) => r.proceso_id === p.id)}
+                      operarios={operarios}
+                      esAreaCorte={areaCodigo === 'CORTE'}
+                      disabled={disabled}
+                    />
+                  ))}
+                </div>
+              </div>
+            );
+          })}
+        </CardContent>
+      </Card>
+
+      {/* Resumen tabla (lo que antes era el editor) */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">Resumen por operación</CardTitle>
         </CardHeader>
         <CardContent className="p-0">
-          {procesosTalla.length === 0 ? (
-            <div className="px-6 py-10 text-center text-sm text-slate-400">
-              No hay operaciones definidas para la talla {tallaSel.replace('T', '')}. Configurálas desde la receta del producto.
-            </div>
-          ) : (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead className="w-[40px] text-center">#</TableHead>
-                  <TableHead>Operación</TableHead>
-                  <TableHead>Área</TableHead>
-                  <TableHead className="text-right">Estándar (min)</TableHead>
-                  <TableHead className="text-right">Real (min)</TableHead>
-                  <TableHead className="text-right">S/ por min</TableHead>
-                  <TableHead className="text-right">Costo unit. real</TableHead>
-                  <TableHead className="w-[150px]"></TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {procesosTalla.map((p) => (
-                  <ProcesoRow
-                    key={p.id}
-                    otId={otId}
-                    proceso={p}
-                    talla={tallaSel}
-                    override={overrideMap.get(`${p.id}|${tallaSel}`) ?? null}
-                    disabled={disabled}
-                  />
-                ))}
-              </TableBody>
-            </Table>
-          )}
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead className="w-[40px] text-center">#</TableHead>
+                <TableHead>Operación</TableHead>
+                <TableHead>Área</TableHead>
+                <TableHead className="text-right">Estándar (min/u)</TableHead>
+                <TableHead className="text-right">Total registrado (min)</TableHead>
+                <TableHead className="text-right">Real (min/u)</TableHead>
+                <TableHead className="text-right">S/ por min</TableHead>
+                <TableHead className="text-right">Costo unit. real</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {procesosTalla.map((p) => {
+                const std = Number(p.tiempo_estandar_min ?? 0);
+                const vmin = Number(p.area?.valor_minuto ?? 0);
+                const regs = registrosTalla.filter((r) => r.proceso_id === p.id);
+                const totalRegistrado = regs.reduce((s, r) => s + Number(r.tiempo_total_min), 0);
+                const realPorUnidad = unidades > 0 ? totalRegistrado / unidades : 0;
+                const tiempoUsado = realPorUnidad > 0 ? realPorUnidad : std;
+                return (
+                  <TableRow key={p.id}>
+                    <TableCell className="text-center text-xs text-slate-500">{p.orden}</TableCell>
+                    <TableCell className="text-sm font-medium">{p.proceso.replace(/_/g, ' ')}</TableCell>
+                    <TableCell className="text-xs"><Badge variant="outline" className="text-[10px]">{p.area?.codigo ?? '—'}</Badge></TableCell>
+                    <TableCell className="text-right font-mono text-xs">{std.toFixed(2)}</TableCell>
+                    <TableCell className="text-right font-mono text-xs">
+                      {regs.length > 0 ? totalRegistrado.toFixed(2) : <span className="text-slate-300">—</span>}
+                    </TableCell>
+                    <TableCell className="text-right font-mono text-xs">
+                      {realPorUnidad > 0 ? realPorUnidad.toFixed(2) : <span className="text-slate-300">—</span>}
+                    </TableCell>
+                    <TableCell className="text-right font-mono text-xs text-slate-500">{vmin > 0 ? PEN(vmin) : <span className="text-slate-400">—</span>}</TableCell>
+                    <TableCell className="text-right font-mono text-xs font-semibold text-emerald-700">{PEN(tiempoUsado * vmin)}</TableCell>
+                  </TableRow>
+                );
+              })}
+            </TableBody>
+          </Table>
         </CardContent>
       </Card>
 
       <div className="rounded-md border-2 border-dashed border-slate-200 bg-slate-50 p-3 text-xs text-slate-600">
         <p className="font-medium text-corp-900">¿Cómo funciona?</p>
         <ul className="ml-4 mt-1 list-disc space-y-0.5">
-          <li>El <strong>costo estándar</strong> usa el tiempo definido en la receta del producto × valor/min del área.</li>
-          <li>El <strong>costo real</strong> sustituye el tiempo estándar por el medido en esta OT (si lo cargás).</li>
-          <li>Si dejás vacío el tiempo real, esa operación usa el estándar.</li>
-          <li>Los totales se multiplican por unidades <strong>cortadas</strong> (no planificadas) para reflejar producción real.</li>
+          <li>Cada operación puede tener <strong>múltiples registros de tiempo</strong> (uno por lote/sesión).</li>
+          <li>Podés ingresar <strong>fecha/hora inicio + fin</strong> y el sistema calcula la duración, o ingresar el <strong>tiempo total directo</strong> en minutos.</li>
+          <li>El campo <strong>unidades procesadas</strong> es opcional; en CORTE muchas veces se deja vacío (es global por operación).</li>
+          <li>El <strong>resumen de abajo</strong> es informativo: suma los registros y calcula real/unidad y costo.</li>
         </ul>
       </div>
     </div>
@@ -266,10 +304,7 @@ export function TiemposCostoTab({ otId, procesos, lineas, tiemposReales, disable
 }
 
 function SelectorProducto({
-  productos,
-  productoSel,
-  setProductoSel,
-  tieneProcesosPorProducto,
+  productos, productoSel, setProductoSel, tieneProcesosPorProducto,
 }: {
   productos: { id: string; nombre: string; codigo: string }[];
   productoSel: string;
@@ -286,16 +321,13 @@ function SelectorProducto({
             key={p.id}
             type="button"
             onClick={() => setProductoSel(p.id)}
-            title={ok ? 'Tiene operaciones definidas' : 'Sin operaciones — necesita cargar receta de procesos'}
+            title={ok ? 'Tiene operaciones definidas' : 'Sin operaciones — cargar receta'}
             className={`flex items-center gap-1 rounded-md border px-2.5 py-1 text-xs font-medium transition ${
-              productoSel === p.id
-                ? 'border-happy-500 bg-happy-500 text-white'
-                : 'border-slate-200 bg-white text-slate-700 hover:border-happy-300'
+              productoSel === p.id ? 'border-happy-500 bg-happy-500 text-white' : 'border-slate-200 bg-white text-slate-700 hover:border-happy-300'
             }`}
           >
             <span className={ok ? 'text-emerald-500' : 'text-amber-500'}>{ok ? '●' : '⚠'}</span>
             {p.nombre}
-            {p.codigo && <span className={`ml-1 font-mono text-[9px] ${productoSel === p.id ? 'text-happy-100' : 'text-slate-400'}`}>{p.codigo}</span>}
           </button>
         );
       })}
@@ -313,119 +345,213 @@ function StatBox({ label, value, sub, highlight }: { label: string; value: strin
   );
 }
 
-function ProcesoRow({
-  otId,
-  proceso,
-  talla,
-  override,
-  disabled,
+function OperacionBlock({
+  otId, proceso, talla, registros, operarios, esAreaCorte, disabled,
 }: {
   otId: string;
   proceso: Proceso;
   talla: string;
-  override: TiempoReal | null;
+  registros: RegistroTiempo[];
+  operarios: Operario[];
+  esAreaCorte: boolean;
   disabled: boolean;
 }) {
+  const [openForm, setOpenForm] = useState(false);
+  const totalMin = registros.reduce((s, r) => s + Number(r.tiempo_total_min), 0);
+  const totalUnid = registros.reduce((s, r) => s + Number(r.unidades_procesadas ?? 0), 0);
+  return (
+    <div className="rounded-md border border-slate-200 bg-white p-2">
+      <div className="flex items-center justify-between gap-2">
+        <div className="min-w-0 flex-1">
+          <p className="text-sm font-medium text-corp-900">
+            <span className="mr-2 text-[10px] text-slate-400">#{proceso.orden}</span>
+            {proceso.proceso.replace(/_/g, ' ')}
+          </p>
+          <p className="text-[10px] text-slate-500">
+            Estándar: {Number(proceso.tiempo_estandar_min ?? 0).toFixed(2)} min/u ·{' '}
+            {registros.length === 0 ? (
+              <span className="italic">sin registros</span>
+            ) : (
+              <span>
+                {registros.length} registro{registros.length === 1 ? '' : 's'} · total {totalMin.toFixed(2)} min
+                {totalUnid > 0 && ` · ${totalUnid} unid`}
+              </span>
+            )}
+          </p>
+        </div>
+        {!disabled && (
+          <Button variant="outline" size="sm" onClick={() => setOpenForm((o) => !o)} className="h-7 gap-1 px-2 text-xs">
+            {openForm ? <X className="h-3 w-3" /> : <Plus className="h-3 w-3" />}
+            {openForm ? 'Cerrar' : 'Registrar'}
+          </Button>
+        )}
+      </div>
+
+      {openForm && (
+        <FormRegistro
+          otId={otId}
+          procesoId={proceso.id}
+          talla={talla}
+          operarios={operarios}
+          esAreaCorte={esAreaCorte}
+          onSaved={() => setOpenForm(false)}
+        />
+      )}
+
+      {registros.length > 0 && (
+        <div className="mt-2 space-y-1">
+          {registros.map((r) => (
+            <RegistroRow key={r.id} otId={otId} registro={r} disabled={disabled} />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function FormRegistro({
+  otId, procesoId, talla, operarios, esAreaCorte, onSaved,
+}: {
+  otId: string;
+  procesoId: string;
+  talla: string;
+  operarios: Operario[];
+  esAreaCorte: boolean;
+  onSaved: () => void;
+}) {
   const [pending, start] = useTransition();
-  const std = Number(proceso.tiempo_estandar_min ?? 0);
-  const vmin = Number(proceso.area?.valor_minuto ?? 0);
-  const realInicial = override?.tiempo_real_min != null ? String(override.tiempo_real_min) : '';
-  const [valor, setValor] = useState<string>(realInicial);
+  const [modo, setModo] = useState<'intervalo' | 'directo'>('intervalo');
+  const [fechaInicio, setFechaInicio] = useState('');
+  const [fechaFin, setFechaFin] = useState('');
+  const [tiempoDirecto, setTiempoDirecto] = useState('');
+  const [unidades, setUnidades] = useState('');
+  const [operarioId, setOperarioId] = useState('');
+  const [notas, setNotas] = useState('');
 
-  const realNum = valor.trim() ? Number(valor) : std;
-  const costoUnitReal = realNum * vmin;
-  const dirty = valor.trim() !== realInicial.trim();
-
-  function save() {
-    const num = valor.trim() ? Number(valor) : null;
-    if (num !== null && (Number.isNaN(num) || num < 0)) {
-      toast.error('Tiempo real inválido');
-      return;
-    }
+  function submit() {
     start(async () => {
-      const r = await upsertTiempoRealOT(otId, {
-        proceso_id: proceso.id,
+      const r = await crearRegistroTiempoOT(otId, {
+        proceso_id: procesoId,
         talla,
-        tiempo_real_min: num,
+        fecha_inicio: modo === 'intervalo' ? fechaInicio : '',
+        fecha_fin: modo === 'intervalo' ? fechaFin : '',
+        tiempo_total_min: modo === 'directo' && tiempoDirecto ? Number(tiempoDirecto) : undefined,
+        unidades_procesadas: unidades ? Number(unidades) : null,
+        operario_id: operarioId || '',
+        notas: notas || null,
       });
       if (r.ok) {
-        toast.success(num === null ? 'Tiempo real removido (usa estándar)' : 'Tiempo real guardado');
+        toast.success('Registro guardado');
+        onSaved();
       } else {
-        toast.error(r.error ?? 'Error al guardar');
+        toast.error(r.error ?? 'Error al guardar registro');
       }
     });
   }
 
-  function reset() {
-    setValor('');
+  return (
+    <div className="mt-2 space-y-2 rounded-md border border-happy-200 bg-happy-50/40 p-2">
+      <div className="flex gap-1 text-xs">
+        <button
+          type="button"
+          onClick={() => setModo('intervalo')}
+          className={`rounded px-2 py-1 ${modo === 'intervalo' ? 'bg-happy-500 text-white' : 'bg-white text-slate-600'}`}
+        >
+          📅 Por fecha/hora
+        </button>
+        <button
+          type="button"
+          onClick={() => setModo('directo')}
+          className={`rounded px-2 py-1 ${modo === 'directo' ? 'bg-happy-500 text-white' : 'bg-white text-slate-600'}`}
+        >
+          ⏱ Tiempo directo
+        </button>
+      </div>
+
+      {modo === 'intervalo' ? (
+        <div className="grid grid-cols-2 gap-2">
+          <label className="text-[10px] text-slate-500">
+            Inicio
+            <Input type="datetime-local" value={fechaInicio} onChange={(e) => setFechaInicio(e.target.value)} className="h-8 text-xs" />
+          </label>
+          <label className="text-[10px] text-slate-500">
+            Fin
+            <Input type="datetime-local" value={fechaFin} onChange={(e) => setFechaFin(e.target.value)} className="h-8 text-xs" />
+          </label>
+        </div>
+      ) : (
+        <label className="block text-[10px] text-slate-500">
+          Tiempo total (min)
+          <Input type="number" step="0.01" min="0" value={tiempoDirecto} onChange={(e) => setTiempoDirecto(e.target.value)} className="h-8 text-xs" placeholder="Ej. 45" />
+        </label>
+      )}
+
+      <div className="grid grid-cols-2 gap-2">
+        <label className="text-[10px] text-slate-500">
+          Unidades procesadas {esAreaCorte ? '(opcional)' : ''}
+          <Input
+            type="number"
+            min="0"
+            value={unidades}
+            onChange={(e) => setUnidades(e.target.value)}
+            className="h-8 text-xs"
+            placeholder={esAreaCorte ? 'vacío = no aplica' : 'Ej. 50'}
+          />
+        </label>
+        <label className="text-[10px] text-slate-500">
+          Operario (opcional)
+          <select
+            value={operarioId}
+            onChange={(e) => setOperarioId(e.target.value)}
+            className="h-8 w-full rounded-md border border-input bg-white px-2 text-xs"
+          >
+            <option value="">— Sin asignar —</option>
+            {operarios.map((o) => <option key={o.id} value={o.id}>{o.nombre}</option>)}
+          </select>
+        </label>
+      </div>
+
+      <label className="block text-[10px] text-slate-500">
+        Notas (opcional)
+        <Input value={notas} onChange={(e) => setNotas(e.target.value)} className="h-8 text-xs" maxLength={500} />
+      </label>
+
+      <div className="flex justify-end gap-1">
+        <Button variant="ghost" size="sm" onClick={onSaved} disabled={pending} className="h-7 px-2 text-xs">Cancelar</Button>
+        <Button variant="premium" size="sm" onClick={submit} disabled={pending} className="h-7 gap-1 px-2 text-xs">
+          {pending ? <Loader2 className="h-3 w-3 animate-spin" /> : <Clock className="h-3 w-3" />}
+          Guardar
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+function RegistroRow({ otId, registro: r, disabled }: { otId: string; registro: RegistroTiempo; disabled: boolean }) {
+  const [pending, start] = useTransition();
+  function eliminar() {
+    if (!confirm('¿Eliminar este registro de tiempo?')) return;
     start(async () => {
-      const r = await upsertTiempoRealOT(otId, {
-        proceso_id: proceso.id,
-        talla,
-        tiempo_real_min: null,
-      });
-      if (r.ok) toast.success('Restaurado al estándar');
-      else toast.error(r.error ?? 'Error');
+      const res = await eliminarRegistroTiempoOT(otId, r.id);
+      if (res.ok) toast.success('Registro eliminado');
+      else toast.error(res.error ?? 'Error');
     });
   }
-
+  const fechaTxt = r.fecha_inicio
+    ? `${new Date(r.fecha_inicio).toLocaleString('es-PE', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })} → ${r.fecha_fin ? new Date(r.fecha_fin).toLocaleString('es-PE', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : '?'}`
+    : new Date(r.created_at).toLocaleString('es-PE', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
   return (
-    <TableRow>
-      <TableCell className="text-center text-xs text-slate-500">{proceso.orden}</TableCell>
-      <TableCell className="text-sm font-medium">{proceso.proceso.replace(/_/g, ' ')}</TableCell>
-      <TableCell className="text-xs">
-        {proceso.area ? (
-          <Badge variant="outline" className="text-[10px]">{proceso.area.codigo}</Badge>
-        ) : (
-          <span className="text-slate-400">—</span>
-        )}
-      </TableCell>
-      <TableCell className="text-right font-mono text-xs">{std.toFixed(2)}</TableCell>
-      <TableCell className="text-right">
-        <Input
-          type="number"
-          step="0.01"
-          min="0"
-          value={valor}
-          onChange={(e) => setValor(e.target.value)}
-          placeholder={std.toFixed(2)}
-          className="h-8 w-20 text-right text-xs"
-          disabled={disabled || pending}
-          title="Vacío = usa estándar"
-        />
-      </TableCell>
-      <TableCell className="text-right font-mono text-xs text-slate-500">
-        {vmin > 0 ? PEN(vmin) : <span className="text-slate-400">—</span>}
-      </TableCell>
-      <TableCell className="text-right font-mono text-xs font-semibold text-emerald-700">
-        {PEN(costoUnitReal)}
-      </TableCell>
-      <TableCell>
-        <div className="flex items-center gap-1">
-          <Button
-            variant="premium"
-            size="sm"
-            onClick={save}
-            disabled={!dirty || pending || disabled}
-            className="h-7 px-2"
-            title="Guardar tiempo real"
-          >
-            {pending ? <Loader2 className="h-3 w-3 animate-spin" /> : <Save className="h-3 w-3" />}
-          </Button>
-          {override && (
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={reset}
-              disabled={pending || disabled}
-              className="h-7 px-2"
-              title="Restaurar al estándar"
-            >
-              <RotateCcw className="h-3 w-3" />
-            </Button>
-          )}
-        </div>
-      </TableCell>
-    </TableRow>
+    <div className="flex items-center gap-2 rounded border border-slate-100 bg-slate-50 px-2 py-1 text-[11px]">
+      <span className="text-slate-500">{fechaTxt}</span>
+      <span className="font-mono font-semibold text-emerald-700">{Number(r.tiempo_total_min).toFixed(2)} min</span>
+      {r.unidades_procesadas != null && <span className="text-slate-600">· {r.unidades_procesadas} u</span>}
+      {r.operario_nombre && <span className="text-slate-500">· 👤 {r.operario_nombre}</span>}
+      {r.notas && <span className="ml-1 truncate text-slate-400">· {r.notas}</span>}
+      {!disabled && (
+        <Button variant="ghost" size="sm" onClick={eliminar} disabled={pending} className="ml-auto h-5 w-5 p-0 text-slate-400 hover:text-danger">
+          {pending ? <Loader2 className="h-3 w-3 animate-spin" /> : <Trash2 className="h-3 w-3" />}
+        </Button>
+      )}
+    </div>
   );
 }

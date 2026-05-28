@@ -350,3 +350,84 @@ export async function upsertTiempoRealOT(
   if (r.ok) await bumpPaths(`/ot/${otId}`);
   return r;
 }
+
+/**
+ * Crea un registro de avance de tiempo para una operación en la OT (mig 43).
+ * Acepta dos modos:
+ *   - Intervalo: fecha_inicio + fecha_fin → calcula tiempo_total_min.
+ *   - Directo: tiempo_total_min directo (sin fechas).
+ * Permite múltiples registros por (ot, proceso, talla).
+ */
+const registroTiempoSchema = z.object({
+  proceso_id: z.string().uuid(),
+  talla: z.string().min(1).max(10),
+  fecha_inicio: z.string().optional().or(z.literal('')),
+  fecha_fin: z.string().optional().or(z.literal('')),
+  tiempo_total_min: z.coerce.number().nonnegative().optional(),
+  unidades_procesadas: z.coerce.number().int().nonnegative().nullable().optional(),
+  operario_id: z.string().uuid().optional().or(z.literal('')),
+  notas: z.string().max(500).optional().nullable(),
+});
+
+export async function crearRegistroTiempoOT(
+  otId: string,
+  input: z.input<typeof registroTiempoSchema>,
+): Promise<ActionResult<{ id: string }>> {
+  const r = await runAction(async () => {
+    const data = registroTiempoSchema.parse(input);
+    const { sb, userId } = await requireUser();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const sbAny = sb as unknown as { from: (t: string) => any };
+
+    let tiempoTotal: number;
+    let inicio: string | null = null;
+    let fin: string | null = null;
+    if (data.fecha_inicio && data.fecha_fin) {
+      const ti = new Date(data.fecha_inicio).getTime();
+      const tf = new Date(data.fecha_fin).getTime();
+      if (Number.isNaN(ti) || Number.isNaN(tf)) throw new Error('Fechas inválidas');
+      if (tf < ti) throw new Error('La fecha de fin no puede ser anterior al inicio');
+      tiempoTotal = Math.round(((tf - ti) / 1000 / 60) * 100) / 100;
+      inicio = data.fecha_inicio;
+      fin = data.fecha_fin;
+    } else if (typeof data.tiempo_total_min === 'number' && data.tiempo_total_min > 0) {
+      tiempoTotal = data.tiempo_total_min;
+    } else {
+      throw new Error('Ingresá fecha inicio + fin O tiempo directo (> 0)');
+    }
+
+    const { data: row, error } = await sbAny
+      .from('ot_registros_tiempo')
+      .insert({
+        ot_id: otId,
+        proceso_id: data.proceso_id,
+        talla: data.talla,
+        fecha_inicio: inicio,
+        fecha_fin: fin,
+        tiempo_total_min: tiempoTotal,
+        unidades_procesadas: data.unidades_procesadas ?? null,
+        operario_id: data.operario_id || null,
+        notas: data.notas || null,
+        registrado_por: userId,
+      })
+      .select('id')
+      .single();
+    if (error) throw new Error(error.message);
+    return { id: row.id as string };
+  });
+  if (r.ok) await bumpPaths(`/ot/${otId}`);
+  return r;
+}
+
+export async function eliminarRegistroTiempoOT(otId: string, registroId: string): Promise<ActionResult> {
+  const r = await runAction(async () => {
+    const { sb } = await requireUser();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const sbAny = sb as unknown as { from: (t: string) => any };
+    const { error } = await sbAny.from('ot_registros_tiempo').delete().eq('id', registroId);
+    if (error) throw new Error(error.message);
+    return null;
+  });
+  if (r.ok) await bumpPaths(`/ot/${otId}`);
+  return r;
+}
