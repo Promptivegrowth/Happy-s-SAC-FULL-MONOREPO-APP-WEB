@@ -180,6 +180,12 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
                   totalLineas={lineas.length}
                   totalUnidades={totalUnidades}
                   materiales={(explosion ?? []) as Parameters<typeof DescargarPdfButton>[0]['materiales']}
+                  lineasProductos={lineas.map((l) => ({
+                    producto_codigo: l.productos?.codigo ?? '',
+                    producto_nombre: l.productos?.nombre ?? '—',
+                    talla: l.talla,
+                    cantidad: Number(l.cantidad_planificada ?? 0),
+                  }))}
                 />
               </CardHeader>
               <CardContent className="p-0">

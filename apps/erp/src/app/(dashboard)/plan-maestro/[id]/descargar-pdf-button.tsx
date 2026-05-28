@@ -13,11 +13,19 @@ type Material = {
   cantidad_total: number;
 };
 
+type LineaProductoTalla = {
+  producto_codigo: string;
+  producto_nombre: string;
+  talla: string;
+  cantidad: number;
+};
+
 type Props = {
   planCodigo: string;
   totalLineas: number;
   totalUnidades: number;
   materiales: Material[];
+  lineasProductos: LineaProductoTalla[];
 };
 
 /**
@@ -25,7 +33,7 @@ type Props = {
  * Usa jspdf + jspdf-autotable cargados dinámicamente para no inflar el bundle
  * principal — solo se descargan cuando el usuario hace click.
  */
-export function DescargarPdfButton({ planCodigo, totalLineas, totalUnidades, materiales }: Props) {
+export function DescargarPdfButton({ planCodigo, totalLineas, totalUnidades, materiales, lineasProductos }: Props) {
   const [loading, setLoading] = useState(false);
 
   async function descargar() {
@@ -80,6 +88,44 @@ export function DescargarPdfButton({ planCodigo, totalLineas, totalUnidades, mat
         headStyles: { fillColor: [37, 99, 235], textColor: 255 },
         columnStyles: { 4: { halign: 'right', fontStyle: 'bold' } },
         alternateRowStyles: { fillColor: [248, 250, 252] },
+      });
+
+      // Segunda tabla: resumen de productos × tallas para los que aplican
+      // estos materiales (contexto del plan).
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const lastY: number = (doc as any).lastAutoTable?.finalY ?? 40;
+      const startY2 = lastY + 12;
+
+      doc.setFontSize(12);
+      doc.setFont('helvetica', 'bold');
+      doc.text('Productos y tallas del plan', 14, startY2 - 4);
+
+      // Ordenar por producto y luego por talla (T0, T2, ... TAD).
+      const ordenTallas = ['T0','T2','T4','T6','T8','T10','T12','T14','T16','TS','TAD'];
+      const lineasOrdenadas = [...lineasProductos].sort((a, b) => {
+        const cmp = a.producto_nombre.localeCompare(b.producto_nombre);
+        if (cmp !== 0) return cmp;
+        return ordenTallas.indexOf(a.talla) - ordenTallas.indexOf(b.talla);
+      });
+
+      autoTable(doc, {
+        startY: startY2,
+        head: [['Código', 'Producto', 'Talla', 'Cantidad']],
+        body: lineasOrdenadas.map((l) => [
+          l.producto_codigo,
+          l.producto_nombre,
+          l.talla.replace('T', ''),
+          String(l.cantidad),
+        ]),
+        styles: { fontSize: 9, cellPadding: 2 },
+        headStyles: { fillColor: [16, 185, 129], textColor: 255 },
+        columnStyles: {
+          2: { halign: 'center' },
+          3: { halign: 'right', fontStyle: 'bold' },
+        },
+        alternateRowStyles: { fillColor: [248, 250, 252] },
+        foot: [['', '', 'Total', String(totalUnidades)]],
+        footStyles: { fillColor: [240, 253, 244], textColor: 0, fontStyle: 'bold' },
       });
 
       doc.save(`explosion-materiales-${planCodigo}.pdf`);
