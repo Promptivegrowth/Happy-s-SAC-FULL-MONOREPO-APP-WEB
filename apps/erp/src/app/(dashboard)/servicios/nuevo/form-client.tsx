@@ -24,7 +24,13 @@ type CorteOption = {
   estado: string;
   lineas: { talla: string; cantidad_real: number | null; cantidad_teorica: number }[];
 };
-type OT = { id: string; numero: string };
+type OT = {
+  id: string;
+  numero: string;
+  producto_id: string;
+  producto_nombre: string;
+  lineas: { talla: string; cantidad_planificada: number; cantidad_cortada: number }[];
+};
 type Taller = { id: string; nombre: string; codigo: string };
 
 const PROCESOS = [
@@ -63,6 +69,42 @@ export function NuevaOSForm({
   const [calcPending, setCalcPending] = useState(false);
 
   const corteSel = useMemo(() => cortes.find((c) => c.id === corteId) ?? null, [cortes, corteId]);
+  const otSel = useMemo(() => ots.find((o) => o.id === otId) ?? null, [ots, otId]);
+  // Líneas a usar para tallas seleccionables. Prioridad: corte (si está) sino OT.
+  const lineasFuente: { talla: string; cantidad: number }[] = useMemo(() => {
+    if (corteSel) {
+      return corteSel.lineas
+        .filter((l) => Number(l.cantidad_real ?? 0) > 0)
+        .map((l) => ({ talla: l.talla, cantidad: Number(l.cantidad_real ?? 0) }))
+        .sort((a, b) => a.talla.localeCompare(b.talla));
+    }
+    if (otSel) {
+      // Si la OT ya tiene cortado declarado, usamos cortada. Sino, planificada.
+      return otSel.lineas
+        .map((l) => ({ talla: l.talla, cantidad: l.cantidad_cortada > 0 ? l.cantidad_cortada : l.cantidad_planificada }))
+        .filter((l) => l.cantidad > 0)
+        .sort((a, b) => a.talla.localeCompare(b.talla));
+    }
+    return [];
+  }, [corteSel, otSel]);
+  const productoIdActual = corteSel?.producto_id ?? otSel?.producto_id ?? '';
+  const productoNombreActual = corteSel?.producto_nombre ?? otSel?.producto_nombre ?? '';
+
+  // Cuando se elige OT directa (sin corte), pre-seleccionar todas las tallas
+  function onOtChange(id: string) {
+    setOtId(id);
+    if (corteId) return; // el corte manda
+    const ot = ots.find((o) => o.id === id);
+    if (ot) {
+      const tallas = ot.lineas
+        .filter((l) => (l.cantidad_cortada > 0 ? l.cantidad_cortada : l.cantidad_planificada) > 0)
+        .map((l) => l.talla);
+      setTallasSel(new Set(tallas));
+    } else {
+      setTallasSel(new Set());
+    }
+    setTarifaInfo(null);
+  }
 
   // Cuando se elige un corte, auto-completa la OT y selecciona TODAS las tallas
   function onCorteChange(id: string) {
@@ -91,17 +133,18 @@ export function NuevaOSForm({
     setTarifaInfo(null); // invalida tarifa al cambiar selección
   }
 
-  // Cálculo de tarifa sugerida (solo cuando hay corte + taller + producto)
+  // Cálculo de tarifa sugerida. Funciona tanto con corte vinculado como con
+  // OT directa: en ambos casos usa lineasFuente + tallas seleccionadas.
   async function calcularTarifa() {
-    if (!corteSel || !tallerId) {
-      toast.error('Necesitás corte y taller para sugerir tarifa');
+    if (!productoIdActual || !tallerId) {
+      toast.error('Necesitás producto (vía corte u OT) y taller para sugerir tarifa');
       return;
     }
     setCalcPending(true);
     const cantidades: Record<string, number> = {};
-    for (const l of corteSel.lineas) {
-      if (tallasSel.has(l.talla) && Number(l.cantidad_real ?? 0) > 0) {
-        cantidades[l.talla] = Number(l.cantidad_real);
+    for (const l of lineasFuente) {
+      if (tallasSel.has(l.talla)) {
+        cantidades[l.talla] = l.cantidad;
       }
     }
     if (Object.keys(cantidades).length === 0) {
@@ -109,7 +152,7 @@ export function NuevaOSForm({
       setCalcPending(false);
       return;
     }
-    const r = await calcularMontoSugeridoOS(tallerId, corteSel.producto_id, proceso, cantidades);
+    const r = await calcularMontoSugeridoOS(tallerId, productoIdActual, proceso, cantidades);
     setCalcPending(false);
     if (r.ok && r.data) {
       setTarifaInfo(r.data);
@@ -124,35 +167,39 @@ export function NuevaOSForm({
     }
   }
 
-  // Auto-calcular tarifa cuando cambia taller/proceso/tallas (con debounce simple)
+  // Auto-calcular tarifa cuando cambia taller/proceso/tallas (con debounce).
   useEffect(() => {
-    if (!corteSel || !tallerId) return;
+    if (!productoIdActual || !tallerId) return;
     const timer = setTimeout(() => {
       calcularTarifa();
     }, 600);
     return () => clearTimeout(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tallerId, proceso, corteId, tallasSel.size]);
+  }, [tallerId, proceso, corteId, otId, tallasSel.size]);
 
   const corteOptions = cortes.map((c) => ({
     id: c.id,
     label: `${c.numero} · ${c.producto_nombre}`,
     sublabel: `OT ${c.ot_numero} · ${c.estado}`,
   }));
-  const otOptions = ots.map((o) => ({ id: o.id, label: o.numero }));
+  const otOptions = ots.map((o) => ({
+    id: o.id,
+    label: o.numero,
+    sublabel: o.producto_nombre,
+  }));
   const tallerOptions = talleres.map((t) => ({
     id: t.id,
     label: t.nombre,
     sublabel: t.codigo,
   }));
 
-  // Líneas del corte para el preview (filtra cantidad_real > 0)
+  // Líneas para el preview (corte o, en su defecto, OT directa)
   const lineasPreview = (corteSel?.lineas ?? [])
     .filter((l) => Number(l.cantidad_real ?? 0) > 0)
     .sort((a, b) => a.talla.localeCompare(b.talla));
-  const totalPrendasSeleccionadas = lineasPreview
+  const totalPrendasSeleccionadas = lineasFuente
     .filter((l) => tallasSel.has(l.talla))
-    .reduce((s, l) => s + Number(l.cantidad_real ?? 0), 0);
+    .reduce((s, l) => s + l.cantidad, 0);
 
   function submit(formEl: HTMLFormElement) {
     const fd = new FormData(formEl);
@@ -164,8 +211,10 @@ export function NuevaOSForm({
     fd.set('monto_base', montoBase || '0');
     fd.set('movilidad_por_unidad', movilidadUnit || '0');
     fd.set('campana_por_unidad', campanaUnit || '0');
-    // Si hay corte y se seleccionaron solo algunas tallas, mandarlas como filtro
-    if (corteId && tallasSel.size > 0 && tallasSel.size < lineasPreview.length) {
+    // Mandar tallas seleccionadas siempre que haya alguna marcada. Se usan
+    // tanto para filtrar las líneas del corte como para poblar las líneas de
+    // la OS desde ot_lineas cuando no hay corte vinculado.
+    if (tallasSel.size > 0) {
       fd.delete('tallas_seleccionadas');
       for (const t of tallasSel) fd.append('tallas_seleccionadas', t);
     }
@@ -340,12 +389,85 @@ export function NuevaOSForm({
           </div>
         )}
 
+        {/* Preview cuando hay OT directa (sin corte vinculado) */}
+        {!corteSel && otSel && (
+          <div className="space-y-3 rounded-lg border-2 border-corp-200 bg-corp-50/40 p-4">
+            <div className="flex items-center gap-2">
+              <Package className="h-4 w-4 text-corp-600" />
+              <h3 className="font-display text-sm font-semibold text-corp-900">
+                {otSel.producto_nombre}
+              </h3>
+              <Badge variant="default" className="text-[10px]">
+                {totalPrendasSeleccionadas} de {lineasFuente.reduce((s, l) => s + l.cantidad, 0)} prendas
+              </Badge>
+              <Badge variant="secondary" className="text-[10px]">
+                OT {otSel.numero}
+              </Badge>
+            </div>
+
+            {lineasFuente.length === 0 ? (
+              <p className="text-xs text-amber-700">
+                ⚠️ Esta OT no tiene líneas con cantidad. La OS se creará vacía.
+              </p>
+            ) : (
+              <div>
+                <p className="mb-2 text-[11px] font-medium uppercase tracking-wider text-slate-600">
+                  Tallas a enviar al taller (desmarcá las que NO van — útil para dividir orden)
+                </p>
+                <div className="flex flex-wrap gap-1.5">
+                  {lineasFuente.map((l) => {
+                    const seleccionada = tallasSel.has(l.talla);
+                    return (
+                      <button
+                        key={l.talla}
+                        type="button"
+                        onClick={() => toggleTalla(l.talla)}
+                        className={`flex items-center gap-1.5 rounded-full border-2 px-3 py-1.5 text-xs transition ${
+                          seleccionada
+                            ? 'border-corp-500 bg-corp-500 text-white shadow-sm'
+                            : 'border-slate-300 bg-white text-slate-500 line-through opacity-60 hover:border-corp-300'
+                        }`}
+                      >
+                        <span className="font-mono">{l.talla.replace('T', '')}</span>
+                        <span className="font-bold">{l.cantidad}u</span>
+                      </button>
+                    );
+                  })}
+                </div>
+                {tallasSel.size < lineasFuente.length && (
+                  <p className="mt-2 text-[11px] text-amber-700">
+                    ⚠️ Estás enviando solo parte: las tallas desmarcadas quedan disponibles para OTRA OS.
+                  </p>
+                )}
+              </div>
+            )}
+
+            <p className="flex items-center gap-1 text-[11px] text-slate-600">
+              <Package className="h-3 w-3" />
+              Sin corte vinculado: la OS se crea con las tallas elegidas. <strong>Los avíos del BOM NO se cargan automáticamente</strong> (eso requiere corte vinculado).
+            </p>
+
+            {/* Panel de tarifa sugerida (mismo bloque que en corte) */}
+            {tallerId && tarifaInfo && tarifaInfo.detalle.length > 0 && (
+              <div className="rounded-md border border-emerald-200 bg-emerald-50/60 p-3 text-xs text-emerald-800">
+                <div className="flex items-center gap-1.5 font-semibold">
+                  <Calculator className="h-3.5 w-3.5" />
+                  Tarifa calculada: S/ {tarifaInfo.total.toFixed(2)} {calcPending && <Loader2 className="h-3 w-3 animate-spin" />}
+                </div>
+                <p className="mt-1 text-[10px] text-emerald-700">
+                  Ya cargado en &quot;Monto base&quot; abajo. Para ajustar, editá tarifas en /talleres/[id]/tarifas o /configuracion/tarifas-servicios.
+                </p>
+              </div>
+            )}
+          </div>
+        )}
+
         <FormGrid cols={2}>
-          <FormRow label="OT" required hint={corteId ? 'Auto-completada con la del corte' : undefined}>
+          <FormRow label="OT" required hint={corteId ? 'Auto-completada con la del corte' : 'Elegí una OT para cargar las tallas a enviar'}>
             <ComboboxBusqueda
               options={otOptions}
               value={otId}
-              onChange={setOtId}
+              onChange={onOtChange}
               placeholder="Buscar OT…"
             />
           </FormRow>

@@ -41,10 +41,13 @@ export default async function Page() {
     lineas: c.ot_corte_lineas ?? [],
   }));
 
-  const [{ data: ots }, { data: talleres }] = await Promise.all([
+  // Traemos OTs activas con sus líneas (producto + talla + cantidades) para
+  // que el form permita elegir tallas directamente desde la OT (sin
+  // necesidad de un corte vinculado).
+  const [{ data: otsRaw }, { data: talleres }] = await Promise.all([
     sb
       .from('ot')
-      .select('id, numero')
+      .select('id, numero, ot_lineas(producto_id, talla, cantidad_planificada, cantidad_cortada, productos:producto_id(nombre))')
       .not('estado', 'in', '("COMPLETADA","CANCELADA")')
       .order('numero', { ascending: false })
       .limit(200),
@@ -55,14 +58,36 @@ export default async function Page() {
       .order('nombre'),
   ]);
 
+  type OTRaw = {
+    id: string;
+    numero: string;
+    ot_lineas: { producto_id: string; talla: string; cantidad_planificada: number; cantidad_cortada: number | null; productos: { nombre: string } | null }[];
+  };
+  const ots = ((otsRaw ?? []) as unknown as OTRaw[]).map((o) => {
+    // Producto principal de la OT (asumimos mono-producto; si hay varios,
+    // tomamos el primero — el flujo nuevo permite agrupar por producto).
+    const primeraLinea = o.ot_lineas?.[0];
+    return {
+      id: o.id,
+      numero: o.numero,
+      producto_id: primeraLinea?.producto_id ?? '',
+      producto_nombre: primeraLinea?.productos?.nombre ?? '—',
+      lineas: (o.ot_lineas ?? []).map((l) => ({
+        talla: l.talla,
+        cantidad_planificada: Number(l.cantidad_planificada ?? 0),
+        cantidad_cortada: Number(l.cantidad_cortada ?? 0),
+      })),
+    };
+  });
+
   return (
     <PageShell
       title="Nueva Orden de Servicio"
-      description="Envío de trabajo a taller externo. Si vinculás un corte, las prendas y los avíos del BOM se cargan solos."
+      description="Envío de trabajo a taller externo. Podés elegir un corte (carga prendas + avíos del BOM) o directamente una OT y seleccionar las tallas a enviar."
     >
       <NuevaOSForm
         cortes={cortes}
-        ots={(ots ?? []).map((o) => ({ id: o.id as string, numero: o.numero as string }))}
+        ots={ots}
         talleres={(talleres ?? []).map((t) => ({
           id: t.id as string,
           codigo: t.codigo as string,

@@ -242,6 +242,39 @@ async function poblarLineasYAviosOS(
   return { lineas: filasLineas.length, avios: aviosMap.size };
 }
 
+/**
+ * Variante: poblar líneas de OS directamente desde ot_lineas (sin corte
+ * vinculado). Usa cantidad_cortada si > 0, sino cantidad_planificada.
+ * Acepta filtro opcional de tallas. NO genera avíos porque eso requiere
+ * el flujo del corte que coordina con almacén.
+ */
+async function poblarLineasOSDesdeOT(
+  sb: Awaited<ReturnType<typeof requireUser>>['sb'],
+  osId: string,
+  otId: string,
+  tallasFiltro?: string[],
+): Promise<{ lineas: number; avios: number }> {
+  const { data: lineasOt, error: errL } = await sb
+    .from('ot_lineas')
+    .select('producto_id, talla, cantidad_planificada, cantidad_cortada')
+    .eq('ot_id', otId);
+  if (errL) throw new Error(`ot_lineas: ${errL.message}`);
+  const filtroSet = tallasFiltro && tallasFiltro.length > 0 ? new Set(tallasFiltro) : null;
+  const candidatas = (lineasOt ?? [])
+    .map((l) => ({
+      producto_id: l.producto_id as string,
+      talla: l.talla as 'T0' | 'T2' | 'T4' | 'T6' | 'T8' | 'T10' | 'T12' | 'T14' | 'T16' | 'TS' | 'TAD',
+      cantidad: Number(l.cantidad_cortada ?? 0) > 0 ? Number(l.cantidad_cortada) : Number(l.cantidad_planificada ?? 0),
+    }))
+    .filter((l) => l.cantidad > 0 && (!filtroSet || filtroSet.has(l.talla)));
+  if (candidatas.length === 0) return { lineas: 0, avios: 0 };
+  const { error: errIns } = await sb.from('ordenes_servicio_lineas').insert(
+    candidatas.map((c) => ({ os_id: osId, producto_id: c.producto_id, talla: c.talla, cantidad: c.cantidad })),
+  );
+  if (errIns) throw new Error(`OS lineas (OT): ${errIns.message}`);
+  return { lineas: candidatas.length, avios: 0 };
+}
+
 export async function crearOS(
   _prev: unknown,
   fd: FormData,
@@ -288,12 +321,12 @@ export async function crearOS(
     }).select('id').single();
     if (error) throw new Error(error.message);
 
-    // Si la OS viene de un corte, poblar líneas + avíos. Acepta filtro
-    // opcional de tallas (campo 'tallas_seleccionadas' en el FormData,
-    // múltiples valores) para dividir un corte en 2+ OSs.
+    // Poblar líneas:
+    //   - Si hay corte_id → líneas + avíos del BOM (flujo completo).
+    //   - Sino → líneas desde ot_lineas con filtro de tallas (sin avíos).
     let extras = { lineas: 0, avios: 0 };
+    const tallasFiltro = fd.getAll('tallas_seleccionadas').map((v) => String(v)).filter(Boolean);
     if (data.corte_id) {
-      const tallasFiltro = fd.getAll('tallas_seleccionadas').map((v) => String(v)).filter(Boolean);
       try {
         extras = await poblarLineasYAviosOS(
           sb,
@@ -304,6 +337,13 @@ export async function crearOS(
       } catch (e) {
         await sb.from('ordenes_servicio').delete().eq('id', row.id);
         throw new Error(`No se pudieron poblar líneas/avíos: ${(e as Error).message}`);
+      }
+    } else if (data.ot_id && tallasFiltro.length > 0) {
+      try {
+        extras = await poblarLineasOSDesdeOT(sb, row.id as string, data.ot_id, tallasFiltro);
+      } catch (e) {
+        await sb.from('ordenes_servicio').delete().eq('id', row.id);
+        throw new Error(`No se pudieron poblar líneas desde OT: ${(e as Error).message}`);
       }
     }
 
