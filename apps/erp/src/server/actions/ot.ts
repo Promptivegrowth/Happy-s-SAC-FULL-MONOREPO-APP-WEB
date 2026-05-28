@@ -48,6 +48,21 @@ export async function agregarLineaOT(otId: string, _prev: unknown, fd: FormData)
       throw new Error('No se pueden agregar líneas a una OT cerrada');
     }
 
+    // Regla de negocio: una OT corresponde a UN solo producto. Si ya tiene
+    // líneas con otro producto, rechazamos. Para producir otro producto del
+    // mismo plan, crear una OT distinta.
+    const { data: existentes } = await sb
+      .from('ot_lineas')
+      .select('producto_id')
+      .eq('ot_id', otId)
+      .limit(1);
+    const productoExistente = (existentes ?? [])[0]?.producto_id as string | undefined;
+    if (productoExistente && productoExistente !== data.producto_id) {
+      throw new Error(
+        'Esta OT ya tiene líneas de otro producto. Una OT corresponde a un solo producto: para producir otro, generá una OT separada en el mismo plan.',
+      );
+    }
+
     const { error } = await sb.from('ot_lineas').insert({
       ot_id: otId,
       producto_id: data.producto_id,
@@ -242,11 +257,11 @@ export async function declararProduccion(otId: string, lineaId: string, cantidad
     if (ot?.estado === 'COMPLETADA' || ot?.estado === 'CANCELADA') {
       throw new Error('No se puede declarar producción en una OT cerrada');
     }
-    if (cantidadCortada > Number(linea.cantidad_planificada)) {
-      throw new Error(
-        `La cantidad cortada (${cantidadCortada}) no puede superar la planificada (${linea.cantidad_planificada})`,
-      );
-    }
+    // Nota: ANTES rechazábamos cantidadCortada > planificada. El cliente
+    // confirmó que en producción real se cortan unidades extras (cubrir
+    // mermas, pedidos adicionales, etc.). Ahora se permite y el usuario es
+    // responsable de declarar lo real. La columna "Falta cortar" muestra 0
+    // cuando se supera el plan.
 
     const { error } = await sb.from('ot_lineas').update({
       cantidad_cortada: cantidadCortada,

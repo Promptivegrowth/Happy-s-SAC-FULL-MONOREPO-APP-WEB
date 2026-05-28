@@ -145,11 +145,14 @@ export function OtLineaProduccion({ otId, lineaId, planificada, cortada, fallas,
   const [f, setF] = useState(fallas);
 
   function save() {
-    if (c > planificada) {
-      return toast.error(`Cortada (${c}) no puede exceder planificada (${planificada})`);
-    }
+    // Se permite cortar más del plan (extras). Solo validamos que las fallas
+    // no superen lo cortado (no podés tener más fallas que unidades).
     if (f > c) {
       return toast.error('Fallas no pueden superar cortadas');
+    }
+    if (c > planificada) {
+      // Aviso suave, no bloqueo.
+      toast.warning(`Cortando ${c} extras (plan ${planificada}). Se guarda igual.`);
     }
     start(async () => {
       const r = await declararProduccion(otId, lineaId, c, f);
@@ -176,10 +179,9 @@ export function OtLineaProduccion({ otId, lineaId, planificada, cortada, fallas,
           value={c}
           onChange={(e) => setC(Number(e.target.value))}
           min={0}
-          max={planificada}
           className="h-8 w-16 text-xs"
           placeholder="0"
-          title={`Acumulado. Plan ${planificada}. Falta cortar ${faltaCortar}.`}
+          title={`Acumulado. Plan ${planificada}. Falta cortar ${faltaCortar}. Se permiten extras.`}
           autoFocus
         />
       </div>
@@ -257,19 +259,42 @@ export function AgregarLineaOTForm({
         <label className="mb-1 block text-[11px] font-medium uppercase tracking-wide text-slate-500">
           Producto
         </label>
-        <select
-          value={productoId}
-          onChange={(e) => setProductoId(e.target.value)}
-          className="h-9 w-full rounded-md border border-input bg-white px-2 text-sm"
-          required
-        >
-          <option value="">— Seleccionar producto —</option>
-          {productos.map((p) => (
-            <option key={p.id} value={p.id}>
-              {p.codigo} · {p.nombre}
-            </option>
-          ))}
-        </select>
+        {productoIdDefault ? (
+          // OT ya tiene un producto: lo fijamos (regla del cliente: una OT =
+          // un solo producto). Para producir otro producto, se crea una OT
+          // separada del mismo plan.
+          (() => {
+            const fijo = productos.find((p) => p.id === productoIdDefault);
+            return (
+              <>
+                <input type="hidden" name="producto_id" value={productoIdDefault} />
+                <div
+                  className="flex h-9 items-center gap-2 rounded-md border border-slate-200 bg-slate-50 px-3 text-sm text-slate-700"
+                  title="Una OT corresponde a un solo producto. Para otro producto, generá una OT separada."
+                >
+                  <span className="font-mono text-[10px] text-slate-400">{fijo?.codigo ?? '?'}</span>
+                  <span className="font-medium">{fijo?.nombre ?? 'Producto fijo'}</span>
+                  <span className="ml-auto rounded-full bg-slate-200 px-1.5 py-0.5 text-[9px] uppercase tracking-wide text-slate-600">fijo</span>
+                </div>
+              </>
+            );
+          })()
+        ) : (
+          <select
+            name="producto_id"
+            value={productoId}
+            onChange={(e) => setProductoId(e.target.value)}
+            className="h-9 w-full rounded-md border border-input bg-white px-2 text-sm"
+            required
+          >
+            <option value="">— Seleccionar producto —</option>
+            {productos.map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.codigo} · {p.nombre}
+              </option>
+            ))}
+          </select>
+        )}
       </div>
       <div>
         <label className="mb-1 block text-[11px] font-medium uppercase tracking-wide text-slate-500">
