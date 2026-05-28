@@ -154,13 +154,17 @@ async function calcularUltimoCostoPorTalla(sb: any, productoId: string, recetaId
     if (recetaId) {
       const { data: rl } = await sb
         .from('recetas_lineas')
-        .select('talla, cantidad, materiales(precio_unitario)')
+        .select('talla, cantidad, materiales(precio_unitario, factor_conversion)')
         .eq('receta_id', recetaId);
-      type RL = { talla: string; cantidad: number; materiales: { precio_unitario: number | null } | null };
+      type RL = { talla: string; cantidad: number; materiales: { precio_unitario: number | null; factor_conversion: number | null } | null };
       for (const l of (rl ?? []) as RL[]) {
+        // precio_unitario es por unidad de COMPRA; cantidad en unidad de
+        // CONSUMO. Dividir por factor_conversion (default 1) para obtener
+        // el costo por unidad de consumo.
         const precio = Number(l.materiales?.precio_unitario ?? 0);
+        const factor = Number(l.materiales?.factor_conversion ?? 1) || 1;
         const cant = Number(l.cantidad ?? 0);
-        materialesPorTalla.set(l.talla, (materialesPorTalla.get(l.talla) ?? 0) + precio * cant);
+        materialesPorTalla.set(l.talla, (materialesPorTalla.get(l.talla) ?? 0) + (precio / factor) * cant);
       }
     }
 

@@ -17,8 +17,8 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
   const sb = await createClient();
   const [{ data: receta }, { data: lineas }, { data: materiales }, { data: unidades }] = await Promise.all([
     sb.from('recetas').select('*, productos(id, nombre, codigo)').eq('id', id).single(),
-    sb.from('recetas_lineas').select('*, materiales(codigo, nombre, categoria, precio_unitario)').eq('receta_id', id),
-    sb.from('materiales').select('id, codigo, nombre, categoria, precio_unitario, unidad_consumo_id').eq('activo', true).order('nombre'),
+    sb.from('recetas_lineas').select('*, materiales(codigo, nombre, categoria, precio_unitario, factor_conversion)').eq('receta_id', id),
+    sb.from('materiales').select('id, codigo, nombre, categoria, precio_unitario, factor_conversion, unidad_consumo_id').eq('activo', true).order('nombre'),
     sb.from('unidades_medida').select('id, codigo, nombre').order('codigo'),
   ]);
   if (!receta) notFound();

@@ -74,7 +74,7 @@ function procesosDeArea(areaCodigo: string | null): readonly (typeof PROCESOS)[n
   return PROCESOS_POR_AREA[areaCodigo.toUpperCase()] ?? PROCESOS;
 }
 
-type Mat = { id: string; codigo: string; nombre: string; categoria: string; precio_unitario?: number | null; unidad_consumo_id?: string | null };
+type Mat = { id: string; codigo: string; nombre: string; categoria: string; precio_unitario?: number | null; factor_conversion?: number | null; unidad_consumo_id?: string | null };
 type Linea = {
   id: string;
   material_id: string;
@@ -84,7 +84,7 @@ type Linea = {
   cantidad_almacen: number | null;
   unidad_id: string | null;
   observacion: string | null;
-  materiales?: { codigo: string; nombre: string; categoria: string; precio_unitario: number | null } | null;
+  materiales?: { codigo: string; nombre: string; categoria: string; precio_unitario: number | null; factor_conversion?: number | null } | null;
 };
 type Unidad = { id: string; codigo: string; nombre: string };
 type Producto = { id: string; codigo: string; nombre: string };
@@ -716,7 +716,14 @@ function RecetaTabla({
       </TableRow></TableHeader>
       <TableBody>
         {lineasOrdenadas.map((l) => {
-          const costo = l.materiales?.precio_unitario ? Number(l.materiales.precio_unitario) * Number(l.cantidad) : 0;
+          // precio_unitario es por unidad de COMPRA (ej. millar=S/50). La
+          // cantidad de receta está en unidad de CONSUMO (ej. unidades). Para
+          // el costo de la línea hay que dividir por factor_conversion (millar
+          // = 1000 → S/0.05 por unidad).
+          const precio = Number(l.materiales?.precio_unitario ?? 0);
+          const factor = Number(l.materiales?.factor_conversion ?? 1) || 1;
+          const costoUnit = precio / factor;
+          const costo = costoUnit * Number(l.cantidad);
           return (
             <TableRow key={l.id}>
               {!compact && <TableCell><Badge variant="outline">{l.talla.replace('T', '')}</Badge></TableCell>}
