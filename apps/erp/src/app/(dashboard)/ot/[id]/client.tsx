@@ -25,16 +25,40 @@ const FLOW: Record<string, string[]> = {
   EN_CONTROL_CALIDAD: ['COMPLETADA'],
 };
 
-export function OtAcciones({ otId, estado, almacenes }: {
+/**
+ * Áreas de la receta del producto que habilitan cada estado siguiente.
+ * - Estados omitidos (EN_HABILITADO, EN_CONTROL_CALIDAD, COMPLETADA, CANCELADA)
+ *   se muestran siempre (opcionales o transversales).
+ * - Caso edge: si la receta no tiene operaciones (áreas vacío), mostramos
+ *   todos los botones del FLOW (fallback seguro).
+ */
+const ESTADO_REQUIERE_AREAS: Record<string, string[]> = {
+  EN_CORTE: ['CORTE'],
+  EN_SERVICIO: ['CONFECCIÓN', 'CONFECCION', 'COSTURA', 'TALLER'],
+  EN_DECORADO: ['BORDADO', 'ESTAMPADO', 'SUBLIMADO', 'DECORADO', 'PLISADO'],
+};
+
+function filtrarTransiciones(allNext: string[], areas: string[]): string[] {
+  if (areas.length === 0) return allNext;
+  return allNext.filter((estado) => {
+    const reqs = ESTADO_REQUIERE_AREAS[estado];
+    if (!reqs) return true;
+    return reqs.some((a) => areas.includes(a));
+  });
+}
+
+export function OtAcciones({ otId, estado, almacenes, areasReceta = [] }: {
   otId: string;
   estado: string;
   almacenes: { id: string; nombre: string; codigo: string }[];
+  /** Códigos de área presentes en la receta del producto de la OT. */
+  areasReceta?: string[];
 }) {
   const [pending, start] = useTransition();
   const [showCierre, setShowCierre] = useState(false);
   const [almacenSel, setAlmacenSel] = useState(almacenes[0]?.id ?? '');
 
-  const next = FLOW[estado] ?? [];
+  const next = filtrarTransiciones(FLOW[estado] ?? [], areasReceta);
 
   function transicion(nuevo: string) {
     if (!confirm(`¿Cambiar estado a ${nuevo.replace('_',' ')}?`)) return;

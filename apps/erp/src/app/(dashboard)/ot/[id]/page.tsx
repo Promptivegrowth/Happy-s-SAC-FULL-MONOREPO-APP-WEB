@@ -129,7 +129,18 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
           {ot.fecha_entrega_objetivo && <> · Entrega {formatDate(ot.fecha_entrega_objetivo)} {atrasada && <Badge variant="destructive" className="ml-1">Atrasada</Badge>}</>}
         </>
       }
-      actions={<OtAcciones otId={id} estado={ot.estado} almacenes={almacenes ?? []} />}
+      actions={
+        <OtAcciones
+          otId={id}
+          estado={ot.estado}
+          almacenes={almacenes ?? []}
+          // Áreas únicas presentes en la receta del/los producto(s) de la OT.
+          // Sirve para que el cliente filtre los botones de "siguiente estado"
+          // y no muestre transiciones a etapas que el producto no requiere
+          // (ej. EN_DECORADO si la receta no tiene bordado/estampado/etc.).
+          areasReceta={Array.from(new Set((procesos ?? []).map((p) => p.area?.codigo).filter((c): c is string => Boolean(c))))}
+        />
+      }
     >
       <EstadoBanner estado={ot.estado} />
 
