@@ -70,6 +70,15 @@ export async function agregarLineaPlan(_prev: unknown, fd: FormData): Promise<Ac
       campana_id: fd.get('campana_id') || '',
     });
     const { sb } = await requireUser();
+    // Defensa: solo se editan planes en BORRADOR. Una vez APROBADO o
+    // EN_EJECUCION el plan se cierra a cambios — para producir otro
+    // producto hay que crear un plan nuevo.
+    const { data: planEstado } = await sb.from('plan_maestro').select('estado').eq('id', data.plan_id).maybeSingle();
+    if (planEstado && planEstado.estado !== 'BORRADOR') {
+      throw new Error(
+        `El plan está en estado ${(planEstado.estado as string).replace('_', ' ')} y no acepta más líneas. Para producir otro producto, creá un plan nuevo.`,
+      );
+    }
     const { error } = await sb.from('plan_maestro_lineas').insert({
       plan_id: data.plan_id,
       producto_id: data.producto_id,
@@ -122,6 +131,15 @@ export async function agregarLineasPlanBatch(input: {
       tallas: input.tallas,
     });
     const { sb } = await requireUser();
+
+    // Defensa: solo se editan planes en BORRADOR (mismo motivo que en
+    // agregarLineaPlan: una vez aprobado el plan se cierra a cambios).
+    const { data: planEstado } = await sb.from('plan_maestro').select('estado').eq('id', data.plan_id).maybeSingle();
+    if (planEstado && planEstado.estado !== 'BORRADOR') {
+      throw new Error(
+        `El plan está en estado ${(planEstado.estado as string).replace('_', ' ')} y no acepta más líneas. Para producir otro producto, creá un plan nuevo.`,
+      );
+    }
 
     // Trae las líneas existentes para detectar duplicados (UNIQUE en plan_id+producto_id+talla).
     const { data: existentes } = await sb
