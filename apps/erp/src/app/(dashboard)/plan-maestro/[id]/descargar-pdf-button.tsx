@@ -90,8 +90,13 @@ export function DescargarPdfButton({ planCodigo, totalLineas, totalUnidades, mat
         alternateRowStyles: { fillColor: [248, 250, 252] },
       });
 
-      // Segunda tabla: resumen de productos × tallas para los que aplican
-      // estos materiales (contexto del plan).
+      // Segunda tabla: pivot de productos × tallas (sugerencia del cliente).
+      // Formato:
+      //          | T0 | T2 | T4 | ... | Total
+      //  Prod A  | 20 |    | 40 | ... | 130
+      //  Prod B  | 10 | 50 | 40 | ... | 178
+      //  Total   | 30 | 50 | 80 | ... | 308
+      // Solo se muestran columnas de tallas que tienen al menos 1 valor.
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const lastY: number = (doc as any).lastAutoTable?.finalY ?? 40;
       const startY2 = lastY + 12;
@@ -100,32 +105,62 @@ export function DescargarPdfButton({ planCodigo, totalLineas, totalUnidades, mat
       doc.setFont('helvetica', 'bold');
       doc.text('Productos y tallas del plan', 14, startY2 - 4);
 
-      // Ordenar por producto y luego por talla (T0, T2, ... TAD).
       const ordenTallas = ['T0','T2','T4','T6','T8','T10','T12','T14','T16','TS','TAD'];
-      const lineasOrdenadas = [...lineasProductos].sort((a, b) => {
-        const cmp = a.producto_nombre.localeCompare(b.producto_nombre);
-        if (cmp !== 0) return cmp;
-        return ordenTallas.indexOf(a.talla) - ordenTallas.indexOf(b.talla);
-      });
+
+      // 1) Tallas que aparecen al menos una vez (ordenadas por convención).
+      const tallasPresentes = ordenTallas.filter((t) =>
+        lineasProductos.some((l) => l.talla === t),
+      );
+
+      // 2) Productos únicos ordenados alfabéticamente.
+      type ProdAgg = { codigo: string; nombre: string; porTalla: Map<string, number>; total: number };
+      const productosMap = new Map<string, ProdAgg>();
+      for (const l of lineasProductos) {
+        const key = `${l.producto_codigo}|${l.producto_nombre}`;
+        if (!productosMap.has(key)) {
+          productosMap.set(key, { codigo: l.producto_codigo, nombre: l.producto_nombre, porTalla: new Map(), total: 0 });
+        }
+        const pa = productosMap.get(key)!;
+        pa.porTalla.set(l.talla, (pa.porTalla.get(l.talla) ?? 0) + l.cantidad);
+        pa.total += l.cantidad;
+      }
+      const productosOrdenados = [...productosMap.values()].sort((a, b) => a.nombre.localeCompare(b.nombre));
+
+      // 3) Filas del body: producto + 1 celda por talla presente + total fila.
+      const body = productosOrdenados.map((p) => [
+        p.nombre,
+        ...tallasPresentes.map((t) => {
+          const v = p.porTalla.get(t);
+          return v ? String(v) : '';
+        }),
+        String(p.total),
+      ]);
+
+      // 4) Totales por columna (suma por talla) + total general.
+      const totalesPorTalla = tallasPresentes.map((t) =>
+        productosOrdenados.reduce((s, p) => s + (p.porTalla.get(t) ?? 0), 0),
+      );
+      const foot = [['Total', ...totalesPorTalla.map((v) => String(v)), String(totalUnidades)]];
+
+      // 5) Cabeceras: "Producto" + cada talla sin la "T" inicial + "Total".
+      const head = [['Producto', ...tallasPresentes.map((t) => t.replace('T', '')), 'Total']];
+
+      // 6) Estilos: centrar columnas numéricas, derecha en "Total", celdas vacías sin fondo alterno raro.
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const columnStyles: Record<number, any> = { 0: { halign: 'left', fontStyle: 'bold' } };
+      for (let i = 1; i <= tallasPresentes.length; i++) columnStyles[i] = { halign: 'center' };
+      columnStyles[tallasPresentes.length + 1] = { halign: 'right', fontStyle: 'bold' };
 
       autoTable(doc, {
         startY: startY2,
-        head: [['Código', 'Producto', 'Talla', 'Cantidad']],
-        body: lineasOrdenadas.map((l) => [
-          l.producto_codigo,
-          l.producto_nombre,
-          l.talla.replace('T', ''),
-          String(l.cantidad),
-        ]),
+        head,
+        body,
+        foot,
         styles: { fontSize: 9, cellPadding: 2 },
-        headStyles: { fillColor: [16, 185, 129], textColor: 255 },
-        columnStyles: {
-          2: { halign: 'center' },
-          3: { halign: 'right', fontStyle: 'bold' },
-        },
+        headStyles: { fillColor: [16, 185, 129], textColor: 255, halign: 'center' },
+        columnStyles,
         alternateRowStyles: { fillColor: [248, 250, 252] },
-        foot: [['', '', 'Total', String(totalUnidades)]],
-        footStyles: { fillColor: [240, 253, 244], textColor: 0, fontStyle: 'bold' },
+        footStyles: { fillColor: [240, 253, 244], textColor: 0, fontStyle: 'bold', halign: 'center' },
       });
 
       doc.save(`explosion-materiales-${planCodigo}.pdf`);
