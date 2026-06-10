@@ -23,6 +23,7 @@ type Variante = {
   precio_mayorista_a: number | null;
   precio_mayorista_b: number | null;
   precio_mayorista_c: number | null;
+  precio_industrial: number | null;
   precio_costo_estandar: number | null;
   activo: boolean;
 };
@@ -118,6 +119,15 @@ export function VariantesSection({
             <FormRow label="Precio mayorista A (S/)" hint="6+ unidades">
               <Input name="precio_mayorista_a" type="number" step="0.01" min="0" />
             </FormRow>
+            <FormRow label="Precio mayorista B (S/)" hint="12+ unidades">
+              <Input name="precio_mayorista_b" type="number" step="0.01" min="0" />
+            </FormRow>
+            <FormRow label="Precio mayorista C (S/)" hint="50+ unidades">
+              <Input name="precio_mayorista_c" type="number" step="0.01" min="0" />
+            </FormRow>
+            <FormRow label="Precio fábrica (S/)" hint="100+ unidades">
+              <Input name="precio_industrial" type="number" step="0.01" min="0" />
+            </FormRow>
             <FormRow label="Precio costo estándar (S/)">
               <Input name="precio_costo_estandar" type="number" step="0.01" min="0" />
             </FormRow>
@@ -140,10 +150,13 @@ export function VariantesSection({
         <Table>
           <TableHeader><TableRow>
             <TableHead>Talla</TableHead><TableHead>SKU</TableHead><TableHead>Código barras</TableHead>
-            <TableHead className="text-right">Precio público</TableHead>
-            <TableHead className="text-right">Mayorista A</TableHead>
+            <TableHead className="text-right">Público</TableHead>
+            <TableHead className="text-right" title="6+ unidades">May. A</TableHead>
+            <TableHead className="text-right" title="12+ unidades">May. B</TableHead>
+            <TableHead className="text-right" title="50+ unidades">May. C</TableHead>
+            <TableHead className="text-right" title="100+ unidades">Fábrica</TableHead>
             <TableHead className="text-right">Costo estándar</TableHead>
-            <TableHead className="text-right">Última producción</TableHead>
+            <TableHead className="text-right">Última prod.</TableHead>
             <TableHead>Estado</TableHead>
             <TableHead className="w-[100px]"></TableHead>
           </TableRow></TableHeader>
@@ -182,6 +195,9 @@ function VarianteRow({
   const [codigoBarras, setCodigoBarras] = useState(v.codigo_barras ?? '');
   const [precioPublico, setPrecioPublico] = useState(String(v.precio_publico ?? ''));
   const [mayoristaA, setMayoristaA] = useState(v.precio_mayorista_a != null ? String(v.precio_mayorista_a) : '');
+  const [mayoristaB, setMayoristaB] = useState(v.precio_mayorista_b != null ? String(v.precio_mayorista_b) : '');
+  const [mayoristaC, setMayoristaC] = useState(v.precio_mayorista_c != null ? String(v.precio_mayorista_c) : '');
+  const [industrial, setIndustrial] = useState(v.precio_industrial != null ? String(v.precio_industrial) : '');
   const [costoEstandar, setCostoEstandar] = useState(v.precio_costo_estandar != null ? String(v.precio_costo_estandar) : '');
   const [activo, setActivo] = useState(v.activo);
 
@@ -190,6 +206,9 @@ function VarianteRow({
     setCodigoBarras(v.codigo_barras ?? '');
     setPrecioPublico(String(v.precio_publico ?? ''));
     setMayoristaA(v.precio_mayorista_a != null ? String(v.precio_mayorista_a) : '');
+    setMayoristaB(v.precio_mayorista_b != null ? String(v.precio_mayorista_b) : '');
+    setMayoristaC(v.precio_mayorista_c != null ? String(v.precio_mayorista_c) : '');
+    setIndustrial(v.precio_industrial != null ? String(v.precio_industrial) : '');
     setCostoEstandar(v.precio_costo_estandar != null ? String(v.precio_costo_estandar) : '');
     setActivo(v.activo);
     setEditing(false);
@@ -210,6 +229,9 @@ function VarianteRow({
         codigo_barras: codigoBarras.trim(),
         precio_publico: Number(precioPublico),
         precio_mayorista_a: mayoristaA.trim() === '' ? '' : Number(mayoristaA),
+        precio_mayorista_b: mayoristaB.trim() === '' ? '' : Number(mayoristaB),
+        precio_mayorista_c: mayoristaC.trim() === '' ? '' : Number(mayoristaC),
+        precio_industrial: industrial.trim() === '' ? '' : Number(industrial),
         precio_costo_estandar: costoEstandar.trim() === '' ? '' : Number(costoEstandar),
         activo,
       });
@@ -235,6 +257,9 @@ function VarianteRow({
         <TableCell className="font-mono text-xs text-slate-500">{v.codigo_barras ?? '—'}</TableCell>
         <TableCell className="text-right font-medium">{formatPEN(Number(v.precio_publico ?? 0))}</TableCell>
         <TableCell className="text-right text-sm">{v.precio_mayorista_a ? formatPEN(Number(v.precio_mayorista_a)) : '—'}</TableCell>
+        <TableCell className="text-right text-sm">{v.precio_mayorista_b ? formatPEN(Number(v.precio_mayorista_b)) : '—'}</TableCell>
+        <TableCell className="text-right text-sm">{v.precio_mayorista_c ? formatPEN(Number(v.precio_mayorista_c)) : '—'}</TableCell>
+        <TableCell className="text-right text-sm">{v.precio_industrial ? formatPEN(Number(v.precio_industrial)) : '—'}</TableCell>
         <TableCell className="text-right text-sm text-slate-500">{v.precio_costo_estandar ? formatPEN(estandar) : '—'}</TableCell>
         <TableCell className="text-right text-sm">
           {u ? (
@@ -277,6 +302,15 @@ function VarianteRow({
       </TableCell>
       <TableCell className="text-right">
         <Input type="number" step="0.01" min="0" value={mayoristaA} onChange={(e) => setMayoristaA(e.target.value)} placeholder="—" className="h-8 w-24 text-right text-xs ml-auto" disabled={pending} />
+      </TableCell>
+      <TableCell className="text-right">
+        <Input type="number" step="0.01" min="0" value={mayoristaB} onChange={(e) => setMayoristaB(e.target.value)} placeholder="—" className="h-8 w-24 text-right text-xs ml-auto" disabled={pending} />
+      </TableCell>
+      <TableCell className="text-right">
+        <Input type="number" step="0.01" min="0" value={mayoristaC} onChange={(e) => setMayoristaC(e.target.value)} placeholder="—" className="h-8 w-24 text-right text-xs ml-auto" disabled={pending} />
+      </TableCell>
+      <TableCell className="text-right">
+        <Input type="number" step="0.01" min="0" value={industrial} onChange={(e) => setIndustrial(e.target.value)} placeholder="—" className="h-8 w-24 text-right text-xs ml-auto" disabled={pending} />
       </TableCell>
       <TableCell className="text-right">
         <Input type="number" step="0.01" min="0" value={costoEstandar} onChange={(e) => setCostoEstandar(e.target.value)} placeholder="—" className="h-8 w-24 text-right text-xs ml-auto" disabled={pending} />

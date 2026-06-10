@@ -10,6 +10,12 @@ export type AutocompleteItem = {
   label: string;
   sublabel?: string;
   href?: string;
+  /** Texto adicional incluido en el filtro (típicamente el código). Si está
+   *  presente, el filtro busca en label + searchKey y IGNORA sublabel — útil
+   *  cuando sublabel contiene contexto visual (ej. categoría) que no debe
+   *  influir en el match. Si no se pasa, se mantiene el comportamiento
+   *  anterior (filtra label + sublabel). */
+  searchKey?: string;
 };
 
 export function SearchAutocomplete({
@@ -45,7 +51,11 @@ export function SearchAutocomplete({
       s.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
     const qn = norm(q);
     return items
-      .filter((it) => norm(it.label).includes(qn) || (it.sublabel && norm(it.sublabel).includes(qn)))
+      .filter((it) => {
+        if (norm(it.label).includes(qn)) return true;
+        if (it.searchKey !== undefined) return norm(it.searchKey).includes(qn);
+        return it.sublabel ? norm(it.sublabel).includes(qn) : false;
+      })
       .slice(0, 10);
   }, [items, text]);
 

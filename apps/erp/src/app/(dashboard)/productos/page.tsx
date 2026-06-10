@@ -39,6 +39,10 @@ export default async function ProductosPage({ searchParams }: { searchParams: Pr
       id: p.id,
       label: p.nombre,
       sublabel: [p.codigo, c?.nombre].filter(Boolean).join(' · '),
+      // Filtramos solo por nombre + código. La categoría se muestra en
+      // sublabel pero no debe matchear (si no, buscar "PRINC" devuelve
+      // todos los productos de Princesas aunque su nombre no contenga PRINC).
+      searchKey: p.codigo ?? '',
       href: `/productos/${p.id}`,
     };
   });
@@ -90,7 +94,7 @@ export default async function ProductosPage({ searchParams }: { searchParams: Pr
           href={chipUrl({ sin_categoria: sinCategoriaActivo ? '' : '1', cat: '' })}
           active={sinCategoriaActivo}
           variant="default"
-          className="bg-amber-500 hover:bg-amber-600"
+          className={sinCategoriaActivo ? 'bg-amber-500 hover:bg-amber-600' : ''}
         >
           <AlertTriangle className="h-3 w-3" /> Sin categoría
         </FilterChip>

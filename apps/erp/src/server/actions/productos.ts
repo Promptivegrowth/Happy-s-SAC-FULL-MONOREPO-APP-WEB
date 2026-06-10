@@ -237,6 +237,7 @@ const varianteSchema = z.object({
   precio_mayorista_a: z.coerce.number().min(0).optional().or(z.literal('')),
   precio_mayorista_b: z.coerce.number().min(0).optional().or(z.literal('')),
   precio_mayorista_c: z.coerce.number().min(0).optional().or(z.literal('')),
+  precio_industrial: z.coerce.number().min(0).optional().or(z.literal('')),
   precio_costo_estandar: z.coerce.number().min(0).optional().or(z.literal('')),
   activo: z.boolean().default(true),
 });
@@ -252,6 +253,7 @@ export async function crearVariante(_prev: unknown, fd: FormData): Promise<Actio
       precio_mayorista_a: fd.get('precio_mayorista_a') || '',
       precio_mayorista_b: fd.get('precio_mayorista_b') || '',
       precio_mayorista_c: fd.get('precio_mayorista_c') || '',
+      precio_industrial: fd.get('precio_industrial') || '',
       precio_costo_estandar: fd.get('precio_costo_estandar') || '',
       activo: fd.get('activo') !== 'off',
     });
@@ -270,6 +272,7 @@ export async function crearVariante(_prev: unknown, fd: FormData): Promise<Actio
       precio_mayorista_a: data.precio_mayorista_a === '' ? null : Number(data.precio_mayorista_a),
       precio_mayorista_b: data.precio_mayorista_b === '' ? null : Number(data.precio_mayorista_b),
       precio_mayorista_c: data.precio_mayorista_c === '' ? null : Number(data.precio_mayorista_c),
+      precio_industrial: data.precio_industrial === '' ? null : Number(data.precio_industrial),
       precio_costo_estandar: data.precio_costo_estandar === '' ? null : Number(data.precio_costo_estandar),
     };
     const { error } = await sb.from('productos_variantes').insert(payload);
@@ -295,6 +298,7 @@ const actualizarVarianteSchema = z.object({
   precio_mayorista_a: z.coerce.number().min(0).optional().or(z.literal('')),
   precio_mayorista_b: z.coerce.number().min(0).optional().or(z.literal('')),
   precio_mayorista_c: z.coerce.number().min(0).optional().or(z.literal('')),
+  precio_industrial: z.coerce.number().min(0).optional().or(z.literal('')),
   precio_costo_estandar: z.coerce.number().min(0).optional().or(z.literal('')),
   activo: z.boolean().default(true),
 });
@@ -314,6 +318,7 @@ export async function actualizarVariante(
       precio_mayorista_a: data.precio_mayorista_a === '' ? null : Number(data.precio_mayorista_a),
       precio_mayorista_b: data.precio_mayorista_b === '' ? null : Number(data.precio_mayorista_b),
       precio_mayorista_c: data.precio_mayorista_c === '' ? null : Number(data.precio_mayorista_c),
+      precio_industrial: data.precio_industrial === '' ? null : Number(data.precio_industrial),
       precio_costo_estandar: data.precio_costo_estandar === '' ? null : Number(data.precio_costo_estandar),
       activo: data.activo,
     };
