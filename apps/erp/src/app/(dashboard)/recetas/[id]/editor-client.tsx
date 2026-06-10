@@ -111,7 +111,7 @@ export function RecetaEditor({
   productos = [],
   areas = [],
   procesos = [],
-  congelada = false,
+  tallasCongeladas = [],
   esHistorica = false,
   cantidadOts = 0,
   versionMateriales = 'v1.0',
@@ -125,22 +125,26 @@ export function RecetaEditor({
   productos?: Producto[];
   areas?: Area[];
   procesos?: Proceso[];
-  /** Si true, la receta está bloqueada para edición. */
-  congelada?: boolean;
-  /** Si true, es una versión histórica (activa=false). Bloquea sin botones de versionar. */
+  /** Tallas con OTs posteriores — bloqueadas individualmente. Las demás siguen
+   *  editables aunque el producto tenga producción en otras tallas. */
+  tallasCongeladas?: string[];
+  /** Si true, es una versión histórica (activa=false). Bloquea TODO sin botones de versionar. */
   esHistorica?: boolean;
   cantidadOts?: number;
   versionMateriales?: string;
   versionProcesos?: string;
 }) {
+  const tallasCongSet = new Set(tallasCongeladas);
+  const hayAlgunaCongelada = tallasCongSet.size > 0;
   return (
     <div className="space-y-3">
       {esHistorica ? (
         <HistoricaBanner versionMateriales={versionMateriales} versionProcesos={versionProcesos} />
-      ) : congelada ? (
+      ) : hayAlgunaCongelada ? (
         <CongeladoBanner
           productoId={productoId}
           cantidadOts={cantidadOts}
+          tallasCongeladas={tallasCongeladas}
           versionMateriales={versionMateriales}
           versionProcesos={versionProcesos}
         />
@@ -163,7 +167,8 @@ export function RecetaEditor({
             unidades={unidades}
             lineas={lineas}
             productos={productos}
-            congelada={congelada}
+            tallasCongeladas={tallasCongSet}
+            esHistorica={esHistorica}
           />
         </TabsContent>
 
@@ -173,7 +178,8 @@ export function RecetaEditor({
             areas={areas}
             procesos={procesos}
             productos={productos}
-            congelada={congelada}
+            tallasCongeladas={tallasCongSet}
+            esHistorica={esHistorica}
           />
         </TabsContent>
       </Tabs>
@@ -220,11 +226,13 @@ function HistoricaBanner({
 function CongeladoBanner({
   productoId,
   cantidadOts,
+  tallasCongeladas,
   versionMateriales,
   versionProcesos,
 }: {
   productoId: string;
   cantidadOts: number;
+  tallasCongeladas: string[];
   versionMateriales: string;
   versionProcesos: string;
 }) {
@@ -254,18 +262,25 @@ function CongeladoBanner({
     });
   }
 
+  const tallasMostrar = tallasCongeladas
+    .slice()
+    .sort()
+    .map((t) => t.replace('T', ''))
+    .join(', ');
   return (
     <div className="rounded-lg border-2 border-amber-300 bg-amber-50 p-4">
       <div className="flex items-start gap-3">
         <div className="text-2xl">🔒</div>
         <div className="flex-1 space-y-2 text-sm">
           <p className="font-bold text-amber-900">
-            Receta congelada · {cantidadOts} línea{cantidadOts === 1 ? '' : 's'} de OT generada{cantidadOts === 1 ? '' : 's'}
+            Tallas congeladas · {tallasCongeladas.length} de 11 ({tallasMostrar})
           </p>
           <p className="text-xs text-amber-800">
-            Este producto ya entró a producción, así que la receta vigente (materiales {versionMateriales} · procesos {versionProcesos})
-            no se puede editar directamente. Esto preserva la trazabilidad con las OTs y avíos ya despachados.
-            Para hacer ajustes, creá una versión nueva — la actual queda guardada como histórico.
+            Estas tallas ya entraron a producción ({cantidadOts} línea{cantidadOts === 1 ? '' : 's'} de OT),
+            así que sus líneas de receta no se pueden modificar para preservar trazabilidad de costos.
+            <strong className="font-semibold"> Las demás tallas siguen totalmente editables</strong> — podés
+            agregarles líneas o ajustarlas sin crear nueva versión. Para cambiar las tallas congeladas,
+            creá una nueva versión (la actual queda como histórico).
           </p>
           <div className="flex flex-wrap gap-2 pt-1">
             <Button variant="outline" size="sm" onClick={nuevaVerMateriales} disabled={pending} className="border-amber-400">
@@ -294,7 +309,8 @@ function BomEditor({
   unidades,
   lineas,
   productos,
-  congelada = false,
+  tallasCongeladas = new Set(),
+  esHistorica = false,
 }: {
   recetaId: string;
   productoId: string;
@@ -302,8 +318,15 @@ function BomEditor({
   unidades: Unidad[];
   lineas: Linea[];
   productos: Producto[];
-  congelada?: boolean;
+  /** Tallas individuales bloqueadas (OTs posteriores). Las demás siguen editables. */
+  tallasCongeladas?: Set<string>;
+  /** Si true, es histórica → todo bloqueado, sin botones de versionar. */
+  esHistorica?: boolean;
 }) {
+  const todasCongeladas = esHistorica || tallasCongeladas.size >= TALLAS.length;
+  // El editor "global" se considera bloqueado solo si TODAS las tallas están congeladas
+  // (caso histórica) o si no hay tallas libres para agregar líneas nuevas.
+  const congelada = todasCongeladas;
   const [filtroTalla, setFiltroTalla] = useState<string>('');
   const [openForm, setOpenForm] = useState(false);
   const [openDup, setOpenDup] = useState(false);
@@ -342,7 +365,8 @@ function BomEditor({
     });
   }
   function todasLasTallas() {
-    setTallasNueva(new Set(TALLAS as readonly string[]));
+    // No incluir tallas congeladas: el server las rechazaría.
+    setTallasNueva(new Set((TALLAS as readonly string[]).filter((t) => !tallasCongeladas.has(t))));
   }
   function ningunaTalla() {
     setTallasNueva(new Set());
@@ -515,23 +539,34 @@ function BomEditor({
               <div className="flex flex-wrap gap-1.5 rounded-md border border-dashed border-slate-200 p-2">
                 {TALLAS.map((t) => {
                   const sel = tallasNueva.has(t);
+                  const cong = tallasCongeladas.has(t);
                   return (
                     <button
                       key={t}
                       type="button"
-                      onClick={() => toggleTallaNueva(t)}
+                      onClick={() => !cong && toggleTallaNueva(t)}
+                      disabled={cong}
+                      title={cong ? `Talla ${t.replace('T', '')} congelada — tiene OTs generadas` : undefined}
                       className={`rounded-full border px-3 py-1 text-xs font-medium transition ${
-                        sel
-                          ? 'border-happy-500 bg-happy-500 text-white shadow-sm'
-                          : 'border-slate-300 bg-white text-slate-700 hover:border-happy-400 hover:bg-happy-50'
+                        cong
+                          ? 'cursor-not-allowed border-amber-200 bg-amber-50 text-amber-400 opacity-60 line-through'
+                          : sel
+                            ? 'border-happy-500 bg-happy-500 text-white shadow-sm'
+                            : 'border-slate-300 bg-white text-slate-700 hover:border-happy-400 hover:bg-happy-50'
                       }`}
                     >
-                      {sel && '✓ '}
+                      {cong && '🔒 '}
+                      {sel && !cong && '✓ '}
                       {t.replace('T', '')}
                     </button>
                   );
                 })}
               </div>
+              {tallasCongeladas.size > 0 && (
+                <p className="mt-1 text-[10px] text-amber-700">
+                  🔒 Las tallas con candado ya tienen OTs y no se pueden modificar — creá nueva versión si necesitás cambiarlas.
+                </p>
+              )}
               {tallasNueva.size > 0 && (
                 <p className="mt-1 text-[10px] text-emerald-700">
                   Se creará 1 línea por cada talla ({tallasNueva.size} en total).
@@ -613,22 +648,38 @@ function BomEditor({
       )}
 
       {filtroTalla ? (
-        <RecetaTabla lineas={porTalla[filtroTalla] ?? []} onDelete={onDelete} onToggleSale={onToggleSale} pending={pending} congelada={congelada} />
+        <RecetaTabla lineas={porTalla[filtroTalla] ?? []} onDelete={onDelete} onToggleSale={onToggleSale} pending={pending} congelada={esHistorica || tallasCongeladas.has(filtroTalla)} />
       ) : (
-        TALLAS.filter((t) => porTalla[t]!.length > 0).map((t) => (
-          <Card key={t} className="overflow-hidden">
-            <div className="flex items-center justify-between border-b bg-slate-50 px-4 py-2">
-              <h3 className="font-display text-sm font-semibold">Talla {t.replace('T', '')}</h3>
-              <div className="flex items-center gap-2">
-                <Badge variant="secondary" className="text-[10px]">{porTalla[t]!.length} líneas</Badge>
-                <Button variant="ghost" size="sm" onClick={() => setOpenDupTalla(t)} title="Duplicar líneas a otra talla">
-                  <Copy className="h-3 w-3" /> Duplicar talla
-                </Button>
+        TALLAS.filter((t) => porTalla[t]!.length > 0).map((t) => {
+          const tallaCong = esHistorica || tallasCongeladas.has(t);
+          return (
+            <Card key={t} className="overflow-hidden">
+              <div className="flex items-center justify-between border-b bg-slate-50 px-4 py-2">
+                <h3 className="font-display text-sm font-semibold">
+                  Talla {t.replace('T', '')}
+                  {tallaCong && !esHistorica && (
+                    <span className="ml-2 inline-flex items-center gap-1 rounded-full bg-amber-100 px-2 py-0.5 text-[9px] font-semibold text-amber-800">
+                      🔒 Congelada (OTs generadas)
+                    </span>
+                  )}
+                </h3>
+                <div className="flex items-center gap-2">
+                  <Badge variant="secondary" className="text-[10px]">{porTalla[t]!.length} líneas</Badge>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => setOpenDupTalla(t)}
+                    disabled={tallaCong}
+                    title={tallaCong ? 'Esta talla está congelada' : 'Duplicar líneas a otra talla'}
+                  >
+                    <Copy className="h-3 w-3" /> Duplicar talla
+                  </Button>
+                </div>
               </div>
-            </div>
-            <RecetaTabla lineas={porTalla[t]!} onDelete={onDelete} onToggleSale={onToggleSale} pending={pending} compact congelada={congelada} />
-          </Card>
-        ))
+              <RecetaTabla lineas={porTalla[t]!} onDelete={onDelete} onToggleSale={onToggleSale} pending={pending} compact congelada={tallaCong} />
+            </Card>
+          );
+        })
       )}
 
       {openDup && (
@@ -1166,14 +1217,21 @@ function ProcesosEditor({
   areas,
   procesos,
   productos = [],
-  congelada = false,
+  tallasCongeladas = new Set(),
+  esHistorica = false,
 }: {
   productoId: string;
   areas: Area[];
   procesos: Proceso[];
   productos?: Producto[];
-  congelada?: boolean;
+  /** Tallas con OTs posteriores — el server bloquea solo procesos de esas tallas. */
+  tallasCongeladas?: Set<string>;
+  esHistorica?: boolean;
 }) {
+  // Permitir abrir el form si hay AL MENOS UNA talla libre. El server valida
+  // la talla específica al guardar. Histórica = todo bloqueado.
+  const todasCongeladas = esHistorica || tallasCongeladas.size >= TALLAS.length;
+  const congelada = todasCongeladas;
   const [open, setOpen] = useState(false);
   const [pending, start] = useTransition();
   const [orderBy, setOrderBy] = useState<'orden' | 'area' | 'tiempo'>('orden');

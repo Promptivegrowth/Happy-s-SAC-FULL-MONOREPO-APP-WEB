@@ -7,6 +7,7 @@ import { Button } from '@happy/ui/button';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@happy/ui/table';
 import { PageShell } from '@/components/page-shell';
 import { RecetaEditor } from './editor-client';
+import { obtenerTallasCongeladas } from '@/server/actions/recetas';
 
 export const dynamic = 'force-dynamic';
 
@@ -43,31 +44,24 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
   const tallasUsadas = Array.from(new Set((lineas ?? []).map((l) => l.talla))).sort();
   const tallasFaltantes = TALLAS.filter((t) => !tallasUsadas.includes(t));
 
-  // Editabilidad:
+  // Editabilidad GRANULAR POR TALLA:
   //  - Si la receta es HISTÓRICA (activa=false) → bloqueada siempre. Las
   //    OTs viejas la usaron y modificarla alteraría reportes históricos.
-  //  - Si es ACTIVA y tiene OTs generadas DESPUÉS de su creación → congelada
-  //    con opción de "crear nueva versión". Las OTs anteriores a la receta
-  //    no la bloquean (corresponden a versiones previas del producto, no a
-  //    esta versión nueva).
-  //  - Si es ACTIVA y no hay OTs posteriores → totalmente editable.
-  const recetaCreatedAt = (receta as { created_at?: string }).created_at;
-  // Traemos las ot_lineas del producto con la fecha de su OT padre y
-  // filtramos en JS. PostgREST no aplica bien filtros gte() sobre columnas
-  // embedded en COUNT(head:true), así que preferimos la versión simple.
-  const { data: otLineasRaw } = await sb
-    .from('ot_lineas')
-    .select('id, ot:ot_id(created_at)')
-    .eq('producto_id', prod.id)
-    .limit(2000);
-  const cantidadOts = recetaCreatedAt
-    ? (otLineasRaw ?? []).filter((l) => {
-        const otCreated = (l as unknown as { ot?: { created_at?: string } | null }).ot?.created_at;
-        return otCreated ? otCreated >= recetaCreatedAt : true;
-      }).length
-    : (otLineasRaw ?? []).length;
+  //  - Si es ACTIVA: se congela SOLO la talla específica que tiene OTs
+  //    creadas DESPUÉS de la receta. Las demás tallas siguen editables
+  //    (agregar/eliminar líneas) aunque otras tengan OTs. Esto permite
+  //    completar tallas faltantes sin necesidad de crear v2.0.
+  //  - Las OTs anteriores a la receta no congelan nada (corresponden a
+  //    versiones previas del producto).
   const esHistorica = !receta.activa;
-  const recetaCongelada = esHistorica || (cantidadOts ?? 0) > 0;
+  const tallasCongeladas = esHistorica
+    ? [...TALLAS] // histórica = todas bloqueadas
+    : await obtenerTallasCongeladas(id, prod.id);
+  // Cantidad de líneas OT del producto (para mostrar en el banner informativo).
+  const { count: cantidadOts } = await sb
+    .from('ot_lineas')
+    .select('id', { count: 'exact', head: true })
+    .eq('producto_id', prod.id);
 
   return (
     <PageShell
@@ -113,7 +107,7 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
         productos={(productosTodos ?? []) as Parameters<typeof RecetaEditor>[0]['productos']}
         areas={(areas ?? []) as Parameters<typeof RecetaEditor>[0]['areas']}
         procesos={(procesos ?? []) as Parameters<typeof RecetaEditor>[0]['procesos']}
-        congelada={recetaCongelada}
+        tallasCongeladas={tallasCongeladas}
         esHistorica={esHistorica}
         cantidadOts={cantidadOts ?? 0}
         versionMateriales={(receta.version as string) ?? 'v1.0'}

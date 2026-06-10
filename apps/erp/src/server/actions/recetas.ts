@@ -12,52 +12,93 @@ const PROCESOS = [
 ] as const;
 
 // ============================================================================
-// Versionado: detección de "producto en producción"
+// Versionado: detección de "tallas en producción"
 // ============================================================================
 
 /**
- * Devuelve true si el producto ya entró a producción (existe al menos una OT).
- * Se usa para bloquear ediciones a la receta vigente — el usuario debe
- * crear una versión nueva (v2.0, v3.0…) en lugar de modificar la actual.
+ * Devuelve el SET de tallas del producto que ya tienen al menos una línea OT.
+ * El bloqueo es POR TALLA, no por receta entera: agregar receta para una talla
+ * que jamás se produjo NO afecta trazabilidad de OTs viejas, así que debe
+ * permitirse aunque otras tallas del mismo producto sí tengan OTs.
  *
  * Definición operativa acordada con el cliente:
  *   Las OTs nacen en estado PLANIFICADA desde un plan APROBADO. Apenas
- *   existe una OT ya hay compromiso de producción real → bloquear edición.
+ *   existe una línea OT con esa talla, hay compromiso de producción real
+ *   sobre esa talla → se bloquea edición de líneas de receta para esa talla.
  */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-async function productoEnProduccion(sb: any, productoId: string): Promise<boolean> {
-  const { count } = await sb
+async function tallasEnProduccion(sb: any, productoId: string): Promise<Set<string>> {
+  const { data } = await sb
     .from('ot_lineas')
-    .select('id', { count: 'exact', head: true })
+    .select('talla')
     .eq('producto_id', productoId);
-  return (count ?? 0) > 0;
+  const set = new Set<string>();
+  for (const r of (data ?? []) as { talla?: string | null }[]) {
+    if (r.talla) set.add(String(r.talla));
+  }
+  return set;
 }
 
 /**
- * Variante: ¿hay OTs del producto creadas DESPUÉS de la receta indicada?
+ * Tallas del producto con OTs creadas DESPUÉS de la receta indicada.
  * Las OTs anteriores corresponden a versiones previas y NO deben bloquear
  * esta receta (sirve para que una v2.0 recién creada quede editable
  * aunque la v1.0 vieja tenga OTs históricas).
+ *
+ * Implementación: 2 queries separadas en lugar de un embed PostgREST.
+ * El embed `ot:ot_id(created_at)` a veces devuelve null por RLS sobre el
+ * parent y entonces el fallback antiguo contaba esas OTs como "posteriores",
+ * lo que CONGELABA versiones nuevas erróneamente.
  */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-async function recetaConOtsPosteriores(sb: any, recetaId: string, productoId: string): Promise<boolean> {
+async function tallasEnProduccionPosterior(sb: any, recetaId: string, productoId: string): Promise<Set<string>> {
   const { data: rec } = await sb
     .from('recetas')
     .select('created_at')
     .eq('id', recetaId)
     .maybeSingle();
   const createdAt = rec?.created_at as string | undefined;
-  if (!createdAt) return await productoEnProduccion(sb, productoId);
-  const { data } = await sb
+  if (!createdAt) return await tallasEnProduccion(sb, productoId);
+
+  // OTs del producto con sus tallas y ot_id.
+  const { data: lineas } = await sb
     .from('ot_lineas')
-    .select('id, ot:ot_id(created_at)')
+    .select('talla, ot_id')
     .eq('producto_id', productoId)
-    .limit(2000);
-  return ((data ?? []) as { ot?: { created_at?: string } | null }[])
-    .some((l) => {
-      const oc = l.ot?.created_at;
-      return oc ? oc >= createdAt : true;
-    });
+    .limit(5000);
+  const otIds = Array.from(
+    new Set((lineas ?? []).map((l: { ot_id?: string | null }) => l.ot_id).filter(Boolean) as string[]),
+  );
+  if (otIds.length === 0) return new Set();
+
+  // Fechas de creación de esas OTs (query separada, sin embed problemático).
+  const { data: ots } = await sb
+    .from('ot')
+    .select('id, created_at')
+    .in('id', otIds);
+  const posteriores = new Set<string>();
+  for (const o of (ots ?? []) as { id: string; created_at?: string | null }[]) {
+    if (o.created_at && o.created_at >= createdAt) posteriores.add(o.id);
+  }
+
+  const set = new Set<string>();
+  for (const l of (lineas ?? []) as { talla?: string | null; ot_id?: string | null }[]) {
+    if (l.talla && l.ot_id && posteriores.has(l.ot_id)) set.add(String(l.talla));
+  }
+  return set;
+}
+
+/**
+ * Exportado para el page.tsx — devuelve las tallas congeladas de una receta
+ * (las que tienen OTs posteriores a la creación de la receta).
+ */
+export async function obtenerTallasCongeladas(
+  recetaId: string,
+  productoId: string,
+): Promise<string[]> {
+  const { sb } = await requireUser();
+  const set = await tallasEnProduccionPosterior(sb, recetaId, productoId);
+  return Array.from(set);
 }
 
 /**
@@ -77,9 +118,14 @@ function siguienteVersion(versionesExistentes: string[]): string {
   return `v${max + 1}.0`;
 }
 
-const MSG_CONGELADA =
-  'La receta de este producto está congelada porque ya entró a producción (hay OTs generadas). ' +
-  'Para hacer cambios, creá una nueva versión desde el botón "Crear nueva versión" en el banner de la receta.';
+function msgTallaCongelada(talla: string) {
+  return (
+    `La talla ${talla.replace('T', '')} de este producto ya entró a producción (hay OTs generadas para esa talla). ` +
+    'No se puede modificar la receta de esa talla específica. ' +
+    'Las tallas que aún no tuvieron OTs sí podés editarlas libremente. ' +
+    'Para cambiar una talla congelada, creá una nueva versión desde el banner.'
+  );
+}
 
 const MSG_HISTORICA =
   'Esta receta es una versión histórica (solo lectura). No se puede editar para preservar la trazabilidad ' +
@@ -92,47 +138,74 @@ async function recetaActiva(sb: any, recetaId: string): Promise<boolean> {
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-async function bloquearSiProductoEnProduccion(sb: any, productoId: string) {
-  if (await productoEnProduccion(sb, productoId)) throw new Error(MSG_CONGELADA);
-}
-
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-async function bloquearSiRecetaEnProduccion(sb: any, recetaId: string) {
-  // 1) Histórica → bloqueada siempre.
+async function bloquearSiTallaEnRecetaPosterior(sb: any, recetaId: string, talla: string) {
+  // 1) Histórica → bloqueada siempre, independiente de talla.
   if (!(await recetaActiva(sb, recetaId))) throw new Error(MSG_HISTORICA);
-  // 2) Activa con OTs creadas DESPUÉS de la receta → congelada.
+  // 2) Activa: solo bloquear si esta talla tiene OTs posteriores.
   const { data } = await sb.from('recetas').select('producto_id').eq('id', recetaId).maybeSingle();
   const pid = (data?.producto_id as string | undefined) ?? '';
   if (!pid) return;
-  if (await recetaConOtsPosteriores(sb, recetaId, pid)) throw new Error(MSG_CONGELADA);
+  const tallasCong = await tallasEnProduccionPosterior(sb, recetaId, pid);
+  if (tallasCong.has(talla)) throw new Error(msgTallaCongelada(talla));
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 async function bloquearSiLineaEnProduccion(sb: any, lineaId: string) {
   const { data } = await sb
     .from('recetas_lineas')
-    .select('receta_id, recetas(producto_id, activa)')
+    .select('talla, receta_id, recetas(producto_id, activa)')
     .eq('id', lineaId)
     .maybeSingle();
   const rec = data?.recetas as { producto_id?: string; activa?: boolean } | null;
   const recId = data?.receta_id as string | undefined;
+  const talla = data?.talla as string | undefined;
   if (!rec) return;
   if (rec.activa === false) throw new Error(MSG_HISTORICA);
   const pid = rec.producto_id ?? '';
-  if (!pid || !recId) return;
-  if (await recetaConOtsPosteriores(sb, recId, pid)) throw new Error(MSG_CONGELADA);
+  if (!pid || !recId || !talla) return;
+  const tallasCong = await tallasEnProduccionPosterior(sb, recId, pid);
+  if (tallasCong.has(talla)) throw new Error(msgTallaCongelada(talla));
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 async function bloquearSiProcesoEnProduccion(sb: any, procesoId: string) {
   const { data } = await sb
     .from('productos_procesos')
-    .select('producto_id')
+    .select('producto_id, talla')
     .eq('id', procesoId)
     .maybeSingle();
   const pid = (data?.producto_id as string | undefined) ?? '';
   if (!pid) return;
-  await bloquearSiProductoEnProduccion(sb, pid);
+  // Procesos no están atados a receta — usar el set global por producto.
+  const tallas = await tallasEnProduccion(sb, pid);
+  const talla = data?.talla as string | undefined;
+  // Sin talla específica = aplica a todas; bloquear si hay CUALQUIER talla en producción.
+  if (!talla) {
+    if (tallas.size > 0) throw new Error(msgTallaCongelada(Array.from(tallas)[0] ?? 'T?'));
+    return;
+  }
+  if (tallas.has(talla)) throw new Error(msgTallaCongelada(talla));
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function bloquearSiProductoEnProduccion(sb: any, productoId: string) {
+  // Reemplazo retrocompatible: si CUALQUIER talla del producto entró a producción,
+  // bloquea acciones globales (reorder, duplicar masivo). Para acciones por talla
+  // específica usá bloquearSiTallaEnRecetaPosterior o bloquearSiTallaEnProductoProduccion.
+  const tallas = await tallasEnProduccion(sb, productoId);
+  if (tallas.size > 0) throw new Error(msgTallaCongelada(Array.from(tallas)[0] ?? 'T?'));
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function bloquearSiTallaEnProductoProduccion(sb: any, productoId: string, talla: string | null | undefined) {
+  // Para procesos: si no hay talla específica (aplica a todas), bloquear si hay CUALQUIER
+  // talla en producción. Si hay talla específica, bloquear solo esa.
+  const tallas = await tallasEnProduccion(sb, productoId);
+  if (!talla) {
+    if (tallas.size > 0) throw new Error(msgTallaCongelada(Array.from(tallas)[0] ?? 'T?'));
+    return;
+  }
+  if (tallas.has(talla)) throw new Error(msgTallaCongelada(talla));
 }
 
 const lineaSchema = z.object({
@@ -191,11 +264,11 @@ export async function upsertReceta(_prev: unknown, fd: FormData): Promise<Action
       unidad_id: fd.get('unidad_id') || '',
       observacion: fd.get('observacion') || '',
     });
-    // Bloquear si el producto de esta receta ya está en producción.
+    // Bloquear solo si la TALLA específica ya entró a producción.
     // upsertReceta puede ejecutarse desde formularios legacy — aplicamos
     // la guarda igual que el resto.
     const { sb } = await requireUser();
-    await bloquearSiRecetaEnProduccion(sb, data.receta_id);
+    await bloquearSiTallaEnRecetaPosterior(sb, data.receta_id, data.talla);
     const { error } = await sb.from('recetas_lineas').upsert({
       receta_id: data.receta_id,
       material_id: data.material_id,
@@ -235,7 +308,24 @@ export async function upsertRecetaMulti(
   const r = await runAction(async () => {
     const data = upsertMultiSchema.parse(input);
     const { sb } = await requireUser();
-    await bloquearSiRecetaEnProduccion(sb, data.receta_id);
+    // Validar talla por talla: rechazamos solo las que están congeladas y
+    // dejamos pasar el resto, o abortamos si TODAS están congeladas. Para
+    // evitar inserciones parciales sorpresivas, abortamos si CUALQUIERA
+    // está congelada y reportamos cuáles.
+    if (!(await recetaActiva(sb, data.receta_id))) throw new Error(MSG_HISTORICA);
+    const { data: rec } = await sb.from('recetas').select('producto_id').eq('id', data.receta_id).maybeSingle();
+    const pid = (rec?.producto_id as string | undefined) ?? '';
+    if (pid) {
+      const tallasCong = await tallasEnProduccionPosterior(sb, data.receta_id, pid);
+      const conflictos = data.tallas.filter((t) => tallasCong.has(t));
+      if (conflictos.length > 0) {
+        const lista = conflictos.map((t) => t.replace('T', '')).join(', ');
+        throw new Error(
+          `Las tallas ${lista} ya tienen OTs generadas y no se pueden modificar. ` +
+          `Desmarcalas o creá una nueva versión de la receta.`,
+        );
+      }
+    }
     const filas = data.tallas.map((t) => ({
       receta_id: data.receta_id,
       material_id: data.material_id,
@@ -334,9 +424,19 @@ export async function duplicarReceta(
       if (errR) throw new Error(errR.message);
       recetaDestId = nueva.id;
     } else {
-      // Si el destino YA tenía receta activa, chequear que no esté en producción.
-      // Sino, duplicar líneas equivale a editar una receta congelada.
-      await bloquearSiProductoEnProduccion(sb, productoDestinoId);
+      // Si el destino YA tenía receta activa, chequear talla por talla que no
+      // tenga OTs posteriores. Las tallas en producción se bloquean para no
+      // sobreescribir lo que ya se cortó.
+      const tallasACopiar = new Set(lineas.map((l) => (tallaDestino || l.talla) as string));
+      const tallasCong = await tallasEnProduccionPosterior(sb, recetaDestId, productoDestinoId);
+      const conflictos = Array.from(tallasACopiar).filter((t) => tallasCong.has(t));
+      if (conflictos.length > 0) {
+        const lista = conflictos.map((t) => t.replace('T', '')).join(', ');
+        throw new Error(
+          `El producto destino ya tiene OTs para las tallas ${lista}. ` +
+          `No se pueden sobreescribir esas líneas. Creá una nueva versión en el destino o filtrá por tallas libres.`,
+        );
+      }
     }
 
     // 3. Insertar líneas con la nueva receta_id (override talla destino si aplica)
@@ -401,7 +501,8 @@ export async function duplicarLineasTalla(
   const r = await runAction(async () => {
     if (tallaOrigen === tallaDestino) throw new Error('Talla origen y destino son iguales');
     const { sb } = await requireUser();
-    await bloquearSiRecetaEnProduccion(sb, recetaId);
+    // Solo bloquear si la TALLA DESTINO ya está en producción (la origen no se toca).
+    await bloquearSiTallaEnRecetaPosterior(sb, recetaId, tallaDestino);
     const { data: lineas, error: errL } = await sb
       .from('recetas_lineas')
       .select('material_id, cantidad, sale_a_servicio, cantidad_almacen, unidad_id, observacion')
@@ -452,7 +553,8 @@ export async function agregarProceso(
   const r = await runAction(async () => {
     const data = procesoSchema.parse({ ...input, producto_id: productoId });
     const { sb } = await requireUser();
-    await bloquearSiProductoEnProduccion(sb, productoId);
+    // Bloquear solo si la talla específica está en producción (o cualquiera si talla es null).
+    await bloquearSiTallaEnProductoProduccion(sb, productoId, data.talla || null);
 
     // orden auto: el siguiente disponible para ese producto (solo procesos activos)
     let orden = data.orden;
