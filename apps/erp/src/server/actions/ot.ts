@@ -166,6 +166,28 @@ export async function cambiarEstadoOT(otId: string, nuevoEstado: typeof ESTADOS[
       );
     }
 
+    // Reglas de avance: no se puede pasar a un estado de PROCESAMIENTO POSTERIOR
+    // al corte (habilitado/servicio/decorado/CC/completada) si no hay UNA SOLA
+    // unidad cortada todavía. Sin corte físico no hay piezas para procesar —
+    // permitirlo lleva a registros de tiempo y costos sobre nada.
+    // CANCELADA y EN_CORTE no requieren corte previo (la primera es escape, la
+    // segunda es PARA cortar).
+    const requiereCorte: EstadoOT[] = ['EN_HABILITADO', 'EN_SERVICIO', 'EN_DECORADO', 'EN_CONTROL_CALIDAD', 'COMPLETADA'];
+    if (requiereCorte.includes(nuevoEstado)) {
+      const { data: lineas } = await sb
+        .from('ot_lineas')
+        .select('cantidad_cortada')
+        .eq('ot_id', otId);
+      const totalCortado = ((lineas ?? []) as { cantidad_cortada: number | null }[])
+        .reduce((s, l) => s + Number(l.cantidad_cortada ?? 0), 0);
+      if (totalCortado === 0) {
+        throw new Error(
+          `No podés pasar a "${nuevoEstado.replace('_', ' ')}" porque ninguna línea de esta OT tiene unidades cortadas. ` +
+          `Generá la orden de corte y registrá las cantidades cortadas antes de avanzar.`,
+        );
+      }
+    }
+
     // Update con WHERE en estado actual para atomicidad (evita race con otro
     // usuario que también esté cambiando el estado en paralelo).
     const { error: errUpd, count } = await sb
@@ -394,6 +416,48 @@ export async function crearRegistroTiempoOT(
       tiempoTotal = data.tiempo_total_min;
     } else {
       throw new Error('Ingresá fecha inicio + fin O tiempo directo (> 0)');
+    }
+
+    // Validar que las unidades procesadas no excedan las cortadas para esa
+    // (talla, producto). Sumamos las unidades ya registradas para el mismo
+    // (proceso, talla) y verificamos que el nuevo + acumulado no pase del
+    // máximo cortado. Sin esta guarda el cliente puede ingresar valores
+    // imposibles (ej. 700 unidades cuando se cortaron 70).
+    if (data.unidades_procesadas != null && data.unidades_procesadas > 0) {
+      // Producto del proceso (productos_procesos.producto_id)
+      const { data: procRow } = await sbAny
+        .from('productos_procesos')
+        .select('producto_id')
+        .eq('id', data.proceso_id)
+        .maybeSingle();
+      const productoId = procRow?.producto_id as string | undefined;
+      if (productoId) {
+        const { data: linea } = await sbAny
+          .from('ot_lineas')
+          .select('cantidad_cortada')
+          .eq('ot_id', otId)
+          .eq('producto_id', productoId)
+          .eq('talla', data.talla)
+          .maybeSingle();
+        const cortada = Number(linea?.cantidad_cortada ?? 0);
+        if (cortada > 0) {
+          const { data: previos } = await sbAny
+            .from('ot_registros_tiempo')
+            .select('unidades_procesadas')
+            .eq('ot_id', otId)
+            .eq('proceso_id', data.proceso_id)
+            .eq('talla', data.talla);
+          const yaRegistrado = ((previos ?? []) as { unidades_procesadas: number | null }[])
+            .reduce((s, r) => s + Number(r.unidades_procesadas ?? 0), 0);
+          const disponible = cortada - yaRegistrado;
+          if (data.unidades_procesadas > disponible) {
+            throw new Error(
+              `No podés registrar ${data.unidades_procesadas} unidades en talla ${data.talla.replace('T', '')}: ` +
+              `se cortaron ${cortada} y ya hay ${yaRegistrado} registradas (quedan ${Math.max(0, disponible)}).`,
+            );
+          }
+        }
+      }
     }
 
     const { data: row, error } = await sbAny

@@ -134,7 +134,12 @@ export function TiemposCostoTab({ otId, procesos, lineas, registros, operarios, 
   // Registros filtrados a la talla seleccionada
   const registrosTalla = useMemo(() => registros.filter((r) => r.talla === tallaSel), [registros, tallaSel]);
 
-  // Totales para el resumen
+  // Totales para el resumen.
+  // "Real por unidad" = total tiempo registrado / SUMA DE UNIDADES PROCESADAS
+  // de los registros (no `cantidad_cortada`, que es el total a producir).
+  // Esto refleja el avance parcial: si procesaste 50 de 100, el ratio es sobre
+  // 50. Si ninguno de los registros trae unidades_procesadas, caemos al
+  // cortado como fallback (legacy) para no romper datos viejos.
   let totalEstandarMin = 0;
   let totalRealMin = 0;
   let totalCostoEstandarUnit = 0;
@@ -144,8 +149,9 @@ export function TiemposCostoTab({ otId, procesos, lineas, registros, operarios, 
     const vmin = Number(p.area?.valor_minuto ?? 0);
     const regs = registrosTalla.filter((r) => r.proceso_id === p.id);
     const tiempoTotal = regs.reduce((s, r) => s + Number(r.tiempo_total_min), 0);
-    // tiempo "real por unidad" = total registrado / unidades, si hay
-    const tiempoRealUnit = unidades > 0 ? tiempoTotal / unidades : 0;
+    const unidadesProcesadasOp = regs.reduce((s, r) => s + Number(r.unidades_procesadas ?? 0), 0);
+    const denominador = unidadesProcesadasOp > 0 ? unidadesProcesadasOp : unidades;
+    const tiempoRealUnit = denominador > 0 ? tiempoTotal / denominador : 0;
     totalEstandarMin += std;
     totalRealMin += tiempoRealUnit > 0 ? tiempoRealUnit : std;
     totalCostoEstandarUnit += std * vmin;
@@ -222,18 +228,37 @@ export function TiemposCostoTab({ otId, procesos, lineas, registros, operarios, 
                   )}
                 </div>
                 <div className="space-y-2">
-                  {procs.map((p) => (
-                    <OperacionBlock
-                      key={p.id}
-                      otId={otId}
-                      proceso={p}
-                      talla={tallaSel}
-                      registros={registrosTalla.filter((r) => r.proceso_id === p.id)}
-                      operarios={operarios}
-                      esAreaCorte={areaCodigo === 'CORTE'}
-                      disabled={disabled}
-                    />
-                  ))}
+                  {procs.map((p) => {
+                    // Lista de tallas con cantidad_cortada y unidades ya
+                    // registradas para ESTE proceso. Sirve para que el form
+                    // muestre el cuadro multi-talla con máximos disponibles.
+                    const tallasParaForm = lineasProducto
+                      .filter((l) => Number(l.cantidad_cortada) > 0)
+                      .map((l) => {
+                        const yaReg = registros
+                          .filter((r) => r.proceso_id === p.id && r.talla === l.talla)
+                          .reduce((s, r) => s + Number(r.unidades_procesadas ?? 0), 0);
+                        return {
+                          talla: l.talla,
+                          cortada: Number(l.cantidad_cortada),
+                          yaRegistrado: yaReg,
+                        };
+                      })
+                      .sort((a, b) => a.talla.localeCompare(b.talla));
+                    return (
+                      <OperacionBlock
+                        key={p.id}
+                        otId={otId}
+                        proceso={p}
+                        tallaActual={tallaSel}
+                        tallasDisponibles={tallasParaForm}
+                        registros={registrosTalla.filter((r) => r.proceso_id === p.id)}
+                        operarios={operarios}
+                        esAreaCorte={areaCodigo === 'CORTE'}
+                        disabled={disabled}
+                      />
+                    );
+                  })}
                 </div>
               </div>
             );
@@ -255,6 +280,7 @@ export function TiemposCostoTab({ otId, procesos, lineas, registros, operarios, 
                 <TableHead>Área</TableHead>
                 <TableHead className="text-right">Estándar (min/u)</TableHead>
                 <TableHead className="text-right">Total registrado (min)</TableHead>
+                <TableHead>Avance</TableHead>
                 <TableHead className="text-right">Real (min/u)</TableHead>
                 <TableHead className="text-right">S/ por min</TableHead>
                 <TableHead className="text-right">Costo unit. real</TableHead>
@@ -266,8 +292,13 @@ export function TiemposCostoTab({ otId, procesos, lineas, registros, operarios, 
                 const vmin = Number(p.area?.valor_minuto ?? 0);
                 const regs = registrosTalla.filter((r) => r.proceso_id === p.id);
                 const totalRegistrado = regs.reduce((s, r) => s + Number(r.tiempo_total_min), 0);
-                const realPorUnidad = unidades > 0 ? totalRegistrado / unidades : 0;
+                const unidadesProcOp = regs.reduce((s, r) => s + Number(r.unidades_procesadas ?? 0), 0);
+                const denominador = unidadesProcOp > 0 ? unidadesProcOp : unidades;
+                const realPorUnidad = denominador > 0 ? totalRegistrado / denominador : 0;
                 const tiempoUsado = realPorUnidad > 0 ? realPorUnidad : std;
+                const parcial = unidadesProcOp > 0 && unidadesProcOp < unidades;
+                const pct = unidades > 0 ? Math.min(100, Math.round((unidadesProcOp / unidades) * 100)) : 0;
+                const completo = unidadesProcOp >= unidades && unidades > 0;
                 return (
                   <TableRow key={p.id}>
                     <TableCell className="text-center text-xs text-slate-500">{p.orden}</TableCell>
@@ -277,8 +308,40 @@ export function TiemposCostoTab({ otId, procesos, lineas, registros, operarios, 
                     <TableCell className="text-right font-mono text-xs">
                       {regs.length > 0 ? totalRegistrado.toFixed(2) : <span className="text-slate-300">—</span>}
                     </TableCell>
+                    <TableCell>
+                      {unidades === 0 ? (
+                        <span className="text-[10px] text-slate-400">sin corte</span>
+                      ) : unidadesProcOp === 0 ? (
+                        <div className="flex flex-col gap-0.5">
+                          <span className="font-mono text-[10px] text-slate-400">0 / {unidades}</span>
+                          <div className="h-1 w-20 rounded-full bg-slate-100" />
+                        </div>
+                      ) : (
+                        <div className="flex flex-col gap-0.5" title={`Procesadas: ${unidadesProcOp} de ${unidades} cortadas`}>
+                          <span className={`font-mono text-[10px] ${completo ? 'text-emerald-700' : 'text-corp-900'}`}>
+                            {unidadesProcOp} / {unidades}
+                            <span className={`ml-1 font-semibold ${completo ? 'text-emerald-700' : 'text-amber-700'}`}>
+                              {pct}%
+                            </span>
+                          </span>
+                          <div className="h-1 w-20 overflow-hidden rounded-full bg-slate-100">
+                            <div
+                              className={`h-full rounded-full transition-all ${completo ? 'bg-emerald-500' : 'bg-amber-500'}`}
+                              style={{ width: `${pct}%` }}
+                            />
+                          </div>
+                        </div>
+                      )}
+                    </TableCell>
                     <TableCell className="text-right font-mono text-xs">
-                      {realPorUnidad > 0 ? realPorUnidad.toFixed(2) : <span className="text-slate-300">—</span>}
+                      {realPorUnidad > 0 ? (
+                        <span title={parcial ? `Parcial: ${unidadesProcOp} de ${unidades} unidades procesadas` : undefined}>
+                          {realPorUnidad.toFixed(2)}
+                          {parcial && <span className="ml-1 text-[9px] text-amber-600">·{unidadesProcOp}u</span>}
+                        </span>
+                      ) : (
+                        <span className="text-slate-300">—</span>
+                      )}
                     </TableCell>
                     <TableCell className="text-right font-mono text-xs text-slate-500">{vmin > 0 ? PEN(vmin) : <span className="text-slate-400">—</span>}</TableCell>
                     <TableCell className="text-right font-mono text-xs font-semibold text-emerald-700">{PEN(tiempoUsado * vmin)}</TableCell>
@@ -345,12 +408,15 @@ function StatBox({ label, value, sub, highlight }: { label: string; value: strin
   );
 }
 
+type TallaDisp = { talla: string; cortada: number; yaRegistrado: number };
+
 function OperacionBlock({
-  otId, proceso, talla, registros, operarios, esAreaCorte, disabled,
+  otId, proceso, tallaActual, tallasDisponibles, registros, operarios, esAreaCorte, disabled,
 }: {
   otId: string;
   proceso: Proceso;
-  talla: string;
+  tallaActual: string;
+  tallasDisponibles: TallaDisp[];
   registros: RegistroTiempo[];
   operarios: Operario[];
   esAreaCorte: boolean;
@@ -391,7 +457,8 @@ function OperacionBlock({
         <FormRegistro
           otId={otId}
           procesoId={proceso.id}
-          talla={talla}
+          tallaActual={tallaActual}
+          tallasDisponibles={tallasDisponibles}
           operarios={operarios}
           esAreaCorte={esAreaCorte}
           onSaved={() => setOpenForm(false)}
@@ -410,11 +477,12 @@ function OperacionBlock({
 }
 
 function FormRegistro({
-  otId, procesoId, talla, operarios, esAreaCorte, onSaved,
+  otId, procesoId, tallaActual, tallasDisponibles, operarios, esAreaCorte, onSaved,
 }: {
   otId: string;
   procesoId: string;
-  talla: string;
+  tallaActual: string;
+  tallasDisponibles: TallaDisp[];
   operarios: Operario[];
   esAreaCorte: boolean;
   onSaved: () => void;
@@ -424,28 +492,112 @@ function FormRegistro({
   const [fechaInicio, setFechaInicio] = useState('');
   const [fechaFin, setFechaFin] = useState('');
   const [tiempoDirecto, setTiempoDirecto] = useState('');
-  const [unidades, setUnidades] = useState('');
+  // Cantidades por talla (string para input controlado). Default: la talla
+  // actualmente seleccionada arriba se prepopula con su remanente disponible
+  // (cortada - ya registrado para este proceso). Las demás arrancan vacías.
+  const [cantPorTalla, setCantPorTalla] = useState<Record<string, string>>(() => {
+    const init: Record<string, string> = {};
+    for (const t of tallasDisponibles) {
+      if (t.talla === tallaActual) {
+        const rem = Math.max(0, t.cortada - t.yaRegistrado);
+        init[t.talla] = rem > 0 ? String(rem) : '';
+      } else {
+        init[t.talla] = '';
+      }
+    }
+    return init;
+  });
   const [operarioId, setOperarioId] = useState('');
   const [notas, setNotas] = useState('');
 
+  function setCant(talla: string, valor: string) {
+    setCantPorTalla((prev) => ({ ...prev, [talla]: valor }));
+  }
+  function marcarTodasTallas() {
+    const next: Record<string, string> = {};
+    for (const t of tallasDisponibles) {
+      const rem = Math.max(0, t.cortada - t.yaRegistrado);
+      next[t.talla] = rem > 0 ? String(rem) : '';
+    }
+    setCantPorTalla(next);
+  }
+  function limpiarTallas() {
+    const next: Record<string, string> = {};
+    for (const t of tallasDisponibles) next[t.talla] = '';
+    setCantPorTalla(next);
+  }
+
+  // Tallas con cantidad > 0 son las que se van a registrar
+  const tallasAEnviar = tallasDisponibles
+    .map((t) => ({ ...t, cantidad: Number(cantPorTalla[t.talla] ?? 0) }))
+    .filter((t) => t.cantidad > 0);
+
   function submit() {
+    if (esAreaCorte && tallasAEnviar.length === 0) {
+      // En CORTE las unidades son opcionales: si no marcaron nada, registramos
+      // solo en la talla actual sin unidades.
+      registrarSinUnidades();
+      return;
+    }
+    if (tallasAEnviar.length === 0) {
+      toast.error('Marcá al menos una talla con cantidad procesada > 0');
+      return;
+    }
+    // Validar máximos en cliente (el server también valida)
+    for (const t of tallasAEnviar) {
+      const rem = t.cortada - t.yaRegistrado;
+      if (t.cantidad > rem) {
+        toast.error(
+          `Talla ${t.talla.replace('T', '')}: máximo ${Math.max(0, rem)} ` +
+          `(se cortaron ${t.cortada}, ya registradas ${t.yaRegistrado})`,
+        );
+        return;
+      }
+    }
+    start(async () => {
+      let okCount = 0;
+      let errMsg = '';
+      for (const t of tallasAEnviar) {
+        const r = await crearRegistroTiempoOT(otId, {
+          proceso_id: procesoId,
+          talla: t.talla,
+          fecha_inicio: modo === 'intervalo' ? fechaInicio : '',
+          fecha_fin: modo === 'intervalo' ? fechaFin : '',
+          tiempo_total_min: modo === 'directo' && tiempoDirecto ? Number(tiempoDirecto) : undefined,
+          unidades_procesadas: t.cantidad,
+          operario_id: operarioId || '',
+          notas: notas || null,
+        });
+        if (r.ok) okCount++;
+        else { errMsg = r.error ?? 'Error'; break; }
+      }
+      if (okCount === tallasAEnviar.length) {
+        toast.success(
+          okCount === 1
+            ? 'Registro guardado'
+            : `${okCount} registros guardados (uno por talla)`,
+        );
+        onSaved();
+      } else {
+        toast.error(`${errMsg} · Se guardaron ${okCount}/${tallasAEnviar.length} antes del error`);
+      }
+    });
+  }
+
+  function registrarSinUnidades() {
     start(async () => {
       const r = await crearRegistroTiempoOT(otId, {
         proceso_id: procesoId,
-        talla,
+        talla: tallaActual,
         fecha_inicio: modo === 'intervalo' ? fechaInicio : '',
         fecha_fin: modo === 'intervalo' ? fechaFin : '',
         tiempo_total_min: modo === 'directo' && tiempoDirecto ? Number(tiempoDirecto) : undefined,
-        unidades_procesadas: unidades ? Number(unidades) : null,
+        unidades_procesadas: null,
         operario_id: operarioId || '',
         notas: notas || null,
       });
-      if (r.ok) {
-        toast.success('Registro guardado');
-        onSaved();
-      } else {
-        toast.error(r.error ?? 'Error al guardar registro');
-      }
+      if (r.ok) { toast.success('Registro guardado'); onSaved(); }
+      else toast.error(r.error ?? 'Error al guardar registro');
     });
   }
 
@@ -486,18 +638,60 @@ function FormRegistro({
         </label>
       )}
 
-      <div className="grid grid-cols-2 gap-2">
-        <label className="text-[10px] text-slate-500">
-          Unidades procesadas {esAreaCorte ? '(opcional)' : ''}
-          <Input
-            type="number"
-            min="0"
-            value={unidades}
-            onChange={(e) => setUnidades(e.target.value)}
-            className="h-8 text-xs"
-            placeholder={esAreaCorte ? 'vacío = no aplica' : 'Ej. 50'}
-          />
-        </label>
+      {/* Multi-talla: cuadro con TODAS las tallas cortadas y cantidad por cada una */}
+      <div className="rounded-md border border-dashed border-slate-200 bg-white p-2">
+        <div className="mb-1 flex items-center justify-between">
+          <span className="text-[10px] font-medium text-slate-700">
+            Unidades procesadas por talla
+            {esAreaCorte && <span className="ml-1 font-normal text-slate-400">(opcional en CORTE)</span>}
+          </span>
+          <div className="flex gap-2 text-[10px]">
+            <button type="button" onClick={marcarTodasTallas} className="text-happy-600 hover:underline">
+              Todo el remanente
+            </button>
+            <span className="text-slate-300">·</span>
+            <button type="button" onClick={limpiarTallas} className="text-slate-500 hover:underline">
+              Limpiar
+            </button>
+          </div>
+        </div>
+        <div className="grid grid-cols-2 gap-1.5 sm:grid-cols-3 md:grid-cols-4">
+          {tallasDisponibles.map((t) => {
+            const rem = Math.max(0, t.cortada - t.yaRegistrado);
+            const completo = rem === 0;
+            return (
+              <div
+                key={t.talla}
+                className={`flex items-center gap-1 rounded border px-1.5 py-1 ${
+                  completo ? 'border-slate-200 bg-slate-50 opacity-60' : 'border-slate-200 bg-white'
+                }`}
+              >
+                <Badge variant="outline" className="text-[9px]">{t.talla.replace('T', '')}</Badge>
+                <Input
+                  type="number"
+                  min="0"
+                  max={rem}
+                  value={cantPorTalla[t.talla] ?? ''}
+                  onChange={(e) => setCant(t.talla, e.target.value)}
+                  disabled={completo}
+                  className="h-6 px-1 text-right text-xs font-mono"
+                  placeholder={completo ? 'ok' : `máx ${rem}`}
+                  title={`Cortadas: ${t.cortada} · Ya registradas: ${t.yaRegistrado} · Disponible: ${rem}`}
+                />
+                <span className="text-[9px] text-slate-400">/{t.cortada}</span>
+              </div>
+            );
+          })}
+        </div>
+        {tallasAEnviar.length > 0 && (
+          <p className="mt-1 text-[10px] text-emerald-700">
+            Se crearán {tallasAEnviar.length} registro{tallasAEnviar.length === 1 ? '' : 's'} (uno por talla),
+            cada uno con el mismo tiempo total ingresado arriba.
+          </p>
+        )}
+      </div>
+
+      <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
         <label className="text-[10px] text-slate-500">
           Operario (opcional)
           <select
@@ -509,12 +703,11 @@ function FormRegistro({
             {operarios.map((o) => <option key={o.id} value={o.id}>{o.nombre}</option>)}
           </select>
         </label>
+        <label className="text-[10px] text-slate-500">
+          Notas (opcional)
+          <Input value={notas} onChange={(e) => setNotas(e.target.value)} className="h-8 text-xs" maxLength={500} />
+        </label>
       </div>
-
-      <label className="block text-[10px] text-slate-500">
-        Notas (opcional)
-        <Input value={notas} onChange={(e) => setNotas(e.target.value)} className="h-8 text-xs" maxLength={500} />
-      </label>
 
       <div className="flex justify-end gap-1">
         <Button variant="ghost" size="sm" onClick={onSaved} disabled={pending} className="h-7 px-2 text-xs">Cancelar</Button>
