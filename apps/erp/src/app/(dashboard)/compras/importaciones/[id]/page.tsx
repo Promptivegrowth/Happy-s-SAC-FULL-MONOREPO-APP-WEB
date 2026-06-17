@@ -8,8 +8,8 @@ import { PageShell } from '@/components/page-shell';
 import {
   obtenerImportacion,
   listarOCsDisponiblesParaImportacion,
-  siguientesEstados,
 } from '@/server/actions/importaciones';
+import { siguientesEstados } from '@/server/actions/importaciones-helpers';
 import { EstadoBadge } from '../estado-badge';
 import { ImportacionDetalleClient } from './detalle-client';
 

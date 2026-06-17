@@ -30,29 +30,10 @@ import { runAction, requireUser, bumpPaths, type ActionResult } from './_helpers
 
 // ---------- Tipos públicos ----------
 
-export const ESTADOS_IMPORTACION = [
-  'PREPARACION',
-  'EN_TRANSITO',
-  'EN_ADUANAS',
-  'LIBERADA',
-  'RECIBIDA',
-  'CANCELADA',
-] as const;
+import { ESTADOS_IMPORTACION, TRANSICIONES_IMPORTACION, type EstadoImportacion } from './importaciones-helpers';
+export type { EstadoImportacion } from './importaciones-helpers';
 
-export type EstadoImportacion = (typeof ESTADOS_IMPORTACION)[number];
-
-const TRANSICIONES: Record<EstadoImportacion, EstadoImportacion[]> = {
-  PREPARACION: ['EN_TRANSITO', 'CANCELADA'],
-  EN_TRANSITO: ['EN_ADUANAS', 'CANCELADA'],
-  EN_ADUANAS: ['LIBERADA', 'CANCELADA'],
-  LIBERADA: ['RECIBIDA', 'CANCELADA'],
-  RECIBIDA: [],
-  CANCELADA: [],
-};
-
-export function siguientesEstados(actual: EstadoImportacion): EstadoImportacion[] {
-  return TRANSICIONES[actual] ?? [];
-}
+const TRANSICIONES = TRANSICIONES_IMPORTACION;
 
 export type ImportacionRow = {
   id: string;

@@ -19,9 +19,7 @@ import { runAction, requireUser, bumpPaths, type ActionResult } from './_helpers
 
 // ---------- Constantes y tipos comunes ----------
 
-const TALLAS = ['T0', 'T2', 'T4', 'T6', 'T8', 'T10', 'T12', 'T14', 'T16', 'TS', 'TAD'] as const;
-const ACCIONES = ['REPROCESO', 'SEGUNDA', 'MERMA', 'DEVOLVER_TALLER'] as const;
-const SEVERIDADES = ['BAJA', 'MEDIA', 'ALTA', 'CRITICA'] as const;
+import { CALIDAD_TALLAS as TALLAS, CALIDAD_ACCIONES as ACCIONES, CALIDAD_SEVERIDADES as SEVERIDADES } from './calidad-helpers';
 
 export type AccionDefecto = (typeof ACCIONES)[number];
 export type SeveridadDefecto = (typeof SEVERIDADES)[number];
@@ -950,7 +948,5 @@ export async function listarOperariosParaCalidad(): Promise<ActionResult<Operari
   });
 }
 
-// Exponemos las tallas y acciones para uso en el cliente.
-export const CALIDAD_TALLAS = TALLAS;
-export const CALIDAD_ACCIONES = ACCIONES;
-export const CALIDAD_SEVERIDADES = SEVERIDADES;
+// Las constantes (CALIDAD_TALLAS, CALIDAD_ACCIONES, CALIDAD_SEVERIDADES)
+// se exportan desde ./calidad-helpers. Importalas de ahí desde tus components.

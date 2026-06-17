@@ -11,9 +11,9 @@ import { TableSkeleton } from '@/components/skeletons';
 import {
   listarImportaciones,
   listarProveedoresParaImportacion,
-  ESTADOS_IMPORTACION,
   type ImportacionRow,
 } from '@/server/actions/importaciones';
+import { ESTADOS_IMPORTACION } from '@/server/actions/importaciones-helpers';
 import { EstadoBadge } from './estado-badge';
 
 export const metadata = { title: 'Importaciones' };

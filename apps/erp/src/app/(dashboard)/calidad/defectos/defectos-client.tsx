@@ -11,8 +11,6 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Loader2, Plus, Pencil, Power, PowerOff, Save, X } from 'lucide-react';
 import { toast } from 'sonner';
 import {
-  CALIDAD_ACCIONES,
-  CALIDAD_SEVERIDADES,
   crearDefecto,
   actualizarDefecto,
   desactivarDefecto,
@@ -21,6 +19,7 @@ import {
   type DefectoRow,
   type SeveridadDefecto,
 } from '@/server/actions/calidad';
+import { CALIDAD_ACCIONES, CALIDAD_SEVERIDADES } from '@/server/actions/calidad-helpers';
 
 const COLOR_SEVERIDAD: Record<string, 'secondary' | 'warning' | 'destructive' | 'default'> = {
   BAJA: 'secondary',

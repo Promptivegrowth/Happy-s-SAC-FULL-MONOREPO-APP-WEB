@@ -11,8 +11,6 @@ import { Loader2, Plus, Save, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
 import {
   crearControl,
-  CALIDAD_ACCIONES,
-  CALIDAD_TALLAS,
   type AccionDefecto,
   type DefectoRow,
   type OTLookup,
@@ -22,6 +20,7 @@ import {
   type OperarioLookup,
   type TallaPrenda,
 } from '@/server/actions/calidad';
+import { CALIDAD_ACCIONES, CALIDAD_TALLAS } from '@/server/actions/calidad-helpers';
 
 type ModoOrigen = 'OT' | 'OS' | 'PRODUCTO';
 
