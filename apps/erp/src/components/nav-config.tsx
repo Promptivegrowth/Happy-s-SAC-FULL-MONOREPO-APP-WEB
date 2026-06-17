@@ -70,7 +70,7 @@ export const NAV: NavGroup[] = [
     label: 'Compras',
     items: [
       { label: 'Órdenes de Compra', href: '/oc', icon: ShoppingCart },
-      { label: 'Recepciones', href: '/compras', icon: Boxes },
+      { label: 'Recepciones', href: '/recepciones', icon: Boxes },
       { label: 'Importaciones', href: '/compras/importaciones', icon: Truck },
       { label: 'Cuentas por pagar', href: '/compras/cxp', icon: Coins },
     ],
