@@ -1,22 +1,146 @@
-import { PageShell, ComingSoon } from '@/components/page-shell';
+import Link from 'next/link';
+import {
+  TrendingUp,
+  Sparkles,
+  PiggyBank,
+  UserCog,
+  ClipboardList,
+  Wallet,
+  Banknote,
+  type LucideIcon,
+} from 'lucide-react';
+import { PageShell } from '@/components/page-shell';
+import { Badge } from '@happy/ui/badge';
+
 export const metadata = { title: 'Reportes' };
+
+type Categoria = 'Ventas' | 'Producción' | 'Inventario' | 'Finanzas';
+
+type ReporteCard = {
+  href: string;
+  titulo: string;
+  descripcion: string;
+  icono: LucideIcon;
+  categoria: Categoria;
+  badge?: 'Nuevo' | 'Pro';
+};
+
+const REPORTES: ReporteCard[] = [
+  {
+    href: '/reportes/ventas',
+    titulo: 'Ventas',
+    descripcion: 'Por período, canal, tienda y vendedor. Comparativa vs período anterior.',
+    icono: TrendingUp,
+    categoria: 'Ventas',
+    badge: 'Nuevo',
+  },
+  {
+    href: '/reportes/productos-temporada',
+    titulo: 'Productos por temporada',
+    descripcion: 'Top vendidos en Halloween, Navidad, Fiestas Patrias y categorías custom.',
+    icono: Sparkles,
+    categoria: 'Ventas',
+    badge: 'Nuevo',
+  },
+  {
+    href: '/reportes/rentabilidad',
+    titulo: 'Rentabilidad por modelo',
+    descripcion: 'Precio − costo (materiales + MO). Margen unitario y porcentaje.',
+    icono: PiggyBank,
+    categoria: 'Finanzas',
+    badge: 'Pro',
+  },
+  {
+    href: '/reportes/productividad',
+    titulo: 'Productividad operarios & talleres',
+    descripcion: 'Minutos producidos, eficiencia real vs estándar, % fallas, pagos a talleres.',
+    icono: UserCog,
+    categoria: 'Producción',
+    badge: 'Pro',
+  },
+  {
+    href: '/reportes/ots',
+    titulo: 'Órdenes de Trabajo',
+    descripcion: 'Abiertas, cerradas y atrasadas. Días en proceso vs fecha objetivo.',
+    icono: ClipboardList,
+    categoria: 'Producción',
+  },
+  {
+    href: '/reportes/caja',
+    titulo: 'Flujo de caja',
+    descripcion: 'Ingresos POS/WEB/B2B vs egresos talleres + proveedores. Saldo por día.',
+    icono: Banknote,
+    categoria: 'Finanzas',
+    badge: 'Nuevo',
+  },
+  {
+    href: '/reportes/pagos-talleres',
+    titulo: 'Pagos a talleres',
+    descripcion: 'Detalle de pagos por taller, medio y período.',
+    icono: Wallet,
+    categoria: 'Finanzas',
+  },
+];
+
+const CATEGORIAS: { nombre: Categoria; color: string }[] = [
+  { nombre: 'Ventas', color: 'bg-happy-100 text-happy-700' },
+  { nombre: 'Producción', color: 'bg-indigo-100 text-indigo-700' },
+  { nombre: 'Inventario', color: 'bg-amber-100 text-amber-700' },
+  { nombre: 'Finanzas', color: 'bg-emerald-100 text-emerald-700' },
+];
+
 export default function Page() {
   return (
-    <PageShell title="Reportes y KPIs" description="Reportes exportables a Excel/PDF y dashboards ejecutivos.">
-      <ComingSoon
-        title="Reportes Gerenciales"
-        description="Vistas precompiladas en SQL (v_kpi_ventas_dia, v_top_productos, v_ots_pendientes, v_cuentas_pagar) listas para graficar con Recharts o exportar."
-        features={[
-          'Ventas por período / canal / tienda / vendedor',
-          'Productos más vendidos por temporada (Halloween, Navidad, FP)',
-          'Rentabilidad por modelo (precio venta − costo producción)',
-          'Productividad por operario y por taller (minutos producidos)',
-          'OTs abiertas, cerradas, atrasadas',
-          'Flujo de caja: ingresos POS + Web + B2B vs. egresos compras + servicios',
-          'Exportes: Excel, PDF, CSV para el contador',
-          'SIRE / PLE para SUNAT (Registro de Ventas y Compras)',
-        ]}
-      />
+    <PageShell
+      title="Hub de Reportes"
+      description="Reportes ejecutivos con export Excel · PDF · CSV brandeados HAPPY SAC."
+    >
+      {CATEGORIAS.map((cat) => {
+        const items = REPORTES.filter((r) => r.categoria === cat.nombre);
+        if (items.length === 0) return null;
+        return (
+          <section key={cat.nombre} className="space-y-3">
+            <div className="flex items-center gap-2">
+              <span className={`inline-block rounded-full px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider ${cat.color}`}>
+                {cat.nombre}
+              </span>
+              <span className="text-xs text-slate-400">{items.length} reporte{items.length !== 1 ? 's' : ''}</span>
+            </div>
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+              {items.map((r) => {
+                const Icon = r.icono;
+                return (
+                  <Link
+                    key={r.href}
+                    href={r.href}
+                    className="group relative flex items-start gap-3 rounded-xl border border-slate-200 bg-white p-4 transition hover:border-happy-300 hover:shadow-md"
+                  >
+                    <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg bg-happy-100 text-happy-600 transition group-hover:bg-happy-500 group-hover:text-white">
+                      <Icon className="h-5 w-5" />
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-2">
+                        <h3 className="font-display text-sm font-semibold text-corp-900 group-hover:text-happy-600">
+                          {r.titulo}
+                        </h3>
+                        {r.badge && (
+                          <Badge
+                            variant={r.badge === 'Pro' ? 'default' : 'secondary'}
+                            className="h-4 px-1.5 text-[9px]"
+                          >
+                            {r.badge}
+                          </Badge>
+                        )}
+                      </div>
+                      <p className="mt-1 text-xs text-slate-500">{r.descripcion}</p>
+                    </div>
+                  </Link>
+                );
+              })}
+            </div>
+          </section>
+        );
+      })}
     </PageShell>
   );
 }
