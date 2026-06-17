@@ -90,26 +90,31 @@ export function AbrirCajaModal({
             </div>
             <div>
               <Label className="text-xs">Caja {necesitaElegirCaja && <span className="text-rose-600">*</span>}</Label>
-              {necesitaElegirCaja ? (
-                <select
-                  value={cajaSel}
-                  onChange={(e) => setCajaSel(e.target.value)}
-                  className="mt-1 h-10 w-full rounded-md border border-input bg-white px-2 text-sm"
-                >
-                  <option value="">— Elegí una caja —</option>
-                  {cajasDisponibles.map((c) => (
-                    <option key={c.id} value={c.id}>
-                      {c.codigo} · {c.nombre}
-                    </option>
-                  ))}
-                </select>
-              ) : (
+              {!necesitaElegirCaja ? (
                 <Input value={cajaNombre ?? '—'} readOnly className="mt-1 bg-slate-50" />
-              )}
-              {necesitaElegirCaja && (
-                <p className="mt-1 text-[10px] text-slate-500">
-                  No tenés caja asignada. La que elijas se guardará como tu predeterminada.
-                </p>
+              ) : cajasDisponibles.length === 0 ? (
+                <div className="mt-1 rounded-md border border-amber-300 bg-amber-50 p-2 text-[11px] text-amber-800">
+                  No hay cajas configuradas en el sistema. El gerente debe crear al menos
+                  una caja desde el ERP antes de poder vender.
+                </div>
+              ) : (
+                <>
+                  <select
+                    value={cajaSel}
+                    onChange={(e) => setCajaSel(e.target.value)}
+                    className="mt-1 h-10 w-full rounded-md border border-input bg-white px-2 text-sm"
+                  >
+                    <option value="">— Elegí una caja —</option>
+                    {cajasDisponibles.map((c) => (
+                      <option key={c.id} value={c.id}>
+                        {c.codigo} · {c.nombre}
+                      </option>
+                    ))}
+                  </select>
+                  <p className="mt-1 text-[10px] text-slate-500">
+                    No tenés caja asignada. La que elijas se guardará como tu predeterminada.
+                  </p>
+                </>
               )}
             </div>
           </div>
@@ -148,7 +153,7 @@ export function AbrirCajaModal({
           onClick={submit}
           variant="premium"
           size="lg"
-          disabled={pending}
+          disabled={pending || (necesitaElegirCaja && cajasDisponibles.length === 0)}
           className="mt-6 w-full"
         >
           {pending ? <Loader2 className="h-4 w-4 animate-spin" /> : <LogIn className="h-4 w-4" />}
