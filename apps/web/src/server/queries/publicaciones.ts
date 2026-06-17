@@ -23,6 +23,8 @@ type LoadOpts = {
   q?: string;
   categoriaId?: string;
   campanaId?: string;
+  /** Filtra productos.genero: MUJER/HOMBRE/UNISEX/NINO/NINA. UNISEX siempre se incluye junto con el género específico. */
+  genero?: 'MUJER' | 'HOMBRE' | 'UNISEX' | 'NINO' | 'NINA' | 'ADULTO';
   destacado?: boolean;
   limit?: number;
 };
@@ -66,6 +68,18 @@ export async function loadPublicaciones(opts: LoadOpts = {}): Promise<ProductCar
     }
     if (opts.campanaId) query = query.eq('productos.campana_id', opts.campanaId);
     if (opts.destacado) query = query.eq('destacado_web', true);
+    if (opts.genero) {
+      // ADULTO en URL = MUJER + HOMBRE + UNISEX (cualquier no-niño)
+      // NINO/NINA específicos: solo ese género (no incluir UNISEX porque
+      // las prendas adultas marcadas UNISEX no son para niños).
+      if (opts.genero === 'ADULTO') {
+        query = query.in('productos.genero', ['MUJER', 'HOMBRE', 'UNISEX']);
+      } else if (opts.genero === 'NINO' || opts.genero === 'NINA') {
+        query = query.eq('productos.genero', opts.genero);
+      } else {
+        query = query.in('productos.genero', [opts.genero, 'UNISEX']);
+      }
+    }
 
     const { data, error } = await query;
     if (error) {

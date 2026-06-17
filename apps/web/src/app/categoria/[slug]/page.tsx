@@ -27,8 +27,21 @@ export async function generateMetadata({ params }: { params: Promise<{ slug: str
   }
 }
 
-export default async function CategoriaPage({ params }: { params: Promise<{ slug: string }> }) {
+type GeneroFiltro = 'NINO' | 'NINA' | 'ADULTO' | undefined;
+
+export default async function CategoriaPage({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ slug: string }>;
+  searchParams: Promise<{ genero?: string; q?: string }>;
+}) {
   const { slug } = await params;
+  const sp = await searchParams;
+  const generoRaw = (sp.genero ?? '').toUpperCase();
+  const generoFiltro: GeneroFiltro =
+    generoRaw === 'NINO' || generoRaw === 'NINA' || generoRaw === 'ADULTO' ? generoRaw : undefined;
+  const qFiltro = (sp.q ?? '').trim();
   let cat: {
     id: string;
     nombre: string;
@@ -67,8 +80,10 @@ export default async function CategoriaPage({ params }: { params: Promise<{ slug
 
   // Cargar productos de la categoría + (si hay campaña con mismo nombre) productos de la campaña
   const [pubsCategoria, pubsCampania] = await Promise.all([
-    loadPublicaciones({ categoriaId: cat.id, limit: 60 }),
-    camp ? loadPublicaciones({ campanaId: camp.id, limit: 60 }) : Promise.resolve([]),
+    loadPublicaciones({ categoriaId: cat.id, genero: generoFiltro, q: qFiltro || undefined, limit: 60 }),
+    camp
+      ? loadPublicaciones({ campanaId: camp.id, genero: generoFiltro, q: qFiltro || undefined, limit: 60 })
+      : Promise.resolve([]),
   ]);
 
   // Mergear quitando duplicados (por slug)
@@ -87,6 +102,29 @@ export default async function CategoriaPage({ params }: { params: Promise<{ slug
           {cat.descripcion && <p className="mt-1 text-slate-500">{cat.descripcion}</p>}
         </div>
       </header>
+
+      {/* Chips de filtro de género — un click para alternar */}
+      <div className="mb-6 flex flex-wrap items-center gap-2">
+        <span className="text-xs font-medium text-slate-500">Para quién:</span>
+        {(['', 'NINO', 'NINA', 'ADULTO'] as const).map((g) => {
+          const label = g === '' ? 'Todos' : g === 'NINO' ? 'Niño' : g === 'NINA' ? 'Niña' : 'Adulto';
+          const active = (generoFiltro ?? '') === g;
+          const href = g ? `/categoria/${slug}?genero=${g}` : `/categoria/${slug}`;
+          return (
+            <Link
+              key={g}
+              href={href}
+              className={`rounded-full border px-3 py-1 text-xs font-medium transition ${
+                active
+                  ? 'border-happy-500 bg-happy-500 text-white shadow-sm'
+                  : 'border-slate-300 bg-white text-slate-700 hover:border-happy-400 hover:bg-happy-50'
+              }`}
+            >
+              {label}
+            </Link>
+          );
+        })}
+      </div>
 
       {camp && (
         <Link

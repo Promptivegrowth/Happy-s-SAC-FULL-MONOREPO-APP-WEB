@@ -1,17 +1,16 @@
 /**
  * Estructura del megamenú principal del header.
- * Cada grupo de navegación (DISFRACES DE NIÑO, NIÑA, ADULTOS) tiene columnas;
- * cada columna es una sub-categoría con un título (link a /categoria/[slug])
- * y una lista descriptiva de ejemplos de productos para SEO/orientación.
+ * Cada grupo de navegación tiene columnas; cada columna es una sub-categoría
+ * con un título (link a /categoria/[slug]) y ejemplos para SEO.
  *
- * Si en el futuro queremos que cada item sea link a producto específico,
- * basta cambiar `examples` por `links: { label, href }[]` y ajustar el render.
+ * Slugs deben coincidir con la columna `categorias.slug` en BD.
+ * El query ?genero=NINO/NINA/ADULTO es filtro funcional en la página.
  */
 
 export type MegaColumna = {
   titulo: string;
   href: string;
-  icono: string; // emoji
+  icono: string;
   examples: string[];
 };
 
@@ -58,6 +57,12 @@ export const MEGA_MENU: MegaItem[] = [
         examples: ['Spiderman', 'Ironman', 'Superman', 'Sonic', 'Goku', 'Venom', 'Capitán América', 'Flash'],
       },
       {
+        titulo: 'Superhéroes sublimados',
+        href: '/categoria/superheroes-sublimados?genero=NINO',
+        icono: '🌈',
+        examples: ['Spiderman', 'Batman', 'Superman', 'Hulk', 'Capitán América'],
+      },
+      {
         titulo: 'Profesiones',
         href: '/categoria/profesiones?genero=NINO',
         icono: '👷',
@@ -70,10 +75,16 @@ export const MEGA_MENU: MegaItem[] = [
         examples: ['Festejo', 'Negroide', 'Chala', 'Carnaval arequipeño', 'Balicha', 'Shipibo', 'Huaylas'],
       },
       {
+        titulo: 'Fiestas Patrias',
+        href: '/categoria/fiestas-patrias?genero=NINO',
+        icono: '🇵🇪',
+        examples: ['Bolívar', 'San Martín', 'Chalaco', 'Husar', 'Conquistador', 'Túpac Amaru'],
+      },
+      {
         titulo: 'Personajes',
         href: '/categoria/personajes-varios?genero=NINO',
         icono: '🎭',
-        examples: ['Mario Bros', 'Luigi', 'Piloto', 'Cars', 'Pocoyo', 'Quico', 'Chavo', 'Chapulín'],
+        examples: ['Mario Bros', 'Luigi', 'Piloto', 'Cars', 'Pocoyó', 'Quico', 'Chavo', 'Chapulín'],
       },
       {
         titulo: 'Halloween',
@@ -86,6 +97,12 @@ export const MEGA_MENU: MegaItem[] = [
         href: '/categoria/primavera?genero=NINO',
         icono: '🌸',
         examples: ['Abejorro', 'Flores', 'Mariposa', 'Conejos', 'Hadas', 'Mariquitas'],
+      },
+      {
+        titulo: 'Talleres de verano',
+        href: '/categoria/talleres-de-verano?genero=NINO',
+        icono: '☀️',
+        examples: ['Marinera', 'Alegría', 'Camisones', 'Pijamas'],
       },
     ],
   },
@@ -100,6 +117,12 @@ export const MEGA_MENU: MegaItem[] = [
         href: '/categoria/princesas-especiales?genero=NINA',
         icono: '👸',
         examples: ['Blanca Nieves', 'Rapunzel', 'Frozen II', 'Jazmín', 'Sirenita', 'Bella', 'Aurora'],
+      },
+      {
+        titulo: 'Superheroínas',
+        href: '/categoria/superheroinas?genero=NINA',
+        icono: '🦸‍♀️',
+        examples: ['Mujer Maravilla', 'Batichica', 'Mujer Araña', 'Capitana Marvel', 'Supergirl'],
       },
       {
         titulo: 'Personajes',
@@ -131,6 +154,18 @@ export const MEGA_MENU: MegaItem[] = [
         icono: '💃',
         examples: ['Festejo', 'Negroide', 'Chala', 'Carnaval arequipeño', 'Balicha', 'Shipibo', 'Huaylas'],
       },
+      {
+        titulo: 'Fiestas Patrias',
+        href: '/categoria/fiestas-patrias?genero=NINA',
+        icono: '🇵🇪',
+        examples: ['Micaela Bastidas', 'Marinera', 'Selva mujer', 'China Tapada', 'Pallas'],
+      },
+      {
+        titulo: 'Semana Santa',
+        href: '/categoria/semana-santa?genero=NINA',
+        icono: '✝️',
+        examples: ['Angelitos', 'Virgen', 'Pastorcita'],
+      },
     ],
   },
 
@@ -149,25 +184,13 @@ export const MEGA_MENU: MegaItem[] = [
         titulo: 'Halloween',
         href: '/categoria/halloween?genero=ADULTO',
         icono: '🎃',
-        examples: ['Chuky', 'Juego del calamar', 'Wasson', 'Mavis', 'Tifany', 'Harley Quinn', 'Maléfica'],
+        examples: ['Chuky', 'Juego del calamar', 'Wasson', 'Drácula', 'Bruja', 'Maléfica'],
       },
       {
         titulo: 'Navidad',
-        href: '/categoria/navidad',
+        href: '/categoria/navidad?genero=ADULTO',
         icono: '🎅',
         examples: ['Mamá Noela', 'Papá Noel', 'Duendes', 'Renos', 'José', 'Jesús', 'María', 'Reyes Magos'],
-      },
-      {
-        titulo: 'Show infantil',
-        href: '/categoria/personajes-varios?genero=ADULTO',
-        icono: '🎪',
-        examples: ['Animadoras', 'Bailarinas', 'Payasos'],
-      },
-      {
-        titulo: 'Muñecos publicitarios',
-        href: '/categoria/personajes-varios',
-        icono: '🤖',
-        examples: ['Mickey', 'Minnie', 'Minions', 'Pollito Chicken', 'Otros'],
       },
       {
         titulo: 'Danzas típicas',
@@ -175,18 +198,45 @@ export const MEGA_MENU: MegaItem[] = [
         icono: '💃',
         examples: ['Festejo', 'Negroide', 'Chala', 'Carnaval arequipeño', 'Balicha', 'Shipibo', 'Huaylas'],
       },
+      {
+        titulo: 'Fiestas Patrias',
+        href: '/categoria/fiestas-patrias?genero=ADULTO',
+        icono: '🇵🇪',
+        examples: ['Bolívar', 'San Martín', 'Marina de Gala', 'Conquistador', 'Húsares'],
+      },
+      {
+        titulo: 'Semana Santa',
+        href: '/categoria/semana-santa?genero=ADULTO',
+        icono: '✝️',
+        examples: ['Túnica', 'Romano', 'Apóstoles', 'María Magdalena'],
+      },
+      {
+        titulo: 'Profesiones',
+        href: '/categoria/profesiones?genero=ADULTO',
+        icono: '👩‍⚕️',
+        examples: ['Doctor', 'Doctora', 'Enfermera', 'Policía', 'Bombero', 'Chef'],
+      },
+      {
+        titulo: 'Personajes',
+        href: '/categoria/personajes-varios?genero=ADULTO',
+        icono: '🎭',
+        examples: ['Mickey', 'Minnie', 'Animadoras', 'Bailarinas', 'Payasos', 'Mascotas'],
+      },
     ],
   },
 
   {
     kind: 'dropdown',
     label: 'Accesorios',
-    href: '/disfraces/accesorios',
+    href: '/categoria/accesorios',
     links: [
-      { label: 'Coronas', href: '/disfraces/accesorios?tipo=coronas' },
-      { label: 'Vinchas', href: '/disfraces/accesorios?tipo=vinchas' },
-      { label: 'Pelucas', href: '/disfraces/accesorios?tipo=pelucas' },
-      { label: 'Alitas', href: '/disfraces/accesorios?tipo=alitas' },
+      { label: 'Ver todos los accesorios', href: '/categoria/accesorios' },
+      { label: 'Coronas', href: '/categoria/accesorios?q=corona' },
+      { label: 'Vinchas', href: '/categoria/accesorios?q=vincha' },
+      { label: 'Pelucas', href: '/categoria/accesorios?q=peluca' },
+      { label: 'Alitas', href: '/categoria/accesorios?q=ala' },
+      { label: 'Capas', href: '/categoria/accesorios?q=capa' },
+      { label: 'Máscaras', href: '/categoria/accesorios?q=mascara' },
     ],
   },
 
