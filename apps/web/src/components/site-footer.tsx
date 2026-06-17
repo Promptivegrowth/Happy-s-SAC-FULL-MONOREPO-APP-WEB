@@ -32,7 +32,7 @@ export function SiteFooter() {
             <li><Link href="/categoria/halloween" className="hover:text-happy-400">Halloween</Link></li>
             <li><Link href="/categoria/fiestas-patrias" className="hover:text-happy-400">Fiestas Patrias</Link></li>
             <li><Link href="/categoria/danzas-tipicas" className="hover:text-happy-400">Danzas Típicas</Link></li>
-            <li><Link href="/categoria/superheroes" className="hover:text-happy-400">Superhéroes</Link></li>
+            <li><Link href="/categoria/superheroes-especiales" className="hover:text-happy-400">Superhéroes</Link></li>
             <li><Link href="/categoria/navidad" className="hover:text-happy-400">Navidad</Link></li>
           </ul>
         </div>

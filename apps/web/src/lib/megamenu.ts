@@ -47,13 +47,13 @@ export const MEGA_MENU: MegaItem[] = [
     columns: [
       {
         titulo: 'Superhéroes económicos',
-        href: '/categoria/superheroes?tier=economico&genero=NINO',
+        href: '/categoria/superheroes-economicos?genero=NINO',
         icono: '🦸',
         examples: ['Spiderman', 'Ironman', 'Superman', 'Batman', 'Capitán América', 'Venom', 'Flash'],
       },
       {
         titulo: 'Superhéroes especiales',
-        href: '/categoria/superheroes?tier=especial&genero=NINO',
+        href: '/categoria/superheroes-especiales?genero=NINO',
         icono: '⭐',
         examples: ['Spiderman', 'Ironman', 'Superman', 'Sonic', 'Goku', 'Venom', 'Capitán América', 'Flash'],
       },
@@ -141,7 +141,7 @@ export const MEGA_MENU: MegaItem[] = [
     columns: [
       {
         titulo: 'Superhéroes',
-        href: '/categoria/superheroes?genero=ADULTO',
+        href: '/categoria/superheroes-especiales?genero=ADULTO',
         icono: '🦸',
         examples: ['Spiderman', 'Superman', 'Capitán América', 'Batman', 'Hulk', 'Mujer Maravilla'],
       },
@@ -159,13 +159,13 @@ export const MEGA_MENU: MegaItem[] = [
       },
       {
         titulo: 'Show infantil',
-        href: '/categoria/personajes-varios?tier=show&genero=ADULTO',
+        href: '/categoria/personajes-varios?genero=ADULTO',
         icono: '🎪',
         examples: ['Animadoras', 'Bailarinas', 'Payasos'],
       },
       {
         titulo: 'Muñecos publicitarios',
-        href: '/categoria/personajes-varios?tier=mascotas',
+        href: '/categoria/personajes-varios',
         icono: '🤖',
         examples: ['Mickey', 'Minnie', 'Minions', 'Pollito Chicken', 'Otros'],
       },
