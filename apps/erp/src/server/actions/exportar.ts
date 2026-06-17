@@ -38,13 +38,39 @@ export async function generarExcelBrandeado(opts: ExportOpts): Promise<ExportRes
     views: [{ state: 'frozen', ySplit: 4 + (opts.subtitulo ? 1 : 0) + (opts.filtros?.length ? 1 : 0) }],
   });
 
+  // ---- Logo de la empresa + título lado a lado ----
+  let logoCargado = false;
+  try {
+    const { createClient } = await import('@happy/db/server');
+    const sb = await createClient();
+    const { data: empresa } = await sb.from('empresa').select('logo_url').single();
+    if (empresa?.logo_url) {
+      const resp = await fetch(empresa.logo_url);
+      if (resp.ok) {
+        const ab = await resp.arrayBuffer();
+        const ext = (empresa.logo_url.split('.').pop() ?? 'png').toLowerCase();
+        const extension = ext === 'jpg' || ext === 'jpeg' ? 'jpeg' : 'png';
+        const buf = Buffer.from(ab) as unknown as Parameters<typeof wb.addImage>[0]['buffer'];
+        const imgId = wb.addImage({ buffer: buf, extension });
+        ws.addImage(imgId, { tl: { col: 0, row: 0 }, ext: { width: 100, height: 50 } });
+        ws.getRow(1).height = 56;
+        logoCargado = true;
+      }
+    }
+  } catch {
+    /* logo opcional — si falla seguimos sin él */
+  }
+
   // ---- Título principal (naranja, bold, size 18) ----
-  ws.mergeCells(1, 1, 1, opts.cols.length);
-  const titleCell = ws.getCell(1, 1);
+  // Si hay logo: el título arranca en col 3 para no superponerse.
+  // Si no: ocupa todo el ancho desde col 1.
+  const tituloCol = logoCargado ? 3 : 1;
+  ws.mergeCells(1, tituloCol, 1, opts.cols.length);
+  const titleCell = ws.getCell(1, tituloCol);
   titleCell.value = opts.titulo;
   titleCell.font = { name: 'Calibri', size: 18, bold: true, color: { argb: BRAND.naranja } };
   titleCell.alignment = { vertical: 'middle', horizontal: 'left' };
-  ws.getRow(1).height = 26;
+  if (!logoCargado) ws.getRow(1).height = 26;
 
   let rowIdx = 2;
   if (opts.subtitulo) {

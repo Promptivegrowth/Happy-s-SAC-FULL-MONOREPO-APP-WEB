@@ -229,10 +229,10 @@ export function PosTerminal({
         });
         numeroComprobante = emitido.numero_completo;
 
-        // 3) Generar PDF según formato
+        // 3) Generar PDF según formato (ahora async: carga logo + QR)
         const blob = payload.formato === 'TICKET_80MM'
-          ? generarTicket(emitido.pdf_data)
-          : generarA4(emitido.pdf_data);
+          ? await generarTicket(emitido.pdf_data)
+          : await generarA4(emitido.pdf_data);
         const filename = `${payload.tipo.toLowerCase()}_${numeroComprobante.replace(/[^A-Za-z0-9_-]/g, '_')}.pdf`;
         abrirPDF(blob, filename);
       } catch (e) {
