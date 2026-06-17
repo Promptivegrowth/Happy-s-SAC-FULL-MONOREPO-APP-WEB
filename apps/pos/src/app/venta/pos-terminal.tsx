@@ -87,19 +87,25 @@ export function PosTerminal({
     setBalanceActual(r?.balance ?? null);
   }
 
-  // Auto-focus en input para pistola de barras (solo si modo búsqueda y nada está abierto)
+  // Auto-focus en input para pistola de barras. Solo activo cuando:
+  //  - estamos en modo búsqueda
+  //  - no hay modal de talla, cobrar, cerrar caja, ni overlay de apertura
+  // De lo contrario el handler captura clicks de los modales y "desfoca"
+  // sus inputs constantemente (bug típico: usuario no puede escribir).
   useEffect(() => {
-    if (vista !== 'busqueda' || productoTallasOpen) return;
+    if (vista !== 'busqueda' || productoTallasOpen || !sesionActiva || cerrarOpen || cobrarOpen) return;
     inputRef.current?.focus();
     const handler = (e: MouseEvent) => {
       const t = e.target as HTMLElement;
-      // No quitar focus al hacer click en botones del catálogo / talla
+      // No quitar focus al hacer click en botones del catálogo / talla / inputs editables
       if (t.closest('[data-pos-no-focus]')) return;
+      if (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT') return;
+      if (t.isContentEditable) return;
       inputRef.current?.focus();
     };
     document.addEventListener('click', handler);
     return () => document.removeEventListener('click', handler);
-  }, [vista, productoTallasOpen]);
+  }, [vista, productoTallasOpen, sesionActiva, cerrarOpen, cobrarOpen]);
 
   const total = useMemo(() => carrito.reduce((a, l) => a + l.cantidad * Number(l.variante.precio_publico ?? 0), 0), [carrito]);
   const pagado = pagos.reduce((a, p) => a + p.monto, 0);
