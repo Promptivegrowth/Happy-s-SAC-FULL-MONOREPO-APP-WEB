@@ -1,0 +1,603 @@
+'use client';
+
+import { useEffect, useMemo, useState, useTransition } from 'react';
+import { useRouter } from 'next/navigation';
+import { Button } from '@happy/ui/button';
+import { Card } from '@happy/ui/card';
+import { FormRow, FormGrid, FormSection } from '@happy/ui/form-row';
+import { Input } from '@happy/ui/input';
+import { Textarea } from '@happy/ui/textarea';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@happy/ui/table';
+import { Loader2, Save, Plus, Trash2, AlertTriangle, Search } from 'lucide-react';
+import { toast } from 'sonner';
+import {
+  crearTraslado,
+  consultarStockEnAlmacen,
+  type VarianteItem,
+  type MaterialItem,
+} from '@/server/actions/traslados';
+
+type Almacen = { id: string; codigo: string; nombre: string };
+
+type LineaEditable = {
+  uid: string; // id local
+  tipo: 'VARIANTE' | 'MATERIAL';
+  variante_id: string;
+  material_id: string;
+  // Display
+  display: string;
+  sub: string;
+  cantidad: string;
+  observacion: string;
+};
+
+let UID = 0;
+function nextUid() {
+  UID += 1;
+  return `l${UID}`;
+}
+
+export function NuevoTrasladoForm({
+  almacenes,
+  variantes,
+  materiales,
+}: {
+  almacenes: Almacen[];
+  variantes: VarianteItem[];
+  materiales: MaterialItem[];
+}) {
+  const router = useRouter();
+  const [pending, start] = useTransition();
+  const [origenId, setOrigenId] = useState<string>('');
+  const [destinoId, setDestinoId] = useState<string>('');
+  const [motivo, setMotivo] = useState('');
+  const [observacion, setObservacion] = useState('');
+  const [lineas, setLineas] = useState<LineaEditable[]>([]);
+
+  // Stock disponible en el almacén origen (por variante / material id).
+  const [stockVar, setStockVar] = useState<Record<string, number>>({});
+  const [stockMat, setStockMat] = useState<Record<string, number>>({});
+  const [stockLoading, setStockLoading] = useState(false);
+
+  // Carga de stock cuando cambia el origen o las líneas (entidades únicas).
+  const varianteIds = useMemo(
+    () => Array.from(new Set(lineas.filter((l) => l.variante_id).map((l) => l.variante_id))),
+    [lineas],
+  );
+  const materialIds = useMemo(
+    () => Array.from(new Set(lineas.filter((l) => l.material_id).map((l) => l.material_id))),
+    [lineas],
+  );
+
+  useEffect(() => {
+    if (!origenId || (varianteIds.length === 0 && materialIds.length === 0)) {
+      setStockVar({});
+      setStockMat({});
+      return;
+    }
+    let cancelled = false;
+    setStockLoading(true);
+    consultarStockEnAlmacen(origenId, varianteIds, materialIds)
+      .then((r) => {
+        if (cancelled) return;
+        if (r.ok && r.data) {
+          setStockVar(r.data.variantes);
+          setStockMat(r.data.materiales);
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setStockLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [origenId, varianteIds, materialIds]);
+
+  const destinosDisponibles = useMemo(
+    () => almacenes.filter((a) => a.id !== origenId),
+    [almacenes, origenId],
+  );
+
+  function addLinea() {
+    setLineas((prev) => [
+      ...prev,
+      {
+        uid: nextUid(),
+        tipo: 'VARIANTE',
+        variante_id: '',
+        material_id: '',
+        display: '',
+        sub: '',
+        cantidad: '1',
+        observacion: '',
+      },
+    ]);
+  }
+
+  function removeLinea(uid: string) {
+    setLineas((prev) => prev.filter((l) => l.uid !== uid));
+  }
+
+  function updateLinea(uid: string, patch: Partial<LineaEditable>) {
+    setLineas((prev) => prev.map((l) => (l.uid === uid ? { ...l, ...patch } : l)));
+  }
+
+  function setLineaVariante(uid: string, v: VarianteItem) {
+    updateLinea(uid, {
+      tipo: 'VARIANTE',
+      variante_id: v.id,
+      material_id: '',
+      display: `${v.sku} · ${v.producto_nombre}`,
+      sub: `Talla ${v.talla.replace('T', '')}`,
+    });
+  }
+
+  function setLineaMaterial(uid: string, m: MaterialItem) {
+    updateLinea(uid, {
+      tipo: 'MATERIAL',
+      variante_id: '',
+      material_id: m.id,
+      display: `${m.codigo} · ${m.nombre}`,
+      sub: m.unidad ?? '—',
+    });
+  }
+
+  function enviar() {
+    if (!origenId) return toast.error('Selecciona almacén origen');
+    if (!destinoId) return toast.error('Selecciona almacén destino');
+    if (origenId === destinoId) return toast.error('Origen y destino deben ser distintos');
+    if (lineas.length === 0) return toast.error('Agrega al menos una línea');
+
+    for (const l of lineas) {
+      if (!l.variante_id && !l.material_id) {
+        return toast.error('Cada línea debe tener un producto o material');
+      }
+      const cant = Number(l.cantidad);
+      if (!cant || cant <= 0) {
+        return toast.error(`Cantidad inválida en línea "${l.display || '(vacía)'}"`);
+      }
+    }
+
+    const payload = {
+      almacen_origen: origenId,
+      almacen_destino: destinoId,
+      motivo,
+      observacion,
+      lineas: lineas.map((l) => ({
+        variante_id: l.variante_id || undefined,
+        material_id: l.material_id || undefined,
+        cantidad: Number(l.cantidad),
+        observacion: l.observacion,
+      })),
+    };
+
+    start(async () => {
+      const r = await crearTraslado(payload);
+      if (r.ok && r.data) {
+        toast.success(`Traslado ${r.data.codigo} creado en borrador`);
+        router.push(`/traslados/${r.data.id}`);
+      } else {
+        toast.error(r.error ?? 'Error al crear traslado');
+      }
+    });
+  }
+
+  const totalCantidad = lineas.reduce((s, l) => s + (Number(l.cantidad) || 0), 0);
+
+  return (
+    <div className="space-y-6">
+      <FormSection
+        title="Almacenes"
+        description="Origen = de dónde sale el stock. Destino = a dónde llega."
+      >
+        <FormGrid cols={2}>
+          <FormRow label="Almacén origen" required>
+            <select
+              value={origenId}
+              onChange={(e) => {
+                setOrigenId(e.target.value);
+                if (e.target.value === destinoId) setDestinoId('');
+              }}
+              className="h-9 w-full rounded-md border border-input bg-white px-2 text-sm"
+              disabled={pending}
+            >
+              <option value="">— Selecciona origen —</option>
+              {almacenes.map((a) => (
+                <option key={a.id} value={a.id}>
+                  {a.codigo} — {a.nombre}
+                </option>
+              ))}
+            </select>
+          </FormRow>
+          <FormRow label="Almacén destino" required>
+            <select
+              value={destinoId}
+              onChange={(e) => setDestinoId(e.target.value)}
+              className="h-9 w-full rounded-md border border-input bg-white px-2 text-sm"
+              disabled={pending || !origenId}
+            >
+              <option value="">
+                {origenId ? '— Selecciona destino —' : 'Selecciona origen primero'}
+              </option>
+              {destinosDisponibles.map((a) => (
+                <option key={a.id} value={a.id}>
+                  {a.codigo} — {a.nombre}
+                </option>
+              ))}
+            </select>
+          </FormRow>
+        </FormGrid>
+      </FormSection>
+
+      <FormSection title="Datos del traslado" description="Información opcional para trazabilidad.">
+        <FormGrid cols={2}>
+          <FormRow label="Motivo">
+            <Textarea
+              value={motivo}
+              onChange={(e) => setMotivo(e.target.value)}
+              placeholder="Reabastecimiento tienda, devolución a central, etc."
+              disabled={pending}
+              rows={3}
+            />
+          </FormRow>
+          <FormRow label="Observación">
+            <Textarea
+              value={observacion}
+              onChange={(e) => setObservacion(e.target.value)}
+              placeholder="Notas adicionales"
+              disabled={pending}
+              rows={3}
+            />
+          </FormRow>
+        </FormGrid>
+      </FormSection>
+
+      <FormSection
+        title="Líneas"
+        description={
+          origenId
+            ? 'Agrega líneas con producto (variante) o material. El stock disponible se carga del almacén origen.'
+            : 'Selecciona almacén origen para ver stock disponible al agregar líneas.'
+        }
+      >
+        <div className="space-y-3">
+          {lineas.length === 0 ? (
+            <p className="text-sm text-slate-500">
+              Aún no hay líneas. Haz clic en &quot;Agregar línea&quot;.
+            </p>
+          ) : (
+            <Card>
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead className="w-24">Tipo</TableHead>
+                    <TableHead>Ítem</TableHead>
+                    <TableHead className="text-right">Stock origen</TableHead>
+                    <TableHead className="w-28 text-right">Cantidad</TableHead>
+                    <TableHead>Observación</TableHead>
+                    <TableHead className="w-12"></TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {lineas.map((l) => {
+                    const stockDisp =
+                      l.tipo === 'VARIANTE' && l.variante_id
+                        ? (stockVar[l.variante_id] ?? 0)
+                        : l.tipo === 'MATERIAL' && l.material_id
+                          ? (stockMat[l.material_id] ?? 0)
+                          : null;
+                    const cant = Number(l.cantidad) || 0;
+                    const insuficiente =
+                      stockDisp != null && cant > stockDisp + 0.0001;
+                    return (
+                      <TableRow key={l.uid}>
+                        <TableCell>
+                          <select
+                            value={l.tipo}
+                            onChange={(e) => {
+                              const tipo = e.target.value as 'VARIANTE' | 'MATERIAL';
+                              updateLinea(l.uid, {
+                                tipo,
+                                variante_id: '',
+                                material_id: '',
+                                display: '',
+                                sub: '',
+                              });
+                            }}
+                            className="h-8 w-full rounded-md border border-input bg-white px-2 text-xs"
+                            disabled={pending}
+                          >
+                            <option value="VARIANTE">Producto</option>
+                            <option value="MATERIAL">Material</option>
+                          </select>
+                        </TableCell>
+                        <TableCell>
+                          {l.tipo === 'VARIANTE' ? (
+                            <ComboVariante
+                              variantes={variantes}
+                              valueId={l.variante_id}
+                              display={l.display}
+                              sub={l.sub}
+                              disabled={pending}
+                              onPick={(v) => setLineaVariante(l.uid, v)}
+                              onClear={() =>
+                                updateLinea(l.uid, {
+                                  variante_id: '',
+                                  display: '',
+                                  sub: '',
+                                })
+                              }
+                            />
+                          ) : (
+                            <ComboMaterial
+                              materiales={materiales}
+                              valueId={l.material_id}
+                              display={l.display}
+                              sub={l.sub}
+                              disabled={pending}
+                              onPick={(m) => setLineaMaterial(l.uid, m)}
+                              onClear={() =>
+                                updateLinea(l.uid, {
+                                  material_id: '',
+                                  display: '',
+                                  sub: '',
+                                })
+                              }
+                            />
+                          )}
+                        </TableCell>
+                        <TableCell className="text-right font-mono text-xs">
+                          {stockDisp == null ? (
+                            <span className="text-slate-400">—</span>
+                          ) : stockLoading ? (
+                            <Loader2 className="ml-auto h-3 w-3 animate-spin text-slate-400" />
+                          ) : (
+                            <span
+                              className={
+                                insuficiente
+                                  ? 'font-semibold text-rose-600'
+                                  : 'text-slate-700'
+                              }
+                            >
+                              {stockDisp.toLocaleString('es-PE', { maximumFractionDigits: 4 })}
+                            </span>
+                          )}
+                        </TableCell>
+                        <TableCell>
+                          <div className="flex items-center gap-1">
+                            <Input
+                              type="number"
+                              step="0.0001"
+                              min="0"
+                              value={l.cantidad}
+                              onChange={(e) =>
+                                updateLinea(l.uid, { cantidad: e.target.value })
+                              }
+                              disabled={pending}
+                              className={`h-8 text-right ${insuficiente ? 'border-rose-400' : ''}`}
+                            />
+                            {insuficiente && (
+                              <AlertTriangle
+                                className="h-4 w-4 flex-none text-rose-500"
+                                aria-label="Excede stock disponible"
+                              />
+                            )}
+                          </div>
+                        </TableCell>
+                        <TableCell>
+                          <Input
+                            type="text"
+                            value={l.observacion}
+                            onChange={(e) =>
+                              updateLinea(l.uid, { observacion: e.target.value })
+                            }
+                            disabled={pending}
+                            className="h-8"
+                            placeholder="—"
+                          />
+                        </TableCell>
+                        <TableCell>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon"
+                            onClick={() => removeLinea(l.uid)}
+                            disabled={pending}
+                            aria-label="Eliminar línea"
+                          >
+                            <Trash2 className="h-4 w-4 text-rose-500" />
+                          </Button>
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })}
+                </TableBody>
+              </Table>
+            </Card>
+          )}
+
+          <Button type="button" variant="outline" size="sm" onClick={addLinea} disabled={pending}>
+            <Plus className="h-4 w-4" /> Agregar línea
+          </Button>
+        </div>
+      </FormSection>
+
+      <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border bg-white p-4 shadow-soft">
+        <div>
+          <p className="text-xs uppercase tracking-wide text-slate-500">Total cantidad</p>
+          <p className="font-display text-2xl font-semibold text-corp-900">
+            {totalCantidad.toLocaleString('es-PE', { maximumFractionDigits: 4 })}
+          </p>
+          <p className="text-[10px] text-slate-500">
+            {lineas.length} línea(s) · stock se moverá al despachar
+          </p>
+        </div>
+        <Button
+          onClick={enviar}
+          disabled={pending || !origenId || !destinoId || lineas.length === 0}
+          variant="premium"
+        >
+          {pending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+          Crear traslado (borrador)
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+// ---------- Combobox autocomplete ligero (inline) ----------
+
+function ComboBase<T>({
+  items,
+  matchText,
+  renderLabel,
+  renderSub,
+  valueId,
+  display,
+  sub,
+  disabled,
+  placeholder,
+  onPick,
+  onClear,
+}: {
+  items: T[];
+  matchText: (it: T) => string;
+  renderLabel: (it: T) => string;
+  renderSub: (it: T) => string;
+  valueId: string;
+  display: string;
+  sub: string;
+  disabled?: boolean;
+  placeholder: string;
+  onPick: (it: T) => void;
+  onClear: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState('');
+
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return items.slice(0, 12);
+    const norm = (s: string) =>
+      s
+        .toLowerCase()
+        .normalize('NFD')
+        .replace(/[̀-ͯ]/g, '');
+    const qn = norm(q);
+    return items.filter((it) => norm(matchText(it)).includes(qn)).slice(0, 25);
+  }, [items, query, matchText]);
+
+  if (valueId) {
+    return (
+      <div className="flex items-center justify-between gap-2 rounded-md border bg-slate-50 px-2 py-1">
+        <div className="min-w-0">
+          <div className="truncate text-sm font-medium text-corp-900">{display}</div>
+          {sub && <div className="truncate text-[10px] text-slate-500">{sub}</div>}
+        </div>
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          className="h-6 text-[10px]"
+          onClick={onClear}
+          disabled={disabled}
+        >
+          Cambiar
+        </Button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="relative">
+      <div className="relative">
+        <Search className="pointer-events-none absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" />
+        <Input
+          type="text"
+          value={query}
+          onChange={(e) => {
+            setQuery(e.target.value);
+            setOpen(true);
+          }}
+          onFocus={() => setOpen(true)}
+          onBlur={() => setTimeout(() => setOpen(false), 150)}
+          disabled={disabled}
+          className="h-8 pl-7"
+          placeholder={placeholder}
+        />
+      </div>
+      {open && filtered.length > 0 && (
+        <div className="absolute left-0 right-0 top-full z-20 mt-1 max-h-64 overflow-auto rounded-md border bg-white shadow-lg">
+          {filtered.map((it, idx) => (
+            <button
+              key={idx}
+              type="button"
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => {
+                onPick(it);
+                setQuery('');
+                setOpen(false);
+              }}
+              className="flex w-full flex-col items-start gap-0.5 border-b px-3 py-1.5 text-left text-xs last:border-0 hover:bg-happy-50"
+            >
+              <span className="font-medium text-corp-900">{renderLabel(it)}</span>
+              <span className="text-[10px] text-slate-500">{renderSub(it)}</span>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ComboVariante(props: {
+  variantes: VarianteItem[];
+  valueId: string;
+  display: string;
+  sub: string;
+  disabled?: boolean;
+  onPick: (v: VarianteItem) => void;
+  onClear: () => void;
+}) {
+  return (
+    <ComboBase<VarianteItem>
+      items={props.variantes}
+      matchText={(v) => `${v.sku} ${v.producto_nombre} ${v.talla}`}
+      renderLabel={(v) => `${v.sku} · ${v.producto_nombre}`}
+      renderSub={(v) => `Talla ${v.talla.replace('T', '')}`}
+      valueId={props.valueId}
+      display={props.display}
+      sub={props.sub}
+      disabled={props.disabled}
+      placeholder="Buscar SKU, producto o talla…"
+      onPick={props.onPick}
+      onClear={props.onClear}
+    />
+  );
+}
+
+function ComboMaterial(props: {
+  materiales: MaterialItem[];
+  valueId: string;
+  display: string;
+  sub: string;
+  disabled?: boolean;
+  onPick: (m: MaterialItem) => void;
+  onClear: () => void;
+}) {
+  return (
+    <ComboBase<MaterialItem>
+      items={props.materiales}
+      matchText={(m) => `${m.codigo} ${m.nombre}`}
+      renderLabel={(m) => `${m.codigo} · ${m.nombre}`}
+      renderSub={(m) => m.unidad ?? '—'}
+      valueId={props.valueId}
+      display={props.display}
+      sub={props.sub}
+      disabled={props.disabled}
+      placeholder="Buscar código o nombre de material…"
+      onPick={props.onPick}
+      onClear={props.onClear}
+    />
+  );
+}
