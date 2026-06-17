@@ -4,6 +4,7 @@ import { PageShell } from '@/components/page-shell';
 import { ClienteForm } from '@/components/forms/cliente-form';
 import { DeleteButton } from '@/components/forms/delete-button';
 import { eliminarCliente } from '@/server/actions/clientes';
+import { HistorialClienteSection } from './historial-section';
 
 export const dynamic = 'force-dynamic';
 
@@ -24,6 +25,10 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
       actions={<DeleteButton action={onDelete} label="Desactivar" itemName="este cliente" />}
     >
       <ClienteForm initial={data} />
+
+      <div className="mt-8 border-t border-slate-200 pt-6">
+        <HistorialClienteSection clienteId={id} />
+      </div>
     </PageShell>
   );
 }

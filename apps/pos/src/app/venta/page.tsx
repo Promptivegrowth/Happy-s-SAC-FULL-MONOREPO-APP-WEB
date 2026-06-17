@@ -61,6 +61,10 @@ export default async function VentaPage() {
   // Sesión activa (si existe)
   const sesionData = await obtenerSesionActiva();
 
+  // Datos de la empresa para mensajes (WhatsApp, etc.)
+  const { data: empresa } = await sb.from('empresa').select('razon_social, nombre_comercial').single();
+  const empresaNombre = empresa?.nombre_comercial || empresa?.razon_social || 'HAPPY SAC';
+
   // Catálogo (siempre se carga; el overlay de apertura sólo bloquea visualmente)
   const [{ data: variantesRaw }, { data: cajas }, { data: categoriasRaw }, { data: stocks }] =
     await Promise.all([
@@ -98,6 +102,7 @@ export default async function VentaPage() {
       cajeroNombre={perfil?.nombre_completo ?? 'Cajero'}
       cajaDefault={cajaDefault}
       sesionInicial={sesionData}
+      empresaNombre={empresaNombre}
     />
   );
 }

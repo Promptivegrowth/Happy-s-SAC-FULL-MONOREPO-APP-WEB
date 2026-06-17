@@ -268,6 +268,121 @@ async function calcularBalanceInterno(
 // CERRAR SESIÓN
 // ============================================================================
 
+// ============================================================================
+// HISTORIAL DE TRANSACCIONES DE LA SESIÓN ACTIVA DEL CAJERO
+// ============================================================================
+export type TransaccionRow = {
+  venta_id: string;
+  numero_venta: string;
+  fecha: string;
+  cliente_nombre: string;
+  cliente_doc: string | null;
+  cliente_telefono: string | null;
+  total: number;
+  metodos: string[];
+  comprobante: { tipo: string; numero_completo: string } | null;
+  estado: string;
+};
+
+export async function obtenerHistorialSesion(): Promise<TransaccionRow[]> {
+  const sb = await createClient();
+  const { data: { user } } = await sb.auth.getUser();
+  if (!user) return [];
+
+  let caja: Awaited<ReturnType<typeof getCajaDefault>>['caja'];
+  try {
+    caja = (await getCajaDefault(sb, user.id)).caja;
+  } catch {
+    return [];
+  }
+
+  const { data: sesion } = await sb
+    .from('cajas_sesiones')
+    .select('id')
+    .eq('caja_id', caja.id)
+    .is('cerrada_en', null)
+    .maybeSingle();
+  if (!sesion) return [];
+
+  const { data: ventas } = await sb
+    .from('ventas')
+    .select(
+      'id, numero, fecha, total, estado, nombre_cliente_rapido, documento_cliente, ' +
+        'cliente:cliente_id(razon_social, nombres, apellido_paterno, apellido_materno, telefono)',
+    )
+    .eq('caja_sesion_id', sesion.id)
+    .order('fecha', { ascending: false })
+    .limit(500);
+
+  type VR = {
+    id: string;
+    numero: string;
+    fecha: string;
+    total: string | number;
+    estado: string;
+    nombre_cliente_rapido: string | null;
+    documento_cliente: string | null;
+    cliente: {
+      razon_social: string | null;
+      nombres: string | null;
+      apellido_paterno: string | null;
+      apellido_materno: string | null;
+      telefono: string | null;
+    } | null;
+  };
+  const filas = (ventas ?? []) as unknown as VR[];
+  const ids = filas.map((v) => v.id);
+
+  // Pagos
+  const pagosPorVenta = new Map<string, string[]>();
+  if (ids.length > 0) {
+    const { data: pagos } = await sb
+      .from('ventas_pagos')
+      .select('venta_id, metodo')
+      .in('venta_id', ids);
+    for (const p of (pagos ?? []) as { venta_id: string; metodo: string }[]) {
+      const arr = pagosPorVenta.get(p.venta_id) ?? [];
+      arr.push(p.metodo);
+      pagosPorVenta.set(p.venta_id, arr);
+    }
+  }
+
+  // Comprobantes
+  const compPorVenta = new Map<string, { tipo: string; numero_completo: string }>();
+  if (ids.length > 0) {
+    const { data: comps } = await sb
+      .from('comprobantes')
+      .select('venta_id, tipo, numero_completo')
+      .in('venta_id', ids)
+      .order('created_at', { ascending: false });
+    for (const c of (comps ?? []) as { venta_id: string; tipo: string; numero_completo: string }[]) {
+      if (!compPorVenta.has(c.venta_id)) {
+        compPorVenta.set(c.venta_id, { tipo: c.tipo, numero_completo: c.numero_completo });
+      }
+    }
+  }
+
+  return filas.map((v) => {
+    const nombreCli =
+      v.cliente?.razon_social ||
+      [v.cliente?.nombres, v.cliente?.apellido_paterno, v.cliente?.apellido_materno].filter(Boolean).join(' ').trim() ||
+      v.nombre_cliente_rapido ||
+      'CLIENTE VARIOS';
+    return {
+      venta_id: v.id,
+      numero_venta: v.numero,
+      fecha: v.fecha,
+      cliente_nombre: nombreCli,
+      cliente_doc: v.documento_cliente,
+      cliente_telefono: v.cliente?.telefono ?? null,
+      total: Number(v.total ?? 0),
+      metodos: Array.from(new Set(pagosPorVenta.get(v.id) ?? [])),
+      comprobante: compPorVenta.get(v.id) ?? null,
+      estado: v.estado,
+    };
+  });
+}
+
 const cerrarSchema = z.object({
   monto_contado_efectivo: z.number().min(0),
   observacion: z.string().max(500).optional().nullable(),

@@ -6,7 +6,7 @@ import { Card } from '@happy/ui/card';
 import { Input } from '@happy/ui/input';
 import { Button } from '@happy/ui/button';
 import { Badge } from '@happy/ui/badge';
-import { Trash2, Plus, Minus, ScanBarcode, X, Smartphone, CreditCard, Banknote, Building2, MessageCircle, Loader2, LayoutGrid, ShoppingBag, LogOut, Receipt } from 'lucide-react';
+import { Trash2, Plus, Minus, ScanBarcode, X, Smartphone, CreditCard, Banknote, Building2, MessageCircle, Loader2, LayoutGrid, ShoppingBag, LogOut, Receipt, History, Send } from 'lucide-react';
 import { toast } from 'sonner';
 import { formatPEN, ordenTalla } from '@happy/lib';
 import { buildPedidoWaMessage, buildWhatsappUrl } from '@happy/lib/whatsapp';
@@ -17,6 +17,8 @@ import { AbrirCajaModal } from './abrir-caja-modal';
 import { CerrarCajaModal } from './cerrar-caja-modal';
 import { CobrarModal, type CobrarPayload } from './cobrar-modal';
 import { generarTicket, generarA4, abrirPDF } from './comprobante-pdf';
+import { HistorialModal } from './historial-modal';
+import { construirMensajeWhatsApp, abrirWhatsApp } from './whatsapp-helper';
 
 type Variante = {
   id: string;
@@ -47,6 +49,7 @@ export function PosTerminal({
   cajeroNombre,
   cajaDefault,
   sesionInicial,
+  empresaNombre = 'HAPPY SAC',
 }: {
   variantes: Variante[];
   cajas: Caja[];
@@ -55,11 +58,13 @@ export function PosTerminal({
   cajeroNombre: string;
   cajaDefault: { id: string; nombre: string; codigo: string; almacen_id: string; monto_apertura_default: number } | null;
   sesionInicial: { sesion: SesionCajaDTO; balance: BalanceCajaDTO } | null;
+  empresaNombre?: string;
 }) {
   // --- Sesión de caja ---
   const [sesionActiva, setSesionActiva] = useState<SesionCajaDTO | null>(sesionInicial?.sesion ?? null);
   const [balanceActual, setBalanceActual] = useState<BalanceCajaDTO | null>(sesionInicial?.balance ?? null);
   const [cerrarOpen, setCerrarOpen] = useState(false);
+  const [historialOpen, setHistorialOpen] = useState(false);
   const [cobrarOpen, setCobrarOpen] = useState(false);
 
   // --- Venta en curso ---
@@ -235,6 +240,32 @@ export function PosTerminal({
           : await generarA4(emitido.pdf_data);
         const filename = `${payload.tipo.toLowerCase()}_${numeroComprobante.replace(/[^A-Za-z0-9_-]/g, '_')}.pdf`;
         abrirPDF(blob, filename);
+
+        // 4) Si el cliente tiene teléfono, ofrecer envío por WhatsApp
+        if (payload.cliente.telefono && payload.tipo !== 'NOTA_VENTA') {
+          const telefono = payload.cliente.telefono;
+          const nombreCli =
+            payload.cliente.razon_social ??
+            [payload.cliente.nombres, payload.cliente.apellidos].filter(Boolean).join(' ').trim() ??
+            'cliente';
+          toast(`📲 Enviar comprobante a ${telefono} por WhatsApp?`, {
+            duration: 12_000,
+            action: {
+              label: 'Enviar',
+              onClick: () => {
+                const msg = construirMensajeWhatsApp({
+                  nombre_cliente: nombreCli,
+                  numero_comprobante: numeroComprobante,
+                  tipo_comprobante: payload.tipo,
+                  total,
+                  fecha: new Date(),
+                  empresa_nombre: empresaNombre,
+                });
+                abrirWhatsApp(telefono, msg);
+              },
+            },
+          });
+        }
       } catch (e) {
         toast.error(`Venta OK pero error al emitir comprobante: ${(e as Error).message}`);
       }
@@ -319,6 +350,17 @@ export function PosTerminal({
                 <LayoutGrid className="h-3.5 w-3.5" /> Catálogo
               </button>
             </div>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setHistorialOpen(true)}
+              disabled={!sesionActiva}
+              data-pos-no-focus
+              className="gap-1 text-xs"
+              title="Historial de transacciones de la sesión"
+            >
+              <History className="h-3.5 w-3.5" /> Historial
+            </Button>
             <Button
               variant="outline"
               size="sm"
@@ -668,6 +710,14 @@ export function PosTerminal({
           defaultCliente={{ nombre: nombreCliente, documento: docCliente }}
           onCancel={() => setCobrarOpen(false)}
           onConfirmar={ejecutarCobro}
+        />
+      )}
+
+      {/* MODAL — Historial de transacciones de la sesión */}
+      {historialOpen && sesionActiva && (
+        <HistorialModal
+          onClose={() => setHistorialOpen(false)}
+          empresaNombre={empresaNombre}
         />
       )}
     </div>
