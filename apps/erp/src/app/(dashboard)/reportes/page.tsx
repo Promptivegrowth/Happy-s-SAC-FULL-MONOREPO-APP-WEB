@@ -7,6 +7,8 @@ import {
   ClipboardList,
   Wallet,
   Banknote,
+  Boxes,
+  History,
   type LucideIcon,
 } from 'lucide-react';
 import { PageShell } from '@/components/page-shell';
@@ -79,6 +81,22 @@ const REPORTES: ReporteCard[] = [
     descripcion: 'Detalle de pagos por taller, medio y período.',
     icono: Wallet,
     categoria: 'Finanzas',
+  },
+  {
+    href: '/reportes/inventario/stock-valorizado',
+    titulo: 'Stock valorizado',
+    descripcion: 'Snapshot del stock con valuación monetaria por almacén y tipo (variantes + materiales).',
+    icono: Boxes,
+    categoria: 'Inventario',
+    badge: 'Nuevo',
+  },
+  {
+    href: '/reportes/inventario/movimientos',
+    titulo: 'Movimientos de inventario',
+    descripcion: 'Resumen agregado del kardex por tipo de movimiento. Entradas vs salidas, valor neto.',
+    icono: History,
+    categoria: 'Inventario',
+    badge: 'Nuevo',
   },
 ];
 

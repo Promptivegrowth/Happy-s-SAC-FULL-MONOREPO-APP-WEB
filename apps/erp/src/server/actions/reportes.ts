@@ -101,22 +101,44 @@ export async function reporteVentas(f: FiltrosVentas): Promise<ReporteVentasResu
     vendedor_b2b_id: string | null;
   };
 
-  const rows: VentaRow[] = ((data ?? []) as VentaRaw[]).map((v) => ({
-    id: v.id,
-    fecha: v.fecha,
-    numero: v.numero,
-    canal: v.canal,
-    almacen: v.almacen ? `${v.almacen.codigo} · ${v.almacen.nombre}` : '—',
-    vendedor: v.vendedor_usuario_id ?? v.vendedor_b2b_id ?? '—',
-    cliente:
-      v.cliente?.razon_social ||
-      [v.cliente?.nombres, v.cliente?.apellido_paterno, v.cliente?.apellido_materno]
-        .filter(Boolean)
-        .join(' ') ||
-      v.nombre_cliente_rapido ||
-      '—',
-    total: Number(v.total),
-  }));
+  // Lookup de vendedores por UUID → nombre_completo desde perfiles
+  const vendedorIds = Array.from(
+    new Set(
+      ((data ?? []) as VentaRaw[])
+        .flatMap((v) => [v.vendedor_usuario_id, v.vendedor_b2b_id])
+        .filter((x: string | null): x is string => !!x),
+    ),
+  );
+  const nombrePorId = new Map<string, string>();
+  if (vendedorIds.length > 0) {
+    const { data: perfiles } = await sb
+      .from('perfiles')
+      .select('id, nombre_completo')
+      .in('id', vendedorIds);
+    for (const p of (perfiles ?? []) as { id: string; nombre_completo: string | null }[]) {
+      if (p.nombre_completo) nombrePorId.set(p.id, p.nombre_completo);
+    }
+  }
+
+  const rows: VentaRow[] = ((data ?? []) as VentaRaw[]).map((v) => {
+    const vid = v.vendedor_usuario_id ?? v.vendedor_b2b_id;
+    return {
+      id: v.id,
+      fecha: v.fecha,
+      numero: v.numero,
+      canal: v.canal,
+      almacen: v.almacen ? `${v.almacen.codigo} · ${v.almacen.nombre}` : '—',
+      vendedor: vid ? (nombrePorId.get(vid) ?? vid.slice(0, 8)) : '—',
+      cliente:
+        v.cliente?.razon_social ||
+        [v.cliente?.nombres, v.cliente?.apellido_paterno, v.cliente?.apellido_materno]
+          .filter(Boolean)
+          .join(' ') ||
+        v.nombre_cliente_rapido ||
+        '—',
+      total: Number(v.total),
+    };
+  });
 
   const total_ventas = rows.reduce((s, r) => s + r.total, 0);
   const cant = rows.length;
@@ -773,17 +795,40 @@ export async function reporteCaja(f: FiltrosCaja): Promise<ReporteCajaResult> {
   }));
 
   // --- Egresos: pagos_talleres + pagos_proveedores ---
-  let qPT = sb.from('pagos_talleres').select('fecha, monto, taller_id, talleres(nombre)').gte('fecha', f.desde).lte('fecha', f.hasta).limit(10000);
-  // pagos_talleres no tiene almacen_id, no filtramos por almacen acá
+  // pagos_talleres no tiene almacen_id directo, pero se puede vincular vía
+  // os_id → ordenes_servicio.ot_id → ot.almacen_produccion. Si hay filtro
+  // de almacén, traemos el join para filtrar; los pagos SIN os_id (concepto
+  // libre tipo "Pago semana X") se excluyen cuando hay filtro de almacén
+  // porque no se pueden atribuir a un almacén específico.
+  let qPT = sb
+    .from('pagos_talleres')
+    .select(
+      'fecha, monto, taller_id, os_id, talleres(nombre), ordenes_servicio(ot:ot_id(almacen_produccion))',
+    )
+    .gte('fecha', f.desde)
+    .lte('fecha', f.hasta)
+    .limit(10000);
   const { data: pagosT } = await qPT;
-  type PT = { fecha: string; monto: string | number; talleres: { nombre: string } | null };
-  const egresosT: CajaDetalleRow[] = ((pagosT ?? []) as PT[]).map((p) => ({
-    fecha: p.fecha,
-    tipo: 'EGRESO' as const,
-    origen: 'PAGO TALLER',
-    referencia: p.talleres?.nombre ?? '—',
-    monto: Number(p.monto),
-  }));
+  type PT = {
+    fecha: string;
+    monto: string | number;
+    os_id: string | null;
+    talleres: { nombre: string } | null;
+    ordenes_servicio: { ot: { almacen_produccion: string | null } | null } | null;
+  };
+  const egresosT: CajaDetalleRow[] = ((pagosT ?? []) as PT[])
+    .filter((p) => {
+      if (!f.almacen_id) return true; // sin filtro: incluir todos
+      const alm = p.ordenes_servicio?.ot?.almacen_produccion;
+      return alm === f.almacen_id;
+    })
+    .map((p) => ({
+      fecha: p.fecha,
+      tipo: 'EGRESO' as const,
+      origen: 'PAGO TALLER',
+      referencia: p.talleres?.nombre ?? '—',
+      monto: Number(p.monto),
+    }));
 
   const { data: pagosP } = await sb
     .from('pagos_proveedores')
@@ -830,6 +875,294 @@ export async function reporteCaja(f: FiltrosCaja): Promise<ReporteCajaResult> {
       por_canal,
     },
     por_dia,
+    rows,
+  };
+}
+
+// ============================================================================
+// INVENTARIO — STOCK VALORIZADO
+// ============================================================================
+
+export type FiltrosStockValorizado = {
+  almacen_id?: string;
+  tipo?: 'VARIANTE' | 'MATERIAL' | '';
+};
+
+export type StockValorizadoRow = {
+  tipo: 'VARIANTE' | 'MATERIAL';
+  almacen: string;
+  codigo: string;
+  nombre: string;
+  detalle: string;
+  cantidad: number;
+  costo_unitario: number;
+  valor_total: number;
+  categoria: string;
+};
+
+export type ReporteStockValorizadoResult = {
+  metricas: {
+    valor_total: number;
+    items_con_stock: number;
+    items_sin_costo: number;
+    valor_variantes: number;
+    valor_materiales: number;
+  };
+  rows: StockValorizadoRow[];
+};
+
+export async function reporteStockValorizado(
+  f: FiltrosStockValorizado,
+): Promise<ReporteStockValorizadoResult> {
+  const sb = await sbReadonly();
+  const rows: StockValorizadoRow[] = [];
+  let valor_variantes = 0;
+  let valor_materiales = 0;
+  let items_sin_costo = 0;
+
+  // --- VARIANTES ---
+  if (!f.tipo || f.tipo === 'VARIANTE') {
+    let q = sb
+      .from('stock_actual')
+      .select('cantidad, variante_id, almacen:almacen_id(codigo, nombre)')
+      .not('variante_id', 'is', null)
+      .gt('cantidad', 0)
+      .limit(20000);
+    if (f.almacen_id) q = q.eq('almacen_id', f.almacen_id);
+    const { data: stocks } = await q;
+
+    type SR = {
+      cantidad: string | number;
+      variante_id: string;
+      almacen: { codigo: string; nombre: string } | null;
+    };
+    const varianteIds = Array.from(
+      new Set(((stocks ?? []) as SR[]).map((s) => s.variante_id)),
+    );
+    if (varianteIds.length > 0) {
+      const CHUNK = 500;
+      const varMap = new Map<
+        string,
+        {
+          sku: string;
+          talla: string;
+          costo: number;
+          producto_nombre: string;
+          categoria: string;
+        }
+      >();
+      for (let i = 0; i < varianteIds.length; i += CHUNK) {
+        const ids = varianteIds.slice(i, i + CHUNK);
+        const { data: vs } = await sb
+          .from('productos_variantes')
+          .select(
+            'id, sku, talla, precio_costo_estandar, producto:producto_id(nombre, categoria:categoria_id(codigo))',
+          )
+          .in('id', ids);
+        for (const v of (vs ?? []) as {
+          id: string;
+          sku: string;
+          talla: string;
+          precio_costo_estandar: string | number | null;
+          producto: { nombre: string; categoria: { codigo: string } | null } | null;
+        }[]) {
+          varMap.set(v.id, {
+            sku: v.sku,
+            talla: v.talla,
+            costo: Number(v.precio_costo_estandar ?? 0),
+            producto_nombre: v.producto?.nombre ?? '—',
+            categoria: v.producto?.categoria?.codigo ?? '—',
+          });
+        }
+      }
+
+      for (const s of (stocks ?? []) as SR[]) {
+        const v = varMap.get(s.variante_id);
+        if (!v) continue;
+        const cant = Number(s.cantidad);
+        const costo = v.costo;
+        const valor = cant * costo;
+        if (costo === 0) items_sin_costo++;
+        valor_variantes += valor;
+        rows.push({
+          tipo: 'VARIANTE',
+          almacen: s.almacen ? `${s.almacen.codigo} · ${s.almacen.nombre}` : '—',
+          codigo: v.sku,
+          nombre: v.producto_nombre,
+          detalle: `Talla ${v.talla.replace('T', '')}`,
+          cantidad: cant,
+          costo_unitario: costo,
+          valor_total: valor,
+          categoria: v.categoria,
+        });
+      }
+    }
+  }
+
+  // --- MATERIALES ---
+  if (!f.tipo || f.tipo === 'MATERIAL') {
+    let q = sb
+      .from('stock_actual')
+      .select('cantidad, material_id, almacen:almacen_id(codigo, nombre)')
+      .not('material_id', 'is', null)
+      .gt('cantidad', 0)
+      .limit(20000);
+    if (f.almacen_id) q = q.eq('almacen_id', f.almacen_id);
+    const { data: stocks } = await q;
+
+    type SR = {
+      cantidad: string | number;
+      material_id: string;
+      almacen: { codigo: string; nombre: string } | null;
+    };
+    const matIds = Array.from(new Set(((stocks ?? []) as SR[]).map((s) => s.material_id)));
+    if (matIds.length > 0) {
+      const CHUNK = 500;
+      const matMap = new Map<
+        string,
+        { codigo: string; nombre: string; costo: number; categoria: string }
+      >();
+      for (let i = 0; i < matIds.length; i += CHUNK) {
+        const ids = matIds.slice(i, i + CHUNK);
+        const { data: ms } = await sb
+          .from('materiales')
+          .select('id, codigo, nombre, categoria, precio_unitario, factor_conversion')
+          .in('id', ids);
+        for (const m of (ms ?? []) as {
+          id: string;
+          codigo: string;
+          nombre: string;
+          categoria: string;
+          precio_unitario: string | number | null;
+          factor_conversion: string | number | null;
+        }[]) {
+          // Precio por unidad de consumo = precio_unitario / factor_conversion
+          const precio = Number(m.precio_unitario ?? 0);
+          const factor = Number(m.factor_conversion ?? 1) || 1;
+          matMap.set(m.id, {
+            codigo: m.codigo,
+            nombre: m.nombre,
+            costo: precio / factor,
+            categoria: String(m.categoria),
+          });
+        }
+      }
+      for (const s of (stocks ?? []) as SR[]) {
+        const m = matMap.get(s.material_id);
+        if (!m) continue;
+        const cant = Number(s.cantidad);
+        const valor = cant * m.costo;
+        if (m.costo === 0) items_sin_costo++;
+        valor_materiales += valor;
+        rows.push({
+          tipo: 'MATERIAL',
+          almacen: s.almacen ? `${s.almacen.codigo} · ${s.almacen.nombre}` : '—',
+          codigo: m.codigo,
+          nombre: m.nombre,
+          detalle: '',
+          cantidad: cant,
+          costo_unitario: m.costo,
+          valor_total: valor,
+          categoria: m.categoria,
+        });
+      }
+    }
+  }
+
+  rows.sort((a, b) => b.valor_total - a.valor_total);
+
+  return {
+    metricas: {
+      valor_total: valor_variantes + valor_materiales,
+      items_con_stock: rows.length,
+      items_sin_costo,
+      valor_variantes,
+      valor_materiales,
+    },
+    rows,
+  };
+}
+
+// ============================================================================
+// INVENTARIO — MOVIMIENTOS KARDEX (RESUMEN POR TIPO)
+// ============================================================================
+
+export type FiltrosMovimientos = {
+  desde: string;
+  hasta: string;
+  almacen_id?: string;
+};
+
+export type MovimientoResumenRow = {
+  tipo: string;
+  cantidad_total: number;
+  movimientos: number;
+  valor_total: number;
+  signo: 'ENTRADA' | 'SALIDA' | 'NEUTRO';
+};
+
+export type ReporteMovimientosResult = {
+  metricas: {
+    total_entradas: number;
+    total_salidas: number;
+    valor_entradas: number;
+    valor_salidas: number;
+    neto_valor: number;
+  };
+  rows: MovimientoResumenRow[];
+};
+
+export async function reporteMovimientos(
+  f: FiltrosMovimientos,
+): Promise<ReporteMovimientosResult> {
+  const sb = await sbReadonly();
+  let q = sb
+    .from('kardex_movimientos')
+    .select('tipo, cantidad, costo_total')
+    .gte('fecha', `${f.desde}T00:00:00`)
+    .lte('fecha', `${f.hasta}T23:59:59`)
+    .limit(20000);
+  if (f.almacen_id) q = q.eq('almacen_id', f.almacen_id);
+  const { data, error } = await q;
+  if (error) throw new Error(error.message);
+
+  type MR = { tipo: string; cantidad: string | number; costo_total: string | number | null };
+  const map = new Map<string, MovimientoResumenRow>();
+  for (const m of (data ?? []) as MR[]) {
+    const signo: 'ENTRADA' | 'SALIDA' | 'NEUTRO' = m.tipo.startsWith('ENTRADA_')
+      ? 'ENTRADA'
+      : m.tipo.startsWith('SALIDA_')
+        ? 'SALIDA'
+        : 'NEUTRO';
+    const cur =
+      map.get(m.tipo) ?? { tipo: m.tipo, cantidad_total: 0, movimientos: 0, valor_total: 0, signo };
+    cur.cantidad_total += Number(m.cantidad);
+    cur.movimientos += 1;
+    cur.valor_total += Number(m.costo_total ?? 0);
+    map.set(m.tipo, cur);
+  }
+  const rows = [...map.values()].sort((a, b) => b.movimientos - a.movimientos);
+  const total_entradas = rows
+    .filter((r) => r.signo === 'ENTRADA')
+    .reduce((s, r) => s + r.cantidad_total, 0);
+  const total_salidas = rows
+    .filter((r) => r.signo === 'SALIDA')
+    .reduce((s, r) => s + r.cantidad_total, 0);
+  const valor_entradas = rows
+    .filter((r) => r.signo === 'ENTRADA')
+    .reduce((s, r) => s + r.valor_total, 0);
+  const valor_salidas = rows
+    .filter((r) => r.signo === 'SALIDA')
+    .reduce((s, r) => s + r.valor_total, 0);
+
+  return {
+    metricas: {
+      total_entradas,
+      total_salidas,
+      valor_entradas,
+      valor_salidas,
+      neto_valor: valor_entradas - valor_salidas,
+    },
     rows,
   };
 }
