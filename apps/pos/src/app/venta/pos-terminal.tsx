@@ -6,11 +6,17 @@ import { Card } from '@happy/ui/card';
 import { Input } from '@happy/ui/input';
 import { Button } from '@happy/ui/button';
 import { Badge } from '@happy/ui/badge';
-import { Search, Trash2, Plus, Minus, ScanBarcode, X, Smartphone, CreditCard, Banknote, Building2, MessageCircle, Loader2, LayoutGrid, ShoppingBag } from 'lucide-react';
+import { Trash2, Plus, Minus, ScanBarcode, X, Smartphone, CreditCard, Banknote, Building2, MessageCircle, Loader2, LayoutGrid, ShoppingBag, LogOut, Receipt } from 'lucide-react';
 import { toast } from 'sonner';
 import { formatPEN, ordenTalla } from '@happy/lib';
 import { buildPedidoWaMessage, buildWhatsappUrl } from '@happy/lib/whatsapp';
 import { registrarVenta } from '@/server/actions/venta';
+import { emitirComprobante, obtenerSesionActiva } from '@/server/actions/caja';
+import type { SesionCajaDTO, BalanceCajaDTO } from '@/server/actions/caja-helpers';
+import { AbrirCajaModal } from './abrir-caja-modal';
+import { CerrarCajaModal } from './cerrar-caja-modal';
+import { CobrarModal, type CobrarPayload } from './cobrar-modal';
+import { generarTicket, generarA4, abrirPDF } from './comprobante-pdf';
 
 type Variante = {
   id: string;
@@ -38,15 +44,27 @@ export function PosTerminal({
   cajas,
   categorias = [],
   stockPorVariante = {},
+  cajeroNombre,
+  cajaDefault,
+  sesionInicial,
 }: {
   variantes: Variante[];
   cajas: Caja[];
   categorias?: Categoria[];
   stockPorVariante?: Record<string, number>;
+  cajeroNombre: string;
+  cajaDefault: { id: string; nombre: string; codigo: string; almacen_id: string; monto_apertura_default: number } | null;
+  sesionInicial: { sesion: SesionCajaDTO; balance: BalanceCajaDTO } | null;
 }) {
+  // --- Sesión de caja ---
+  const [sesionActiva, setSesionActiva] = useState<SesionCajaDTO | null>(sesionInicial?.sesion ?? null);
+  const [balanceActual, setBalanceActual] = useState<BalanceCajaDTO | null>(sesionInicial?.balance ?? null);
+  const [cerrarOpen, setCerrarOpen] = useState(false);
+  const [cobrarOpen, setCobrarOpen] = useState(false);
+
+  // --- Venta en curso ---
   const [search, setSearch] = useState('');
   const [carrito, setCarrito] = useState<LineaCarrito[]>([]);
-  const [cajaId, setCajaId] = useState<string>(cajas[0]?.id ?? '');
   const [pagos, setPagos] = useState<PagoLinea[]>([]);
   const [tipoCliente, setTipoCliente] = useState<'rapido' | 'completo'>('rapido');
   const [nombreCliente, setNombreCliente] = useState('');
@@ -55,6 +73,19 @@ export function PosTerminal({
   const [catFiltro, setCatFiltro] = useState<string>('');
   const [productoTallasOpen, setProductoTallasOpen] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+
+  // Cuando hay sesión activa, fijamos la caja del terminal a la sesión actual.
+  // (la sesión define a qué caja vendemos: no permitimos cambiar mid-session)
+  const cajaId = sesionActiva?.caja_id ?? cajas[0]?.id ?? '';
+  const cajaActual = sesionActiva
+    ? { id: sesionActiva.caja_id, codigo: sesionActiva.caja_codigo, nombre: sesionActiva.caja_nombre, almacen_id: sesionActiva.almacen_id }
+    : cajas.find((c) => c.id === cajaId) ?? null;
+
+  async function refrescarSesion() {
+    const r = await obtenerSesionActiva();
+    setSesionActiva(r?.sesion ?? null);
+    setBalanceActual(r?.balance ?? null);
+  }
 
   // Auto-focus en input para pistola de barras (solo si modo búsqueda y nada está abierto)
   useEffect(() => {
@@ -132,27 +163,36 @@ export function PosTerminal({
     setPagos((p) => p.filter((_, i) => i !== idx));
   }
 
-  const [tipoComp, setTipoComp] = useState<'NOTA_VENTA' | 'BOLETA' | 'FACTURA'>('BOLETA');
   const [cobrando, setCobrando] = useState(false);
 
-  async function cobrar() {
+  function abrirModalCobrar() {
+    if (!sesionActiva) return toast.error('Abre la caja primero');
     if (carrito.length === 0) return toast.error('Carrito vacío');
     if (pagado < total) return toast.error(`Falta cobrar ${formatPEN(total - pagado)}`);
-    const cajaActual = cajas.find((c) => c.id === cajaId);
-    if (!cajaActual) return toast.error('Selecciona una caja');
+    if (!cajaActual) return toast.error('No hay caja activa');
+    setCobrarOpen(true);
+  }
 
+  async function ejecutarCobro(payload: CobrarPayload) {
+    if (!sesionActiva || !cajaActual) {
+      toast.error('No hay sesión de caja activa');
+      return;
+    }
     setCobrando(true);
     try {
+      // 1) Registrar venta (sin emitir comprobante — lo hacemos abajo con el flujo nuevo)
       const r = await registrarVenta({
-        caja_id: cajaId,
+        caja_id: cajaActual.id,
         almacen_id: cajaActual.almacen_id,
         cliente_id: null,
-        documento_cliente: docCliente || null,
-        tipo_documento_cliente: tipoCliente === 'completo' && docCliente
-          ? ((docCliente.length === 11 ? 'RUC' : 'DNI') as 'DNI' | 'RUC')
-          : null,
-        nombre_cliente_rapido: nombreCliente || null,
-        tipo_comprobante: tipoComp,
+        documento_cliente: payload.cliente.numero_documento,
+        tipo_documento_cliente: payload.cliente.tipo_documento,
+        nombre_cliente_rapido: payload.cliente.razon_social
+          ?? [payload.cliente.nombres, payload.cliente.apellidos].filter(Boolean).join(' ').trim()
+          ?? null,
+        // Forzamos NOTA_VENTA en `registrarVenta` para que NO cree el comprobante ahí —
+        // la emisión real (con el cliente que vino del modal) la hace `emitirComprobante`.
+        tipo_comprobante: 'NOTA_VENTA',
         items: carrito.map((l) => ({
           variante_id: l.variante.id,
           cantidad: l.cantidad,
@@ -161,15 +201,49 @@ export function PosTerminal({
         })),
         pagos: pagos.map((p) => ({ metodo: p.metodo, monto: p.monto })),
       });
-      if (r.ok) {
-        toast.success(`✅ ${r.numero}${r.comprobante ? ` · ${r.comprobante.serie}-${String(r.comprobante.numero).padStart(8, '0')}` : ''} · ${formatPEN(total)}`);
-        setCarrito([]);
-        setPagos([]);
-        setNombreCliente('');
-        setDocCliente('');
-      } else {
+      if (!r.ok) {
         toast.error(r.error);
+        return;
       }
+
+      // 2) Emitir comprobante real (BOLETA, FACTURA o NOTA_VENTA)
+      let numeroComprobante = '';
+      try {
+        const emitido = await emitirComprobante({
+          venta_id: r.venta_id,
+          tipo: payload.tipo,
+          cliente_data: {
+            razon_social: payload.cliente.razon_social,
+            nombres: payload.cliente.nombres,
+            apellidos: payload.cliente.apellidos,
+            tipo_documento: payload.cliente.tipo_documento,
+            numero_documento: payload.cliente.numero_documento,
+            direccion: payload.cliente.direccion,
+          },
+        });
+        numeroComprobante = emitido.numero_completo;
+
+        // 3) Generar PDF según formato
+        const blob = payload.formato === 'TICKET_80MM'
+          ? generarTicket(emitido.pdf_data)
+          : generarA4(emitido.pdf_data);
+        const filename = `${payload.tipo.toLowerCase()}_${numeroComprobante.replace(/[^A-Za-z0-9_-]/g, '_')}.pdf`;
+        abrirPDF(blob, filename);
+      } catch (e) {
+        toast.error(`Venta OK pero error al emitir comprobante: ${(e as Error).message}`);
+      }
+
+      toast.success(
+        `✅ ${r.numero}${numeroComprobante ? ` · ${numeroComprobante}` : ''} · ${formatPEN(total)}`,
+      );
+      // Reset
+      setCarrito([]);
+      setPagos([]);
+      setNombreCliente('');
+      setDocCliente('');
+      setCobrarOpen(false);
+      // Refrescar balance para que el cierre vea la venta
+      void refrescarSesion();
     } finally {
       setCobrando(false);
     }
@@ -211,10 +285,14 @@ export function PosTerminal({
       <section className="flex h-screen flex-col bg-white">
         <header className="border-b p-4">
           <div className="mb-3 flex items-center gap-2">
-            <select value={cajaId} onChange={(e) => setCajaId(e.target.value)} className="h-9 rounded-md border bg-white px-2 text-sm">
-              {cajas.map((c) => <option key={c.id} value={c.id}>{c.nombre}</option>)}
-            </select>
-            <Badge variant="success" className="gap-1"><span className="h-1.5 w-1.5 rounded-full bg-emerald-500" /> Caja abierta</Badge>
+            <div className="flex h-9 items-center rounded-md border bg-slate-50 px-2 text-sm">
+              <span className="mr-1.5 h-1.5 w-1.5 rounded-full bg-emerald-500" />
+              <span className="font-medium text-corp-900">{sesionActiva?.caja_nombre ?? cajaActual?.nombre ?? '—'}</span>
+              <span className="ml-1.5 text-xs text-slate-500">· {cajeroNombre}</span>
+            </div>
+            {sesionActiva && (
+              <Badge variant="success" className="gap-1">Caja abierta</Badge>
+            )}
 
             {/* Toggle vista búsqueda / catálogo */}
             <div className="ml-auto flex rounded-md border bg-slate-50 p-0.5" data-pos-no-focus>
@@ -235,7 +313,16 @@ export function PosTerminal({
                 <LayoutGrid className="h-3.5 w-3.5" /> Catálogo
               </button>
             </div>
-            <a href="/cierre" className="text-xs text-slate-500 hover:text-happy-600">Cerrar caja →</a>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setCerrarOpen(true)}
+              disabled={!sesionActiva}
+              data-pos-no-focus
+              className="gap-1 text-xs"
+            >
+              <LogOut className="h-3.5 w-3.5" /> Cerrar caja
+            </Button>
           </div>
           <div className="relative">
             <ScanBarcode className="absolute left-3 top-1/2 h-5 w-5 -translate-y-1/2 text-happy-500" />
@@ -521,22 +608,60 @@ export function PosTerminal({
               </span>
             </div>
           )}
-          <select value={tipoComp} onChange={(e) => setTipoComp(e.target.value as 'BOLETA' | 'FACTURA' | 'NOTA_VENTA')} className="mb-3 h-10 w-full rounded-md border bg-white px-2 text-sm">
-            <option value="BOLETA">Boleta de venta</option>
-            <option value="FACTURA">Factura</option>
-            <option value="NOTA_VENTA">Nota de venta (sin SUNAT)</option>
-          </select>
           <div className="flex gap-2">
             <Button onClick={pedirPorWhatsapp} variant="outline" disabled={carrito.length === 0} className="flex-1">
               <MessageCircle className="h-4 w-4" /> WA
             </Button>
-            <Button onClick={cobrar} variant="premium" size="lg" disabled={cobrando || carrito.length === 0 || pagado < total} className="flex-[2]">
-              {cobrando ? <Loader2 className="h-4 w-4 animate-spin" /> : <Banknote className="h-4 w-4" />}
+            <Button
+              onClick={abrirModalCobrar}
+              variant="premium"
+              size="lg"
+              disabled={cobrando || carrito.length === 0 || pagado < total || !sesionActiva}
+              className="flex-[2]"
+            >
+              {cobrando ? <Loader2 className="h-4 w-4 animate-spin" /> : <Receipt className="h-4 w-4" />}
               Cobrar {formatPEN(total)}
             </Button>
           </div>
+          <p className="mt-2 text-center text-[11px] text-slate-400">
+            Eliges tipo de comprobante (boleta/factura/interno) y formato (ticket/A4) en el siguiente paso.
+          </p>
         </div>
       </aside>
+
+      {/* MODAL — Apertura de caja (bloquea el terminal cuando no hay sesión) */}
+      {!sesionActiva && (
+        <AbrirCajaModal
+          cajeroNombre={cajeroNombre}
+          cajaNombre={cajaDefault?.nombre ?? null}
+          montoDefault={cajaDefault?.monto_apertura_default ?? 100}
+          onAbierta={() => void refrescarSesion()}
+        />
+      )}
+
+      {/* MODAL — Cierre de caja */}
+      {cerrarOpen && sesionActiva && balanceActual && (
+        <CerrarCajaModal
+          sesion={sesionActiva}
+          balanceInicial={balanceActual}
+          onClose={() => setCerrarOpen(false)}
+          onCerrada={() => {
+            setCerrarOpen(false);
+            void refrescarSesion();
+          }}
+        />
+      )}
+
+      {/* MODAL — Cobro (selector de tipo + cliente + formato) */}
+      {cobrarOpen && sesionActiva && (
+        <CobrarModal
+          total={total}
+          pagado={pagado}
+          defaultCliente={{ nombre: nombreCliente, documento: docCliente }}
+          onCancel={() => setCobrarOpen(false)}
+          onConfirmar={ejecutarCobro}
+        />
+      )}
     </div>
   );
 }
