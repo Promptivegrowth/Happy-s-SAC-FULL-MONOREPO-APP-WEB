@@ -640,6 +640,8 @@ export function PosTerminal({
         <AbrirCajaModal
           cajeroNombre={cajeroNombre}
           cajaNombre={cajaDefault?.nombre ?? null}
+          cajaId={cajaDefault?.id ?? null}
+          cajasDisponibles={cajas}
           montoDefault={cajaDefault?.monto_apertura_default ?? 100}
           onAbierta={() => void refrescarSesion()}
         />

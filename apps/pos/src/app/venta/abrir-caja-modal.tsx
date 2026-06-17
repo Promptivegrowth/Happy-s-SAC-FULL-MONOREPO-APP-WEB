@@ -19,17 +19,29 @@ import { abrirSesion } from '@/server/actions/caja';
 export function AbrirCajaModal({
   cajeroNombre,
   cajaNombre,
+  cajaId,
+  cajasDisponibles,
   montoDefault,
   onAbierta,
 }: {
   cajeroNombre: string;
   cajaNombre: string | null;
+  cajaId: string | null;
+  cajasDisponibles: { id: string; codigo: string; nombre: string }[];
   montoDefault: number;
   onAbierta: () => void;
 }) {
   const [monto, setMonto] = useState<string>(montoDefault.toFixed(2));
   const [obs, setObs] = useState('');
+  // Si el usuario no tiene caja asignada, se obliga a elegir. Si hay solo una
+  // disponible, se preselecciona. Si tiene caja_default, ese valor manda.
+  const [cajaSel, setCajaSel] = useState<string>(() => {
+    if (cajaId) return cajaId;
+    if (cajasDisponibles.length === 1) return cajasDisponibles[0]!.id;
+    return '';
+  });
   const [pending, start] = useTransition();
+  const necesitaElegirCaja = !cajaId;
 
   function submit() {
     const n = Number(monto);
@@ -37,9 +49,18 @@ export function AbrirCajaModal({
       toast.error('Monto inválido');
       return;
     }
+    if (!cajaSel) {
+      toast.error('Seleccioná una caja');
+      return;
+    }
     start(async () => {
       try {
-        await abrirSesion({ monto_apertura: n, observacion: obs || null });
+        // Pasamos caja_id solo si el cajero la eligió manualmente (no hay default)
+        await abrirSesion({
+          monto_apertura: n,
+          caja_id: necesitaElegirCaja ? cajaSel : null,
+          observacion: obs || null,
+        });
         toast.success('Caja abierta');
         onAbierta();
       } catch (e) {
@@ -68,8 +89,28 @@ export function AbrirCajaModal({
               <Input value={cajeroNombre} readOnly className="mt-1 bg-slate-50" />
             </div>
             <div>
-              <Label className="text-xs">Caja</Label>
-              <Input value={cajaNombre ?? '—'} readOnly className="mt-1 bg-slate-50" />
+              <Label className="text-xs">Caja {necesitaElegirCaja && <span className="text-rose-600">*</span>}</Label>
+              {necesitaElegirCaja ? (
+                <select
+                  value={cajaSel}
+                  onChange={(e) => setCajaSel(e.target.value)}
+                  className="mt-1 h-10 w-full rounded-md border border-input bg-white px-2 text-sm"
+                >
+                  <option value="">— Elegí una caja —</option>
+                  {cajasDisponibles.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.codigo} · {c.nombre}
+                    </option>
+                  ))}
+                </select>
+              ) : (
+                <Input value={cajaNombre ?? '—'} readOnly className="mt-1 bg-slate-50" />
+              )}
+              {necesitaElegirCaja && (
+                <p className="mt-1 text-[10px] text-slate-500">
+                  No tenés caja asignada. La que elijas se guardará como tu predeterminada.
+                </p>
+              )}
             </div>
           </div>
 

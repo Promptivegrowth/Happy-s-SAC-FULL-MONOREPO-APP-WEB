@@ -68,14 +68,41 @@ function fmtNumero(n: number, padding = 8): string {
 
 const abrirSchema = z.object({
   monto_apertura: z.number().min(0),
+  caja_id: z.string().uuid().optional().nullable(),
   observacion: z.string().max(500).optional().nullable(),
 });
 
-export async function abrirSesion(input: { monto_apertura: number; observacion?: string | null }) {
+export async function abrirSesion(input: {
+  monto_apertura: number;
+  caja_id?: string | null;
+  observacion?: string | null;
+}) {
   const parsed = abrirSchema.parse(input);
   const sb = await createClient();
   const user = await requireUser(sb);
-  const { caja } = await getCajaDefault(sb, user.id);
+
+  // Resolución de caja:
+  //   1) Si viene caja_id explícita, usar esa (y guardarla como caja_default)
+  //   2) Si no, usar caja_default del perfil
+  //   3) Si no hay ninguna → error claro pidiendo asignación
+  let cajaId = parsed.caja_id ?? null;
+  if (!cajaId) {
+    const { data: perfil } = await sb.from('perfiles').select('caja_default').eq('id', user.id).single();
+    cajaId = perfil?.caja_default ?? null;
+  }
+  if (!cajaId) {
+    throw new Error(
+      'Tu usuario no tiene caja asignada. Elegí una caja en el modal o pedí al admin que la configure.',
+    );
+  }
+
+  const { data: caja, error: errCaja } = await sb
+    .from('cajas')
+    .select('id, codigo, nombre, almacen_id, monto_apertura_default')
+    .eq('id', cajaId)
+    .eq('activo', true)
+    .single();
+  if (errCaja || !caja) throw new Error('La caja indicada no existe o está inactiva.');
 
   // Validar que NO haya otra sesión abierta para esta caja
   const { data: abierta } = await sb
@@ -102,6 +129,12 @@ export async function abrirSesion(input: { monto_apertura: number; observacion?:
     .select('id')
     .single();
   if (error) throw new Error(`No se pudo abrir caja: ${error.message}`);
+
+  // Si el cajero eligió manualmente una caja distinta a su default, persistirla
+  // como nuevo default para no tener que elegirla la próxima vez.
+  if (parsed.caja_id) {
+    await sb.from('perfiles').update({ caja_default: caja.id }).eq('id', user.id);
+  }
 
   revalidatePath('/venta');
   return { id: nueva.id, caja_nombre: caja.nombre };
