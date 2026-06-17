@@ -190,7 +190,7 @@ export function PosTerminal({
       const r = await registrarVenta({
         caja_id: cajaActual.id,
         almacen_id: cajaActual.almacen_id,
-        cliente_id: null,
+        cliente_id: payload.cliente.cliente_id,
         documento_cliente: payload.cliente.numero_documento,
         tipo_documento_cliente: payload.cliente.tipo_documento,
         nombre_cliente_rapido: payload.cliente.razon_social

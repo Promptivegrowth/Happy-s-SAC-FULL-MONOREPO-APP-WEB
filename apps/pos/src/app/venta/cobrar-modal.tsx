@@ -13,28 +13,35 @@
  * el terminal llame a `registrarVenta` + `emitirComprobante` y genere el PDF.
  */
 
-import { useState } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Card } from '@happy/ui/card';
 import { Input } from '@happy/ui/input';
 import { Label } from '@happy/ui/label';
 import { Button } from '@happy/ui/button';
+import { Badge } from '@happy/ui/badge';
 import {
   FileText, Receipt, ScrollText, Loader2, Printer, FileType2, ChevronLeft, X, Building2, IdCard,
+  Search, UserPlus, UserCheck, Phone, Mail, MapPin, Plus, Edit3,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { formatPEN } from '@happy/lib';
 import type { TipoComprobantePOS, TipoDocumentoCliente, FormatoImpresion } from '@/server/actions/caja-helpers';
+import { buscarClientesPOS, crearClienteRapidoPOS, actualizarClientePOS, type ClienteRow } from '@/server/actions/clientes';
 
 export type CobrarPayload = {
   tipo: TipoComprobantePOS;
   formato: FormatoImpresion;
   cliente: {
+    /** UUID del cliente persistido si vino del buscador / acaba de ser creado. null = cliente anónimo */
+    cliente_id: string | null;
     tipo_documento: TipoDocumentoCliente | null;
     numero_documento: string | null;
     razon_social: string | null;
     nombres: string | null;
     apellidos: string | null;
     direccion: string | null;
+    telefono: string | null;
+    email: string | null;
   };
 };
 
@@ -55,7 +62,19 @@ export function CobrarModal({
   const [tipo, setTipo] = useState<TipoComprobantePOS>('BOLETA');
   const [formato, setFormato] = useState<FormatoImpresion>('TICKET_80MM');
 
-  // Cliente
+  // Cliente — modo búsqueda vs creación manual
+  type ClienteMode = 'buscar' | 'crear' | 'seleccionado' | 'anonimo';
+  const [clienteMode, setClienteMode] = useState<ClienteMode>('buscar');
+  const [clienteSeleccionado, setClienteSeleccionado] = useState<ClienteRow | null>(null);
+
+  // Buscador
+  const [busqueda, setBusqueda] = useState(defaultCliente?.documento ?? defaultCliente?.nombre ?? '');
+  const [resultados, setResultados] = useState<ClienteRow[]>([]);
+  const [buscando, setBuscando] = useState(false);
+  const [yaBusco, setYaBusco] = useState(false);
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Form manual (creación rápida o anónimo)
   const initialDoc = defaultCliente?.documento ?? '';
   const [tipoDoc, setTipoDoc] = useState<TipoDocumentoCliente | ''>(
     initialDoc.length === 11 ? 'RUC' : initialDoc.length === 8 ? 'DNI' : '',
@@ -63,8 +82,161 @@ export function CobrarModal({
   const [numDoc, setNumDoc] = useState(initialDoc);
   const [razonSocial, setRazonSocial] = useState(defaultCliente?.nombre ?? '');
   const [direccion, setDireccion] = useState('');
+  const [telefono, setTelefono] = useState('');
+  const [email, setEmail] = useState('');
+  const [guardandoCliente, setGuardandoCliente] = useState(false);
+  const [editandoExistente, setEditandoExistente] = useState(false);
 
   const [confirming, setConfirming] = useState(false);
+
+  // Debounce de búsqueda
+  useEffect(() => {
+    if (clienteMode !== 'buscar') return;
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    const q = busqueda.trim();
+    if (q.length < 2) {
+      setResultados([]);
+      setYaBusco(false);
+      return;
+    }
+    setBuscando(true);
+    debounceRef.current = setTimeout(async () => {
+      try {
+        const rows = await buscarClientesPOS(q);
+        setResultados(rows);
+        setYaBusco(true);
+      } finally {
+        setBuscando(false);
+      }
+    }, 250);
+    return () => {
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+    };
+  }, [busqueda, clienteMode]);
+
+  function seleccionarCliente(c: ClienteRow) {
+    setClienteSeleccionado(c);
+    setClienteMode('seleccionado');
+    // Pre-cargar campos por si se necesitan en confirmación
+    setTipoDoc(c.tipo_documento);
+    setNumDoc(c.numero_documento);
+    setRazonSocial(c.nombre_para_mostrar);
+    setDireccion(c.direccion ?? '');
+    setTelefono(c.telefono ?? '');
+    setEmail(c.email ?? '');
+  }
+
+  function irACrearNuevo() {
+    // Heurística: si la búsqueda son solo dígitos, precargar como documento
+    const q = busqueda.trim();
+    if (/^\d{8}$/.test(q)) {
+      setTipoDoc('DNI');
+      setNumDoc(q);
+      setRazonSocial('');
+    } else if (/^\d{11}$/.test(q)) {
+      setTipoDoc('RUC');
+      setNumDoc(q);
+      setRazonSocial('');
+    } else {
+      if (!tipoDoc) setTipoDoc('DNI');
+      setRazonSocial(q);
+      setNumDoc('');
+    }
+    setDireccion('');
+    setTelefono('');
+    setEmail('');
+    setClienteMode('crear');
+  }
+
+  function volverABuscar() {
+    setClienteMode('buscar');
+    setClienteSeleccionado(null);
+    setEditandoExistente(false);
+  }
+
+  function irAVentaAnonima() {
+    setClienteMode('anonimo');
+    setClienteSeleccionado(null);
+    setTipoDoc('');
+    setNumDoc('');
+    setRazonSocial('');
+    setDireccion('');
+    setTelefono('');
+    setEmail('');
+  }
+
+  async function guardarClienteRapido(): Promise<boolean> {
+    if (!tipoDoc) {
+      toast.error('Seleccioná el tipo de documento');
+      return false;
+    }
+    if (!numDoc.trim()) {
+      toast.error('El número de documento es obligatorio');
+      return false;
+    }
+    if (tipoDoc === 'DNI' && numDoc.length !== 8) {
+      toast.error('DNI debe tener 8 dígitos');
+      return false;
+    }
+    if (tipoDoc === 'RUC' && numDoc.length !== 11) {
+      toast.error('RUC debe tener 11 dígitos');
+      return false;
+    }
+    if (!razonSocial.trim() || razonSocial.trim().length < 2) {
+      toast.error('Ingresá el nombre del cliente');
+      return false;
+    }
+    setGuardandoCliente(true);
+    try {
+      const r = await crearClienteRapidoPOS({
+        tipo_documento: tipoDoc,
+        numero_documento: numDoc.trim(),
+        nombre_completo: razonSocial.trim(),
+        telefono: telefono.trim() || '',
+        email: email.trim() || '',
+        direccion: direccion.trim() || '',
+      });
+      if (!r.ok) {
+        toast.error(r.error);
+        return false;
+      }
+      seleccionarCliente(r.cliente);
+      toast.success('Cliente guardado');
+      return true;
+    } finally {
+      setGuardandoCliente(false);
+    }
+  }
+
+  async function guardarEdicionExistente(): Promise<boolean> {
+    if (!clienteSeleccionado) return false;
+    setGuardandoCliente(true);
+    try {
+      const r = await actualizarClientePOS(clienteSeleccionado.id, {
+        nombre_completo: razonSocial.trim() || undefined,
+        telefono: telefono.trim(),
+        email: email.trim(),
+        direccion: direccion.trim(),
+      });
+      if (!r.ok) {
+        toast.error(r.error);
+        return false;
+      }
+      // Refrescar el cliente seleccionado con los nuevos datos
+      setClienteSeleccionado({
+        ...clienteSeleccionado,
+        nombre_para_mostrar: razonSocial.trim() || clienteSeleccionado.nombre_para_mostrar,
+        telefono: telefono.trim() || null,
+        email: email.trim() || null,
+        direccion: direccion.trim() || null,
+      });
+      setEditandoExistente(false);
+      toast.success('Cliente actualizado');
+      return true;
+    } finally {
+      setGuardandoCliente(false);
+    }
+  }
 
   const faltante = total - pagado;
   const pagoOk = faltante <= 0.01;
@@ -85,22 +257,35 @@ export function CobrarModal({
     }
   }
 
-  function nextStepDesdeCliente() {
+  async function nextStepDesdeCliente() {
+    // Si el cajero está en modo creación: guardar primero
+    if (clienteMode === 'crear') {
+      const ok = await guardarClienteRapido();
+      if (!ok) return;
+    }
+    if (clienteMode === 'seleccionado' && editandoExistente) {
+      const ok = await guardarEdicionExistente();
+      if (!ok) return;
+    }
+    // Para FACTURA es OBLIGATORIO que haya cliente con RUC
     if (tipo === 'FACTURA') {
-      if (tipoDoc !== 'RUC') {
+      const docOk = clienteSeleccionado
+        ? clienteSeleccionado.tipo_documento === 'RUC'
+        : tipoDoc === 'RUC' && numDoc.length === 11;
+      const nombreOk = clienteSeleccionado
+        ? !!clienteSeleccionado.nombre_para_mostrar
+        : !!razonSocial.trim();
+      if (!docOk) {
         toast.error('Para FACTURA el cliente debe tener RUC');
         return;
       }
-      if (!numDoc || numDoc.length !== 11) {
-        toast.error('RUC debe tener 11 dígitos');
-        return;
-      }
-      if (!razonSocial.trim()) {
+      if (!nombreOk) {
         toast.error('Razón social obligatoria');
         return;
       }
-    } else if (tipo === 'BOLETA') {
-      // En boleta, DNI es opcional pero recomendado; si pone documento debe ser válido
+    }
+    // BOLETA acepta anónimo o con datos parciales. Si capturó número, validar formato.
+    if (tipo === 'BOLETA' && clienteMode === 'anonimo') {
       if (numDoc && tipoDoc === 'DNI' && numDoc.length !== 8) {
         toast.error('DNI debe tener 8 dígitos');
         return;
@@ -116,32 +301,54 @@ export function CobrarModal({
   async function confirmar() {
     setConfirming(true);
     try {
-      // Split razón social → nombres/apellidos para DNI (heurística simple)
-      let nombres: string | null = null;
-      let apellidos: string | null = null;
-      let razon: string | null = null;
-      if (tipoDoc === 'DNI' && razonSocial.trim()) {
-        const parts = razonSocial.trim().split(/\s+/);
-        if (parts.length >= 2) {
-          nombres = parts.slice(0, parts.length === 2 ? 1 : 2).join(' ');
-          apellidos = parts.slice(parts.length === 2 ? 1 : 2).join(' ');
+      // Construir payload del cliente desde la fuente correcta
+      const fuente = clienteSeleccionado
+        ? {
+            id: clienteSeleccionado.id,
+            tipo_documento: clienteSeleccionado.tipo_documento,
+            numero_documento: clienteSeleccionado.numero_documento,
+            razon_social: clienteSeleccionado.razon_social,
+            nombres: clienteSeleccionado.nombres,
+            apellido_paterno: clienteSeleccionado.apellido_paterno,
+            apellido_materno: clienteSeleccionado.apellido_materno,
+            direccion: clienteSeleccionado.direccion,
+            telefono: clienteSeleccionado.telefono,
+            email: clienteSeleccionado.email,
+          }
+        : null;
+
+      let nombres: string | null = fuente?.nombres ?? null;
+      let apellidos: string | null = [fuente?.apellido_paterno, fuente?.apellido_materno].filter(Boolean).join(' ') || null;
+      let razon: string | null = fuente?.razon_social ?? null;
+
+      if (!fuente) {
+        // Modo anónimo o crear-pero-no-confirmado: split heurístico
+        if (tipoDoc === 'DNI' && razonSocial.trim()) {
+          const parts = razonSocial.trim().split(/\s+/);
+          if (parts.length >= 2) {
+            nombres = parts.slice(0, parts.length === 2 ? 1 : 2).join(' ');
+            apellidos = parts.slice(parts.length === 2 ? 1 : 2).join(' ');
+          } else {
+            nombres = parts[0] ?? null;
+          }
         } else {
-          nombres = parts[0] ?? null;
+          razon = razonSocial.trim() || null;
         }
-      } else {
-        razon = razonSocial.trim() || null;
       }
 
       await onConfirmar({
         tipo,
         formato,
         cliente: {
-          tipo_documento: tipoDoc || null,
-          numero_documento: numDoc.trim() || null,
+          cliente_id: fuente?.id ?? null,
+          tipo_documento: (fuente?.tipo_documento ?? tipoDoc) || null,
+          numero_documento: (fuente?.numero_documento ?? numDoc.trim()) || null,
           razon_social: razon,
           nombres,
           apellidos,
-          direccion: direccion.trim() || null,
+          direccion: (fuente?.direccion ?? direccion.trim()) || null,
+          telefono: (fuente?.telefono ?? telefono.trim()) || null,
+          email: (fuente?.email ?? email.trim()) || null,
         },
       });
     } finally {
@@ -232,76 +439,255 @@ export function CobrarModal({
         {step === 'cliente' && (
           <>
             <div className="mt-5 space-y-4">
-              <div className="grid gap-3 sm:grid-cols-[140px_1fr]">
-                <div>
-                  <Label className="text-xs">Tipo documento</Label>
-                  <select
-                    value={tipoDoc}
-                    onChange={(e) => setTipoDoc(e.target.value as TipoDocumentoCliente | '')}
-                    className="mt-1 h-10 w-full rounded-md border bg-white px-2 text-sm"
-                  >
-                    {tipo === 'FACTURA' ? (
-                      <option value="RUC">RUC</option>
-                    ) : (
-                      <>
-                        <option value="">— Sin documento —</option>
-                        <option value="DNI">DNI</option>
-                        <option value="RUC">RUC</option>
-                        <option value="CE">CE</option>
-                        <option value="PASAPORTE">Pasaporte</option>
-                      </>
-                    )}
-                  </select>
-                </div>
-                <div>
-                  <Label className="text-xs">Número documento {tipo === 'FACTURA' && <span className="text-red-500">*</span>}</Label>
-                  <div className="relative mt-1">
-                    <IdCard className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-                    <Input
-                      value={numDoc}
-                      onChange={(e) => setNumDoc(e.target.value.replace(/\D/g, ''))}
-                      maxLength={11}
-                      placeholder={tipo === 'FACTURA' ? '11 dígitos (RUC)' : '8 dígitos (DNI)'}
-                      className="pl-9"
-                      autoFocus
-                    />
+              {/* MODE: BUSCAR */}
+              {clienteMode === 'buscar' && (
+                <>
+                  <div>
+                    <Label className="text-xs">Buscar cliente por DNI / RUC / nombre</Label>
+                    <div className="relative mt-1">
+                      <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                      <Input
+                        value={busqueda}
+                        onChange={(e) => setBusqueda(e.target.value)}
+                        placeholder="Escribe al menos 2 caracteres…"
+                        className="pl-9"
+                        autoFocus
+                      />
+                      {buscando && (
+                        <Loader2 className="absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 animate-spin text-slate-400" />
+                      )}
+                    </div>
                   </div>
-                </div>
-              </div>
 
-              <div>
-                <Label className="text-xs">
-                  {tipoDoc === 'DNI' ? 'Nombre completo' : 'Razón social / Nombre'}
-                  {tipo === 'FACTURA' && <span className="text-red-500">*</span>}
-                </Label>
-                <div className="relative mt-1">
-                  <Building2 className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-                  <Input
-                    value={razonSocial}
-                    onChange={(e) => setRazonSocial(e.target.value)}
-                    placeholder={tipo === 'FACTURA' ? 'EMPRESA S.A.C.' : 'Cliente Final'}
-                    className="pl-9"
-                  />
-                </div>
-              </div>
+                  {/* Resultados */}
+                  {resultados.length > 0 && (
+                    <div className="max-h-56 overflow-y-auto rounded-md border border-slate-200 bg-white">
+                      {resultados.map((c) => (
+                        <button
+                          key={c.id}
+                          type="button"
+                          onClick={() => seleccionarCliente(c)}
+                          className="flex w-full items-center justify-between gap-3 border-b border-slate-100 px-3 py-2 text-left last:border-0 hover:bg-happy-50"
+                        >
+                          <div className="min-w-0 flex-1">
+                            <p className="truncate text-sm font-medium text-corp-900">{c.nombre_para_mostrar}</p>
+                            <p className="text-[11px] text-slate-500">
+                              {c.tipo_documento} {c.numero_documento}
+                              {c.telefono && <> · 📞 {c.telefono}</>}
+                            </p>
+                          </div>
+                          <Badge variant="outline" className="shrink-0 text-[10px]">Seleccionar</Badge>
+                        </button>
+                      ))}
+                    </div>
+                  )}
 
-              <div>
-                <Label className="text-xs">Dirección {tipo === 'FACTURA' && '(recomendada)'}</Label>
-                <Input
-                  value={direccion}
-                  onChange={(e) => setDireccion(e.target.value)}
-                  placeholder="Av. Ejemplo 123, Lima"
-                  className="mt-1"
-                />
-              </div>
+                  {yaBusco && resultados.length === 0 && !buscando && (
+                    <div className="rounded-md border border-slate-200 bg-slate-50 p-4 text-center">
+                      <p className="text-sm text-slate-600">No se encontró ningún cliente con "{busqueda}"</p>
+                    </div>
+                  )}
+
+                  {/* Acciones */}
+                  <div className="grid gap-2 sm:grid-cols-2">
+                    <Button variant="outline" onClick={irACrearNuevo} disabled={busqueda.trim().length < 2}>
+                      <UserPlus className="h-4 w-4" /> Crear nuevo cliente
+                    </Button>
+                    {tipo !== 'FACTURA' && (
+                      <Button variant="ghost" onClick={irAVentaAnonima}>
+                        Continuar sin cliente registrado
+                      </Button>
+                    )}
+                  </div>
+                </>
+              )}
+
+              {/* MODE: SELECCIONADO */}
+              {clienteMode === 'seleccionado' && clienteSeleccionado && !editandoExistente && (
+                <Card className="border-emerald-300 bg-emerald-50/40 p-4">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="flex items-start gap-3">
+                      <div className="rounded-full bg-emerald-100 p-2">
+                        <UserCheck className="h-5 w-5 text-emerald-600" />
+                      </div>
+                      <div>
+                        <p className="font-display text-base font-semibold text-corp-900">
+                          {clienteSeleccionado.nombre_para_mostrar}
+                        </p>
+                        <p className="text-xs text-slate-600">
+                          {clienteSeleccionado.tipo_documento} {clienteSeleccionado.numero_documento}
+                        </p>
+                        {clienteSeleccionado.telefono && (
+                          <p className="mt-1 flex items-center gap-1 text-xs text-slate-500">
+                            <Phone className="h-3 w-3" /> {clienteSeleccionado.telefono}
+                          </p>
+                        )}
+                        {clienteSeleccionado.email && (
+                          <p className="flex items-center gap-1 text-xs text-slate-500">
+                            <Mail className="h-3 w-3" /> {clienteSeleccionado.email}
+                          </p>
+                        )}
+                        {clienteSeleccionado.direccion && (
+                          <p className="flex items-center gap-1 text-xs text-slate-500">
+                            <MapPin className="h-3 w-3" /> {clienteSeleccionado.direccion}
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                    <div className="flex flex-col gap-1">
+                      <Button variant="ghost" size="sm" onClick={() => setEditandoExistente(true)}>
+                        <Edit3 className="h-3 w-3" /> Editar
+                      </Button>
+                      <Button variant="ghost" size="sm" onClick={volverABuscar}>
+                        Cambiar
+                      </Button>
+                    </div>
+                  </div>
+                </Card>
+              )}
+
+              {/* MODE: CREAR | EDITAR EXISTENTE — mismo form, distinto submit */}
+              {(clienteMode === 'crear' || (clienteMode === 'seleccionado' && editandoExistente) || clienteMode === 'anonimo') && (
+                <>
+                  {clienteMode === 'crear' && (
+                    <div className="rounded-md border border-amber-200 bg-amber-50 p-2 text-xs text-amber-800">
+                      <Plus className="mr-1 inline h-3 w-3" />
+                      Cliente nuevo. Sólo documento y nombre son obligatorios — el resto se completa luego desde el ERP.
+                    </div>
+                  )}
+                  {clienteMode === 'anonimo' && (
+                    <div className="rounded-md border border-slate-200 bg-slate-50 p-2 text-xs text-slate-700">
+                      Venta sin cliente registrado. Si el cliente da DNI, completalo abajo y aparecerá impreso en la boleta sin crear ficha.
+                    </div>
+                  )}
+
+                  <div className="grid gap-3 sm:grid-cols-[140px_1fr]">
+                    <div>
+                      <Label className="text-xs">Tipo documento</Label>
+                      <select
+                        value={tipoDoc}
+                        onChange={(e) => setTipoDoc(e.target.value as TipoDocumentoCliente | '')}
+                        disabled={editandoExistente}
+                        className="mt-1 h-10 w-full rounded-md border bg-white px-2 text-sm disabled:bg-slate-50 disabled:text-slate-500"
+                      >
+                        {tipo === 'FACTURA' ? (
+                          <option value="RUC">RUC</option>
+                        ) : (
+                          <>
+                            {clienteMode === 'anonimo' && <option value="">— Sin documento —</option>}
+                            <option value="DNI">DNI</option>
+                            <option value="RUC">RUC</option>
+                            <option value="CE">CE</option>
+                            <option value="PASAPORTE">Pasaporte</option>
+                          </>
+                        )}
+                      </select>
+                    </div>
+                    <div>
+                      <Label className="text-xs">
+                        Número documento {(tipo === 'FACTURA' || clienteMode === 'crear') && <span className="text-red-500">*</span>}
+                      </Label>
+                      <div className="relative mt-1">
+                        <IdCard className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                        <Input
+                          value={numDoc}
+                          onChange={(e) => setNumDoc(e.target.value.replace(/\D/g, ''))}
+                          maxLength={11}
+                          disabled={editandoExistente}
+                          placeholder={tipo === 'FACTURA' || tipoDoc === 'RUC' ? '11 dígitos' : tipoDoc === 'DNI' ? '8 dígitos' : 'Número'}
+                          className="pl-9 disabled:bg-slate-50 disabled:text-slate-500"
+                          autoFocus
+                        />
+                      </div>
+                    </div>
+                  </div>
+
+                  <div>
+                    <Label className="text-xs">
+                      {tipoDoc === 'DNI' || tipoDoc === 'CE' || tipoDoc === 'PASAPORTE' ? 'Nombre completo' : 'Razón social / Nombre'}
+                      {(tipo === 'FACTURA' || clienteMode === 'crear') && <span className="text-red-500">*</span>}
+                    </Label>
+                    <div className="relative mt-1">
+                      <Building2 className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                      <Input
+                        value={razonSocial}
+                        onChange={(e) => setRazonSocial(e.target.value)}
+                        placeholder={tipo === 'FACTURA' ? 'EMPRESA S.A.C.' : 'Juan Pérez Gómez'}
+                        className="pl-9"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <div>
+                      <Label className="text-xs">Teléfono / WhatsApp</Label>
+                      <div className="relative mt-1">
+                        <Phone className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                        <Input
+                          value={telefono}
+                          onChange={(e) => setTelefono(e.target.value.replace(/[^\d+]/g, ''))}
+                          placeholder="987654321"
+                          className="pl-9"
+                          maxLength={15}
+                        />
+                      </div>
+                    </div>
+                    <div>
+                      <Label className="text-xs">Email</Label>
+                      <div className="relative mt-1">
+                        <Mail className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                        <Input
+                          value={email}
+                          onChange={(e) => setEmail(e.target.value)}
+                          placeholder="cliente@email.com"
+                          type="email"
+                          className="pl-9"
+                        />
+                      </div>
+                    </div>
+                  </div>
+
+                  <div>
+                    <Label className="text-xs">Dirección {tipo === 'FACTURA' && '(recomendada)'}</Label>
+                    <div className="relative mt-1">
+                      <MapPin className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                      <Input
+                        value={direccion}
+                        onChange={(e) => setDireccion(e.target.value)}
+                        placeholder="Av. Ejemplo 123, Lima"
+                        className="pl-9"
+                      />
+                    </div>
+                  </div>
+
+                  {(clienteMode === 'crear' || editandoExistente) && (
+                    <Button variant="outline" onClick={volverABuscar} size="sm">
+                      ← Volver a buscar
+                    </Button>
+                  )}
+                  {clienteMode === 'anonimo' && (
+                    <Button variant="outline" onClick={volverABuscar} size="sm">
+                      ← Volver a buscar cliente
+                    </Button>
+                  )}
+                </>
+              )}
             </div>
 
             <div className="mt-6 flex justify-between gap-2">
-              <Button variant="outline" onClick={() => setStep('tipo')}>
+              <Button variant="outline" onClick={() => setStep('tipo')} disabled={guardandoCliente}>
                 <ChevronLeft className="h-4 w-4" /> Volver
               </Button>
-              <Button variant="premium" onClick={nextStepDesdeCliente}>
-                Continuar
+              <Button
+                variant="premium"
+                onClick={nextStepDesdeCliente}
+                disabled={
+                  guardandoCliente ||
+                  (clienteMode === 'buscar' && tipo === 'FACTURA') /* obliga seleccionar/crear para FACTURA */
+                }
+              >
+                {guardandoCliente && <Loader2 className="h-4 w-4 animate-spin" />}
+                {clienteMode === 'crear' ? 'Guardar y continuar' : editandoExistente ? 'Guardar y continuar' : 'Continuar'}
               </Button>
             </div>
           </>
