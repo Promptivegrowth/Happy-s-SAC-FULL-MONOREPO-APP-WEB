@@ -535,17 +535,14 @@ export async function generarExcelCierre(sesionId: string): Promise<{ base64: st
     pageSetup: { paperSize: 9, orientation: 'portrait', margins: { left: 0.5, right: 0.5, top: 0.6, bottom: 0.6, header: 0.3, footer: 0.3 } },
   });
 
-  // Anchos: col A ancha (24) para etiquetas largas y para que el logo no
-  // se desborde sobre el título; col B media (16); resto 14.
-  // 10 columnas para que entre el detalle de ventas.
+  // 10 columnas. El TÍTULO arranca en col D (4) para tener margen seguro
+  // respecto al logo aunque exceljs decida ignorar widths.
   const COLS = 10;
-  ws.columns = Array.from({ length: COLS }, (_, i) => ({
-    key: `c${i + 1}`,
-    width: i === 0 ? 24 : i === 1 ? 16 : 14,
-  }));
 
   // ---- Logo (si está disponible y es URL pública) ----
-  // El logo ocupa cols A+B (cabe holgado en 24+16 = ~280pt); el título arranca en col C.
+  // El logo se coloca PRIMERO, ANCLADO a un rango fijo de celdas (br:
+  // bottom-right) para garantizar que ocupe SOLO cols A-C y rows 1-3.
+  // Así, sin importar widths, el título en col D nunca queda debajo.
   let row = 1;
   let tieneLogo = false;
   if (empresa?.logo_url) {
@@ -557,24 +554,49 @@ export async function generarExcelCierre(sesionId: string): Promise<{ base64: st
         const extension: 'png' | 'jpeg' | 'gif' = ext === 'jpg' || ext === 'jpeg' ? 'jpeg' : ext === 'gif' ? 'gif' : 'png';
         const buf = Buffer.from(ab) as unknown as Parameters<typeof wb.addImage>[0]['buffer'];
         const imgId = wb.addImage({ buffer: buf, extension });
-        // tl col 0 row 0; tamaño moderado para no invadir la col C
-        ws.addImage(imgId, { tl: { col: 0, row: 0 }, ext: { width: 160, height: 56 } });
+        // Anclar a rango A1:C3 — el logo se ajusta a ese rectángulo.
+        // Cast porque el tipo Anchor de ExcelJS pide nativeCol/etc opcionales
+        // pero runtime acepta el formato corto { col, row }.
+        ws.addImage(imgId, {
+          tl: { col: 0, row: 0 } as unknown as ExcelJS.Anchor,
+          br: { col: 3, row: 3 } as unknown as ExcelJS.Anchor,
+        });
         tieneLogo = true;
-        ws.getRow(1).height = 60;
       }
     } catch {
       // si falla, seguimos sin logo
     }
   }
 
-  // Cabecera con título brandeado (col C cuando hay logo, sino col A)
-  const tituloCol = tieneLogo ? 3 : 1;
+  // ---- Anchos de columna — APLICADOS DESPUÉS del logo para que no se reseteen ----
+  // Col A 26 (etiquetas largas como "Cajero (apertura)", "Observaciones")
+  // Cols B/C 14 (para que A-C juntas tengan ~370pt y el logo entre cómodo)
+  // Col D 24 (donde arranca el título — debe ser ancho para "DISFRACES HAPPYS")
+  // Resto 14
+  for (let i = 1; i <= COLS; i++) {
+    const col = ws.getColumn(i);
+    col.key = `c${i}`;
+    if (i === 1) col.width = 26;
+    else if (i === 2 || i === 3) col.width = 14;
+    else if (i === 4) col.width = 24;
+    else col.width = 14;
+  }
+
+  // Forzar alto de las primeras 3 filas para que el logo se vea proporcionado
+  if (tieneLogo) {
+    ws.getRow(1).height = 24;
+    ws.getRow(2).height = 18;
+    ws.getRow(3).height = 18;
+  }
+
+  // ---- Cabecera con título brandeado ----
+  // Título en col D (4) cuando hay logo, sino col A. Title row = 1, datos rows 2,3.
+  const tituloCol = tieneLogo ? 4 : 1;
   ws.mergeCells(row, tituloCol, row, COLS);
   const title = ws.getCell(row, tituloCol);
   title.value = empresa?.nombre_comercial || empresa?.razon_social || 'Reporte de cierre de caja';
-  title.font = { name: 'Calibri', size: 18, bold: true, color: { argb: BRAND.naranja } };
+  title.font = { name: 'Calibri', size: 16, bold: true, color: { argb: BRAND.naranja } };
   title.alignment = { vertical: 'middle', horizontal: 'left' };
-  if (!tieneLogo) ws.getRow(row).height = 28;
   row++;
 
   if (empresa) {

@@ -39,7 +39,10 @@ export async function generarExcelBrandeado(opts: ExportOpts): Promise<ExportRes
     views: [{ state: 'frozen', ySplit: 4 + (opts.subtitulo ? 1 : 0) + (opts.filtros?.length ? 1 : 0) }],
   });
 
-  // ---- Logo de la empresa + título lado a lado ----
+  // ---- Logo de la empresa — anclado a A1:C3 (top-left a bottom-right) ----
+  // Usar tl+br fuerza al logo a un rectángulo fijo independientemente de
+  // los widths de columna. El título se posiciona luego en col D (4) con
+  // margen seguro. Esto evita la superposición que aparecía con tl+ext.
   let logoCargado = false;
   try {
     const { createClient } = await import('@happy/db/server');
@@ -53,9 +56,10 @@ export async function generarExcelBrandeado(opts: ExportOpts): Promise<ExportRes
         const extension = ext === 'jpg' || ext === 'jpeg' ? 'jpeg' : 'png';
         const buf = Buffer.from(ab) as unknown as Parameters<typeof wb.addImage>[0]['buffer'];
         const imgId = wb.addImage({ buffer: buf, extension });
-        // Logo ocupa A+B (≈ 270pt) y el título arranca en C — sin superposición
-        ws.addImage(imgId, { tl: { col: 0, row: 0 }, ext: { width: 150, height: 56 } });
-        ws.getRow(1).height = 60;
+        ws.addImage(imgId, {
+          tl: { col: 0, row: 0 } as unknown as ExcelJS.Anchor,
+          br: { col: 3, row: 3 } as unknown as ExcelJS.Anchor,
+        });
         logoCargado = true;
       }
     }
@@ -64,15 +68,21 @@ export async function generarExcelBrandeado(opts: ExportOpts): Promise<ExportRes
   }
 
   // ---- Título principal (naranja, bold, size 18) ----
-  // Si hay logo: el título arranca en col 3 para no superponerse.
-  // Si no: ocupa todo el ancho desde col 1.
-  const tituloCol = logoCargado ? 3 : 1;
+  // Si hay logo: arranca en col 4 (D) con margen seguro respecto al logo.
+  // Si no hay logo o hay menos de 4 columnas: arranca en col 1.
+  const tituloCol = logoCargado && opts.cols.length >= 4 ? 4 : 1;
   ws.mergeCells(1, tituloCol, 1, opts.cols.length);
   const titleCell = ws.getCell(1, tituloCol);
   titleCell.value = opts.titulo;
   titleCell.font = { name: 'Calibri', size: 18, bold: true, color: { argb: BRAND.naranja } };
   titleCell.alignment = { vertical: 'middle', horizontal: 'left' };
-  if (!logoCargado) ws.getRow(1).height = 26;
+  if (logoCargado) {
+    ws.getRow(1).height = 24;
+    ws.getRow(2).height = 18;
+    ws.getRow(3).height = 18;
+  } else {
+    ws.getRow(1).height = 26;
+  }
 
   let rowIdx = 2;
   if (opts.subtitulo) {
@@ -106,13 +116,21 @@ export async function generarExcelBrandeado(opts: ExportOpts): Promise<ExportRes
   });
   headerRow.height = 28;
 
-  // Set column widths/keys (ExcelJS columns array)
-  // Ancho mínimo de col A = 20 si hay logo, para que el logo de 150pt entre
-  // y no se desborde sobre el título (que arranca en col C).
-  ws.columns = opts.cols.map((col, i) => ({
-    key: col.key,
-    width: i === 0 && logoCargado ? Math.max(col.width ?? 18, 22) : col.width ?? 18,
-  }));
+  // Set column widths/keys. Cuando hay logo: las cols 1-3 deben ser
+  // suficientemente anchas para que el logo se vea bien (≥18 cada una),
+  // y la col 4 (donde arranca el título) un poco más ancha para acomodar
+  // el texto "Reporte de XYZ — DISFRACES HAPPYS".
+  // Usamos getColumn().width DESPUÉS para forzar y evitar que mergeCells
+  // las resetee.
+  ws.columns = opts.cols.map((col) => ({ key: col.key, width: col.width ?? 18 }));
+  if (logoCargado) {
+    for (let i = 1; i <= Math.min(3, opts.cols.length); i++) {
+      ws.getColumn(i).width = Math.max(ws.getColumn(i).width ?? 18, 14);
+    }
+    if (opts.cols.length >= 4) {
+      ws.getColumn(4).width = Math.max(ws.getColumn(4).width ?? 18, 22);
+    }
+  }
 
   // ---- Filas con zebra ----
   opts.rows.forEach((row, i) => {
