@@ -192,20 +192,29 @@ export async function generarFichaTecnicaPDF(fichaId: string, productoId: string
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   y = (doc as any).lastAutoTable.finalY + 4;
 
-  // Imágenes delantero/posterior si existen
+  // Imágenes referenciales: delantero, posterior, lateral
   const delantero = data.imagenes.find((i) => i.tipo === 'DELANTERO');
   const posterior = data.imagenes.find((i) => i.tipo === 'POSTERIOR');
-  if (delantero || posterior) {
+  const lateral = data.imagenes.find((i) => i.tipo === 'LATERAL');
+  const refImgs: { img: typeof delantero; label: string }[] = [];
+  if (delantero) refImgs.push({ img: delantero, label: 'Vista delantera' });
+  if (posterior) refImgs.push({ img: posterior, label: 'Vista posterior' });
+  if (lateral) refImgs.push({ img: lateral, label: 'Vista lateral' });
+  if (refImgs.length > 0) {
     y = ensureSpace(y + 3, 80);
     y = sectionTitle('IMÁGENES REFERENCIALES', y);
-    const imgW = (pageW - M * 2 - 4) / 2;
+    const cols = refImgs.length;
+    const gap = 4;
+    const imgW = (pageW - M * 2 - gap * (cols - 1)) / cols;
     const imgH = 70;
-    try { if (delantero) await drawImageFromUrl(doc, delantero.url, M, y, imgW, imgH); } catch { /* ignore */ }
-    try { if (posterior) await drawImageFromUrl(doc, posterior.url, M + imgW + 4, y, imgW, imgH); } catch { /* ignore */ }
-    doc.setFontSize(7);
-    doc.setTextColor(...GRIS);
-    doc.text('Vista delantera', M + imgW / 2, y + imgH + 3, { align: 'center' });
-    doc.text('Vista posterior', M + imgW + 4 + imgW / 2, y + imgH + 3, { align: 'center' });
+    for (let i = 0; i < refImgs.length; i++) {
+      const it = refImgs[i]!;
+      const x = M + i * (imgW + gap);
+      try { if (it.img) await drawImageFromUrl(doc, it.img.url, x, y, imgW, imgH); } catch { /* ignore */ }
+      doc.setFontSize(7);
+      doc.setTextColor(...GRIS);
+      doc.text(it.label, x + imgW / 2, y + imgH + 3, { align: 'center' });
+    }
     y += imgH + 8;
   }
 
@@ -273,9 +282,10 @@ export async function generarFichaTecnicaPDF(fichaId: string, productoId: string
   }
 
   // ============================================================================
-  // HOJA DE CONFECCIÓN (puntadas + notas)
+  // HOJA DE CONFECCIÓN (puntadas + notas + imágenes de detalle confección)
   // ============================================================================
-  if (f.puntadas_remalle || f.puntadas_recta || f.notas_confeccion) {
+  const imgsConfeccion = data.imagenes.filter((i) => i.tipo === 'CONFECCION_DETALLE');
+  if (f.puntadas_remalle || f.puntadas_recta || f.notas_confeccion || imgsConfeccion.length > 0) {
     y = ensureSpace(y + 3, 30);
     y = sectionTitle('HOJA DE CONFECCIÓN', y);
     const cnf: [string, string][] = [];
@@ -300,6 +310,26 @@ export async function generarFichaTecnicaPDF(fichaId: string, productoId: string
       const notas = doc.splitTextToSize(f.notas_confeccion, pageW - M * 2);
       doc.text(notas, M, y);
       y += notas.length * 3.5 + 4;
+    }
+    // Imágenes de detalle de confección dentro de la misma sección (grid 2 cols)
+    if (imgsConfeccion.length > 0) {
+      const colW = (pageW - M * 2 - 4) / 2;
+      const colH = 55;
+      let col = 0;
+      for (const img of imgsConfeccion) {
+        if (col === 0) y = ensureSpace(y, colH + 12);
+        const x = M + col * (colW + 4);
+        try { await drawImageFromUrl(doc, img.url, x, y, colW, colH); } catch { /* ignore */ }
+        if (img.leyenda) {
+          doc.setFontSize(7);
+          doc.setTextColor(...GRIS);
+          const ley = doc.splitTextToSize(img.leyenda, colW - 2);
+          doc.text(ley.slice(0, 2), x + 1, y + colH + 4);
+        }
+        col++;
+        if (col === 2) { col = 0; y += colH + 10; }
+      }
+      if (col > 0) y += colH + 10; // cerrar fila incompleta
     }
   }
 
@@ -392,32 +422,53 @@ export async function generarFichaTecnicaPDF(fichaId: string, productoId: string
       margin: { left: M, right: M },
     });
 
-    // Imagen acabados/doblado si existe
+    // Imagen acabados/doblado y etiqueta dentro de la misma sección
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     y = (doc as any).lastAutoTable.finalY + 4;
     const doblado = data.imagenes.find((i) => i.tipo === 'ACABADOS_DOBLADO');
+    const etiqueta = data.imagenes.find((i) => i.tipo === 'ETIQUETA');
     if (doblado) {
       y = ensureSpace(y, 84);
       try { await drawImageFromUrl(doc, doblado.url, M, y, pageW - M * 2, 80); } catch { /* ignore */ }
       y += 84;
     }
+    if (etiqueta) {
+      y = ensureSpace(y + 2, 70);
+      const w = 80;
+      const h = 60;
+      try { await drawImageFromUrl(doc, etiqueta.url, M, y, w, h); } catch { /* ignore */ }
+      doc.setFontSize(7);
+      doc.setTextColor(...GRIS);
+      doc.text('Ubicación de etiqueta', M, y + h + 4);
+      if (etiqueta.leyenda) {
+        doc.text(etiqueta.leyenda, M + w + 5, y + h / 2);
+      }
+      y += h + 8;
+    }
   }
 
   // ============================================================================
-  // IMÁGENES ADICIONALES (callouts, detalles, etiquetas)
+  // IMÁGENES ADICIONALES — solo CALLOUT y OTRA (las demás ya viven en
+  // su sección temática: DELANTERO/POSTERIOR/LATERAL en imágenes refs,
+  // CORTE_DIAGRAMA en hoja de corte, CONFECCION_DETALLE en confección,
+  // MEDIDAS_DIAGRAMA en medidas, ACABADOS_DOBLADO y ETIQUETA en acabados).
   // ============================================================================
-  const yaUsadas: TipoImagenFicha[] = ['DELANTERO', 'POSTERIOR', 'CORTE_DIAGRAMA', 'MEDIDAS_DIAGRAMA', 'ACABADOS_DOBLADO'];
+  const yaUsadas: TipoImagenFicha[] = [
+    'DELANTERO', 'POSTERIOR', 'LATERAL',
+    'CORTE_DIAGRAMA', 'CONFECCION_DETALLE',
+    'MEDIDAS_DIAGRAMA', 'ETIQUETA', 'ACABADOS_DOBLADO',
+  ];
   const restantes = data.imagenes.filter((i) => !yaUsadas.includes(i.tipo));
   if (restantes.length > 0) {
     y = ensureSpace(y + 3, 80);
-    y = sectionTitle('IMÁGENES DE DETALLE', y);
+    y = sectionTitle('IMÁGENES ADICIONALES', y);
     const imgW = (pageW - M * 2 - 6) / 2;
     const imgH = 60;
     let col = 0;
     for (const img of restantes) {
       if (y + imgH + 10 > pageH - PIE_RESERVA) {
         y = newPage();
-        y = sectionTitle('IMÁGENES DE DETALLE (cont.)', y);
+        y = sectionTitle('IMÁGENES ADICIONALES (cont.)', y);
         col = 0;
       }
       const x = M + col * (imgW + 6);
