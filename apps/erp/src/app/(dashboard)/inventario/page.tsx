@@ -164,18 +164,28 @@ async function InventarioTable({ q, almacen, vista }: SP) {
 
   if (incluirCeros) {
     // 2a) Variantes activas + almacenes activos → producto cruz
-    let varsQuery = sb
+    // OJO: NO usar .or() con productos.nombre — Supabase ignora silenciosamente
+    // los filtros sobre foreign tables en .or() y devuelve todo (o nada).
+    // Mejor: traer todas las variantes (límite 2000) y filtrar client-side
+    // donde sí podemos cruzar sku + nombre del producto.
+    const { data: varsRaw } = await sb
       .from('productos_variantes')
       .select('id, sku, talla, productos!inner(nombre, activo)')
       .eq('activo', true)
       .eq('productos.activo', true)
       .order('sku')
       .limit(2000);
-    if (qNorm) varsQuery = varsQuery.or(`sku.ilike.%${qNorm}%,productos.nombre.ilike.%${qNorm}%`);
-    const { data: varsRaw } = await varsQuery;
-    const variantes = ((varsRaw ?? []) as unknown as {
+    let variantes = ((varsRaw ?? []) as unknown as {
       id: string; sku: string; talla: string; productos: { nombre: string } | null;
     }[]).filter((v) => v.productos);
+    if (qNorm) {
+      const qq = qNorm.toLowerCase();
+      variantes = variantes.filter(
+        (v) =>
+          v.sku.toLowerCase().includes(qq) ||
+          (v.productos?.nombre ?? '').toLowerCase().includes(qq),
+      );
+    }
 
     const { data: almsAll } = await sb.from('almacenes').select('id, nombre').eq('activo', true).order('nombre');
     const almacenes = ((almsAll ?? []) as { id: string; nombre: string }[]).filter(
