@@ -17,8 +17,11 @@ import { z } from 'zod';
 import { createClient } from '@happy/db/server';
 import { createServiceClient } from '@happy/db/service';
 import { runAction, requireUser, bumpPaths, type ActionResult } from './_helpers';
-import { BUCKET_FICHAS, TEMPORADAS, TIPOS_IMAGEN_FICHA } from './fichas-tecnicas-helpers';
-import type { FichaTecnica, FichaMedida, FichaImagen } from './fichas-tecnicas-helpers';
+import { BUCKET_FICHAS, TEMPORADAS, TIPOS_IMAGEN_FICHA, TIPOS_TELA } from './fichas-tecnicas-helpers';
+import type {
+  FichaTecnica, FichaMedida, FichaImagen,
+  PiezaCorte, AvioRow, ProcesoFichaRow,
+} from './fichas-tecnicas-helpers';
 
 // Las tablas nuevas (mig 45) aún no están en los types auto-generados.
 // Cast pragmático para acceder a ellas hasta regenerar.
@@ -363,4 +366,225 @@ export async function actualizarLeyendaImagen(
     if (error) throw new Error(error.message);
     return null;
   });
+}
+
+// ============================================================================
+// FASE 2 — PIEZAS DE CORTE
+// ============================================================================
+export async function obtenerPiezasCorte(fichaId: string): Promise<PiezaCorte[]> {
+  const sb = (await createClient()) as unknown as AnyClient;
+  const { data } = await sb
+    .from('fichas_piezas_corte')
+    .select('*')
+    .eq('ficha_id', fichaId)
+    .order('orden');
+  return (data ?? []) as unknown as PiezaCorte[];
+}
+
+const piezaInputSchema = z.object({
+  tipo_tela: z.enum(TIPOS_TELA),
+  descripcion: z.string().min(1).max(100),
+  cantidad: z.number().int().min(1),
+  posicion: z.string().nullable().optional().or(z.literal('')),
+  orientacion: z.string().nullable().optional().or(z.literal('')),
+  observaciones: z.string().nullable().optional().or(z.literal('')),
+  orden: z.number().int().default(0),
+});
+
+export async function guardarPiezasCorte(
+  fichaId: string,
+  piezas: z.input<typeof piezaInputSchema>[],
+): Promise<ActionResult> {
+  return runAction(async () => {
+    const { sb: sbRaw } = await requireUser();
+    const sb = sbRaw as unknown as AnyClient;
+    const parsed = piezas.map((p) => piezaInputSchema.parse(p));
+
+    await sb.from('fichas_piezas_corte').delete().eq('ficha_id', fichaId);
+    if (parsed.length === 0) return null;
+
+    const insert = parsed.map((p, i) => ({
+      ficha_id: fichaId,
+      tipo_tela: p.tipo_tela,
+      descripcion: p.descripcion.trim(),
+      cantidad: p.cantidad,
+      posicion: p.posicion === '' ? null : (p.posicion ?? null),
+      orientacion: p.orientacion === '' ? null : (p.orientacion ?? null),
+      observaciones: p.observaciones === '' ? null : (p.observaciones ?? null),
+      orden: p.orden ?? i,
+    }));
+    const { error } = await sb.from('fichas_piezas_corte').insert(insert);
+    if (error) throw new Error(error.message);
+    return null;
+  });
+}
+
+// ============================================================================
+// FASE 2 — AVÍOS (derivado de receta activa + materiales)
+// ============================================================================
+export async function obtenerAviosProducto(productoId: string): Promise<AvioRow[]> {
+  const sb = (await createClient()) as unknown as AnyClient;
+
+  // 1) Receta activa
+  const { data: receta } = await sb
+    .from('recetas')
+    .select('id')
+    .eq('producto_id', productoId)
+    .eq('activa', true)
+    .maybeSingle();
+  if (!receta?.id) return [];
+
+  // 2) Líneas de receta agrupadas por material (sumar cantidades de todas las tallas)
+  const { data: lineas } = await sb
+    .from('recetas_lineas')
+    .select('material_id, cantidad, unidad_id')
+    .eq('receta_id', receta.id);
+  if (!lineas || lineas.length === 0) return [];
+
+  type LR = { material_id: string; cantidad: number | string; unidad_id: string | null };
+  const sumByMaterial = new Map<string, number>();
+  for (const l of lineas as LR[]) {
+    const acc = sumByMaterial.get(l.material_id) ?? 0;
+    sumByMaterial.set(l.material_id, acc + Number(l.cantidad ?? 0));
+  }
+  const matIds = Array.from(sumByMaterial.keys());
+
+  // 3) Cargar materiales (codigo, nombre, categoria, color, imagen, unidad)
+  const { data: mats } = await sb
+    .from('materiales')
+    .select('id, codigo, nombre, categoria, color_nombre, imagen_url, unidad_consumo_id')
+    .in('id', matIds);
+
+  type MR = {
+    id: string; codigo: string; nombre: string; categoria: string;
+    color_nombre: string | null; imagen_url: string | null;
+    unidad_consumo_id: string | null;
+  };
+  const matMap = new Map<string, MR>();
+  for (const m of (mats ?? []) as MR[]) matMap.set(m.id, m);
+
+  // 4) Cargar unidades para mostrar simbolo
+  const unidadIds = Array.from(new Set(((mats ?? []) as MR[]).map((m) => m.unidad_consumo_id).filter(Boolean) as string[]));
+  const unidadByID = new Map<string, string>();
+  if (unidadIds.length > 0) {
+    const { data: unis } = await sb.from('unidades_medida').select('id, simbolo').in('id', unidadIds);
+    for (const u of (unis ?? []) as { id: string; simbolo: string }[]) unidadByID.set(u.id, u.simbolo);
+  }
+
+  return matIds.map((id) => {
+    const m = matMap.get(id);
+    return {
+      material_id: id,
+      codigo: m?.codigo ?? '—',
+      nombre: m?.nombre ?? '—',
+      categoria: String(m?.categoria ?? '—'),
+      color: m?.color_nombre ?? null,
+      imagen_url: m?.imagen_url ?? null,
+      cantidad_total: sumByMaterial.get(id) ?? 0,
+      unidad: m?.unidad_consumo_id ? unidadByID.get(m.unidad_consumo_id) ?? '' : '',
+    } satisfies AvioRow;
+  });
+}
+
+export async function obtenerProcesosProducto(productoId: string): Promise<ProcesoFichaRow[]> {
+  const sb = (await createClient()) as unknown as AnyClient;
+
+  const { data: procs } = await sb
+    .from('productos_procesos')
+    .select('id, proceso, orden, area_id, tiempo_estandar_min, maquina, descripcion_operativa')
+    .eq('producto_id', productoId)
+    .eq('activo', true)
+    .order('orden');
+
+  type PR = {
+    id: string; proceso: string; orden: number; area_id: string | null;
+    tiempo_estandar_min: number | string | null;
+    maquina: string | null; descripcion_operativa: string | null;
+  };
+  const filas = (procs ?? []) as PR[];
+
+  const areaIds = Array.from(new Set(filas.map((p) => p.area_id).filter(Boolean) as string[]));
+  const areaByID = new Map<string, string>();
+  if (areaIds.length > 0) {
+    const { data: areas } = await sb.from('areas_produccion').select('id, nombre').in('id', areaIds);
+    for (const a of (areas ?? []) as { id: string; nombre: string }[]) areaByID.set(a.id, a.nombre);
+  }
+
+  return filas.map((p) => ({
+    id: p.id,
+    proceso: p.proceso,
+    orden: p.orden,
+    area: p.area_id ? areaByID.get(p.area_id) ?? null : null,
+    maquina: p.maquina,
+    descripcion_operativa: p.descripcion_operativa,
+    tiempo_estandar_min: Number(p.tiempo_estandar_min ?? 0),
+  } satisfies ProcesoFichaRow));
+}
+
+// Actualizar maquina/descripcion de un proceso (no rompe nada existente)
+const procesoFichaSchema = z.object({
+  maquina: z.string().nullable().optional().or(z.literal('')),
+  descripcion_operativa: z.string().nullable().optional().or(z.literal('')),
+});
+
+export async function actualizarProcesoFicha(
+  procesoId: string,
+  input: z.input<typeof procesoFichaSchema>,
+): Promise<ActionResult> {
+  return runAction(async () => {
+    const { sb: sbRaw } = await requireUser();
+    const sb = sbRaw as unknown as AnyClient;
+    const data = procesoFichaSchema.parse(input);
+    const { error } = await sb
+      .from('productos_procesos')
+      .update({
+        maquina: data.maquina === '' ? null : (data.maquina ?? null),
+        descripcion_operativa: data.descripcion_operativa === '' ? null : (data.descripcion_operativa ?? null),
+      })
+      .eq('id', procesoId);
+    if (error) throw new Error(error.message);
+    return null;
+  });
+}
+
+// ============================================================================
+// FASE 2 — Cargar empresa para PDF
+// ============================================================================
+export async function cargarDatosParaPDFFicha(fichaId: string, productoId: string) {
+  const sb = (await createClient()) as unknown as AnyClient;
+
+  const [vigente, piezas, avios, procesos, empresaRes, productoRes] = await Promise.all([
+    obtenerFichaVigente(productoId),
+    obtenerPiezasCorte(fichaId),
+    obtenerAviosProducto(productoId),
+    obtenerProcesosProducto(productoId),
+    sb.from('empresa').select('razon_social, nombre_comercial, ruc, direccion_fiscal, telefono, email, logo_url').single(),
+    sb.from('productos').select('codigo, nombre').eq('id', productoId).single(),
+  ]);
+
+  let logo_dataurl: string | null = null;
+  const empresa = empresaRes.data as { razon_social: string; nombre_comercial: string | null; ruc: string; direccion_fiscal: string | null; telefono: string | null; email: string | null; logo_url: string | null } | null;
+  if (empresa?.logo_url) {
+    try {
+      const resp = await fetch(empresa.logo_url);
+      if (resp.ok) {
+        const buf = Buffer.from(await resp.arrayBuffer());
+        const ext = (empresa.logo_url.split('.').pop() ?? 'png').toLowerCase();
+        const mime = ext === 'jpg' || ext === 'jpeg' ? 'image/jpeg' : 'image/png';
+        logo_dataurl = `data:${mime};base64,${buf.toString('base64')}`;
+      }
+    } catch { /* opcional */ }
+  }
+
+  return {
+    ficha: vigente.ficha,
+    medidas: vigente.medidas,
+    imagenes: vigente.imagenes,
+    piezas,
+    avios,
+    procesos,
+    empresa,
+    logo_dataurl,
+    producto: productoRes.data as { codigo: string; nombre: string } | null,
+  };
 }

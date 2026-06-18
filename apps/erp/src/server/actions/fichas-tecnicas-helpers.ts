@@ -92,3 +92,48 @@ export type FichaImagen = {
 };
 
 export const BUCKET_FICHAS = 'productos-fichas';
+
+// ============================================================================
+// FASE 2 — Hoja de corte
+// ============================================================================
+export const TIPOS_TELA = ['PRINCIPAL', 'SECUNDARIA', 'FORRO', 'OTRO'] as const;
+export type TipoTela = (typeof TIPOS_TELA)[number];
+
+export const POSICIONES_CORTE = ['vertical', 'horizontal', 'sesgo'] as const;
+export const ORIENTACIONES_CORTE = ['hilo', 'contrahilo', 'diagonal'] as const;
+
+export type PiezaCorte = {
+  id: string;
+  ficha_id: string;
+  tipo_tela: TipoTela;
+  descripcion: string;
+  cantidad: number;
+  posicion: string | null;
+  orientacion: string | null;
+  observaciones: string | null;
+  orden: number;
+};
+
+// ============================================================================
+// FASE 2 — Avíos (vista derivada de receta + materiales del producto)
+// ============================================================================
+export type AvioRow = {
+  material_id: string;
+  codigo: string;
+  nombre: string;
+  categoria: string;
+  color: string | null;
+  imagen_url: string | null;
+  cantidad_total: number;       // suma de cantidad en todas las tallas
+  unidad: string;
+};
+
+export type ProcesoFichaRow = {
+  id: string;
+  proceso: string;
+  orden: number;
+  area: string | null;
+  maquina: string | null;
+  descripcion_operativa: string | null;
+  tiempo_estandar_min: number;
+};

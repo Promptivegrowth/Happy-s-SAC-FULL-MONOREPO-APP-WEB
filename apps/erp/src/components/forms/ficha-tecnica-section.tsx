@@ -10,6 +10,7 @@
  */
 
 import { useState, useTransition, useMemo, useRef } from 'react';
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { Button } from '@happy/ui/button';
 import { Card } from '@happy/ui/card';
@@ -19,7 +20,7 @@ import { Badge } from '@happy/ui/badge';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@happy/ui/table';
 import {
   FileText, Plus, Loader2, Save, Trash2, Upload, ImageIcon, Ruler, Shirt, Wrench,
-  Layers, Info,
+  Layers, Info, Scissors, Package, Download,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { ordenTalla } from '@happy/lib';
@@ -29,16 +30,22 @@ import {
   guardarMedidasFicha,
   subirImagenFicha,
   eliminarImagenFicha,
+  guardarPiezasCorte,
 } from '@/server/actions/fichas-tecnicas';
 import {
   TEMPORADAS,
   TIPOS_IMAGEN_FICHA,
   TIPO_IMAGEN_LABEL,
+  TIPOS_TELA,
   type FichaTecnica,
   type FichaMedida,
   type FichaImagen,
   type TipoImagenFicha,
   type Temporada,
+  type PiezaCorte,
+  type AvioRow,
+  type ProcesoFichaRow,
+  type TipoTela,
 } from '@/server/actions/fichas-tecnicas-helpers';
 
 type Props = {
@@ -48,10 +55,13 @@ type Props = {
   ficha: FichaTecnica | null;
   medidas: FichaMedida[];
   imagenes: FichaImagen[];
+  piezas: PiezaCorte[];
+  avios: AvioRow[];
+  procesos: ProcesoFichaRow[];
   revisiones: { id: string; revision: number; vigente: boolean; updated_at: string }[];
 };
 
-type SubTab = 'resumen' | 'composicion' | 'medidas' | 'imagenes' | 'confeccion';
+type SubTab = 'resumen' | 'composicion' | 'medidas' | 'corte' | 'avios' | 'imagenes' | 'confeccion';
 
 export function FichaTecnicaSection(props: Props) {
   const router = useRouter();
@@ -96,11 +106,24 @@ export function FichaTecnicaSection(props: Props) {
 }
 
 function FichaEditor({
-  productoId, productoNombre, tallasProducto, ficha, medidas, imagenes, revisiones,
+  productoId, productoNombre, tallasProducto, ficha, medidas, imagenes, piezas, avios, procesos, revisiones,
 }: Props & { ficha: FichaTecnica }) {
   const router = useRouter();
   const [tab, setTab] = useState<SubTab>('resumen');
   const [creandoRev, startRev] = useTransition();
+  const [descargando, setDescargando] = useState(false);
+
+  async function descargarPDF() {
+    setDescargando(true);
+    try {
+      const { generarFichaTecnicaPDF } = await import('./ficha-tecnica-pdf');
+      await generarFichaTecnicaPDF(ficha.id, productoId);
+    } catch (e) {
+      toast.error('Error al generar PDF: ' + (e as Error).message);
+    } finally {
+      setDescargando(false);
+    }
+  }
 
   function nuevaRevision() {
     if (!confirm(`¿Crear nueva revisión a partir de la ${ficha.revision}? La actual quedará archivada.`)) return;
@@ -141,6 +164,10 @@ function FichaEditor({
               {revisiones.length} revisiones en historial
             </Badge>
           )}
+          <Button variant="outline" size="sm" onClick={descargarPDF} disabled={descargando}>
+            {descargando ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Download className="h-3.5 w-3.5" />}
+            Exportar PDF
+          </Button>
           <Button variant="outline" size="sm" onClick={nuevaRevision} disabled={creandoRev}>
             {creandoRev && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
             Nueva revisión
@@ -159,6 +186,12 @@ function FichaEditor({
         <SubTabBtn active={tab === 'medidas'} onClick={() => setTab('medidas')} icon={<Ruler className="h-3.5 w-3.5" />}>
           Medidas ({medidas.length})
         </SubTabBtn>
+        <SubTabBtn active={tab === 'corte'} onClick={() => setTab('corte')} icon={<Scissors className="h-3.5 w-3.5" />}>
+          Corte ({piezas.length})
+        </SubTabBtn>
+        <SubTabBtn active={tab === 'avios'} onClick={() => setTab('avios')} icon={<Package className="h-3.5 w-3.5" />}>
+          Avíos ({avios.length})
+        </SubTabBtn>
         <SubTabBtn active={tab === 'imagenes'} onClick={() => setTab('imagenes')} icon={<ImageIcon className="h-3.5 w-3.5" />}>
           Imágenes ({imagenes.length})
         </SubTabBtn>
@@ -170,6 +203,8 @@ function FichaEditor({
       {tab === 'resumen' && <ResumenTab ficha={ficha} />}
       {tab === 'composicion' && <ComposicionTab ficha={ficha} />}
       {tab === 'medidas' && <MedidasTab ficha={ficha} medidasIniciales={medidas} tallasProducto={tallasProducto} />}
+      {tab === 'corte' && <CorteTab ficha={ficha} piezasIniciales={piezas} />}
+      {tab === 'avios' && <AviosTab productoId={productoId} avios={avios} procesos={procesos} />}
       {tab === 'imagenes' && <ImagenesTab fichaId={ficha.id} imagenes={imagenes} />}
       {tab === 'confeccion' && <ConfeccionTab ficha={ficha} />}
     </div>
@@ -851,6 +886,288 @@ function ConfeccionTab({ ficha }: { ficha: FichaTecnica }) {
           Guardar
         </Button>
       </div>
+    </div>
+  );
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// CORTE — piezas
+// ────────────────────────────────────────────────────────────────────────────
+type PiezaRow = {
+  tipo_tela: TipoTela;
+  descripcion: string;
+  cantidad: string;
+  posicion: string;
+  orientacion: string;
+  observaciones: string;
+};
+
+function CorteTab({ ficha, piezasIniciales }: { ficha: FichaTecnica; piezasIniciales: PiezaCorte[] }) {
+  const [pending, start] = useTransition();
+  const [rows, setRows] = useState<PiezaRow[]>(() =>
+    piezasIniciales.length > 0
+      ? piezasIniciales.map((p) => ({
+          tipo_tela: p.tipo_tela,
+          descripcion: p.descripcion,
+          cantidad: String(p.cantidad),
+          posicion: p.posicion ?? '',
+          orientacion: p.orientacion ?? '',
+          observaciones: p.observaciones ?? '',
+        }))
+      : [{ tipo_tela: 'PRINCIPAL', descripcion: '', cantidad: '1', posicion: 'vertical', orientacion: 'hilo', observaciones: '' }],
+  );
+
+  function agregar() {
+    setRows([...rows, { tipo_tela: 'PRINCIPAL', descripcion: '', cantidad: '1', posicion: 'vertical', orientacion: 'hilo', observaciones: '' }]);
+  }
+  function eliminar(i: number) {
+    setRows(rows.filter((_, idx) => idx !== i));
+  }
+  function actualizar(i: number, patch: Partial<PiezaRow>) {
+    setRows(rows.map((r, idx) => idx === i ? { ...r, ...patch } : r));
+  }
+
+  function save() {
+    for (const r of rows) {
+      if (!r.descripcion.trim()) {
+        toast.error('Toda pieza requiere descripción');
+        return;
+      }
+      if (!r.cantidad || Number(r.cantidad) < 1) {
+        toast.error('Cantidad debe ser ≥ 1');
+        return;
+      }
+    }
+    start(async () => {
+      const r = await guardarPiezasCorte(
+        ficha.id,
+        rows.map((row, idx) => ({
+          tipo_tela: row.tipo_tela,
+          descripcion: row.descripcion,
+          cantidad: Number(row.cantidad),
+          posicion: row.posicion || null,
+          orientacion: row.orientacion || null,
+          observaciones: row.observaciones || null,
+          orden: idx,
+        })),
+      );
+      if (r.ok) toast.success('Piezas guardadas');
+      else toast.error(r.error ?? 'Error');
+    });
+  }
+
+  return (
+    <Card className="p-0">
+      <div className="flex items-center justify-between border-b border-slate-200 p-3">
+        <div>
+          <h4 className="font-display text-sm font-semibold text-corp-900">Hoja de corte</h4>
+          <p className="text-[11px] text-slate-500">Piezas a cortar por tipo de tela. Subí un diagrama en la tab "Imágenes" tipo "Diagrama de corte".</p>
+        </div>
+        <div className="flex items-center gap-2">
+          <Button variant="outline" size="sm" onClick={agregar}>
+            <Plus className="h-3.5 w-3.5" /> Pieza
+          </Button>
+          <Button variant="premium" size="sm" onClick={save} disabled={pending}>
+            {pending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />}
+            Guardar
+          </Button>
+        </div>
+      </div>
+
+      <Table>
+        <TableHeader>
+          <TableRow>
+            <TableHead className="w-32">Tipo tela</TableHead>
+            <TableHead>Descripción</TableHead>
+            <TableHead className="w-20 text-center">Cantidad</TableHead>
+            <TableHead className="w-32">Posición</TableHead>
+            <TableHead className="w-32">Orientación</TableHead>
+            <TableHead>Observación</TableHead>
+            <TableHead className="w-10"></TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {rows.length === 0 && (
+            <TableRow>
+              <TableCell colSpan={7} className="py-8 text-center text-sm text-slate-400">
+                Sin piezas. Click en "Pieza" para agregar.
+              </TableCell>
+            </TableRow>
+          )}
+          {rows.map((row, i) => (
+            <TableRow key={i}>
+              <TableCell>
+                <select
+                  value={row.tipo_tela}
+                  onChange={(e) => actualizar(i, { tipo_tela: e.target.value as TipoTela })}
+                  className="h-8 w-full rounded-md border border-input bg-white px-2 text-xs"
+                >
+                  {TIPOS_TELA.map((t) => <option key={t} value={t}>{t}</option>)}
+                </select>
+              </TableCell>
+              <TableCell>
+                <Input
+                  value={row.descripcion}
+                  onChange={(e) => actualizar(i, { descripcion: e.target.value })}
+                  placeholder="Delantero, Bolsa menor, Vivos, Franja..."
+                  className="h-8"
+                />
+              </TableCell>
+              <TableCell>
+                <Input
+                  type="number"
+                  min={1}
+                  value={row.cantidad}
+                  onChange={(e) => actualizar(i, { cantidad: e.target.value })}
+                  className="h-8 text-center font-mono text-xs"
+                />
+              </TableCell>
+              <TableCell>
+                <select
+                  value={row.posicion}
+                  onChange={(e) => actualizar(i, { posicion: e.target.value })}
+                  className="h-8 w-full rounded-md border border-input bg-white px-2 text-xs"
+                >
+                  <option value="">—</option>
+                  <option value="vertical">vertical</option>
+                  <option value="horizontal">horizontal</option>
+                  <option value="sesgo">sesgo</option>
+                </select>
+              </TableCell>
+              <TableCell>
+                <select
+                  value={row.orientacion}
+                  onChange={(e) => actualizar(i, { orientacion: e.target.value })}
+                  className="h-8 w-full rounded-md border border-input bg-white px-2 text-xs"
+                >
+                  <option value="">—</option>
+                  <option value="hilo">hilo</option>
+                  <option value="contrahilo">contrahilo</option>
+                  <option value="diagonal">diagonal</option>
+                </select>
+              </TableCell>
+              <TableCell>
+                <Input
+                  value={row.observaciones}
+                  onChange={(e) => actualizar(i, { observaciones: e.target.value })}
+                  className="h-8"
+                />
+              </TableCell>
+              <TableCell>
+                <Button variant="ghost" size="sm" onClick={() => eliminar(i)}>
+                  <Trash2 className="h-3.5 w-3.5 text-rose-500" />
+                </Button>
+              </TableCell>
+            </TableRow>
+          ))}
+        </TableBody>
+      </Table>
+    </Card>
+  );
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// AVÍOS — solo lectura desde receta + procesos
+// ────────────────────────────────────────────────────────────────────────────
+function AviosTab({ productoId, avios, procesos }: { productoId: string; avios: AvioRow[]; procesos: ProcesoFichaRow[] }) {
+  return (
+    <div className="space-y-4">
+      <Card className="p-0">
+        <div className="flex items-center justify-between border-b border-slate-200 p-3">
+          <div>
+            <h4 className="font-display text-sm font-semibold text-corp-900">Cuadro de avíos</h4>
+            <p className="text-[11px] text-slate-500">
+              Materiales tomados de la <Link href={`/recetas?producto=${productoId}`} className="text-happy-600 hover:underline">receta activa</Link>.
+              Subí imagen referencial desde /materiales.
+            </p>
+          </div>
+        </div>
+        {avios.length === 0 ? (
+          <div className="py-10 text-center text-sm text-slate-500">
+            Este producto no tiene receta activa con materiales.
+          </div>
+        ) : (
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead className="w-16"></TableHead>
+                <TableHead>Material</TableHead>
+                <TableHead>Categoría</TableHead>
+                <TableHead>Color</TableHead>
+                <TableHead className="text-right">Cantidad total</TableHead>
+                <TableHead>Unidad</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {avios.map((a) => (
+                <TableRow key={a.material_id}>
+                  <TableCell>
+                    {a.imagen_url ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img src={a.imagen_url} alt="" className="h-12 w-12 rounded object-cover" />
+                    ) : (
+                      <div className="flex h-12 w-12 items-center justify-center rounded bg-slate-100 text-slate-300">
+                        <Package className="h-5 w-5" />
+                      </div>
+                    )}
+                  </TableCell>
+                  <TableCell>
+                    <div className="text-sm font-medium text-corp-900">{a.nombre}</div>
+                    <div className="font-mono text-[10px] text-slate-400">{a.codigo}</div>
+                  </TableCell>
+                  <TableCell><Badge variant="outline" className="text-[10px]">{a.categoria}</Badge></TableCell>
+                  <TableCell className="text-sm">{a.color ?? '—'}</TableCell>
+                  <TableCell className="text-right font-mono text-sm">{a.cantidad_total.toLocaleString('es-PE', { maximumFractionDigits: 3 })}</TableCell>
+                  <TableCell className="text-xs text-slate-500">{a.unidad || '—'}</TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        )}
+      </Card>
+
+      <Card className="p-0">
+        <div className="border-b border-slate-200 p-3">
+          <h4 className="font-display text-sm font-semibold text-corp-900">Procesos / secuencia de operaciones</h4>
+          <p className="text-[11px] text-slate-500">
+            Procesos tomados de <Link href={`/procesos?producto=${productoId}`} className="text-happy-600 hover:underline">/procesos</Link> de este producto. Podés enriquecer "máquina" y "descripción operativa" desde ahí.
+          </p>
+        </div>
+        {procesos.length === 0 ? (
+          <div className="py-10 text-center text-sm text-slate-500">
+            Este producto no tiene procesos cargados.
+          </div>
+        ) : (
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead className="w-14 text-center">#</TableHead>
+                <TableHead>Proceso</TableHead>
+                <TableHead>Área</TableHead>
+                <TableHead>Máquina</TableHead>
+                <TableHead>Descripción operativa</TableHead>
+                <TableHead className="w-24 text-right">Tiempo min</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {procesos.map((p) => (
+                <TableRow key={p.id}>
+                  <TableCell className="text-center font-mono text-xs">{p.orden}</TableCell>
+                  <TableCell className="text-sm font-medium">{p.proceso}</TableCell>
+                  <TableCell className="text-xs">{p.area ?? '—'}</TableCell>
+                  <TableCell className="text-xs">
+                    {p.maquina ?? <span className="text-slate-400">—</span>}
+                  </TableCell>
+                  <TableCell className="text-xs">
+                    {p.descripcion_operativa ?? <span className="text-slate-400">—</span>}
+                  </TableCell>
+                  <TableCell className="text-right font-mono text-xs">{p.tiempo_estandar_min}</TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        )}
+      </Card>
     </div>
   );
 }

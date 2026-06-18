@@ -12,7 +12,7 @@ import { PublicacionSection } from '@/components/forms/publicacion-section';
 import { FichaTecnicaSection } from '@/components/forms/ficha-tecnica-section';
 import { DeleteButton } from '@/components/forms/delete-button';
 import { eliminarProducto } from '@/server/actions/productos';
-import { obtenerFichaVigente } from '@/server/actions/fichas-tecnicas';
+import { obtenerFichaVigente, obtenerPiezasCorte, obtenerAviosProducto, obtenerProcesosProducto } from '@/server/actions/fichas-tecnicas';
 
 export const dynamic = 'force-dynamic';
 
@@ -47,12 +47,23 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
   // alguna tabla devuelve algo inesperado.
   const ultimosCostos = await calcularUltimoCostoPorTalla(sb, id, recetaActiva?.id ?? null);
 
-  // Ficha técnica (envuelta en try/catch — si falla NO debe romper la página)
+  // Ficha técnica + datos derivados (envuelto en try/catch — si falla NO rompe la página)
   let fichaData: Awaited<ReturnType<typeof obtenerFichaVigente>> | null = null;
+  let piezasCorte: Awaited<ReturnType<typeof obtenerPiezasCorte>> = [];
+  let aviosProd: Awaited<ReturnType<typeof obtenerAviosProducto>> = [];
+  let procesosProd: Awaited<ReturnType<typeof obtenerProcesosProducto>> = [];
   try {
     fichaData = await obtenerFichaVigente(id);
+    const [pi, av, pr] = await Promise.all([
+      fichaData?.ficha ? obtenerPiezasCorte(fichaData.ficha.id) : Promise.resolve([]),
+      obtenerAviosProducto(id),
+      obtenerProcesosProducto(id),
+    ]);
+    piezasCorte = pi;
+    aviosProd = av;
+    procesosProd = pr;
   } catch (e) {
-    console.warn('[productos] obtenerFichaVigente falló:', (e as Error).message);
+    console.warn('[productos] carga ficha técnica falló:', (e as Error).message);
   }
 
   async function onDelete() { 'use server'; return eliminarProducto(id); }
@@ -104,6 +115,9 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
             ficha={fichaData?.ficha ?? null}
             medidas={fichaData?.medidas ?? []}
             imagenes={fichaData?.imagenes ?? []}
+            piezas={piezasCorte}
+            avios={aviosProd}
+            procesos={procesosProd}
             revisiones={fichaData?.revisiones ?? []}
           />
         </TabsContent>
