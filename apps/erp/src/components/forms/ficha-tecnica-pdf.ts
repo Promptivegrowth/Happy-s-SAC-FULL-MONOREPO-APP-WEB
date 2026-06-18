@@ -488,3 +488,167 @@ async function drawImageFromUrl(
 
 // Suprimir warning del lint sobre FichaImagen siendo importado pero no usado directo
 export type _FichaImagenRef = FichaImagen;
+
+// ============================================================================
+// PDF COMPACTO — 1 página A4 para imprimir y meter en la OT del taller
+// ============================================================================
+export async function generarFichaCompactaPDF(fichaId: string, productoId: string): Promise<void> {
+  const [{ jsPDF }, autoTableMod] = await Promise.all([
+    import('jspdf'),
+    import('jspdf-autotable'),
+  ]);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const autoTable = (autoTableMod.default ?? autoTableMod) as any;
+
+  const data = await cargarDatosParaPDFFicha(fichaId, productoId);
+  if (!data.ficha) throw new Error('Ficha no encontrada');
+
+  const doc = new jsPDF({ unit: 'mm', format: 'a4' });
+  const pageW = doc.internal.pageSize.getWidth();
+  const pageH = doc.internal.pageSize.getHeight();
+  const M = 10;
+
+  const productoNombre = (data.producto?.nombre ?? '').toUpperCase();
+  const productoCodigo = data.producto?.codigo ?? '';
+  const rev = data.ficha.revision;
+
+  // Cabecera reducida (logo + título + revisión)
+  if (data.logo_dataurl) {
+    try { doc.addImage(data.logo_dataurl, 'PNG', M, M, 22, 11); } catch { /* ignore */ }
+  }
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(13);
+  doc.setTextColor(...NARANJA);
+  doc.text(productoNombre || 'PRODUCTO', M + 26, M + 6);
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(8);
+  doc.setTextColor(...GRIS);
+  doc.text(`Código ${productoCodigo}  ·  Ficha Rev. ${rev}  ·  ${data.empresa?.razon_social ?? 'HAPPY SAC'}`, M + 26, M + 11);
+
+  // Línea separadora
+  doc.setDrawColor(...AZUL);
+  doc.setLineWidth(0.4);
+  doc.line(M, M + 14, pageW - M, M + 14);
+
+  let y = M + 17;
+
+  // Imagen delantero (compacta, izquierda) si existe
+  const delantero = data.imagenes.find((i) => i.tipo === 'DELANTERO');
+  const tieneImg = !!delantero;
+  const colImg = tieneImg ? 55 : 0;
+  if (delantero) {
+    try { await drawImageFromUrl(doc, delantero.url, M, y, 50, 60); } catch { /* ignore */ }
+  }
+
+  // Resumen 2 columnas a la derecha
+  const xData = M + colImg + (tieneImg ? 5 : 0);
+  const widthData = pageW - xData - M;
+  const resumenRows: [string, string][] = [
+    ['Temporada', data.ficha.temporada ?? '—'],
+    ['Tela principal', data.ficha.tela_principal_nombre ?? '—'],
+    ['Color', data.ficha.tela_principal_color ?? '—'],
+    ['Composición', data.ficha.tela_principal_composicion ?? '—'],
+  ];
+  if (data.ficha.tela_secundaria_nombre) {
+    resumenRows.push(['Tela secundaria', `${data.ficha.tela_secundaria_nombre} ${data.ficha.tela_secundaria_color ? `(${data.ficha.tela_secundaria_color})` : ''}`]);
+  }
+  if (data.ficha.puntadas_remalle) resumenRows.push(['PPP remalle', data.ficha.puntadas_remalle]);
+  if (data.ficha.puntadas_recta) resumenRows.push(['PPP recta', data.ficha.puntadas_recta]);
+
+  autoTable(doc, {
+    startY: y,
+    theme: 'plain',
+    styles: { fontSize: 7.5, cellPadding: 0.8 },
+    columnStyles: {
+      0: { cellWidth: 30, fontStyle: 'bold', textColor: AZUL },
+      1: { cellWidth: widthData - 30 },
+    },
+    body: resumenRows,
+    margin: { left: xData, right: M },
+    tableWidth: widthData,
+  });
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const yResumen = (doc as any).lastAutoTable.finalY;
+
+  // y avanza al máximo de las 2 columnas
+  y = Math.max(y + 65, yResumen + 3);
+
+  // Cuadro de medidas (compacto)
+  if (data.medidas.length > 0) {
+    const tallasSet = new Set<string>();
+    for (const m of data.medidas) for (const v of m.valores) tallasSet.add(v.talla);
+    const tallas = Array.from(tallasSet);
+
+    doc.setFillColor(...AZUL);
+    doc.rect(M, y, pageW - M * 2, 5, 'F');
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(8);
+    doc.setTextColor(255, 255, 255);
+    doc.text('MEDIDAS (cm)', M + 2, y + 3.5);
+    y += 6;
+
+    const body = data.medidas.map((m) => {
+      const cells = tallas.map((t) => {
+        const found = m.valores.find((v) => v.talla === t);
+        return found?.valor !== null && found?.valor !== undefined ? String(found.valor) : '—';
+      });
+      return [m.codigo, m.descripcion, ...cells, `±${m.tolerancia_cm}`];
+    });
+    autoTable(doc, {
+      startY: y,
+      theme: 'grid',
+      styles: { fontSize: 6.5, cellPadding: 0.8 },
+      head: [['#', 'Descripción', ...tallas, 'Tol']],
+      headStyles: { fillColor: [241, 245, 249], textColor: TEXTO, fontStyle: 'bold' },
+      columnStyles: { 0: { cellWidth: 7, halign: 'center' } },
+      body,
+      margin: { left: M, right: M },
+    });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    y = (doc as any).lastAutoTable.finalY + 3;
+  }
+
+  // Procesos (compacto, lista numerada)
+  if (data.procesos.length > 0 && y < pageH - 40) {
+    doc.setFillColor(...AZUL);
+    doc.rect(M, y, pageW - M * 2, 5, 'F');
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(8);
+    doc.setTextColor(255, 255, 255);
+    doc.text('SECUENCIA DE OPERACIONES', M + 2, y + 3.5);
+    y += 6;
+
+    autoTable(doc, {
+      startY: y,
+      theme: 'grid',
+      styles: { fontSize: 6.5, cellPadding: 0.8 },
+      head: [['#', 'Proceso', 'Máquina', 'Descripción', 'Min']],
+      headStyles: { fillColor: [241, 245, 249], textColor: TEXTO, fontStyle: 'bold' },
+      columnStyles: {
+        0: { cellWidth: 7, halign: 'center' },
+        2: { cellWidth: 22 },
+        4: { cellWidth: 10, halign: 'right' },
+      },
+      body: data.procesos.map((p) => [
+        String(p.orden),
+        p.proceso,
+        p.maquina ?? '—',
+        p.descripcion_operativa ?? '—',
+        p.tiempo_estandar_min.toLocaleString('es-PE', { maximumFractionDigits: 2 }),
+      ]),
+      margin: { left: M, right: M },
+    });
+  }
+
+  // Footer mini
+  doc.setFontSize(6.5);
+  doc.setTextColor(...GRIS);
+  doc.text(
+    `Generado ${new Date().toLocaleString('es-PE')} · Documento de uso interno`,
+    pageW / 2,
+    pageH - 5,
+    { align: 'center' },
+  );
+
+  doc.save(`ficha-compacta_${productoCodigo || productoId.slice(0, 8)}_rev${rev}.pdf`);
+}

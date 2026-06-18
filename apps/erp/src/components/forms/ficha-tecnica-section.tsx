@@ -20,7 +20,7 @@ import { Badge } from '@happy/ui/badge';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@happy/ui/table';
 import {
   FileText, Plus, Loader2, Save, Trash2, Upload, ImageIcon, Ruler, Shirt, Wrench,
-  Layers, Info, Scissors, Package, Download,
+  Layers, Info, Scissors, Package, Download, Share2, Copy, X, ExternalLink, Sparkles, GitCompare,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { ordenTalla } from '@happy/lib';
@@ -31,12 +31,19 @@ import {
   subirImagenFicha,
   eliminarImagenFicha,
   guardarPiezasCorte,
+  generarLinkPublico,
+  revocarLinkPublico,
+  listarLinksPublicos,
+  aplicarPlantillaFicha,
+  obtenerDiffRevisiones,
+  type DiffRevisiones,
 } from '@/server/actions/fichas-tecnicas';
 import {
   TEMPORADAS,
   TIPOS_IMAGEN_FICHA,
   TIPO_IMAGEN_LABEL,
   TIPOS_TELA,
+  PLANTILLAS_PRENDA,
   type FichaTecnica,
   type FichaMedida,
   type FichaImagen,
@@ -112,12 +119,27 @@ function FichaEditor({
   const [tab, setTab] = useState<SubTab>('resumen');
   const [creandoRev, startRev] = useTransition();
   const [descargando, setDescargando] = useState(false);
+  const [compartirOpen, setCompartirOpen] = useState(false);
+  const [plantillaOpen, setPlantillaOpen] = useState(false);
+  const [diffOpen, setDiffOpen] = useState(false);
 
   async function descargarPDF() {
     setDescargando(true);
     try {
       const { generarFichaTecnicaPDF } = await import('./ficha-tecnica-pdf');
       await generarFichaTecnicaPDF(ficha.id, productoId);
+    } catch (e) {
+      toast.error('Error al generar PDF: ' + (e as Error).message);
+    } finally {
+      setDescargando(false);
+    }
+  }
+
+  async function descargarPDFCompacto() {
+    setDescargando(true);
+    try {
+      const { generarFichaCompactaPDF } = await import('./ficha-tecnica-pdf');
+      await generarFichaCompactaPDF(ficha.id, productoId);
     } catch (e) {
       toast.error('Error al generar PDF: ' + (e as Error).message);
     } finally {
@@ -164,10 +186,28 @@ function FichaEditor({
               {revisiones.length} revisiones en historial
             </Badge>
           )}
+          <Button variant="outline" size="sm" onClick={descargarPDFCompacto} disabled={descargando} title="PDF de 1 página para imprimir y meter en la OT del taller">
+            <FileText className="h-3.5 w-3.5" />
+            Compacto OT
+          </Button>
           <Button variant="outline" size="sm" onClick={descargarPDF} disabled={descargando}>
             {descargando ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Download className="h-3.5 w-3.5" />}
-            Exportar PDF
+            PDF completo
           </Button>
+          <Button variant="outline" size="sm" onClick={() => setCompartirOpen(true)} title="Generar link público compartible con el cliente">
+            <Share2 className="h-3.5 w-3.5" />
+            Compartir
+          </Button>
+          <Button variant="outline" size="sm" onClick={() => setPlantillaOpen(true)} title="Cargar medidas y piezas predefinidas">
+            <Sparkles className="h-3.5 w-3.5" />
+            Plantilla
+          </Button>
+          {revisiones.length > 1 && (
+            <Button variant="outline" size="sm" onClick={() => setDiffOpen(true)} title="Comparar con la revisión anterior">
+              <GitCompare className="h-3.5 w-3.5" />
+              Comparar
+            </Button>
+          )}
           <Button variant="outline" size="sm" onClick={nuevaRevision} disabled={creandoRev}>
             {creandoRev && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
             Nueva revisión
@@ -207,6 +247,16 @@ function FichaEditor({
       {tab === 'avios' && <AviosTab productoId={productoId} avios={avios} procesos={procesos} />}
       {tab === 'imagenes' && <ImagenesTab fichaId={ficha.id} imagenes={imagenes} />}
       {tab === 'confeccion' && <ConfeccionTab ficha={ficha} />}
+
+      {compartirOpen && (
+        <CompartirModal fichaId={ficha.id} onClose={() => setCompartirOpen(false)} />
+      )}
+      {plantillaOpen && (
+        <PlantillaModal fichaId={ficha.id} onClose={() => setPlantillaOpen(false)} onApplied={() => { setPlantillaOpen(false); router.refresh(); }} />
+      )}
+      {diffOpen && (
+        <DiffModal productoId={productoId} onClose={() => setDiffOpen(false)} />
+      )}
     </div>
   );
 }
@@ -1167,6 +1217,393 @@ function AviosTab({ productoId, avios, procesos }: { productoId: string; avios: 
             </TableBody>
           </Table>
         )}
+      </Card>
+    </div>
+  );
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// MODAL — Compartir ficha vía link público
+// ────────────────────────────────────────────────────────────────────────────
+type LinkRow = { id: string; token: string; expira_en: string | null; vistas: number; activo: boolean; created_at: string; ultima_vista_en: string | null };
+
+function CompartirModal({ fichaId, onClose }: { fichaId: string; onClose: () => void }) {
+  const [links, setLinks] = useState<LinkRow[]>([]);
+  const [cargando, setCargando] = useState(true);
+  const [generando, startGen] = useTransition();
+  const [diasValidez, setDiasValidez] = useState('30');
+  const webUrl = useMemo(() => {
+    if (typeof window === 'undefined') return '';
+    // Asume mismo dominio o variable de env. Usamos NEXT_PUBLIC_WEB_URL si está definida.
+    return (process.env.NEXT_PUBLIC_WEB_URL ?? '').replace(/\/$/, '');
+  }, []);
+
+  async function cargar() {
+    setCargando(true);
+    try {
+      const data = await listarLinksPublicos(fichaId);
+      setLinks(data as unknown as LinkRow[]);
+    } finally {
+      setCargando(false);
+    }
+  }
+
+  // Cargar al montar
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useMemo(() => { void cargar(); }, []);
+
+  function generar() {
+    const dias = Math.max(0, Math.min(365, Number(diasValidez) || 0));
+    startGen(async () => {
+      const r = await generarLinkPublico(fichaId, { dias_validez: dias });
+      if (r.ok) {
+        toast.success('Link generado');
+        void cargar();
+      } else {
+        toast.error(r.error ?? 'Error');
+      }
+    });
+  }
+
+  async function copiarLink(token: string) {
+    const url = `${webUrl || window.location.origin.replace('erp', 'web')}/fichas/${token}`;
+    try {
+      await navigator.clipboard.writeText(url);
+      toast.success('Link copiado');
+    } catch {
+      toast.error('No se pudo copiar — copia manual: ' + url);
+    }
+  }
+
+  async function revocar(linkId: string) {
+    if (!confirm('¿Revocar este link? El cliente que lo tenga ya no podrá acceder.')) return;
+    const r = await revocarLinkPublico(linkId);
+    if (r.ok) {
+      toast.success('Link revocado');
+      void cargar();
+    } else {
+      toast.error(r.error ?? 'Error');
+    }
+  }
+
+  function fmtFecha(s: string | null): string {
+    if (!s) return '—';
+    return new Date(s).toLocaleString('es-PE', { dateStyle: 'short', timeStyle: 'short' });
+  }
+
+  function linkUrl(token: string): string {
+    const base = webUrl || (typeof window !== 'undefined' ? window.location.origin.replace('erp', 'web') : '');
+    return `${base}/fichas/${token}`;
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
+      <Card className="w-full max-w-2xl p-5 shadow-2xl" onClick={(e) => e.stopPropagation()}>
+        <div className="mb-4 flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <Share2 className="h-5 w-5 text-happy-600" />
+            <h3 className="font-display text-lg font-semibold text-corp-900">Compartir ficha técnica</h3>
+          </div>
+          <button onClick={onClose} className="rounded-full p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700">
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+
+        <p className="mb-4 text-xs text-slate-500">
+          Genera un link público que el cliente B2B puede abrir sin login. Podés revocarlo cuando quieras.
+        </p>
+
+        {/* Generar nuevo */}
+        <div className="mb-4 rounded-lg border border-slate-200 bg-slate-50 p-3">
+          <div className="flex items-end gap-3">
+            <div className="flex-1">
+              <Label className="text-xs">Validez (días)</Label>
+              <Input
+                type="number"
+                min={0}
+                max={365}
+                value={diasValidez}
+                onChange={(e) => setDiasValidez(e.target.value)}
+                className="mt-1"
+              />
+              <p className="mt-1 text-[10px] text-slate-400">0 = no expira</p>
+            </div>
+            <Button variant="premium" onClick={generar} disabled={generando}>
+              {generando ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
+              Generar link
+            </Button>
+          </div>
+        </div>
+
+        {/* Lista de links existentes */}
+        <div className="max-h-72 overflow-y-auto rounded-md border border-slate-200">
+          {cargando ? (
+            <div className="flex items-center justify-center py-6">
+              <Loader2 className="h-4 w-4 animate-spin text-slate-400" />
+            </div>
+          ) : links.length === 0 ? (
+            <p className="py-6 text-center text-xs text-slate-400">Todavía no generaste ningún link.</p>
+          ) : (
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Link</TableHead>
+                  <TableHead className="w-24">Expira</TableHead>
+                  <TableHead className="w-16 text-center">Vistas</TableHead>
+                  <TableHead className="w-24">Estado</TableHead>
+                  <TableHead className="w-24"></TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {links.map((l) => {
+                  const expirado = !!(l.expira_en && new Date(l.expira_en) < new Date());
+                  const activo = l.activo && !expirado;
+                  return (
+                    <TableRow key={l.id} className={!activo ? 'opacity-50' : ''}>
+                      <TableCell>
+                        <p className="font-mono text-[10px] text-slate-600">{l.token.slice(0, 8)}…{l.token.slice(-4)}</p>
+                        <p className="text-[10px] text-slate-400">Creado {fmtFecha(l.created_at)}</p>
+                      </TableCell>
+                      <TableCell className="text-xs">{l.expira_en ? fmtFecha(l.expira_en) : 'Nunca'}</TableCell>
+                      <TableCell className="text-center font-mono text-xs">{l.vistas}</TableCell>
+                      <TableCell>
+                        {!l.activo ? (
+                          <Badge variant="secondary" className="text-[10px]">Revocado</Badge>
+                        ) : expirado ? (
+                          <Badge variant="outline" className="text-[10px]">Expirado</Badge>
+                        ) : (
+                          <Badge variant="success" className="text-[10px]">Activo</Badge>
+                        )}
+                      </TableCell>
+                      <TableCell className="text-right">
+                        <div className="flex items-center justify-end gap-1">
+                          {activo && (
+                            <>
+                              <Button variant="ghost" size="sm" onClick={() => copiarLink(l.token)} title="Copiar link">
+                                <Copy className="h-3 w-3" />
+                              </Button>
+                              <a href={linkUrl(l.token)} target="_blank" rel="noopener noreferrer">
+                                <Button variant="ghost" size="sm" title="Abrir en nueva pestaña">
+                                  <ExternalLink className="h-3 w-3" />
+                                </Button>
+                              </a>
+                              <Button variant="ghost" size="sm" onClick={() => revocar(l.id)} title="Revocar">
+                                <Trash2 className="h-3 w-3 text-rose-500" />
+                              </Button>
+                            </>
+                          )}
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
+              </TableBody>
+            </Table>
+          )}
+        </div>
+      </Card>
+    </div>
+  );
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// MODAL — Plantilla por tipo de prenda
+// ────────────────────────────────────────────────────────────────────────────
+function PlantillaModal({ fichaId, onClose, onApplied }: { fichaId: string; onClose: () => void; onApplied: () => void }) {
+  const [seleccionada, setSeleccionada] = useState<string | null>(null);
+  const [aplicando, start] = useTransition();
+
+  function aplicar() {
+    if (!seleccionada) return;
+    if (!confirm('¿Aplicar plantilla? Solo se agregarán medidas/piezas que NO existan — no se sobreescribe lo que ya cargaste.')) return;
+    start(async () => {
+      const r = await aplicarPlantillaFicha(fichaId, seleccionada);
+      if (r.ok) {
+        const d = r.data;
+        toast.success(`Plantilla aplicada — +${d?.medidas_agregadas ?? 0} medidas, +${d?.piezas_agregadas ?? 0} piezas`);
+        onApplied();
+      } else toast.error(r.error ?? 'Error');
+    });
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
+      <Card className="w-full max-w-2xl p-5 shadow-2xl" onClick={(e) => e.stopPropagation()}>
+        <div className="mb-4 flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <Sparkles className="h-5 w-5 text-happy-600" />
+            <h3 className="font-display text-lg font-semibold text-corp-900">Aplicar plantilla de prenda</h3>
+          </div>
+          <button onClick={onClose} className="rounded-full p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700">
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+        <p className="mb-4 text-xs text-slate-500">
+          Elegí el tipo de prenda que más se acerque. Se agregarán las medidas estándar y piezas típicas — <strong>solo si no existen ya</strong> en tu ficha (no destruye nada cargado).
+        </p>
+
+        <div className="grid gap-2 sm:grid-cols-2">
+          {PLANTILLAS_PRENDA.map((p) => (
+            <button
+              key={p.key}
+              type="button"
+              onClick={() => setSeleccionada(p.key)}
+              className={`flex items-start gap-3 rounded-lg border-2 p-3 text-left transition ${
+                seleccionada === p.key
+                  ? 'border-happy-500 bg-happy-50'
+                  : 'border-slate-200 bg-white hover:border-happy-300 hover:bg-happy-50/30'
+              }`}
+            >
+              <span className="text-2xl">{p.emoji}</span>
+              <div className="min-w-0 flex-1">
+                <p className="font-display text-sm font-semibold text-corp-900">{p.nombre}</p>
+                <p className="text-[11px] text-slate-500">{p.descripcion}</p>
+                <p className="mt-1 text-[10px] text-slate-400">
+                  {p.medidas.length} medidas · {p.piezas.length} piezas
+                </p>
+              </div>
+            </button>
+          ))}
+        </div>
+
+        <div className="mt-5 flex justify-end gap-2">
+          <Button variant="outline" onClick={onClose} disabled={aplicando}>Cancelar</Button>
+          <Button variant="premium" onClick={aplicar} disabled={!seleccionada || aplicando}>
+            {aplicando && <Loader2 className="h-4 w-4 animate-spin" />}
+            Aplicar plantilla
+          </Button>
+        </div>
+      </Card>
+    </div>
+  );
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// MODAL — Diff de revisiones
+// ────────────────────────────────────────────────────────────────────────────
+function DiffModal({ productoId, onClose }: { productoId: string; onClose: () => void }) {
+  const [diff, setDiff] = useState<DiffRevisiones | null | 'loading'>('loading');
+
+  // Cargar una sola vez
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useMemo(() => {
+    (async () => {
+      try {
+        const d = await obtenerDiffRevisiones(productoId);
+        setDiff(d);
+      } catch {
+        setDiff(null);
+      }
+    })();
+  }, []);
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
+      <Card className="flex max-h-[85vh] w-full max-w-3xl flex-col p-0 shadow-2xl" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between border-b border-slate-200 p-4">
+          <div className="flex items-center gap-2">
+            <GitCompare className="h-5 w-5 text-happy-600" />
+            <h3 className="font-display text-lg font-semibold text-corp-900">
+              Comparar revisiones
+              {diff && diff !== 'loading' && (
+                <span className="ml-2 text-xs font-normal text-slate-500">
+                  Rev. {diff.rev_anterior} → Rev. {diff.rev_actual}
+                </span>
+              )}
+            </h3>
+          </div>
+          <button onClick={onClose} className="rounded-full p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700">
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+
+        <div className="space-y-4 overflow-y-auto p-4">
+          {diff === 'loading' && (
+            <div className="flex items-center justify-center py-10 text-sm text-slate-500">
+              <Loader2 className="mr-2 h-4 w-4 animate-spin" /> Cargando…
+            </div>
+          )}
+          {diff === null && (
+            <p className="py-10 text-center text-sm text-slate-500">
+              No hay diferencias o aún no existe una segunda revisión.
+            </p>
+          )}
+          {diff && diff !== 'loading' && (
+            <>
+              {diff.campos_cambiados.length === 0 && diff.medidas_cambiadas.length === 0 && (
+                <p className="py-10 text-center text-sm text-slate-500">
+                  Las dos revisiones son idénticas en datos cargados.
+                </p>
+              )}
+
+              {diff.campos_cambiados.length > 0 && (
+                <Card className="p-0">
+                  <div className="border-b border-slate-100 p-3">
+                    <h4 className="font-display text-sm font-semibold text-corp-900">
+                      Campos cambiados ({diff.campos_cambiados.length})
+                    </h4>
+                  </div>
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Campo</TableHead>
+                        <TableHead>Rev. {diff.rev_anterior}</TableHead>
+                        <TableHead>Rev. {diff.rev_actual}</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {diff.campos_cambiados.map((c) => (
+                        <TableRow key={c.campo}>
+                          <TableCell className="text-xs font-medium text-corp-900">{c.campo}</TableCell>
+                          <TableCell className="text-xs text-rose-700">{c.anterior ?? <em className="text-slate-400">vacío</em>}</TableCell>
+                          <TableCell className="text-xs text-emerald-700">{c.actual ?? <em className="text-slate-400">vacío</em>}</TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </Card>
+              )}
+
+              {diff.medidas_cambiadas.length > 0 && (
+                <Card className="p-0">
+                  <div className="border-b border-slate-100 p-3">
+                    <h4 className="font-display text-sm font-semibold text-corp-900">
+                      Medidas modificadas ({diff.medidas_cambiadas.length})
+                    </h4>
+                  </div>
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead className="w-12">Cód</TableHead>
+                        <TableHead>Descripción</TableHead>
+                        <TableHead className="w-16">Talla</TableHead>
+                        <TableHead className="w-20 text-right">Rev. {diff.rev_anterior}</TableHead>
+                        <TableHead className="w-20 text-right">Rev. {diff.rev_actual}</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {diff.medidas_cambiadas.flatMap((m) =>
+                        m.cambios.map((c, idx) => (
+                          <TableRow key={`${m.codigo}-${c.talla}`}>
+                            {idx === 0 && (
+                              <>
+                                <TableCell className="font-mono text-xs" rowSpan={m.cambios.length}>{m.codigo}</TableCell>
+                                <TableCell className="text-xs" rowSpan={m.cambios.length}>{m.descripcion}</TableCell>
+                              </>
+                            )}
+                            <TableCell className="text-xs">{c.talla}</TableCell>
+                            <TableCell className="text-right font-mono text-xs text-rose-700">{c.anterior ?? '—'}</TableCell>
+                            <TableCell className="text-right font-mono text-xs text-emerald-700">{c.actual ?? '—'}</TableCell>
+                          </TableRow>
+                        ))
+                      )}
+                    </TableBody>
+                  </Table>
+                </Card>
+              )}
+            </>
+          )}
+        </div>
       </Card>
     </div>
   );
