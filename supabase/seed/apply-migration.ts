@@ -47,6 +47,33 @@ async function main() {
   const result = await res.json();
   console.info('[apply] ✓ aplicado');
   console.info(JSON.stringify(result, null, 2).slice(0, 500));
+
+  // Si el archivo es una migración formal (NNNNN_nombre.sql) bajo
+  // supabase/migrations/, registrarla en supabase_migrations.schema_migrations
+  // para que el CI (ci-apply-pending.ts) no la vea como pendiente y reintente
+  // aplicarla rompiendo el job.
+  const fileBase = path.basename(fullPath);
+  const migMatch = fileBase.match(/^(\d+)_(.+)\.sql$/);
+  const esMigracion = migMatch && fullPath.includes(`migrations${path.sep}`);
+  if (esMigracion && migMatch) {
+    const version = migMatch[1]!;
+    const name = migMatch[2]!.replace(/'/g, "''");
+    try {
+      const regRes = await fetch(`https://api.supabase.com/v1/projects/${REF}/database/query`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${TOKEN}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          query: `insert into supabase_migrations.schema_migrations (version, name, statements)
+                  values ('${version}', '${name}', '{}'::text[])
+                  on conflict (version) do nothing`,
+        }),
+      });
+      if (regRes.ok) console.info(`[apply] ✓ registrada en schema_migrations (versión ${version})`);
+      else console.warn(`[apply] ⚠ no se pudo registrar versión ${version}: HTTP ${regRes.status}`);
+    } catch (e) {
+      console.warn(`[apply] ⚠ no se pudo registrar versión: ${(e as Error).message}`);
+    }
+  }
 }
 
 main().catch((e) => {
