@@ -97,12 +97,13 @@ export function DevolucionModal({
   const [entregaLineas, setEntregaLineas] = useState<LineaEntrega[]>([]);
 
   function agregarVarianteAEntrega(v: VarianteDev) {
-    // Validar stock disponible. Si ya hay esa variante en la lista,
-    // sumamos +1 sólo si no supera el stock.
+    // BLOQUEO ESTRICTO: en cambio NO se permite entregar sin stock.
+    // (Distinto al POS regular donde el cajero ya tiene el producto en mano;
+    // acá el producto debe estar físicamente en el almacén para entregarse.)
     const existe = entregaLineas.find((l) => l.variante_id === v.id);
     const cantActual = existe?.cantidad ?? 0;
     if (cantActual + 1 > v.stock) {
-      toast.error(`Sin stock: solo hay ${v.stock} unid. de ${v.producto_nombre} talla ${v.talla.replace('T', '')}`);
+      toast.error(`Sin stock: ${v.stock} unid. disponibles de ${v.producto_nombre} talla ${v.talla.replace('T', '')}`);
       return;
     }
     if (existe) {
@@ -157,7 +158,7 @@ export function DevolucionModal({
       setEntregaLineas(entregaLineas.filter((l) => l.variante_id !== varId));
       return;
     }
-    // Validar contra stock disponible
+    // Bloqueo estricto: no permite cantidad > stock
     const v = variantes.find((x) => x.id === varId);
     const stock = v?.stock ?? 0;
     if (cant > stock) {
