@@ -1,15 +1,22 @@
 import type { ReclamoDetalle } from '@/server/actions/reclamos';
+import type { EmpresaPDFData } from '@/server/empresa-pdf-helper';
 
 /**
  * Genera el PDF del Libro de Reclamaciones (formato hoja A4, una página).
  * Imports dinámicos para que jspdf no entre al bundle principal.
  *
  * Convención visual:
- *  - Cabecera con número, fecha y tipo (RECLAMO/QUEJA)
+ *  - Cabecera brandeada: logo de la empresa a la izquierda + razón social,
+ *    RUC, dirección y contacto a la derecha. Los datos del proveedor son
+ *    OBLIGATORIOS por Ley N° 29571 (INDECOPI).
+ *  - Título oficial "LIBRO DE RECLAMACIONES" debajo de la cabecera.
  *  - Bloques: Identificación del consumidor / Bien contratado / Detalle del
  *    reclamo / Pedido del consumidor / Respuesta (si existe) / Firmas
  */
-export async function generarReclamoPdf(r: ReclamoDetalle): Promise<void> {
+export async function generarReclamoPdf(
+  r: ReclamoDetalle,
+  empresa: EmpresaPDFData | null = null,
+): Promise<void> {
   const [{ jsPDF }, autoTableMod] = await Promise.all([
     import('jspdf'),
     import('jspdf-autotable'),
@@ -33,24 +40,81 @@ export async function generarReclamoPdf(r: ReclamoDetalle): Promise<void> {
     minute: '2-digit',
   });
 
-  // Cabecera
-  doc.setFontSize(16);
+  // ---------------------------------------------------------------------------
+  // Cabecera BRANDEADA — datos del proveedor obligatorios por Ley 29571.
+  // Layout en mm:
+  //   Logo:         14..42 (28 mm de ancho × 16 mm alto)
+  //   Datos emp:    derecha del logo / centro de la hoja
+  // ---------------------------------------------------------------------------
+  let yHeader = M;
+  if (empresa?.logo_dataurl) {
+    try {
+      doc.addImage(
+        empresa.logo_dataurl,
+        empresa.logo_formato ?? 'PNG',
+        M,
+        yHeader,
+        28,
+        16,
+      );
+    } catch {
+      /* logo opcional */
+    }
+  }
+
+  if (empresa) {
+    doc.setFontSize(11);
+    doc.setFont('helvetica', 'bold');
+    doc.setTextColor(255, 77, 13);
+    doc.text(empresa.nombre_comercial || empresa.razon_social, M + 32, yHeader + 4);
+
+    doc.setFontSize(8);
+    doc.setFont('helvetica', 'normal');
+    doc.setTextColor(60);
+    let yE = yHeader + 8.5;
+    if (empresa.nombre_comercial && empresa.nombre_comercial !== empresa.razon_social) {
+      doc.text(empresa.razon_social, M + 32, yE);
+      yE += 3.6;
+    }
+    doc.text(`RUC ${empresa.ruc}`, M + 32, yE);
+    yE += 3.6;
+    if (empresa.direccion_fiscal) {
+      const dirLines = doc.splitTextToSize(empresa.direccion_fiscal, pageW - M - 32 - M);
+      doc.text(dirLines, M + 32, yE);
+      yE += (dirLines.length as number) * 3.6;
+    }
+    if (empresa.telefono || empresa.email) {
+      doc.text(
+        [empresa.telefono, empresa.email].filter(Boolean).join(' · '),
+        M + 32,
+        yE,
+      );
+    }
+    doc.setTextColor(0);
+  }
+
+  // Avanzamos debajo de la cabecera de empresa antes del título oficial.
+  const yTitulo = Math.max(yHeader + 20, M + 20);
+
+  // Título oficial (centrado debajo del logo y datos)
+  doc.setFontSize(14);
   doc.setFont('helvetica', 'bold');
-  doc.text('LIBRO DE RECLAMACIONES', pageW / 2, 18, { align: 'center' });
-  doc.setFontSize(9);
+  doc.setTextColor(30, 58, 95);
+  doc.text('LIBRO DE RECLAMACIONES', pageW / 2, yTitulo, { align: 'center' });
+  doc.setFontSize(8);
   doc.setFont('helvetica', 'normal');
   doc.setTextColor(110);
   doc.text(
     'Conforme al Código de Protección y Defensa del Consumidor — Ley N° 29571',
     pageW / 2,
-    23,
+    yTitulo + 4.5,
     { align: 'center' },
   );
   doc.setTextColor(0);
 
-  // Cuadro número + fecha + tipo
+  // Cuadro número + fecha + tipo (arrancando justo debajo del título)
   autoTable(doc, {
-    startY: 28,
+    startY: yTitulo + 8,
     theme: 'grid',
     styles: { fontSize: 10, cellPadding: 2 },
     head: [['N° de reclamo', 'Fecha', 'Tipo']],

@@ -50,6 +50,7 @@ import {
   type CondicionPago,
   type EstadoB2B,
 } from '@/server/actions/b2b-helpers';
+import { cargarEmpresaPDF } from '@/server/empresa-pdf-helper';
 import { generarProformaPdf } from './proforma-pdf';
 
 type Almacen = { id: string; codigo: string; nombre: string };
@@ -934,7 +935,8 @@ function DescargarProformaButton({
   async function generar() {
     try {
       setPending(true);
-      await generarProformaPdf(pedido, lineas);
+      const empresa = await cargarEmpresaPDF();
+      await generarProformaPdf(pedido, lineas, empresa);
     } catch (e) {
       toast.error(`No se pudo generar PDF: ${(e as Error).message}`);
     } finally {

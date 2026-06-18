@@ -5,6 +5,7 @@ import { Button } from '@happy/ui/button';
 import { Download, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { exportarReclamoPDF } from '@/server/actions/reclamos';
+import { cargarEmpresaPDF } from '@/server/empresa-pdf-helper';
 import { generarReclamoPdf } from './pdf';
 
 export function DescargarReclamoPdfButton({
@@ -19,11 +20,14 @@ export function DescargarReclamoPdfButton({
   async function descargar() {
     setLoading(true);
     try {
-      const res = await exportarReclamoPDF(id);
+      const [res, empresa] = await Promise.all([
+        exportarReclamoPDF(id),
+        cargarEmpresaPDF(),
+      ]);
       if (!res.ok || !res.data) {
         throw new Error(res.error ?? 'No se pudo cargar el reclamo');
       }
-      await generarReclamoPdf(res.data);
+      await generarReclamoPdf(res.data, empresa);
       toast.success('PDF descargado');
     } catch (e) {
       toast.error(`No se pudo generar el PDF: ${(e as Error).message}`);

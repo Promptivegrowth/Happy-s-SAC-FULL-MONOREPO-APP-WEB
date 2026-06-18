@@ -1,11 +1,19 @@
 import type { ReclamoConfirmacion } from '@/server/actions/reclamos';
+import type { EmpresaPDFData } from '@/server/empresa-pdf-helper';
 
 /**
  * Genera el PDF de comprobante del reclamo (formato A4, una página).
  * Versión del lado público — paralela a la del ERP staff. Si en el futuro se
  * unifican los layouts, conviene extraer este código a `@happy/lib`.
+ *
+ * Incluye cabecera brandeada con logo y datos del proveedor (RUC, dirección,
+ * contacto), obligatorios por Ley N° 29571 (INDECOPI). Si `empresa` es null
+ * el PDF se sigue generando sin la cabecera (degrade gracioso).
  */
-export async function generarReclamoPdf(r: ReclamoConfirmacion): Promise<void> {
+export async function generarReclamoPdf(
+  r: ReclamoConfirmacion,
+  empresa: EmpresaPDFData | null = null,
+): Promise<void> {
   const [{ jsPDF }, autoTableMod] = await Promise.all([
     import('jspdf'),
     import('jspdf-autotable'),
@@ -29,22 +37,75 @@ export async function generarReclamoPdf(r: ReclamoConfirmacion): Promise<void> {
     minute: '2-digit',
   });
 
-  doc.setFontSize(16);
+  // ---------------------------------------------------------------------------
+  // Cabecera BRANDEADA — datos del proveedor obligatorios por Ley 29571.
+  // ---------------------------------------------------------------------------
+  let yHeader = M;
+  if (empresa?.logo_dataurl) {
+    try {
+      doc.addImage(
+        empresa.logo_dataurl,
+        empresa.logo_formato ?? 'PNG',
+        M,
+        yHeader,
+        28,
+        16,
+      );
+    } catch {
+      /* logo opcional */
+    }
+  }
+
+  if (empresa) {
+    doc.setFontSize(11);
+    doc.setFont('helvetica', 'bold');
+    doc.setTextColor(255, 77, 13);
+    doc.text(empresa.nombre_comercial || empresa.razon_social, M + 32, yHeader + 4);
+
+    doc.setFontSize(8);
+    doc.setFont('helvetica', 'normal');
+    doc.setTextColor(60);
+    let yE = yHeader + 8.5;
+    if (empresa.nombre_comercial && empresa.nombre_comercial !== empresa.razon_social) {
+      doc.text(empresa.razon_social, M + 32, yE);
+      yE += 3.6;
+    }
+    doc.text(`RUC ${empresa.ruc}`, M + 32, yE);
+    yE += 3.6;
+    if (empresa.direccion_fiscal) {
+      const dirLines = doc.splitTextToSize(empresa.direccion_fiscal, pageW - M - 32 - M);
+      doc.text(dirLines, M + 32, yE);
+      yE += (dirLines.length as number) * 3.6;
+    }
+    if (empresa.telefono || empresa.email) {
+      doc.text(
+        [empresa.telefono, empresa.email].filter(Boolean).join(' · '),
+        M + 32,
+        yE,
+      );
+    }
+    doc.setTextColor(0);
+  }
+
+  const yTitulo = Math.max(yHeader + 20, M + 20);
+
+  doc.setFontSize(14);
   doc.setFont('helvetica', 'bold');
-  doc.text('LIBRO DE RECLAMACIONES', pageW / 2, 18, { align: 'center' });
-  doc.setFontSize(9);
+  doc.setTextColor(30, 58, 95);
+  doc.text('LIBRO DE RECLAMACIONES', pageW / 2, yTitulo, { align: 'center' });
+  doc.setFontSize(8);
   doc.setFont('helvetica', 'normal');
   doc.setTextColor(110);
   doc.text(
     'Conforme al Código de Protección y Defensa del Consumidor — Ley N° 29571',
     pageW / 2,
-    23,
+    yTitulo + 4.5,
     { align: 'center' },
   );
   doc.setTextColor(0);
 
   autoTable(doc, {
-    startY: 28,
+    startY: yTitulo + 8,
     theme: 'grid',
     styles: { fontSize: 10, cellPadding: 2 },
     head: [['N° de reclamo', 'Fecha', 'Tipo']],

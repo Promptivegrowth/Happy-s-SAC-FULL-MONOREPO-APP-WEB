@@ -12,6 +12,7 @@ import {
   obtenerReclamoConfirmacion,
   type CrearReclamoPublicoInput,
 } from '@/server/actions/reclamos';
+import { cargarEmpresaPDF } from '@/server/empresa-pdf-helper';
 import { generarReclamoPdf } from './pdf';
 
 type Tipo = 'RECLAMO' | 'QUEJA';
@@ -75,9 +76,12 @@ export function ReclamoForm() {
     if (!exito) return;
     setPdfLoading(true);
     try {
-      const res = await obtenerReclamoConfirmacion(exito.id);
+      const [res, empresa] = await Promise.all([
+        obtenerReclamoConfirmacion(exito.id),
+        cargarEmpresaPDF(),
+      ]);
       if (!res.ok) throw new Error(res.error);
-      await generarReclamoPdf(res.data);
+      await generarReclamoPdf(res.data, empresa);
       toast.success('PDF descargado');
     } catch (e) {
       toast.error(`No se pudo generar el PDF: ${(e as Error).message}`);

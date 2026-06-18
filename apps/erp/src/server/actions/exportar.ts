@@ -13,6 +13,7 @@ import ExcelJS from 'exceljs';
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { BRAND, type ColExport } from './reportes-helpers';
+import { cargarEmpresaPDF } from '../empresa-pdf-helper';
 
 export type ExportOpts = {
   titulo: string;
@@ -192,18 +193,67 @@ export async function generarPDFBrandeado(opts: ExportOpts): Promise<ExportResul
   const doc = new jsPDF({ orientation: 'landscape', unit: 'pt', format: 'a4' });
   const pageW = doc.internal.pageSize.getWidth();
 
-  // ---- Header naranja ----
+  // Cargar datos de empresa (logo + RUC + dirección) para brandear el PDF.
+  // Si falla, seguimos con el header sin logo.
+  const empresa = await cargarEmpresaPDF();
+
+  // ---- Header naranja con logo izquierda + título centro + RUC derecha ----
   doc.setFillColor(255, 77, 13); // BRAND.naranja
   doc.rect(0, 0, pageW, 50, 'F');
+
+  // Logo dentro de la barra naranja (alto 38pt — encaja en 50pt con padding 6)
+  let tituloX = 30;
+  if (empresa?.logo_dataurl) {
+    try {
+      doc.addImage(
+        empresa.logo_dataurl,
+        empresa.logo_formato ?? 'PNG',
+        20,
+        6,
+        76,
+        38,
+      );
+      tituloX = 110; // título arranca después del logo
+    } catch {
+      /* logo opcional */
+    }
+  }
+
   doc.setTextColor(255, 255, 255);
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(16);
-  doc.text(opts.titulo, 30, 30);
+  doc.text(opts.titulo, tituloX, 30);
+
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(8);
-  doc.text('HAPPY SAC ERP', pageW - 30, 30, { align: 'right' });
+  const empresaLabel = empresa
+    ? `${empresa.nombre_comercial || empresa.razon_social} · RUC ${empresa.ruc}`
+    : 'HAPPY SAC ERP';
+  doc.text(empresaLabel, pageW - 30, 30, { align: 'right' });
 
-  let y = 70;
+  // Sub-barra con datos de empresa (RUC + dirección) justo debajo del header
+  let y = 58;
+  if (empresa) {
+    doc.setFillColor(248, 250, 252); // BRAND.bgSuave
+    doc.rect(0, 50, pageW, 18, 'F');
+    doc.setFontSize(8);
+    doc.setTextColor(60, 60, 60);
+    doc.setFont('helvetica', 'normal');
+    const datosEmp = [
+      empresa.direccion_fiscal,
+      empresa.telefono && `Tel. ${empresa.telefono}`,
+      empresa.email,
+    ]
+      .filter(Boolean)
+      .join('  ·  ');
+    if (datosEmp) {
+      doc.text(datosEmp, 30, 63, { maxWidth: pageW - 60 });
+    }
+    y = 82; // arrancamos contenido más abajo por la sub-barra
+  } else {
+    y = 70;
+  }
+
   doc.setTextColor(100, 116, 139);
   if (opts.subtitulo) {
     doc.setFontSize(10);
