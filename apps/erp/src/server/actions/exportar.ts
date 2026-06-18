@@ -52,8 +52,9 @@ export async function generarExcelBrandeado(opts: ExportOpts): Promise<ExportRes
         const extension = ext === 'jpg' || ext === 'jpeg' ? 'jpeg' : 'png';
         const buf = Buffer.from(ab) as unknown as Parameters<typeof wb.addImage>[0]['buffer'];
         const imgId = wb.addImage({ buffer: buf, extension });
-        ws.addImage(imgId, { tl: { col: 0, row: 0 }, ext: { width: 100, height: 50 } });
-        ws.getRow(1).height = 56;
+        // Logo ocupa A+B (≈ 270pt) y el título arranca en C — sin superposición
+        ws.addImage(imgId, { tl: { col: 0, row: 0 }, ext: { width: 150, height: 56 } });
+        ws.getRow(1).height = 60;
         logoCargado = true;
       }
     }
@@ -105,7 +106,12 @@ export async function generarExcelBrandeado(opts: ExportOpts): Promise<ExportRes
   headerRow.height = 28;
 
   // Set column widths/keys (ExcelJS columns array)
-  ws.columns = opts.cols.map((col) => ({ key: col.key, width: col.width ?? 18 }));
+  // Ancho mínimo de col A = 20 si hay logo, para que el logo de 150pt entre
+  // y no se desborde sobre el título (que arranca en col C).
+  ws.columns = opts.cols.map((col, i) => ({
+    key: col.key,
+    width: i === 0 && logoCargado ? Math.max(col.width ?? 18, 22) : col.width ?? 18,
+  }));
 
   // ---- Filas con zebra ----
   opts.rows.forEach((row, i) => {
