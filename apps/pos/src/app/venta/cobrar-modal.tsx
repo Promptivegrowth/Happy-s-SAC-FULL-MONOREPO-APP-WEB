@@ -21,7 +21,7 @@ import { Button } from '@happy/ui/button';
 import { Badge } from '@happy/ui/badge';
 import {
   FileText, Receipt, ScrollText, Loader2, Printer, FileType2, ChevronLeft, X, Building2, IdCard,
-  Search, UserPlus, UserCheck, Phone, Mail, MapPin, Plus, Edit3,
+  Search, UserPlus, UserCheck, Phone, Mail, MapPin, Plus, Edit3, Globe,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { formatPEN } from '@happy/lib';
@@ -86,6 +86,52 @@ export function CobrarModal({
   const [email, setEmail] = useState('');
   const [guardandoCliente, setGuardandoCliente] = useState(false);
   const [editandoExistente, setEditandoExistente] = useState(false);
+  const [consultandoSunat, setConsultandoSunat] = useState(false);
+
+  // Consulta a SUNAT/RENIEC vía /api/sunat (Decolecta API en backend ERP/POS).
+  // Autocompleta razón social/nombre y dirección si encuentra.
+  async function consultarSunat() {
+    if (!tipoDoc) {
+      toast.error('Seleccioná tipo DNI o RUC');
+      return;
+    }
+    if (tipoDoc !== 'DNI' && tipoDoc !== 'RUC') {
+      toast.error('Solo DNI o RUC se pueden consultar');
+      return;
+    }
+    const num = numDoc.trim();
+    if (tipoDoc === 'DNI' && num.length !== 8) {
+      toast.error('DNI debe tener 8 dígitos');
+      return;
+    }
+    if (tipoDoc === 'RUC' && num.length !== 11) {
+      toast.error('RUC debe tener 11 dígitos');
+      return;
+    }
+    setConsultandoSunat(true);
+    try {
+      const r = await fetch(`/api/sunat/${tipoDoc.toLowerCase()}/${num}`);
+      if (!r.ok) {
+        const err = await r.json().catch(() => ({ error: `HTTP ${r.status}` }));
+        toast.error(err.error ?? 'No se encontró');
+        return;
+      }
+      const data = await r.json();
+      if (tipoDoc === 'DNI') {
+        setRazonSocial(data.nombreCompleto ?? '');
+        toast.success('Datos cargados de RENIEC');
+      } else {
+        setRazonSocial(data.razonSocial ?? '');
+        if (data.direccion) setDireccion(data.direccion);
+        const partes = [data.estado, data.condicion].filter(Boolean).join(' · ');
+        toast.success(`Datos cargados de SUNAT${partes ? ' · ' + partes : ''}`);
+      }
+    } catch (e) {
+      toast.error('Error consultando SUNAT: ' + (e as Error).message);
+    } finally {
+      setConsultandoSunat(false);
+    }
+  }
 
   const [confirming, setConfirming] = useState(false);
 
@@ -587,18 +633,43 @@ export function CobrarModal({
                       <Label className="text-xs">
                         Número documento {(tipo === 'FACTURA' || clienteMode === 'crear') && <span className="text-red-500">*</span>}
                       </Label>
-                      <div className="relative mt-1">
-                        <IdCard className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-                        <Input
-                          value={numDoc}
-                          onChange={(e) => setNumDoc(e.target.value.replace(/\D/g, ''))}
-                          maxLength={11}
-                          disabled={editandoExistente}
-                          placeholder={tipo === 'FACTURA' || tipoDoc === 'RUC' ? '11 dígitos' : tipoDoc === 'DNI' ? '8 dígitos' : 'Número'}
-                          className="pl-9 disabled:bg-slate-50 disabled:text-slate-500"
-                          autoFocus
-                        />
+                      <div className="relative mt-1 flex gap-1">
+                        <div className="relative flex-1">
+                          <IdCard className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                          <Input
+                            value={numDoc}
+                            onChange={(e) => setNumDoc(e.target.value.replace(/\D/g, ''))}
+                            maxLength={11}
+                            disabled={editandoExistente}
+                            placeholder={tipo === 'FACTURA' || tipoDoc === 'RUC' ? '11 dígitos' : tipoDoc === 'DNI' ? '8 dígitos' : 'Número'}
+                            className="pl-9 disabled:bg-slate-50 disabled:text-slate-500"
+                            autoFocus
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter' && (tipoDoc === 'DNI' || tipoDoc === 'RUC') && !editandoExistente) {
+                                e.preventDefault();
+                                void consultarSunat();
+                              }
+                            }}
+                          />
+                        </div>
+                        {(tipoDoc === 'DNI' || tipoDoc === 'RUC') && !editandoExistente && (
+                          <Button
+                            type="button"
+                            variant="outline"
+                            onClick={consultarSunat}
+                            disabled={consultandoSunat || !numDoc}
+                            title={`Buscar en ${tipoDoc === 'DNI' ? 'RENIEC' : 'SUNAT'}`}
+                            className="shrink-0 px-3"
+                          >
+                            {consultandoSunat ? <Loader2 className="h-4 w-4 animate-spin" /> : <Globe className="h-4 w-4" />}
+                          </Button>
+                        )}
                       </div>
+                      {(tipoDoc === 'DNI' || tipoDoc === 'RUC') && !editandoExistente && (
+                        <p className="mt-1 text-[10px] text-slate-400">
+                          Enter para consultar {tipoDoc === 'DNI' ? 'RENIEC' : 'SUNAT'} y autocompletar nombre.
+                        </p>
+                      )}
                     </div>
                   </div>
 

@@ -6,7 +6,7 @@ import { Card } from '@happy/ui/card';
 import { Input } from '@happy/ui/input';
 import { Button } from '@happy/ui/button';
 import { Badge } from '@happy/ui/badge';
-import { Trash2, Plus, Minus, ScanBarcode, X, Smartphone, CreditCard, Banknote, Building2, MessageCircle, Loader2, LayoutGrid, ShoppingBag, LogOut, Receipt, History, Send } from 'lucide-react';
+import { Trash2, Plus, Minus, ScanBarcode, X, Smartphone, CreditCard, Banknote, Building2, MessageCircle, Loader2, LayoutGrid, ShoppingBag, LogOut, Receipt, History, Send, RotateCcw } from 'lucide-react';
 import { toast } from 'sonner';
 import { formatPEN, ordenTalla } from '@happy/lib';
 import { buildPedidoWaMessage, buildWhatsappUrl } from '@happy/lib/whatsapp';
@@ -18,6 +18,7 @@ import { CerrarCajaModal } from './cerrar-caja-modal';
 import { CobrarModal, type CobrarPayload } from './cobrar-modal';
 import { generarTicket, generarA4, abrirPDF } from './comprobante-pdf';
 import { HistorialModal } from './historial-modal';
+import { DevolucionModal } from './devolucion-modal';
 import { construirMensajeWhatsApp, abrirWhatsApp } from './whatsapp-helper';
 
 type Variante = {
@@ -65,7 +66,12 @@ export function PosTerminal({
   const [balanceActual, setBalanceActual] = useState<BalanceCajaDTO | null>(sesionInicial?.balance ?? null);
   const [cerrarOpen, setCerrarOpen] = useState(false);
   const [historialOpen, setHistorialOpen] = useState(false);
+  const [devolucionOpen, setDevolucionOpen] = useState(false);
   const [cobrarOpen, setCobrarOpen] = useState(false);
+  // Counter para forzar REMOUNT del CobrarModal después de cada venta.
+  // Cuando incrementa, React re-monta el modal con state limpio
+  // garantizando que NO queden datos del cliente anterior.
+  const [cobrarKey, setCobrarKey] = useState(0);
 
   // --- Venta en curso ---
   const [search, setSearch] = useState('');
@@ -273,12 +279,15 @@ export function PosTerminal({
       toast.success(
         `✅ ${r.numero}${numeroComprobante ? ` · ${numeroComprobante}` : ''} · ${formatPEN(total)}`,
       );
-      // Reset
+      // Reset COMPLETO — el contador cobrarKey fuerza un remount fresco
+      // del CobrarModal en la próxima apertura, así NO queda info del cliente anterior.
       setCarrito([]);
       setPagos([]);
       setNombreCliente('');
       setDocCliente('');
+      setTipoCliente('rapido');
       setCobrarOpen(false);
+      setCobrarKey((k) => k + 1);
       // Refrescar balance para que el cierre vea la venta
       void refrescarSesion();
     } finally {
@@ -360,6 +369,17 @@ export function PosTerminal({
               title="Historial de transacciones de la sesión"
             >
               <History className="h-3.5 w-3.5" /> Historial
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setDevolucionOpen(true)}
+              disabled={!sesionActiva}
+              data-pos-no-focus
+              className="gap-1 text-xs"
+              title="Devolución o cambio de mercadería"
+            >
+              <RotateCcw className="h-3.5 w-3.5" /> Devolución
             </Button>
             <Button
               variant="outline"
@@ -702,9 +722,12 @@ export function PosTerminal({
         />
       )}
 
-      {/* MODAL — Cobro (selector de tipo + cliente + formato) */}
+      {/* MODAL — Cobro (selector de tipo + cliente + formato).
+          `key` cambia tras cada venta exitosa para forzar remount fresco
+          y evitar que datos del cliente anterior queden persistentes. */}
       {cobrarOpen && sesionActiva && (
         <CobrarModal
+          key={`cobrar-${cobrarKey}`}
           total={total}
           pagado={pagado}
           defaultCliente={{ nombre: nombreCliente, documento: docCliente }}
@@ -718,6 +741,17 @@ export function PosTerminal({
         <HistorialModal
           onClose={() => setHistorialOpen(false)}
           empresaNombre={empresaNombre}
+        />
+      )}
+
+      {/* MODAL — Devolución / Cambio de mercadería */}
+      {devolucionOpen && sesionActiva && (
+        <DevolucionModal
+          onClose={() => setDevolucionOpen(false)}
+          onCompleted={() => {
+            setDevolucionOpen(false);
+            void refrescarSesion();
+          }}
         />
       )}
     </div>
