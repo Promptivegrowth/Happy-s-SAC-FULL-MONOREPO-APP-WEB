@@ -11,7 +11,7 @@ import { SearchAutocomplete } from '@/components/search-autocomplete';
 import { FilterChip } from '@/components/filter-chip';
 import { TableSkeleton } from '@/components/skeletons';
 import { formatNumber } from '@happy/lib';
-import { Boxes, AlertTriangle } from 'lucide-react';
+import { Boxes, AlertTriangle, History } from 'lucide-react';
 import { AjustarStockButton } from './ajustar-stock-client';
 import { NuevoMovimientoButton } from './nuevo-movimiento-client';
 
@@ -115,52 +115,135 @@ export default async function InventarioPage({ searchParams }: { searchParams: P
   );
 }
 
-type StockRow = {
-  id: string;
-  cantidad: number;
-  almacen_id: string;
+// Una fila por (almacén × variante). Si nunca hubo movimiento, cantidad = 0.
+type Fila = {
   variante_id: string;
-  almacenes: { nombre: string; codigo: string } | null;
-  productos_variantes: {
-    sku: string;
-    talla: string;
-    productos: { nombre: string } | null;
-  } | null;
+  sku: string;
+  talla: string;
+  producto_nombre: string;
+  almacen_id: string;
+  almacen_nombre: string;
+  cantidad: number;
 };
 
 async function InventarioTable({ q, almacen, vista }: SP) {
   const sb = await createClient();
-  let query = sb
+
+  // Estrategia:
+  //  - Vista "Con stock" (default) y "Stock bajo": query directa a stock_actual (rápida)
+  //  - Vista "Todo": LEFT JOIN sintético — traemos todas las variantes activas y todos los
+  //    almacenes activos (filtrados si hay almacén elegido), generamos el producto cruz
+  //    y le aplicamos el stock real desde stock_actual (0 si no hay fila).
+  const incluirCeros = vista === 'todo';
+
+  // 1) Cargar stock real
+  let stockQuery = sb
     .from('stock_actual')
-    .select('id, cantidad, almacen_id, variante_id, almacenes(nombre, codigo), productos_variantes!inner(sku, talla, productos(nombre))')
+    .select('cantidad, almacen_id, variante_id')
     .not('variante_id', 'is', null)
-    .order('cantidad', { ascending: false })
-    .limit(300);
+    .limit(5000);
+  if (almacen) stockQuery = stockQuery.eq('almacen_id', almacen);
+  if (!incluirCeros) {
+    if (vista === 'bajo') stockQuery = stockQuery.lte('cantidad', 5).gt('cantidad', 0);
+    else stockQuery = stockQuery.gt('cantidad', 0);
+  }
+  const { data: stocksRaw } = await stockQuery;
+  const stocksMap = new Map<string, number>(); // key = almacen|variante
+  for (const s of (stocksRaw ?? []) as { variante_id: string; almacen_id: string; cantidad: string | number }[]) {
+    stocksMap.set(`${s.almacen_id}|${s.variante_id}`, Number(s.cantidad ?? 0));
+  }
 
-  if (vista === 'bajo') query = query.lte('cantidad', 5).gt('cantidad', 0);
-  else if (vista !== 'todo') query = query.gt('cantidad', 0);
+  let filas: Fila[] = [];
 
-  if (almacen) query = query.eq('almacen_id', almacen);
-  if (q) query = query.ilike('productos_variantes.sku', `%${q}%`);
+  if (incluirCeros) {
+    // 2a) Variantes activas + almacenes activos → producto cruz
+    let varsQuery = sb
+      .from('productos_variantes')
+      .select('id, sku, talla, productos!inner(nombre, activo)')
+      .eq('activo', true)
+      .eq('productos.activo', true)
+      .order('sku')
+      .limit(2000);
+    if (q) varsQuery = varsQuery.or(`sku.ilike.%${q}%,productos.nombre.ilike.%${q}%`);
+    const { data: varsRaw } = await varsQuery;
+    const variantes = ((varsRaw ?? []) as unknown as {
+      id: string; sku: string; talla: string; productos: { nombre: string } | null;
+    }[]).filter((v) => v.productos);
 
-  const { data } = await query;
-  const stocks = (data ?? []) as unknown as StockRow[];
+    const { data: almsAll } = await sb.from('almacenes').select('id, nombre').eq('activo', true).order('nombre');
+    const almacenes = ((almsAll ?? []) as { id: string; nombre: string }[]).filter(
+      (a) => !almacen || a.id === almacen,
+    );
 
-  // Filtro adicional client-side por nombre de producto (cuando search tiene texto que no matchea SKU)
-  const stocksFiltrados = q
-    ? stocks.filter(
-        (s) =>
-          s.productos_variantes?.sku.toLowerCase().includes(q.toLowerCase()) ||
-          s.productos_variantes?.productos?.nombre.toLowerCase().includes(q.toLowerCase()),
-      )
-    : stocks;
+    for (const v of variantes) {
+      for (const a of almacenes) {
+        filas.push({
+          variante_id: v.id,
+          sku: v.sku,
+          talla: v.talla,
+          producto_nombre: v.productos!.nombre,
+          almacen_id: a.id,
+          almacen_nombre: a.nombre,
+          cantidad: stocksMap.get(`${a.id}|${v.id}`) ?? 0,
+        });
+      }
+    }
+    // Ordenar: con stock primero (descendente), luego cero
+    filas.sort((x, y) => y.cantidad - x.cantidad || x.sku.localeCompare(y.sku));
+  } else {
+    // 2b) Solo lo que hay con stock — necesitamos info de variante y almacén para mostrar nombres
+    const varIds = Array.from(new Set([...stocksMap.keys()].map((k) => k.split('|')[1] ?? '')));
+    const almIds = Array.from(new Set([...stocksMap.keys()].map((k) => k.split('|')[0] ?? '')));
+    if (varIds.length === 0) {
+      filas = [];
+    } else {
+      const [{ data: vars }, { data: alms }] = await Promise.all([
+        sb.from('productos_variantes').select('id, sku, talla, productos(nombre)').in('id', varIds),
+        sb.from('almacenes').select('id, nombre').in('id', almIds),
+      ]);
+      const vmap = new Map(
+        ((vars ?? []) as unknown as { id: string; sku: string; talla: string; productos: { nombre: string } | null }[]).map((v) => [v.id, v]),
+      );
+      const amap = new Map(((alms ?? []) as { id: string; nombre: string }[]).map((a) => [a.id, a]));
+      for (const [key, cantidad] of stocksMap) {
+        const [aId, vId] = key.split('|');
+        const v = vmap.get(vId ?? '');
+        const a = amap.get(aId ?? '');
+        if (!v || !a) continue;
+        filas.push({
+          variante_id: v.id,
+          sku: v.sku,
+          talla: v.talla,
+          producto_nombre: v.productos?.nombre ?? '—',
+          almacen_id: a.id,
+          almacen_nombre: a.nombre,
+          cantidad,
+        });
+      }
+      // Filtro client-side por texto si q presente
+      if (q) {
+        const qq = q.toLowerCase();
+        filas = filas.filter((f) => f.sku.toLowerCase().includes(qq) || f.producto_nombre.toLowerCase().includes(qq));
+      }
+      filas.sort((x, y) => y.cantidad - x.cantidad || x.sku.localeCompare(y.sku));
+    }
+  }
 
-  if (stocksFiltrados.length === 0) {
+  // Limitar a 500 filas para no romper el render
+  const filasMostrar = filas.slice(0, 500);
+
+  if (filasMostrar.length === 0) {
     return (
       <EmptyState
         icon={<Boxes className="h-6 w-6" />}
-        title="Sin stock"
-        description={q ? `Sin coincidencias para "${q}".` : 'No hay stock con los filtros seleccionados.'}
+        title={q ? 'Sin coincidencias' : incluirCeros ? 'Sin variantes' : 'Sin stock'}
+        description={
+          q
+            ? `Sin coincidencias para "${q}".`
+            : incluirCeros
+              ? 'No hay variantes activas. Creá productos y variantes desde el catálogo.'
+              : 'No hay stock con los filtros seleccionados. Probá "Todo (incluye 0)" para ver variantes sin stock.'
+        }
       />
     );
   }
@@ -176,49 +259,64 @@ async function InventarioTable({ q, almacen, vista }: SP) {
               <TableHead>Producto</TableHead>
               <TableHead>Talla</TableHead>
               <TableHead className="text-right">Stock</TableHead>
-              <TableHead className="text-right">Ajustar</TableHead>
+              <TableHead className="text-right">Acciones</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
-            {stocksFiltrados.map((s) => {
-              const a = s.almacenes;
-              const v = s.productos_variantes;
-              const cantidad = Number(s.cantidad);
-              const bajo = cantidad <= 5;
+            {filasMostrar.map((f) => {
+              const bajo = f.cantidad > 0 && f.cantidad <= 5;
+              const cero = f.cantidad === 0;
               return (
-                <TableRow key={s.id}>
+                <TableRow key={`${f.almacen_id}-${f.variante_id}`} className={cero ? 'opacity-60' : ''}>
                   <TableCell>
-                    <Badge variant="secondary">{a?.nombre}</Badge>
+                    <Badge variant="secondary">{f.almacen_nombre}</Badge>
                   </TableCell>
-                  <TableCell className="font-mono text-xs">{v?.sku}</TableCell>
-                  <TableCell className="font-medium">{v?.productos?.nombre}</TableCell>
+                  <TableCell className="font-mono text-xs">{f.sku}</TableCell>
+                  <TableCell className="font-medium">{f.producto_nombre}</TableCell>
                   <TableCell>
-                    <Badge variant="outline">{v?.talla?.replace('T', '')}</Badge>
+                    <Badge variant="outline">{f.talla.replace('T', '')}</Badge>
                   </TableCell>
                   <TableCell className="text-right">
-                    <span className={`font-semibold ${bajo ? 'text-amber-600' : 'text-corp-900'}`}>
-                      {formatNumber(cantidad)}
+                    <span
+                      className={`font-semibold ${
+                        cero ? 'text-slate-400' : bajo ? 'text-amber-600' : 'text-corp-900'
+                      }`}
+                    >
+                      {formatNumber(f.cantidad)}
                     </span>
                     {bajo && <AlertTriangle className="ml-1 inline h-3 w-3 text-amber-500" />}
                   </TableCell>
                   <TableCell className="text-right">
-                    {v && a && (
+                    <div className="flex items-center justify-end gap-1">
+                      <Link
+                        href={`/kardex/variante/${f.variante_id}`}
+                        title="Ver historial de movimientos"
+                      >
+                        <Button variant="ghost" size="sm" className="h-7 px-2">
+                          <History className="h-3.5 w-3.5 text-slate-500" />
+                        </Button>
+                      </Link>
                       <AjustarStockButton
-                        almacenId={s.almacen_id}
-                        almacenNombre={a.nombre}
-                        varianteId={s.variante_id}
-                        sku={v.sku}
-                        productoNombre={v.productos?.nombre ?? ''}
-                        talla={v.talla}
-                        cantidadActual={cantidad}
+                        almacenId={f.almacen_id}
+                        almacenNombre={f.almacen_nombre}
+                        varianteId={f.variante_id}
+                        sku={f.sku}
+                        productoNombre={f.producto_nombre}
+                        talla={f.talla}
+                        cantidadActual={f.cantidad}
                       />
-                    )}
+                    </div>
                   </TableCell>
                 </TableRow>
               );
             })}
           </TableBody>
         </Table>
+        {filas.length > 500 && (
+          <div className="border-t bg-slate-50/50 p-3 text-center text-xs text-slate-500">
+            Mostrando 500 de {filas.length} filas. Usá los filtros para reducir.
+          </div>
+        )}
       </CardContent>
     </Card>
   );
