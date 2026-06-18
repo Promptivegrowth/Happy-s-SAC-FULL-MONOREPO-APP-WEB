@@ -18,20 +18,39 @@ import { Button } from '@happy/ui/button';
 import { Badge } from '@happy/ui/badge';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@happy/ui/table';
 import {
-  X, Search, Loader2, ArrowLeft, RotateCcw, Receipt, AlertCircle,
+  X, Search, Loader2, ArrowLeft, RotateCcw, Receipt, AlertCircle, ScanBarcode, Plus, Trash2,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { formatPEN } from '@happy/lib';
 import {
   buscarVentaParaDevolucion,
   registrarDevolucion,
+  registrarCambio,
   cargarDatosDevolucionPDF,
   type VentaDevolucionData,
 } from '@/server/actions/devoluciones';
 
-type Step = 'buscar' | 'seleccionar' | 'confirmar';
+type Step = 'buscar' | 'seleccionar' | 'entrega' | 'confirmar';
 type TipoDevolucion = 'DEVOLUCION' | 'CAMBIO';
 type Metodo = 'EFECTIVO' | 'YAPE' | 'PLIN' | 'TARJETA_DEBITO' | 'TARJETA_CREDITO' | 'TRANSFERENCIA' | 'DEPOSITO' | 'CREDITO';
+
+export type VarianteDev = {
+  id: string;
+  sku: string;
+  codigo_barras: string | null;
+  talla: string;
+  precio: number;
+  producto_nombre: string;
+};
+
+type LineaEntrega = {
+  variante_id: string;
+  sku: string;
+  producto_nombre: string;
+  talla: string;
+  cantidad: number;
+  precio_unitario: number;
+};
 
 const METODOS: { value: Metodo; label: string }[] = [
   { value: 'EFECTIVO', label: 'Efectivo' },
@@ -44,7 +63,19 @@ const METODOS: { value: Metodo; label: string }[] = [
   { value: 'CREDITO', label: 'Nota de crédito (saldo)' },
 ];
 
-export function DevolucionModal({ onClose, onCompleted }: { onClose: () => void; onCompleted: () => void }) {
+export function DevolucionModal({
+  variantes,
+  cajaId,
+  sesionId,
+  onClose,
+  onCompleted,
+}: {
+  variantes: VarianteDev[];
+  cajaId: string;
+  sesionId: string;
+  onClose: () => void;
+  onCompleted: () => void;
+}) {
   const [step, setStep] = useState<Step>('buscar');
   const [busqueda, setBusqueda] = useState('');
   const [buscando, setBuscando] = useState(false);
@@ -59,6 +90,50 @@ export function DevolucionModal({ onClose, onCompleted }: { onClose: () => void;
   const [metodo, setMetodo] = useState<Metodo>('EFECTIVO');
   const [observacion, setObservacion] = useState('');
   const [confirmando, startConfirm] = useTransition();
+
+  // CAMBIO — productos entregados al cliente
+  const [entregaScan, setEntregaScan] = useState('');
+  const [entregaLineas, setEntregaLineas] = useState<LineaEntrega[]>([]);
+
+  function agregarEntregaPorCodigo(input: string) {
+    const q = input.trim();
+    if (!q) return;
+    const v = variantes.find((x) => x.codigo_barras === q || x.sku.toLowerCase() === q.toLowerCase());
+    if (!v) {
+      toast.error('SKU / código no encontrado');
+      return;
+    }
+    const existe = entregaLineas.find((l) => l.variante_id === v.id);
+    if (existe) {
+      setEntregaLineas(entregaLineas.map((l) =>
+        l.variante_id === v.id ? { ...l, cantidad: l.cantidad + 1 } : l,
+      ));
+    } else {
+      setEntregaLineas([
+        ...entregaLineas,
+        {
+          variante_id: v.id,
+          sku: v.sku,
+          producto_nombre: v.producto_nombre,
+          talla: v.talla,
+          cantidad: 1,
+          precio_unitario: v.precio,
+        },
+      ]);
+    }
+    setEntregaScan('');
+  }
+
+  function setEntregaCantidad(varId: string, cant: number) {
+    if (cant <= 0) {
+      setEntregaLineas(entregaLineas.filter((l) => l.variante_id !== varId));
+      return;
+    }
+    setEntregaLineas(entregaLineas.map((l) => l.variante_id === varId ? { ...l, cantidad: cant } : l));
+  }
+  function quitarEntrega(varId: string) {
+    setEntregaLineas(entregaLineas.filter((l) => l.variante_id !== varId));
+  }
 
   async function buscar() {
     if (busqueda.trim().length < 3) {
@@ -93,9 +168,20 @@ export function DevolucionModal({ onClose, onCompleted }: { onClose: () => void;
     : 0;
   const itemsSeleccionados = Object.values(cantidades).reduce((s, n) => s + n, 0);
 
-  function irAConfirmar() {
+  const totalEntrega = entregaLineas.reduce((s, l) => s + l.cantidad * l.precio_unitario, 0);
+  const diferencia = Math.round((totalEntrega - totalSeleccionado) * 100) / 100;
+
+  function irSiguienteDesdeSeleccionar() {
     if (itemsSeleccionados === 0) {
       toast.error('Seleccioná al menos 1 unidad a devolver');
+      return;
+    }
+    setStep(tipo === 'CAMBIO' ? 'entrega' : 'confirmar');
+  }
+
+  function irAConfirmarDesdeEntrega() {
+    if (entregaLineas.length === 0) {
+      toast.error('Agregá al menos un producto entregado al cliente');
       return;
     }
     setStep('confirmar');
@@ -120,26 +206,64 @@ export function DevolucionModal({ onClose, onCompleted }: { onClose: () => void;
         precio_unitario: l.precio_unitario,
         reingresa_stock: true,
       }));
-    startConfirm(async () => {
-      const r = await registrarDevolucion({
-        venta_id: venta.venta_id,
-        almacen_id: venta.almacen_id,
-        tipo,
-        motivo: motivo.trim(),
-        observacion: observacion || null,
-        metodo_devolucion: tipo === 'DEVOLUCION' ? metodo : null,
-        monto_devuelto: tipo === 'DEVOLUCION' ? totalSeleccionado : 0,
-        lineas: lineasDevolver,
-      });
-      if (!r.ok) {
-        toast.error(r.error ?? 'Error');
-        return;
-      }
-      toast.success(`✅ ${r.data?.numero} · ${tipo === 'DEVOLUCION' ? formatPEN(totalSeleccionado) : 'Cambio registrado'}`);
 
-      // Auto-descargar PDF del comprobante de devolución
+    startConfirm(async () => {
+      let devolucionId: string | null = null;
+      let mensajeExito = '';
+
+      if (tipo === 'DEVOLUCION') {
+        const r = await registrarDevolucion({
+          venta_id: venta.venta_id,
+          almacen_id: venta.almacen_id,
+          tipo,
+          motivo: motivo.trim(),
+          observacion: observacion || null,
+          metodo_devolucion: metodo,
+          monto_devuelto: totalSeleccionado,
+          lineas: lineasDevolver,
+        });
+        if (!r.ok) { toast.error(r.error ?? 'Error'); return; }
+        devolucionId = r.data!.id;
+        mensajeExito = `✅ ${r.data!.numero} · ${formatPEN(totalSeleccionado)}`;
+      } else {
+        // CAMBIO atómico: devolución + venta nueva + diferencia
+        if (entregaLineas.length === 0) {
+          toast.error('Agregá los productos entregados al cliente');
+          return;
+        }
+        const r = await registrarCambio({
+          venta_id: venta.venta_id,
+          almacen_id: venta.almacen_id,
+          caja_id: cajaId,
+          caja_sesion_id: sesionId,
+          motivo: motivo.trim(),
+          observacion: observacion || null,
+          lineas_devueltas: lineasDevolver,
+          productos_nuevos: entregaLineas.map((l) => ({
+            variante_id: l.variante_id,
+            cantidad: l.cantidad,
+            precio_unitario: l.precio_unitario,
+          })),
+          metodo_diferencia_cobro: diferencia > 0.01
+            ? (metodo === 'CREDITO' ? 'EFECTIVO' : metodo)
+            : null,
+          metodo_diferencia_devuelta: diferencia < -0.01 ? metodo : null,
+        });
+        if (!r.ok) { toast.error(r.error ?? 'Error'); return; }
+        devolucionId = r.data!.devolucion_id;
+        const dif = r.data!.diferencia;
+        mensajeExito = `✅ Cambio ${r.data!.devolucion_numero} · ` + (
+          dif > 0.01 ? `Cobrado adicional ${formatPEN(dif)}` :
+          dif < -0.01 ? `Devuelto ${formatPEN(Math.abs(dif))}` :
+          'Sin diferencia'
+        );
+      }
+
+      toast.success(mensajeExito);
+
+      // Auto-descargar PDF (con sección de entrega si fue cambio)
       try {
-        const data = await cargarDatosDevolucionPDF(r.data!.id);
+        const data = await cargarDatosDevolucionPDF(devolucionId!);
         if (data) {
           const { generarComprobanteDevolucionPDF } = await import('./devolucion-pdf');
           await generarComprobanteDevolucionPDF(data);
@@ -162,7 +286,8 @@ export function DevolucionModal({ onClose, onCompleted }: { onClose: () => void;
             <h2 className="font-display text-lg font-semibold text-corp-900">
               {step === 'buscar' && 'Devolución / Cambio'}
               {step === 'seleccionar' && 'Seleccionar productos a devolver'}
-              {step === 'confirmar' && 'Confirmar devolución'}
+              {step === 'entrega' && 'Productos entregados al cliente'}
+              {step === 'confirmar' && (tipo === 'CAMBIO' ? 'Confirmar cambio' : 'Confirmar devolución')}
             </h2>
           </div>
           <button onClick={onClose} className="rounded-full p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700">
@@ -214,6 +339,35 @@ export function DevolucionModal({ onClose, onCompleted }: { onClose: () => void;
                 <p className="mt-1 text-sm">{venta.cliente_nombre}{venta.cliente_doc && ` · ${venta.cliente_doc}`}</p>
                 <p className="text-xs text-slate-500">Almacén: {venta.almacen_nombre} · Total venta: <strong>{formatPEN(venta.total)}</strong></p>
               </Card>
+
+              {/* Selector de tipo MUY arriba para que el cajero sepa qué va a hacer */}
+              <div>
+                <Label className="text-xs">Tipo de operación *</Label>
+                <div className="mt-1 grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setTipo('DEVOLUCION')}
+                    className={`rounded-lg border-2 p-2 text-left transition ${tipo === 'DEVOLUCION' ? 'border-rose-500 bg-rose-50' : 'border-slate-200 hover:border-rose-300'}`}
+                  >
+                    <div className="flex items-center gap-2">
+                      <RotateCcw className="h-4 w-4 text-rose-600" />
+                      <span className="text-sm font-semibold">Devolución</span>
+                    </div>
+                    <p className="text-[10px] text-slate-500">Cliente devuelve y recibe dinero</p>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setTipo('CAMBIO')}
+                    className={`rounded-lg border-2 p-2 text-left transition ${tipo === 'CAMBIO' ? 'border-indigo-500 bg-indigo-50' : 'border-slate-200 hover:border-indigo-300'}`}
+                  >
+                    <div className="flex items-center gap-2">
+                      <Receipt className="h-4 w-4 text-indigo-600" />
+                      <span className="text-sm font-semibold">Cambio</span>
+                    </div>
+                    <p className="text-[10px] text-slate-500">Devuelve y se lleva otro producto</p>
+                  </button>
+                </div>
+              </div>
 
               <div className="rounded-md border border-slate-200">
                 <Table>
@@ -270,58 +424,155 @@ export function DevolucionModal({ onClose, onCompleted }: { onClose: () => void;
             </div>
           )}
 
-          {/* STEP 3 — CONFIRMAR */}
-          {step === 'confirmar' && venta && (
+          {/* STEP 3 — ENTREGA (solo cuando tipo=CAMBIO) */}
+          {step === 'entrega' && venta && (
             <div className="space-y-4">
-              <Card className="bg-slate-50 p-3">
-                <p className="text-xs text-slate-500">Devolución de venta {venta.comprobante?.numero_completo ?? venta.numero_venta}</p>
-                <p className="text-sm font-medium">{venta.cliente_nombre}</p>
-                <p className="mt-1 text-sm">
-                  <strong>{itemsSeleccionados}</strong> unidad(es) · Total: <strong>{formatPEN(totalSeleccionado)}</strong>
+              <Card className="bg-indigo-50 p-3">
+                <p className="text-xs text-indigo-800">
+                  El cliente devolvió <strong>{itemsSeleccionados} unid.</strong> por <strong>{formatPEN(totalSeleccionado)}</strong>.
+                  Agregá los productos que se lleva.
                 </p>
               </Card>
 
               <div>
-                <Label className="text-xs">Tipo *</Label>
-                <div className="mt-1 grid grid-cols-2 gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setTipo('DEVOLUCION')}
-                    className={`rounded-lg border-2 p-3 text-left transition ${tipo === 'DEVOLUCION' ? 'border-rose-500 bg-rose-50' : 'border-slate-200 bg-white hover:border-rose-300'}`}
-                  >
-                    <div className="flex items-center gap-2">
-                      <RotateCcw className="h-4 w-4 text-rose-600" />
-                      <span className="font-display text-sm font-semibold">Devolución</span>
-                    </div>
-                    <p className="mt-1 text-[10px] text-slate-500">Reembolso al cliente</p>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setTipo('CAMBIO')}
-                    className={`rounded-lg border-2 p-3 text-left transition ${tipo === 'CAMBIO' ? 'border-indigo-500 bg-indigo-50' : 'border-slate-200 bg-white hover:border-indigo-300'}`}
-                  >
-                    <div className="flex items-center gap-2">
-                      <Receipt className="h-4 w-4 text-indigo-600" />
-                      <span className="font-display text-sm font-semibold">Cambio</span>
-                    </div>
-                    <p className="mt-1 text-[10px] text-slate-500">Sin reembolso, solo entra el producto</p>
-                  </button>
+                <Label className="text-xs">Buscar por SKU o código de barras</Label>
+                <div className="relative mt-1">
+                  <ScanBarcode className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-indigo-500" />
+                  <Input
+                    value={entregaScan}
+                    onChange={(e) => setEntregaScan(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        agregarEntregaPorCodigo(entregaScan);
+                      }
+                    }}
+                    placeholder="Escaneá o tipeá SKU + Enter"
+                    className="pl-9"
+                    autoFocus
+                  />
                 </div>
               </div>
+
+              {entregaLineas.length > 0 && (
+                <div className="rounded-md border border-slate-200">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Producto</TableHead>
+                        <TableHead className="text-center">Cantidad</TableHead>
+                        <TableHead className="text-right">P. Unit.</TableHead>
+                        <TableHead className="text-right">Subtotal</TableHead>
+                        <TableHead className="w-10"></TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {entregaLineas.map((l) => (
+                        <TableRow key={l.variante_id}>
+                          <TableCell>
+                            <div className="text-sm font-medium text-corp-900">{l.producto_nombre}</div>
+                            <div className="text-[10px] text-slate-500">{l.sku} · Talla {l.talla.replace('T', '')}</div>
+                          </TableCell>
+                          <TableCell className="text-center">
+                            <Input
+                              type="number"
+                              min={1}
+                              value={l.cantidad}
+                              onChange={(e) => setEntregaCantidad(l.variante_id, Math.max(0, parseInt(e.target.value || '0', 10)))}
+                              className="h-8 w-20 text-center font-mono"
+                            />
+                          </TableCell>
+                          <TableCell className="text-right font-mono text-sm">{formatPEN(l.precio_unitario)}</TableCell>
+                          <TableCell className="text-right font-mono text-sm font-semibold">{formatPEN(l.cantidad * l.precio_unitario)}</TableCell>
+                          <TableCell>
+                            <Button variant="ghost" size="sm" onClick={() => quitarEntrega(l.variante_id)}>
+                              <Trash2 className="h-3 w-3 text-rose-500" />
+                            </Button>
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </div>
+              )}
+
+              {/* Comparativa devuelto vs entregado */}
+              <Card className="space-y-1 p-3">
+                <div className="flex justify-between text-xs">
+                  <span className="text-slate-500">Total devuelto:</span>
+                  <span className="font-mono font-semibold text-rose-700">{formatPEN(totalSeleccionado)}</span>
+                </div>
+                <div className="flex justify-between text-xs">
+                  <span className="text-slate-500">Total entregado:</span>
+                  <span className="font-mono font-semibold text-indigo-700">{formatPEN(totalEntrega)}</span>
+                </div>
+                <div className="border-t border-slate-200 pt-1">
+                  <div className="flex items-baseline justify-between">
+                    <span className="text-xs font-semibold">
+                      {diferencia > 0.01 ? 'Cobrar al cliente' : diferencia < -0.01 ? 'Devolver al cliente' : 'Sin diferencia'}
+                    </span>
+                    <span className={`font-display text-lg font-bold ${diferencia > 0.01 ? 'text-amber-700' : diferencia < -0.01 ? 'text-emerald-700' : 'text-slate-500'}`}>
+                      {formatPEN(Math.abs(diferencia))}
+                    </span>
+                  </div>
+                </div>
+              </Card>
+            </div>
+          )}
+
+          {/* STEP 4 — CONFIRMAR */}
+          {step === 'confirmar' && venta && (
+            <div className="space-y-4">
+              <Card className={`p-3 ${tipo === 'CAMBIO' ? 'bg-indigo-50' : 'bg-rose-50'}`}>
+                <Badge variant="outline" className="text-[10px]">
+                  {tipo === 'CAMBIO' ? 'CAMBIO' : 'DEVOLUCIÓN'}
+                </Badge>
+                <p className="mt-1 text-xs text-slate-600">
+                  Venta original: {venta.comprobante?.numero_completo ?? venta.numero_venta}
+                </p>
+                <p className="text-sm font-medium">{venta.cliente_nombre}</p>
+                {tipo === 'CAMBIO' ? (
+                  <div className="mt-2 grid grid-cols-3 gap-2 text-xs">
+                    <div>
+                      <span className="block text-slate-500">Devuelve</span>
+                      <strong>{itemsSeleccionados} u · {formatPEN(totalSeleccionado)}</strong>
+                    </div>
+                    <div>
+                      <span className="block text-slate-500">Se lleva</span>
+                      <strong>{entregaLineas.reduce((s, l) => s + l.cantidad, 0)} u · {formatPEN(totalEntrega)}</strong>
+                    </div>
+                    <div>
+                      <span className="block text-slate-500">{diferencia > 0.01 ? 'Cobrar' : diferencia < -0.01 ? 'Devolver' : 'Diferencia'}</span>
+                      <strong className={diferencia > 0.01 ? 'text-amber-700' : diferencia < -0.01 ? 'text-emerald-700' : ''}>
+                        {formatPEN(Math.abs(diferencia))}
+                      </strong>
+                    </div>
+                  </div>
+                ) : (
+                  <p className="mt-1 text-sm">
+                    <strong>{itemsSeleccionados}</strong> unidad(es) · Total: <strong>{formatPEN(totalSeleccionado)}</strong>
+                  </p>
+                )}
+              </Card>
 
               <div>
                 <Label className="text-xs">Motivo *</Label>
                 <Input
                   value={motivo}
                   onChange={(e) => setMotivo(e.target.value)}
-                  placeholder="Ej. talla incorrecta, defecto de fábrica, cliente arrepentido"
+                  placeholder="Ej. talla incorrecta, defecto, cambió de modelo"
                   className="mt-1"
                 />
               </div>
 
-              {tipo === 'DEVOLUCION' && (
+              {/* Método aplica si:
+                  - DEVOLUCION (siempre)
+                  - CAMBIO con diferencia ≠ 0 (cobro o reembolso) */}
+              {(tipo === 'DEVOLUCION' || Math.abs(diferencia) > 0.01) && (
                 <div>
-                  <Label className="text-xs">Método de reembolso *</Label>
+                  <Label className="text-xs">
+                    Método {tipo === 'DEVOLUCION' ? 'de reembolso' : diferencia > 0 ? 'para cobrar la diferencia' : 'para devolver la diferencia'} *
+                  </Label>
                   <select
                     value={metodo}
                     onChange={(e) => setMetodo(e.target.value as Metodo)}
@@ -346,7 +597,8 @@ export function DevolucionModal({ onClose, onCompleted }: { onClose: () => void;
               <div className="rounded-md border border-amber-200 bg-amber-50 p-3">
                 <p className="flex items-center gap-2 text-xs text-amber-800">
                   <AlertCircle className="h-3.5 w-3.5" />
-                  El stock se reintegra automáticamente al almacén <strong>{venta.almacen_nombre}</strong>.
+                  Stock devuelto reintegra al almacén <strong>{venta.almacen_nombre}</strong>.
+                  {tipo === 'CAMBIO' && ' Stock entregado sale del mismo almacén.'}
                 </p>
               </div>
             </div>
@@ -359,7 +611,11 @@ export function DevolucionModal({ onClose, onCompleted }: { onClose: () => void;
             <Button
               variant="outline"
               size="sm"
-              onClick={() => setStep(step === 'confirmar' ? 'seleccionar' : 'buscar')}
+              onClick={() => {
+                if (step === 'confirmar') setStep(tipo === 'CAMBIO' ? 'entrega' : 'seleccionar');
+                else if (step === 'entrega') setStep('seleccionar');
+                else setStep('buscar');
+              }}
               disabled={confirmando}
             >
               <ArrowLeft className="h-3.5 w-3.5" /> Volver
@@ -367,8 +623,13 @@ export function DevolucionModal({ onClose, onCompleted }: { onClose: () => void;
           )}
           <div className="flex-1"></div>
           {step === 'seleccionar' && (
-            <Button variant="premium" onClick={irAConfirmar} disabled={itemsSeleccionados === 0}>
-              Continuar
+            <Button variant="premium" onClick={irSiguienteDesdeSeleccionar} disabled={itemsSeleccionados === 0}>
+              {tipo === 'CAMBIO' ? 'Seleccionar productos a entregar' : 'Continuar'}
+            </Button>
+          )}
+          {step === 'entrega' && (
+            <Button variant="premium" onClick={irAConfirmarDesdeEntrega} disabled={entregaLineas.length === 0}>
+              Continuar a confirmación
             </Button>
           )}
           {step === 'confirmar' && (

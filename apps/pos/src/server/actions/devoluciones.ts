@@ -374,6 +374,260 @@ export async function listarDevolucionesSesion(): Promise<DevolucionRow[]> {
 }
 
 // ============================================================================
+// REGISTRAR CAMBIO ATÓMICO (devolución + venta nueva + diferencia)
+// ============================================================================
+const cambioLineaNuevaSchema = z.object({
+  variante_id: z.string().uuid(),
+  cantidad: z.number().int().min(1),
+  precio_unitario: z.number().min(0),
+});
+
+const cambioSchema = z.object({
+  venta_id: z.string().uuid(),
+  almacen_id: z.string().uuid(),
+  caja_id: z.string().uuid().nullable().optional(),
+  caja_sesion_id: z.string().uuid().nullable().optional(),
+  motivo: z.string().min(1).max(500),
+  observacion: z.string().nullable().optional().or(z.literal('')),
+  lineas_devueltas: z.array(lineaInputSchema).min(1),
+  productos_nuevos: z.array(cambioLineaNuevaSchema).min(1),
+  /** Si el monto nuevo supera al devuelto, método para cobrar la diferencia */
+  metodo_diferencia_cobro: z.enum([
+    'EFECTIVO', 'YAPE', 'PLIN', 'TARJETA_DEBITO', 'TARJETA_CREDITO',
+    'TRANSFERENCIA', 'DEPOSITO',
+  ]).nullable().optional(),
+  /** Si el monto nuevo es menor al devuelto, método para reembolsar la diferencia */
+  metodo_diferencia_devuelta: z.enum([
+    'EFECTIVO', 'YAPE', 'PLIN', 'TARJETA_DEBITO', 'TARJETA_CREDITO',
+    'TRANSFERENCIA', 'DEPOSITO', 'CREDITO',
+  ]).nullable().optional(),
+});
+
+export async function registrarCambio(
+  input: z.input<typeof cambioSchema>,
+): Promise<ActionResult<{ devolucion_id: string; devolucion_numero: string; venta_id: string; venta_numero: string; diferencia: number }>> {
+  try {
+    const userId = await requireUserId();
+    const data = cambioSchema.parse(input);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const sb = createServiceClient() as any;
+
+    // Validar venta original
+    const venta = await obtenerVentaDevolucionInterno(sb, data.venta_id);
+    if (!venta) throw new Error('Venta original no encontrada');
+
+    // Validar cantidades devueltas
+    const disp = new Map(venta.lineas.map((l) => [l.venta_linea_id, l.cantidad_disponible]));
+    for (const l of data.lineas_devueltas) {
+      if (l.cantidad > (disp.get(l.venta_linea_id) ?? 0)) {
+        throw new Error('Cantidad devuelta excede lo disponible');
+      }
+    }
+
+    const totalDevuelto = data.lineas_devueltas.reduce((s, l) => s + l.cantidad * l.precio_unitario, 0);
+    const totalNuevo = data.productos_nuevos.reduce((s, l) => s + l.cantidad * l.precio_unitario, 0);
+    const diferencia = Math.round((totalNuevo - totalDevuelto) * 100) / 100; // + = cobrar, - = devolver
+
+    // Validar métodos según diferencia
+    if (diferencia > 0.01 && !data.metodo_diferencia_cobro) {
+      throw new Error('Se necesita método para cobrar la diferencia');
+    }
+    if (diferencia < -0.01 && !data.metodo_diferencia_devuelta) {
+      throw new Error('Se necesita método para reembolsar la diferencia');
+    }
+
+    // ---- 1) Insertar devolución (tipo CAMBIO, sin reembolso monto base) ----
+    let devNumero: string;
+    try {
+      const { data: corr } = await sb.rpc('next_correlativo', { p_clave: 'DEVOLUCION', p_padding: 6 });
+      devNumero = typeof corr === 'string' ? corr : `DEV-${Date.now()}`;
+    } catch {
+      devNumero = `DEV-${Date.now()}`;
+    }
+
+    const { data: devIns, error: errDev } = await sb
+      .from('devoluciones')
+      .insert({
+        numero: devNumero,
+        venta_id: data.venta_id,
+        fecha: new Date().toISOString(),
+        almacen_id: data.almacen_id,
+        atendido_por: userId,
+        motivo: data.motivo,
+        tipo: 'CAMBIO',
+        // Si hubo que devolver dinero, lo registramos acá; si no, queda en 0
+        monto_devuelto: diferencia < -0.01 ? Math.abs(diferencia) : 0,
+        metodo_devolucion: diferencia < -0.01 ? data.metodo_diferencia_devuelta : null,
+        observacion: data.observacion === '' ? null : (data.observacion ?? null),
+      })
+      .select('id, numero')
+      .single();
+    if (errDev) throw new Error(`Devolución cabecera: ${errDev.message}`);
+    const devId = devIns.id as string;
+
+    // 1.b) Líneas devueltas
+    const lineasDevInsert = data.lineas_devueltas.map((l) => ({
+      devolucion_id: devId,
+      venta_linea_id: l.venta_linea_id,
+      variante_id: l.variante_id,
+      cantidad: l.cantidad,
+      precio_unitario: l.precio_unitario,
+      reingresa_stock: l.reingresa_stock,
+    }));
+    const { error: errLin } = await sb.from('devoluciones_lineas').insert(lineasDevInsert);
+    if (errLin) {
+      await sb.from('devoluciones').delete().eq('id', devId);
+      throw new Error(`Devolución líneas: ${errLin.message}`);
+    }
+
+    // ---- 2) Crear venta nueva por los productos entregados ----
+    let ventaNumero: string;
+    try {
+      const { data: corr2 } = await sb.rpc('next_correlativo', { p_clave: 'VENTA', p_padding: 6 });
+      ventaNumero = typeof corr2 === 'string' ? corr2 : `VEN-${Date.now()}`;
+    } catch {
+      ventaNumero = `VEN-${Date.now()}`;
+    }
+
+    // IGV ya viene incluido en precios; computamos sub_total e igv 18%
+    const IGV_RATIO = 0.18 / 1.18;
+    const igvNueva = Math.round(totalNuevo * IGV_RATIO * 100) / 100;
+    const subTotalNueva = Math.round((totalNuevo - igvNueva) * 100) / 100;
+
+    const { data: ventaNueva, error: errVN } = await sb
+      .from('ventas')
+      .insert({
+        numero: ventaNumero,
+        canal: 'POS',
+        fecha: new Date().toISOString(),
+        almacen_id: data.almacen_id,
+        caja_sesion_id: data.caja_sesion_id ?? null,
+        caja_id: data.caja_id ?? null,
+        vendedor_usuario_id: userId,
+        cliente_id: null,
+        sub_total: subTotalNueva,
+        igv: igvNueva,
+        total: totalNuevo,
+        estado: 'COMPLETADA',
+        observacion: `Venta por cambio. Devolución asociada: ${devNumero}`,
+      })
+      .select('id, numero')
+      .single();
+    if (errVN) {
+      // Rollback devolución
+      await sb.from('devoluciones_lineas').delete().eq('devolucion_id', devId);
+      await sb.from('devoluciones').delete().eq('id', devId);
+      throw new Error(`Venta nueva: ${errVN.message}`);
+    }
+    const ventaNuevaId = ventaNueva.id as string;
+
+    // 2.b) Líneas de venta nueva
+    const lineasNuevaInsert = data.productos_nuevos.map((p) => ({
+      venta_id: ventaNuevaId,
+      variante_id: p.variante_id,
+      cantidad: p.cantidad,
+      precio_unitario: p.precio_unitario,
+    }));
+    const { error: errLinN } = await sb.from('ventas_lineas').insert(lineasNuevaInsert);
+    if (errLinN) {
+      await sb.from('ventas').delete().eq('id', ventaNuevaId);
+      await sb.from('devoluciones_lineas').delete().eq('devolucion_id', devId);
+      await sb.from('devoluciones').delete().eq('id', devId);
+      throw new Error(`Líneas venta nueva: ${errLinN.message}`);
+    }
+
+    // 2.c) Pagos de la venta nueva
+    //   Parte 1: CREDITO por el valor de la devolución que se aplicó (hasta totalNuevo)
+    //   Parte 2: si diferencia > 0, registrar el método elegido por la diferencia
+    const pagosNueva: { venta_id: string; metodo: string; monto: number; referencia: string | null }[] = [];
+    const aplicadoDevolucion = Math.min(totalDevuelto, totalNuevo);
+    if (aplicadoDevolucion > 0) {
+      pagosNueva.push({
+        venta_id: ventaNuevaId,
+        metodo: 'CREDITO',
+        monto: aplicadoDevolucion,
+        referencia: `Aplicado de devolución ${devNumero}`,
+      });
+    }
+    if (diferencia > 0.01) {
+      pagosNueva.push({
+        venta_id: ventaNuevaId,
+        metodo: data.metodo_diferencia_cobro!,
+        monto: diferencia,
+        referencia: null,
+      });
+    }
+    if (pagosNueva.length > 0) {
+      const { error: errPag } = await sb.from('ventas_pagos').insert(pagosNueva);
+      if (errPag) {
+        await sb.from('ventas_lineas').delete().eq('venta_id', ventaNuevaId);
+        await sb.from('ventas').delete().eq('id', ventaNuevaId);
+        await sb.from('devoluciones_lineas').delete().eq('devolucion_id', devId);
+        await sb.from('devoluciones').delete().eq('id', devId);
+        throw new Error(`Pagos venta nueva: ${errPag.message}`);
+      }
+    }
+
+    // ---- 3) Kardex: ENTRADA_DEVOLUCION_CLIENTE (devueltos) + SALIDA_VENTA (entregados) ----
+    const kx: Record<string, unknown>[] = [];
+    for (const l of data.lineas_devueltas) {
+      if (l.reingresa_stock) {
+        kx.push({
+          fecha: new Date().toISOString(),
+          tipo: 'ENTRADA_DEVOLUCION_CLIENTE',
+          almacen_id: data.almacen_id,
+          variante_id: l.variante_id,
+          cantidad: l.cantidad,
+          costo_unitario: l.precio_unitario,
+          costo_total: l.precio_unitario * l.cantidad,
+          referencia_tipo: 'DEVOLUCION',
+          referencia_id: devId,
+          observacion: `Cambio ${devNumero} (recibido)`,
+        });
+      }
+    }
+    for (const p of data.productos_nuevos) {
+      kx.push({
+        fecha: new Date().toISOString(),
+        tipo: 'SALIDA_VENTA',
+        almacen_id: data.almacen_id,
+        variante_id: p.variante_id,
+        cantidad: p.cantidad,
+        costo_unitario: p.precio_unitario,
+        costo_total: p.precio_unitario * p.cantidad,
+        referencia_tipo: 'VENTA',
+        referencia_id: ventaNuevaId,
+        observacion: `Venta por cambio ${ventaNumero}`,
+      });
+    }
+    if (kx.length > 0) {
+      const { error: errKx } = await sb.from('kardex_movimientos').insert(kx);
+      if (errKx) {
+        await sb.from('ventas_pagos').delete().eq('venta_id', ventaNuevaId);
+        await sb.from('ventas_lineas').delete().eq('venta_id', ventaNuevaId);
+        await sb.from('ventas').delete().eq('id', ventaNuevaId);
+        await sb.from('devoluciones_lineas').delete().eq('devolucion_id', devId);
+        await sb.from('devoluciones').delete().eq('id', devId);
+        throw new Error(`Kardex: ${errKx.message}`);
+      }
+    }
+
+    return {
+      ok: true,
+      data: {
+        devolucion_id: devId,
+        devolucion_numero: devNumero,
+        venta_id: ventaNuevaId,
+        venta_numero: ventaNumero,
+        diferencia,
+      },
+    };
+  } catch (e) {
+    return { ok: false, error: (e as Error).message };
+  }
+}
+
+// ============================================================================
 // DATOS PARA PDF DE COMPROBANTE DE DEVOLUCIÓN
 // ============================================================================
 export type DevolucionPDFData = {
@@ -413,6 +667,20 @@ export type DevolucionPDFData = {
     email: string | null;
   } | null;
   logo_dataurl: string | null;
+  // Cuando es CAMBIO con venta asociada: productos entregados al cliente
+  venta_intercambio: {
+    numero: string;
+    total: number;
+    lineas: {
+      producto_nombre: string;
+      sku: string;
+      talla: string;
+      cantidad: number;
+      precio_unitario: number;
+      sub_total: number;
+    }[];
+  } | null;
+  diferencia: number; // positiva = cliente pagó extra; negativa = se le devolvió dinero; 0 = igual
 };
 
 export async function cargarDatosDevolucionPDF(devolucionId: string): Promise<DevolucionPDFData | null> {
@@ -507,6 +775,50 @@ export async function cargarDatosDevolucionPDF(devolucionId: string): Promise<De
     venta?.nombre_cliente_rapido ||
     'CLIENTE VARIOS';
 
+  // Si es CAMBIO, buscar la venta nueva asociada (observación contiene "Devolución asociada: NUMERO")
+  let venta_intercambio: DevolucionPDFData['venta_intercambio'] = null;
+  let diferencia = 0;
+  if (dev.tipo === 'CAMBIO') {
+    // La venta nueva tiene observación tipo "Venta por cambio. Devolución asociada: DEV-XXXXXX"
+    const { data: vNueva } = await sb
+      .from('ventas')
+      .select('id, numero, total')
+      .ilike('observacion', `%${dev.numero}%`)
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (vNueva) {
+      const { data: lineasVN } = await sb
+        .from('ventas_lineas')
+        .select('cantidad, precio_unitario, variantes:variante_id(sku, talla, productos:producto_id(nombre))')
+        .eq('venta_id', vNueva.id);
+      type LN = {
+        cantidad: number;
+        precio_unitario: string | number;
+        variantes: { sku: string; talla: string; productos: { nombre: string } | null } | null;
+      };
+      const lineasIntercambio = ((lineasVN ?? []) as LN[]).map((l) => {
+        const pu = Number(l.precio_unitario ?? 0);
+        return {
+          producto_nombre: l.variantes?.productos?.nombre ?? '—',
+          sku: l.variantes?.sku ?? '—',
+          talla: l.variantes?.talla ?? '—',
+          cantidad: Number(l.cantidad),
+          precio_unitario: pu,
+          sub_total: pu * Number(l.cantidad),
+        };
+      });
+      const totalVN = Number(vNueva.total ?? 0);
+      const totalDev = lineas.reduce((s, l) => s + l.sub_total, 0);
+      venta_intercambio = {
+        numero: vNueva.numero as string,
+        total: totalVN,
+        lineas: lineasIntercambio,
+      };
+      diferencia = Math.round((totalVN - totalDev) * 100) / 100;
+    }
+  }
+
   return {
     numero: dev.numero as string,
     fecha: dev.fecha as string,
@@ -530,5 +842,7 @@ export async function cargarDatosDevolucionPDF(devolucionId: string): Promise<De
     lineas,
     empresa: empresa as DevolucionPDFData['empresa'],
     logo_dataurl,
+    venta_intercambio,
+    diferencia,
   };
 }

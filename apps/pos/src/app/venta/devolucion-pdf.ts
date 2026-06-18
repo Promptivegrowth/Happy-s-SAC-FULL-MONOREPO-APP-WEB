@@ -159,8 +159,16 @@ export async function generarComprobanteDevolucionPDF(data: DevolucionPDFData): 
   y += 4;
 
   // ============================================================================
-  // TABLA DE PRODUCTOS
+  // TABLA DE PRODUCTOS DEVUELTOS
   // ============================================================================
+  // Título de la tabla cuando es CAMBIO (para diferenciarla de la de entrega)
+  if (esCambio) {
+    doc.setFontSize(9);
+    doc.setFont('helvetica', 'bold');
+    doc.setTextColor(...ROSE);
+    doc.text('PRODUCTOS DEVUELTOS POR EL CLIENTE', M, y);
+    y += 4;
+  }
   autoTable(doc, {
     startY: y,
     theme: 'grid',
@@ -174,7 +182,7 @@ export async function generarComprobanteDevolucionPDF(data: DevolucionPDFData): 
       fmtPEN(l.sub_total),
     ]),
     headStyles: {
-      fillColor: AZUL,
+      fillColor: esCambio ? ROSE : AZUL,
       textColor: [255, 255, 255],
       fontStyle: 'bold',
       fontSize: 9,
@@ -193,6 +201,50 @@ export async function generarComprobanteDevolucionPDF(data: DevolucionPDFData): 
   });
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   y = (doc as any).lastAutoTable.finalY + 4;
+
+  // ============================================================================
+  // TABLA DE PRODUCTOS ENTREGADOS (solo si es CAMBIO con venta intercambio)
+  // ============================================================================
+  if (esCambio && data.venta_intercambio && data.venta_intercambio.lineas.length > 0) {
+    doc.setFontSize(9);
+    doc.setFont('helvetica', 'bold');
+    doc.setTextColor(...INDIGO);
+    doc.text(`PRODUCTOS ENTREGADOS AL CLIENTE — ${data.venta_intercambio.numero}`, M, y);
+    y += 4;
+
+    autoTable(doc, {
+      startY: y,
+      theme: 'grid',
+      head: [['Producto', 'SKU', 'Talla', 'Cant.', 'P. Unit.', 'Subtotal']],
+      body: data.venta_intercambio.lineas.map((l) => [
+        l.producto_nombre,
+        l.sku,
+        l.talla.replace('T', ''),
+        String(l.cantidad),
+        fmtPEN(l.precio_unitario),
+        fmtPEN(l.sub_total),
+      ]),
+      headStyles: {
+        fillColor: INDIGO,
+        textColor: [255, 255, 255],
+        fontStyle: 'bold',
+        fontSize: 9,
+        cellPadding: 2,
+      },
+      bodyStyles: { fontSize: 9, textColor: TEXTO, cellPadding: 2 },
+      alternateRowStyles: { fillColor: [248, 250, 252] },
+      columnStyles: {
+        1: { halign: 'center', cellWidth: 24 },
+        2: { halign: 'center', cellWidth: 14 },
+        3: { halign: 'center', cellWidth: 14 },
+        4: { halign: 'right', cellWidth: 28 },
+        5: { halign: 'right', cellWidth: 30 },
+      },
+      margin: { left: M, right: M },
+    });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    y = (doc as any).lastAutoTable.finalY + 4;
+  }
 
   // ============================================================================
   // RESUMEN: total + método (o "Sin reembolso")
@@ -225,7 +277,7 @@ export async function generarComprobanteDevolucionPDF(data: DevolucionPDFData): 
     doc.text(obsLines.slice(0, 1), M + 3, y + 25);
   }
 
-  // Box der: total / método
+  // Box der: total / método / diferencia
   const boxRX = M + boxLW + 4;
   const boxRW = pageW - M - boxRX;
   doc.setFillColor(...tipoColor);
@@ -233,9 +285,32 @@ export async function generarComprobanteDevolucionPDF(data: DevolucionPDFData): 
   doc.setFontSize(8);
   doc.setTextColor(255, 255, 255);
   doc.setFont('helvetica', 'normal');
-  doc.text(`${totalU} unidad(es)`, boxRX + 3, y + 6);
 
-  if (esCambio) {
+  if (esCambio && data.venta_intercambio) {
+    const totalEntregado = data.venta_intercambio.total;
+    const dif = data.diferencia;
+    // Resumen línea por línea
+    doc.text(`Devuelto: ${fmtPEN(totalMonto)}`, boxRX + 3, y + 6);
+    doc.text(`Entregado: ${fmtPEN(totalEntregado)}`, boxRX + 3, y + 11);
+
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(11);
+    if (Math.abs(dif) < 0.01) {
+      doc.text('SIN DIFERENCIA', boxRX + boxRW / 2, y + 21, { align: 'center' });
+    } else if (dif > 0) {
+      doc.text(`COBRADO: ${fmtPEN(dif)}`, boxRX + boxRW / 2, y + 19, { align: 'center' });
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(7);
+      doc.text(`Método: ${metodoLabel(data.metodo_devolucion)}`, boxRX + boxRW / 2, y + 25, { align: 'center' });
+    } else {
+      doc.text(`DEVUELTO: ${fmtPEN(Math.abs(dif))}`, boxRX + boxRW / 2, y + 19, { align: 'center' });
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(7);
+      doc.text(`Método: ${metodoLabel(data.metodo_devolucion)}`, boxRX + boxRW / 2, y + 25, { align: 'center' });
+    }
+  } else if (esCambio) {
+    // CAMBIO sin venta intercambio (legacy / fallback)
+    doc.text(`${totalU} unidad(es)`, boxRX + 3, y + 6);
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(12);
     doc.text('CAMBIO SIN REEMBOLSO', boxRX + boxRW / 2, y + 15, { align: 'center' });
@@ -243,7 +318,7 @@ export async function generarComprobanteDevolucionPDF(data: DevolucionPDFData): 
     doc.setFontSize(8);
     doc.text(`Valor: ${fmtPEN(totalMonto)}`, boxRX + boxRW / 2, y + 23, { align: 'center' });
   } else {
-    doc.setFont('helvetica', 'normal');
+    doc.text(`${totalU} unidad(es)`, boxRX + 3, y + 6);
     doc.setFontSize(8);
     doc.text('TOTAL DEVUELTO', boxRX + 3, y + 11);
     doc.setFont('helvetica', 'bold');

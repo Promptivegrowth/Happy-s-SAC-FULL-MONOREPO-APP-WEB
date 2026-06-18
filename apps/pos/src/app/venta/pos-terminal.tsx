@@ -67,6 +67,7 @@ export function PosTerminal({
   const [cerrarOpen, setCerrarOpen] = useState(false);
   const [historialOpen, setHistorialOpen] = useState(false);
   const [devolucionOpen, setDevolucionOpen] = useState(false);
+  const [efectivoInput, setEfectivoInput] = useState<string>('');
   const [cobrarOpen, setCobrarOpen] = useState(false);
   // Counter para forzar REMOUNT del CobrarModal después de cada venta.
   // Cuando incrementa, React re-monta el modal con state limpio
@@ -286,6 +287,7 @@ export function PosTerminal({
       setNombreCliente('');
       setDocCliente('');
       setTipoCliente('rapido');
+      setEfectivoInput('');
       setCobrarOpen(false);
       setCobrarKey((k) => k + 1);
       // Refrescar balance para que el cierre vea la venta
@@ -632,9 +634,46 @@ export function PosTerminal({
 
         <div className="flex-1 overflow-auto p-4">
           <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-slate-400">Métodos de pago</p>
+
+          {/* EFECTIVO con input — para registrar monto real recibido y calcular vuelto */}
+          <div className="mb-2 rounded-md border-2 border-emerald-200 bg-emerald-50 p-2">
+            <div className="flex items-center gap-2">
+              <Banknote className="h-4 w-4 text-emerald-700" />
+              <span className="flex-1 text-xs font-semibold text-emerald-700">Efectivo recibido</span>
+              <div className="flex gap-1">
+                <input
+                  type="number"
+                  step="0.10"
+                  min={0}
+                  inputMode="decimal"
+                  value={efectivoInput}
+                  onChange={(e) => setEfectivoInput(e.target.value.replace(/[^\d.]/g, ''))}
+                  placeholder={(total - pagado).toFixed(2)}
+                  className="h-9 w-24 rounded-md border border-emerald-300 bg-white px-2 text-right font-mono text-sm"
+                  data-pos-no-focus
+                />
+                <button
+                  onClick={() => {
+                    const n = Number(efectivoInput || (total - pagado).toFixed(2));
+                    if (n <= 0) return;
+                    agregarPago('EFECTIVO', n);
+                    setEfectivoInput('');
+                  }}
+                  className="rounded-md bg-emerald-600 px-3 text-xs font-semibold text-white hover:bg-emerald-700"
+                >
+                  Cobrar
+                </button>
+              </div>
+            </div>
+            {efectivoInput && Number(efectivoInput) > total - pagado && (
+              <p className="mt-1 text-right text-[11px] text-emerald-700">
+                Vuelto a entregar: <strong>{formatPEN(Math.max(0, Number(efectivoInput) - (total - pagado)))}</strong>
+              </p>
+            )}
+          </div>
+
           <div className="grid grid-cols-2 gap-2">
             {([
-              { m: 'EFECTIVO', label: 'Efectivo', icon: <Banknote className="h-4 w-4" />, color: 'bg-emerald-50 text-emerald-700' },
               { m: 'YAPE', label: 'Yape', icon: <Smartphone className="h-4 w-4" />, color: 'bg-purple-50 text-purple-700' },
               { m: 'PLIN', label: 'Plin', icon: <Smartphone className="h-4 w-4" />, color: 'bg-blue-50 text-blue-700' },
               { m: 'TARJETA_CREDITO', label: 'Tarjeta', icon: <CreditCard className="h-4 w-4" />, color: 'bg-slate-100 text-slate-700' },
@@ -745,8 +784,18 @@ export function PosTerminal({
       )}
 
       {/* MODAL — Devolución / Cambio de mercadería */}
-      {devolucionOpen && sesionActiva && (
+      {devolucionOpen && sesionActiva && cajaActual && (
         <DevolucionModal
+          variantes={variantes.map((v) => ({
+            id: v.id,
+            sku: v.sku,
+            codigo_barras: v.codigo_barras,
+            talla: v.talla,
+            precio: Number(v.precio_publico ?? 0),
+            producto_nombre: v.productos.nombre,
+          }))}
+          cajaId={cajaActual.id}
+          sesionId={sesionActiva.id}
           onClose={() => setDevolucionOpen(false)}
           onCompleted={() => {
             setDevolucionOpen(false);
