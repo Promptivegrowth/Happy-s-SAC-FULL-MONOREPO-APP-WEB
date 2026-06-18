@@ -271,20 +271,10 @@ async function calcularBalanceInterno(
 // ============================================================================
 // HISTORIAL DE TRANSACCIONES DE LA SESIÓN ACTIVA DEL CAJERO
 // ============================================================================
-export type TransaccionRow = {
-  venta_id: string;
-  numero_venta: string;
-  fecha: string;
-  cliente_nombre: string;
-  cliente_doc: string | null;
-  cliente_telefono: string | null;
-  total: number;
-  metodos: string[];
-  comprobante: { tipo: string; numero_completo: string } | null;
-  estado: string;
-};
+// (el TYPE TransaccionRow vive en caja-helpers.ts — los archivos 'use server'
+// no deben exportar tipos, rompe el bundle del cliente)
 
-export async function obtenerHistorialSesion(): Promise<TransaccionRow[]> {
+export async function obtenerHistorialSesion(): Promise<import('./caja-helpers').TransaccionRow[]> {
   const sb = await createClient();
   const { data: { user } } = await sb.auth.getUser();
   if (!user) return [];
@@ -545,13 +535,19 @@ export async function generarExcelCierre(sesionId: string): Promise<{ base64: st
     pageSetup: { paperSize: 9, orientation: 'portrait', margins: { left: 0.5, right: 0.5, top: 0.6, bottom: 0.6, header: 0.3, footer: 0.3 } },
   });
 
-  // Anchos generosos (10 columnas para que entre el detalle de ventas)
+  // Anchos: col A ancha (24) para etiquetas largas y para que el logo no
+  // se desborde sobre el título; col B media (16); resto 14.
+  // 10 columnas para que entre el detalle de ventas.
   const COLS = 10;
-  ws.columns = Array.from({ length: COLS }, (_, i) => ({ key: `c${i + 1}`, width: i === 0 ? 6 : 14 }));
+  ws.columns = Array.from({ length: COLS }, (_, i) => ({
+    key: `c${i + 1}`,
+    width: i === 0 ? 24 : i === 1 ? 16 : 14,
+  }));
 
   // ---- Logo (si está disponible y es URL pública) ----
+  // El logo ocupa cols A+B (cabe holgado en 24+16 = ~280pt); el título arranca en col C.
   let row = 1;
-  let logoHeight = 0;
+  let tieneLogo = false;
   if (empresa?.logo_url) {
     try {
       const resp = await fetch(empresa.logo_url);
@@ -559,44 +555,44 @@ export async function generarExcelCierre(sesionId: string): Promise<{ base64: st
         const ab = await resp.arrayBuffer();
         const ext = (empresa.logo_url.split('.').pop() ?? 'png').toLowerCase();
         const extension: 'png' | 'jpeg' | 'gif' = ext === 'jpg' || ext === 'jpeg' ? 'jpeg' : ext === 'gif' ? 'gif' : 'png';
-        // ExcelJS espera un Buffer "clásico" — castamos para evitar el clash
-        // de tipos Buffer<ArrayBuffer> en TS estricto.
         const buf = Buffer.from(ab) as unknown as Parameters<typeof wb.addImage>[0]['buffer'];
         const imgId = wb.addImage({ buffer: buf, extension });
-        ws.addImage(imgId, { tl: { col: 0, row: 0 }, ext: { width: 120, height: 60 } });
-        logoHeight = 60;
+        // tl col 0 row 0; tamaño moderado para no invadir la col C
+        ws.addImage(imgId, { tl: { col: 0, row: 0 }, ext: { width: 160, height: 56 } });
+        tieneLogo = true;
+        ws.getRow(1).height = 60;
       }
     } catch {
       // si falla, seguimos sin logo
     }
   }
 
-  // Cabecera con título brandeado (a la derecha si hay logo)
-  ws.mergeCells(row, logoHeight ? 2 : 1, row, COLS);
-  const title = ws.getCell(row, logoHeight ? 2 : 1);
+  // Cabecera con título brandeado (col C cuando hay logo, sino col A)
+  const tituloCol = tieneLogo ? 3 : 1;
+  ws.mergeCells(row, tituloCol, row, COLS);
+  const title = ws.getCell(row, tituloCol);
   title.value = empresa?.nombre_comercial || empresa?.razon_social || 'Reporte de cierre de caja';
   title.font = { name: 'Calibri', size: 18, bold: true, color: { argb: BRAND.naranja } };
   title.alignment = { vertical: 'middle', horizontal: 'left' };
-  ws.getRow(row).height = 28;
+  if (!tieneLogo) ws.getRow(row).height = 28;
   row++;
 
   if (empresa) {
-    ws.mergeCells(row, 1, row, COLS);
-    const c = ws.getCell(row, 1);
+    ws.mergeCells(row, tituloCol, row, COLS);
+    const c = ws.getCell(row, tituloCol);
     c.value = `RUC ${empresa.ruc} · ${empresa.direccion_fiscal ?? ''}`;
     c.font = { name: 'Calibri', size: 10, color: { argb: 'FF64748B' } };
+    c.alignment = { vertical: 'middle', horizontal: 'left' };
     row++;
     if (empresa.telefono || empresa.email) {
-      ws.mergeCells(row, 1, row, COLS);
-      const c2 = ws.getCell(row, 1);
+      ws.mergeCells(row, tituloCol, row, COLS);
+      const c2 = ws.getCell(row, tituloCol);
       c2.value = [empresa.telefono, empresa.email].filter(Boolean).join(' · ');
       c2.font = { name: 'Calibri', size: 9, color: { argb: 'FF94A3B8' } };
+      c2.alignment = { vertical: 'middle', horizontal: 'left' };
       row++;
     }
   }
-
-  // Asegurar altura suficiente para el logo
-  if (logoHeight && ws.getRow(1).height < 50) ws.getRow(1).height = 50;
   row++;
 
   // ---- Subtítulo CIERRE DE CAJA ----

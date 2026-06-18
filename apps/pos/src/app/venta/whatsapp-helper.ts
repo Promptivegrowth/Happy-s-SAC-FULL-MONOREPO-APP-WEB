@@ -1,3 +1,5 @@
+'use client';
+
 /**
  * Helper para enviar comprobantes por WhatsApp.
  *

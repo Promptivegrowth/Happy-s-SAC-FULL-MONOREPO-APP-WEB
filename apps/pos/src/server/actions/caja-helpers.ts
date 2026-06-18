@@ -23,6 +23,20 @@ export type TipoComprobantePOS = 'BOLETA' | 'FACTURA' | 'NOTA_VENTA';
 export type TipoDocumentoCliente = 'DNI' | 'RUC' | 'CE' | 'PASAPORTE';
 export type FormatoImpresion = 'TICKET_80MM' | 'A4';
 
+// Fila del historial de transacciones de la sesión (UI POS)
+export type TransaccionRow = {
+  venta_id: string;
+  numero_venta: string;
+  fecha: string;
+  cliente_nombre: string;
+  cliente_doc: string | null;
+  cliente_telefono: string | null;
+  total: number;
+  metodos: string[];
+  comprobante: { tipo: string; numero_completo: string } | null;
+  estado: string;
+};
+
 // ----------------------------------------------------------------------------
 // PALETA HAPPY (alineada con apps/erp/src/server/actions/reportes-helpers.ts)
 // ----------------------------------------------------------------------------

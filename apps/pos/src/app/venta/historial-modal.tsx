@@ -16,7 +16,8 @@ import { Badge } from '@happy/ui/badge';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@happy/ui/table';
 import { X, Loader2, History, Send } from 'lucide-react';
 import { formatPEN } from '@happy/lib';
-import { obtenerHistorialSesion, type TransaccionRow } from '@/server/actions/caja';
+import { obtenerHistorialSesion } from '@/server/actions/caja';
+import type { TransaccionRow } from '@/server/actions/caja-helpers';
 import { construirMensajeWhatsApp, abrirWhatsApp } from './whatsapp-helper';
 
 export function HistorialModal({ onClose, empresaNombre }: { onClose: () => void; empresaNombre: string }) {
