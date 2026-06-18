@@ -276,7 +276,9 @@ export async function registrarDevolucion(
       .filter((l) => l.reingresa_stock)
       .map((l) => ({
         fecha: new Date().toISOString(),
-        tipo: 'ENTRADA_DEVOLUCION',
+        // El enum tipo_movimiento_kardex tiene ENTRADA_DEVOLUCION_CLIENTE
+        // (no "ENTRADA_DEVOLUCION" pelado). Devolución desde POS = cliente.
+        tipo: 'ENTRADA_DEVOLUCION_CLIENTE',
         almacen_id: data.almacen_id,
         variante_id: l.variante_id,
         cantidad: l.cantidad,
@@ -284,7 +286,8 @@ export async function registrarDevolucion(
         costo_total: l.precio_unitario * l.cantidad,
         referencia_tipo: 'DEVOLUCION',
         referencia_id: devId,
-        referencia_numero: numero,
+        // El número de devolución se guarda en observacion (la tabla NO tiene
+        // columna referencia_numero — solo referencia_id/referencia_linea_id).
         observacion: `Devolución ${numero} de venta ${venta.numero_venta}`,
       }));
     if (movimientosKardex.length > 0) {
