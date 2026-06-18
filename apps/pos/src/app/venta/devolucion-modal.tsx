@@ -25,6 +25,7 @@ import { formatPEN } from '@happy/lib';
 import {
   buscarVentaParaDevolucion,
   registrarDevolucion,
+  cargarDatosDevolucionPDF,
   type VentaDevolucionData,
 } from '@/server/actions/devoluciones';
 
@@ -130,12 +131,24 @@ export function DevolucionModal({ onClose, onCompleted }: { onClose: () => void;
         monto_devuelto: tipo === 'DEVOLUCION' ? totalSeleccionado : 0,
         lineas: lineasDevolver,
       });
-      if (r.ok) {
-        toast.success(`✅ ${r.data?.numero} · ${tipo === 'DEVOLUCION' ? formatPEN(totalSeleccionado) : 'Cambio registrado'}`);
-        onCompleted();
-      } else {
+      if (!r.ok) {
         toast.error(r.error ?? 'Error');
+        return;
       }
+      toast.success(`✅ ${r.data?.numero} · ${tipo === 'DEVOLUCION' ? formatPEN(totalSeleccionado) : 'Cambio registrado'}`);
+
+      // Auto-descargar PDF del comprobante de devolución
+      try {
+        const data = await cargarDatosDevolucionPDF(r.data!.id);
+        if (data) {
+          const { generarComprobanteDevolucionPDF } = await import('./devolucion-pdf');
+          await generarComprobanteDevolucionPDF(data);
+        }
+      } catch (e) {
+        toast.error('Operación OK pero error al generar PDF: ' + (e as Error).message);
+      }
+
+      onCompleted();
     });
   }
 

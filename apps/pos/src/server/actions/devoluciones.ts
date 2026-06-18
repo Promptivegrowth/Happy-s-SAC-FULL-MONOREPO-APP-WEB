@@ -369,3 +369,163 @@ export async function listarDevolucionesSesion(): Promise<DevolucionRow[]> {
     };
   });
 }
+
+// ============================================================================
+// DATOS PARA PDF DE COMPROBANTE DE DEVOLUCIÓN
+// ============================================================================
+export type DevolucionPDFData = {
+  numero: string;
+  fecha: string;
+  tipo: 'DEVOLUCION' | 'CAMBIO';
+  motivo: string;
+  observacion: string | null;
+  monto_devuelto: number;
+  metodo_devolucion: string | null;
+  atendido_por_nombre: string;
+  almacen_nombre: string;
+  venta: {
+    numero: string;
+    fecha: string;
+    comprobante: { tipo: string; numero_completo: string } | null;
+  };
+  cliente: {
+    nombre: string;
+    documento: string | null;
+    tipo_documento: string | null;
+  };
+  lineas: {
+    producto_nombre: string;
+    sku: string;
+    talla: string;
+    cantidad: number;
+    precio_unitario: number;
+    sub_total: number;
+  }[];
+  empresa: {
+    razon_social: string;
+    nombre_comercial: string | null;
+    ruc: string;
+    direccion_fiscal: string | null;
+    telefono: string | null;
+    email: string | null;
+  } | null;
+  logo_dataurl: string | null;
+};
+
+export async function cargarDatosDevolucionPDF(devolucionId: string): Promise<DevolucionPDFData | null> {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const sb = (await createClient()) as any;
+
+  const { data: dev } = await sb
+    .from('devoluciones')
+    .select(
+      'id, numero, fecha, tipo, motivo, observacion, monto_devuelto, metodo_devolucion, atendido_por, almacen_id, venta_id, ' +
+        'almacen:almacen_id(nombre)',
+    )
+    .eq('id', devolucionId)
+    .single();
+  if (!dev) return null;
+
+  const [{ data: lineasRaw }, { data: venta }, { data: empresa }, { data: perfil }] = await Promise.all([
+    sb
+      .from('devoluciones_lineas')
+      .select('cantidad, precio_unitario, variantes:variante_id(sku, talla, productos:producto_id(nombre))')
+      .eq('devolucion_id', devolucionId),
+    sb
+      .from('ventas')
+      .select(
+        'numero, fecha, nombre_cliente_rapido, documento_cliente, tipo_documento_cliente, comprobante_id, ' +
+          'cliente:cliente_id(razon_social, nombres, apellido_paterno, apellido_materno, tipo_documento, numero_documento)',
+      )
+      .eq('id', dev.venta_id)
+      .single(),
+    sb.from('empresa').select('razon_social, nombre_comercial, ruc, direccion_fiscal, telefono, email, logo_url').single(),
+    sb.from('perfiles').select('nombre_completo').eq('id', dev.atendido_por).maybeSingle(),
+  ]);
+
+  // Comprobante de la venta (más reciente)
+  let comprobante: { tipo: string; numero_completo: string } | null = null;
+  if (venta?.comprobante_id) {
+    const { data: c } = await sb
+      .from('comprobantes')
+      .select('tipo, numero_completo')
+      .eq('id', venta.comprobante_id)
+      .maybeSingle();
+    if (c) comprobante = { tipo: c.tipo as string, numero_completo: c.numero_completo as string };
+  } else {
+    const { data: c } = await sb
+      .from('comprobantes')
+      .select('tipo, numero_completo')
+      .eq('venta_id', dev.venta_id)
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (c) comprobante = { tipo: c.tipo as string, numero_completo: c.numero_completo as string };
+  }
+
+  // Logo como dataURL para incrustar en el PDF
+  let logo_dataurl: string | null = null;
+  const emp = empresa as { logo_url: string | null } | null;
+  if (emp?.logo_url) {
+    try {
+      const resp = await fetch(emp.logo_url, { cache: 'no-store' });
+      if (resp.ok) {
+        const buf = Buffer.from(await resp.arrayBuffer());
+        const ext = (emp.logo_url.split('.').pop() ?? 'png').toLowerCase();
+        const mime = ext === 'jpg' || ext === 'jpeg' ? 'image/jpeg' : 'image/png';
+        logo_dataurl = `data:${mime};base64,${buf.toString('base64')}`;
+      }
+    } catch { /* opcional */ }
+  }
+
+  type LR = {
+    cantidad: number;
+    precio_unitario: string | number;
+    variantes: { sku: string; talla: string; productos: { nombre: string } | null } | null;
+  };
+  const lineas = ((lineasRaw ?? []) as LR[]).map((l) => {
+    const pu = Number(l.precio_unitario ?? 0);
+    return {
+      producto_nombre: l.variantes?.productos?.nombre ?? '—',
+      sku: l.variantes?.sku ?? '—',
+      talla: l.variantes?.talla ?? '—',
+      cantidad: Number(l.cantidad),
+      precio_unitario: pu,
+      sub_total: pu * Number(l.cantidad),
+    };
+  });
+
+  const cliNombre =
+    venta?.cliente?.razon_social ||
+    [venta?.cliente?.nombres, venta?.cliente?.apellido_paterno, venta?.cliente?.apellido_materno]
+      .filter(Boolean)
+      .join(' ')
+      .trim() ||
+    venta?.nombre_cliente_rapido ||
+    'CLIENTE VARIOS';
+
+  return {
+    numero: dev.numero as string,
+    fecha: dev.fecha as string,
+    tipo: dev.tipo as 'DEVOLUCION' | 'CAMBIO',
+    motivo: (dev.motivo as string) ?? '',
+    observacion: (dev.observacion as string | null) ?? null,
+    monto_devuelto: Number(dev.monto_devuelto ?? 0),
+    metodo_devolucion: (dev.metodo_devolucion as string | null) ?? null,
+    atendido_por_nombre: (perfil?.nombre_completo as string | null) ?? 'Cajero',
+    almacen_nombre: (dev.almacen?.nombre as string) ?? '—',
+    venta: {
+      numero: venta?.numero as string,
+      fecha: venta?.fecha as string,
+      comprobante,
+    },
+    cliente: {
+      nombre: cliNombre,
+      documento: (venta?.cliente?.numero_documento ?? venta?.documento_cliente ?? null) as string | null,
+      tipo_documento: (venta?.cliente?.tipo_documento ?? venta?.tipo_documento_cliente ?? null) as string | null,
+    },
+    lineas,
+    empresa: empresa as DevolucionPDFData['empresa'],
+    logo_dataurl,
+  };
+}
