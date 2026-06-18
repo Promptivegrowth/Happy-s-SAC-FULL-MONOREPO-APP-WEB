@@ -9,8 +9,10 @@ import { ProductoForm } from '@/components/forms/producto-form';
 import { VariantesSection } from '@/components/forms/variantes-section';
 import { GaleriaSection } from '@/components/forms/galeria-section';
 import { PublicacionSection } from '@/components/forms/publicacion-section';
+import { FichaTecnicaSection } from '@/components/forms/ficha-tecnica-section';
 import { DeleteButton } from '@/components/forms/delete-button';
 import { eliminarProducto } from '@/server/actions/productos';
+import { obtenerFichaVigente } from '@/server/actions/fichas-tecnicas';
 
 export const dynamic = 'force-dynamic';
 
@@ -45,6 +47,14 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
   // alguna tabla devuelve algo inesperado.
   const ultimosCostos = await calcularUltimoCostoPorTalla(sb, id, recetaActiva?.id ?? null);
 
+  // Ficha técnica (envuelta en try/catch — si falla NO debe romper la página)
+  let fichaData: Awaited<ReturnType<typeof obtenerFichaVigente>> | null = null;
+  try {
+    fichaData = await obtenerFichaVigente(id);
+  } catch (e) {
+    console.warn('[productos] obtenerFichaVigente falló:', (e as Error).message);
+  }
+
   async function onDelete() { 'use server'; return eliminarProducto(id); }
 
   return (
@@ -69,6 +79,7 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
           <TabsTrigger value="datos">Datos del modelo</TabsTrigger>
           <TabsTrigger value="variantes">Variantes ({(vars ?? []).length})</TabsTrigger>
           <TabsTrigger value="galeria">Galería ({(imgs ?? []).length})</TabsTrigger>
+          <TabsTrigger value="ficha">Ficha técnica{fichaData?.ficha ? ` · Rev.${fichaData.ficha.revision}` : ''}</TabsTrigger>
           <TabsTrigger value="publicacion">Publicación web {pub?.publicado ? '✓' : ''}</TabsTrigger>
         </TabsList>
         <TabsContent value="datos">
@@ -84,6 +95,17 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
         </TabsContent>
         <TabsContent value="galeria">
           <GaleriaSection productoId={id} imagenes={imgs ?? []} />
+        </TabsContent>
+        <TabsContent value="ficha">
+          <FichaTecnicaSection
+            productoId={id}
+            productoNombre={prod.nombre}
+            tallasProducto={Array.from(new Set((vars ?? []).map((v) => v.talla as string)))}
+            ficha={fichaData?.ficha ?? null}
+            medidas={fichaData?.medidas ?? []}
+            imagenes={fichaData?.imagenes ?? []}
+            revisiones={fichaData?.revisiones ?? []}
+          />
         </TabsContent>
         <TabsContent value="publicacion">
           <PublicacionSection

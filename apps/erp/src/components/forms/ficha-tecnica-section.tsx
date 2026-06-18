@@ -1,0 +1,883 @@
+'use client';
+
+/**
+ * SECCIÓN — Ficha técnica de un producto (MVP fase 1).
+ *
+ * Sub-tabs internos: Resumen · Composición · Medidas · Imágenes · Confección/Acabados
+ *
+ * Estado vacío: si el producto no tiene ficha vigente, muestra un CTA grande
+ * "Crear ficha técnica" para arrancar la primera revisión.
+ */
+
+import { useState, useTransition, useMemo, useRef } from 'react';
+import { useRouter } from 'next/navigation';
+import { Button } from '@happy/ui/button';
+import { Card } from '@happy/ui/card';
+import { Input } from '@happy/ui/input';
+import { Label } from '@happy/ui/label';
+import { Badge } from '@happy/ui/badge';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@happy/ui/table';
+import {
+  FileText, Plus, Loader2, Save, Trash2, Upload, ImageIcon, Ruler, Shirt, Wrench,
+  Layers, Info,
+} from 'lucide-react';
+import { toast } from 'sonner';
+import { ordenTalla } from '@happy/lib';
+import {
+  crearFichaTecnica,
+  actualizarFichaTecnica,
+  guardarMedidasFicha,
+  subirImagenFicha,
+  eliminarImagenFicha,
+} from '@/server/actions/fichas-tecnicas';
+import {
+  TEMPORADAS,
+  TIPOS_IMAGEN_FICHA,
+  TIPO_IMAGEN_LABEL,
+  type FichaTecnica,
+  type FichaMedida,
+  type FichaImagen,
+  type TipoImagenFicha,
+  type Temporada,
+} from '@/server/actions/fichas-tecnicas-helpers';
+
+type Props = {
+  productoId: string;
+  productoNombre: string;
+  tallasProducto: string[];
+  ficha: FichaTecnica | null;
+  medidas: FichaMedida[];
+  imagenes: FichaImagen[];
+  revisiones: { id: string; revision: number; vigente: boolean; updated_at: string }[];
+};
+
+type SubTab = 'resumen' | 'composicion' | 'medidas' | 'imagenes' | 'confeccion';
+
+export function FichaTecnicaSection(props: Props) {
+  const router = useRouter();
+  const [creando, startCreando] = useTransition();
+
+  if (!props.ficha) {
+    return (
+      <Card className="border-2 border-dashed border-slate-300 p-10 text-center">
+        <FileText className="mx-auto h-10 w-10 text-slate-300" />
+        <h3 className="mt-3 font-display text-lg font-semibold text-corp-900">
+          Este producto aún no tiene ficha técnica
+        </h3>
+        <p className="mt-1 text-sm text-slate-500">
+          La ficha técnica documenta materiales, medidas por talla, especificaciones de confección,
+          imágenes de referencia y acabados — útil para producción, calidad y atención al cliente B2B.
+        </p>
+        <Button
+          variant="premium"
+          size="lg"
+          className="mt-5"
+          disabled={creando}
+          onClick={() => {
+            startCreando(async () => {
+              const r = await crearFichaTecnica(props.productoId);
+              if (r.ok) {
+                toast.success('Ficha técnica creada');
+                router.refresh();
+              } else {
+                toast.error(r.error ?? 'Error');
+              }
+            });
+          }}
+        >
+          {creando ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
+          Crear ficha técnica
+        </Button>
+      </Card>
+    );
+  }
+
+  return <FichaEditor {...props} ficha={props.ficha} />;
+}
+
+function FichaEditor({
+  productoId, productoNombre, tallasProducto, ficha, medidas, imagenes, revisiones,
+}: Props & { ficha: FichaTecnica }) {
+  const router = useRouter();
+  const [tab, setTab] = useState<SubTab>('resumen');
+  const [creandoRev, startRev] = useTransition();
+
+  function nuevaRevision() {
+    if (!confirm(`¿Crear nueva revisión a partir de la ${ficha.revision}? La actual quedará archivada.`)) return;
+    startRev(async () => {
+      const r = await crearFichaTecnica(productoId);
+      if (r.ok) {
+        toast.success(`Revisión ${r.data?.revision} creada`);
+        router.refresh();
+      } else toast.error(r.error ?? 'Error');
+    });
+  }
+
+  return (
+    <div className="space-y-4">
+      {/* Header con metadatos de la ficha vigente */}
+      <Card className="flex flex-wrap items-center justify-between gap-3 p-3">
+        <div className="flex items-center gap-3">
+          <div className="rounded-full bg-happy-100 p-2">
+            <FileText className="h-4 w-4 text-happy-600" />
+          </div>
+          <div>
+            <p className="text-xs text-slate-500">
+              {productoNombre} · Revisión vigente
+            </p>
+            <p className="font-display text-base font-semibold text-corp-900">
+              Rev. {ficha.revision}
+              {ficha.fecha_aprobacion && (
+                <span className="ml-2 text-xs font-normal text-slate-500">
+                  · Aprobada {new Date(ficha.fecha_aprobacion).toLocaleDateString('es-PE')}
+                </span>
+              )}
+            </p>
+          </div>
+        </div>
+        <div className="flex items-center gap-2">
+          {revisiones.length > 1 && (
+            <Badge variant="outline" className="text-[10px]">
+              {revisiones.length} revisiones en historial
+            </Badge>
+          )}
+          <Button variant="outline" size="sm" onClick={nuevaRevision} disabled={creandoRev}>
+            {creandoRev && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+            Nueva revisión
+          </Button>
+        </div>
+      </Card>
+
+      {/* Sub-tabs */}
+      <div className="flex flex-wrap gap-1 border-b border-slate-200">
+        <SubTabBtn active={tab === 'resumen'} onClick={() => setTab('resumen')} icon={<Info className="h-3.5 w-3.5" />}>
+          Resumen
+        </SubTabBtn>
+        <SubTabBtn active={tab === 'composicion'} onClick={() => setTab('composicion')} icon={<Shirt className="h-3.5 w-3.5" />}>
+          Composición
+        </SubTabBtn>
+        <SubTabBtn active={tab === 'medidas'} onClick={() => setTab('medidas')} icon={<Ruler className="h-3.5 w-3.5" />}>
+          Medidas ({medidas.length})
+        </SubTabBtn>
+        <SubTabBtn active={tab === 'imagenes'} onClick={() => setTab('imagenes')} icon={<ImageIcon className="h-3.5 w-3.5" />}>
+          Imágenes ({imagenes.length})
+        </SubTabBtn>
+        <SubTabBtn active={tab === 'confeccion'} onClick={() => setTab('confeccion')} icon={<Wrench className="h-3.5 w-3.5" />}>
+          Confección / Acabados
+        </SubTabBtn>
+      </div>
+
+      {tab === 'resumen' && <ResumenTab ficha={ficha} />}
+      {tab === 'composicion' && <ComposicionTab ficha={ficha} />}
+      {tab === 'medidas' && <MedidasTab ficha={ficha} medidasIniciales={medidas} tallasProducto={tallasProducto} />}
+      {tab === 'imagenes' && <ImagenesTab fichaId={ficha.id} imagenes={imagenes} />}
+      {tab === 'confeccion' && <ConfeccionTab ficha={ficha} />}
+    </div>
+  );
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// RESUMEN
+// ────────────────────────────────────────────────────────────────────────────
+function ResumenTab({ ficha }: { ficha: FichaTecnica }) {
+  const [pending, start] = useTransition();
+  const [form, setForm] = useState({
+    temporada: ficha.temporada ?? '',
+    fecha_aprobacion: ficha.fecha_aprobacion ?? '',
+    cliente_referencia: ficha.cliente_referencia ?? '',
+    descripcion_larga: ficha.descripcion_larga ?? '',
+    alcance_uso: ficha.alcance_uso ?? '',
+    observaciones: ficha.observaciones ?? '',
+  });
+
+  function save() {
+    start(async () => {
+      const r = await actualizarFichaTecnica(ficha.id, {
+        temporada: (form.temporada || null) as Temporada | null,
+        fecha_aprobacion: form.fecha_aprobacion || null,
+        cliente_referencia: form.cliente_referencia,
+        descripcion_larga: form.descripcion_larga,
+        alcance_uso: form.alcance_uso,
+        observaciones: form.observaciones,
+      });
+      if (r.ok) toast.success('Resumen guardado');
+      else toast.error(r.error ?? 'Error');
+    });
+  }
+
+  return (
+    <Card className="space-y-4 p-5">
+      <div className="grid gap-3 sm:grid-cols-3">
+        <div>
+          <Label className="text-xs">Temporada</Label>
+          <select
+            value={form.temporada}
+            onChange={(e) => setForm({ ...form, temporada: e.target.value })}
+            className="mt-1 h-10 w-full rounded-md border border-input bg-white px-2 text-sm"
+          >
+            <option value="">—</option>
+            {TEMPORADAS.map((t) => <option key={t} value={t}>{t}</option>)}
+          </select>
+        </div>
+        <div>
+          <Label className="text-xs">Fecha aprobación</Label>
+          <Input
+            type="date"
+            value={form.fecha_aprobacion}
+            onChange={(e) => setForm({ ...form, fecha_aprobacion: e.target.value })}
+            className="mt-1"
+          />
+        </div>
+        <div>
+          <Label className="text-xs">Cliente / referencia</Label>
+          <Input
+            value={form.cliente_referencia}
+            onChange={(e) => setForm({ ...form, cliente_referencia: e.target.value })}
+            placeholder="Ej. Colegio XYZ"
+            className="mt-1"
+          />
+        </div>
+      </div>
+
+      <Field label="Descripción del producto">
+        <textarea
+          value={form.descripcion_larga}
+          onChange={(e) => setForm({ ...form, descripcion_larga: e.target.value })}
+          rows={3}
+          placeholder="Pantalón escolar que lleva elástico en la cintura. Cuenta con..."
+          className="mt-1 w-full rounded-md border border-input bg-white p-2 text-sm"
+        />
+      </Field>
+
+      <div className="grid gap-3 sm:grid-cols-2">
+        <Field label="Alcance / uso de la prenda">
+          <Input
+            value={form.alcance_uso}
+            onChange={(e) => setForm({ ...form, alcance_uso: e.target.value })}
+            placeholder="Prenda uso escolar"
+            className="mt-1"
+          />
+        </Field>
+        <Field label="Observaciones">
+          <Input
+            value={form.observaciones}
+            onChange={(e) => setForm({ ...form, observaciones: e.target.value })}
+            className="mt-1"
+          />
+        </Field>
+      </div>
+
+      <div className="flex justify-end">
+        <Button variant="premium" size="sm" onClick={save} disabled={pending}>
+          {pending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+          Guardar resumen
+        </Button>
+      </div>
+    </Card>
+  );
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// COMPOSICIÓN (tela principal + secundaria)
+// ────────────────────────────────────────────────────────────────────────────
+function ComposicionTab({ ficha }: { ficha: FichaTecnica }) {
+  const [pending, start] = useTransition();
+  const [form, setForm] = useState({
+    tela_principal_nombre: ficha.tela_principal_nombre ?? '',
+    tela_principal_composicion: ficha.tela_principal_composicion ?? '',
+    tela_principal_color: ficha.tela_principal_color ?? '',
+    tela_principal_densidad: ficha.tela_principal_densidad ?? '',
+    tela_principal_ancho: ficha.tela_principal_ancho ?? '',
+    tela_secundaria_nombre: ficha.tela_secundaria_nombre ?? '',
+    tela_secundaria_composicion: ficha.tela_secundaria_composicion ?? '',
+    tela_secundaria_color: ficha.tela_secundaria_color ?? '',
+    tela_secundaria_densidad: ficha.tela_secundaria_densidad ?? '',
+    tela_secundaria_ancho: ficha.tela_secundaria_ancho ?? '',
+  });
+
+  function save() {
+    start(async () => {
+      const r = await actualizarFichaTecnica(ficha.id, form);
+      if (r.ok) toast.success('Composición guardada');
+      else toast.error(r.error ?? 'Error');
+    });
+  }
+
+  return (
+    <div className="space-y-4">
+      <Card className="space-y-3 p-5">
+        <h4 className="font-display text-sm font-semibold uppercase tracking-wide text-corp-900">
+          <Layers className="mr-1 inline h-3.5 w-3.5" /> Tela principal
+        </h4>
+        <TelaForm
+          prefix="tela_principal"
+          values={form}
+          onChange={(v) => setForm({ ...form, ...v })}
+        />
+      </Card>
+
+      <Card className="space-y-3 p-5">
+        <h4 className="font-display text-sm font-semibold uppercase tracking-wide text-corp-900">
+          <Layers className="mr-1 inline h-3.5 w-3.5" /> Tela secundaria (opcional)
+        </h4>
+        <TelaForm
+          prefix="tela_secundaria"
+          values={form}
+          onChange={(v) => setForm({ ...form, ...v })}
+        />
+      </Card>
+
+      <div className="flex justify-end">
+        <Button variant="premium" size="sm" onClick={save} disabled={pending}>
+          {pending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+          Guardar composición
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+function TelaForm({
+  prefix, values, onChange,
+}: {
+  prefix: 'tela_principal' | 'tela_secundaria';
+  values: Record<string, string>;
+  onChange: (v: Record<string, string>) => void;
+}) {
+  const k = (suf: string) => `${prefix}_${suf}`;
+  return (
+    <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+      <Field label="Nombre tejido">
+        <Input
+          value={values[k('nombre')] ?? ''}
+          onChange={(e) => onChange({ [k('nombre')]: e.target.value })}
+          placeholder="Polinam"
+          className="mt-1"
+        />
+      </Field>
+      <Field label="Composición">
+        <Input
+          value={values[k('composicion')] ?? ''}
+          onChange={(e) => onChange({ [k('composicion')]: e.target.value })}
+          placeholder="100% poliéster"
+          className="mt-1"
+        />
+      </Field>
+      <Field label="Color">
+        <Input
+          value={values[k('color')] ?? ''}
+          onChange={(e) => onChange({ [k('color')]: e.target.value })}
+          placeholder="Verde"
+          className="mt-1"
+        />
+      </Field>
+      <Field label="Densidad">
+        <Input
+          value={values[k('densidad')] ?? ''}
+          onChange={(e) => onChange({ [k('densidad')]: e.target.value })}
+          className="mt-1"
+        />
+      </Field>
+      <Field label="Ancho de tela">
+        <Input
+          value={values[k('ancho')] ?? ''}
+          onChange={(e) => onChange({ [k('ancho')]: e.target.value })}
+          placeholder="1.70 +/- 2 cm"
+          className="mt-1"
+        />
+      </Field>
+    </div>
+  );
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// MEDIDAS — matriz medida × talla
+// ────────────────────────────────────────────────────────────────────────────
+type MedidaRow = {
+  codigo: string;
+  descripcion: string;
+  tolerancia_cm: number;
+  observaciones: string;
+  valores: Record<string, string>; // talla → valor string
+};
+
+function MedidasTab({
+  ficha, medidasIniciales, tallasProducto,
+}: {
+  ficha: FichaTecnica;
+  medidasIniciales: FichaMedida[];
+  tallasProducto: string[];
+}) {
+  const [pending, start] = useTransition();
+  const tallas = useMemo(() => {
+    const set = new Set<string>();
+    tallasProducto.forEach((t) => set.add(t));
+    medidasIniciales.forEach((m) => m.valores.forEach((v) => set.add(v.talla)));
+    return Array.from(set).sort((a, b) => ordenTalla(a) - ordenTalla(b));
+  }, [tallasProducto, medidasIniciales]);
+
+  const [rows, setRows] = useState<MedidaRow[]>(() => {
+    if (medidasIniciales.length === 0) {
+      // Plantilla: una fila vacía para arrancar
+      return [{ codigo: 'A', descripcion: '', tolerancia_cm: 0.5, observaciones: '', valores: {} }];
+    }
+    return medidasIniciales.map((m) => ({
+      codigo: m.codigo,
+      descripcion: m.descripcion,
+      tolerancia_cm: m.tolerancia_cm,
+      observaciones: m.observaciones ?? '',
+      valores: Object.fromEntries(m.valores.map((v) => [v.talla, v.valor !== null ? String(v.valor) : '']))
+    }));
+  });
+
+  function siguienteCodigo() {
+    const letras = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('');
+    const usadas = new Set(rows.map((r) => r.codigo.trim().toUpperCase()));
+    for (const l of letras) if (!usadas.has(l)) return l;
+    return `M${rows.length + 1}`;
+  }
+
+  function agregar() {
+    setRows([...rows, { codigo: siguienteCodigo(), descripcion: '', tolerancia_cm: 0.5, observaciones: '', valores: {} }]);
+  }
+  function eliminar(i: number) {
+    setRows(rows.filter((_, idx) => idx !== i));
+  }
+  function actualizar(i: number, patch: Partial<MedidaRow>) {
+    setRows(rows.map((r, idx) => idx === i ? { ...r, ...patch } : r));
+  }
+  function setValor(i: number, talla: string, valor: string) {
+    setRows(rows.map((r, idx) => idx === i ? { ...r, valores: { ...r.valores, [talla]: valor } } : r));
+  }
+
+  function save() {
+    // Validación local
+    for (const r of rows) {
+      if (!r.codigo.trim() || !r.descripcion.trim()) {
+        toast.error('Cada medida necesita código y descripción');
+        return;
+      }
+    }
+    const codigosUnicos = new Set(rows.map((r) => r.codigo.trim().toUpperCase()));
+    if (codigosUnicos.size !== rows.length) {
+      toast.error('Hay códigos duplicados');
+      return;
+    }
+
+    start(async () => {
+      const r = await guardarMedidasFicha(
+        ficha.id,
+        rows.map((row, idx) => ({
+          codigo: row.codigo,
+          descripcion: row.descripcion,
+          tolerancia_cm: Number(row.tolerancia_cm) || 0,
+          observaciones: row.observaciones || null,
+          orden: idx,
+          valores: tallas.map((t) => ({
+            talla: t,
+            valor: row.valores[t] && row.valores[t].trim() !== '' ? Number(row.valores[t]) : null,
+          })),
+        })),
+      );
+      if (r.ok) toast.success('Medidas guardadas');
+      else toast.error(r.error ?? 'Error');
+    });
+  }
+
+  return (
+    <Card className="p-0">
+      <div className="flex items-center justify-between border-b border-slate-200 p-3">
+        <div>
+          <h4 className="font-display text-sm font-semibold text-corp-900">
+            Cuadro de medidas (centímetros)
+          </h4>
+          <p className="text-[11px] text-slate-500">
+            {tallas.length === 0
+              ? 'Este producto no tiene variantes con tallas todavía — crealas en la tab "Variantes".'
+              : `Tallas disponibles: ${tallas.join(' · ')}`}
+          </p>
+        </div>
+        <div className="flex items-center gap-2">
+          <Button variant="outline" size="sm" onClick={agregar}>
+            <Plus className="h-3.5 w-3.5" /> Medida
+          </Button>
+          <Button variant="premium" size="sm" onClick={save} disabled={pending}>
+            {pending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />}
+            Guardar medidas
+          </Button>
+        </div>
+      </div>
+
+      <div className="overflow-x-auto">
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead className="w-14">#</TableHead>
+              <TableHead className="min-w-[200px]">Descripción</TableHead>
+              {tallas.map((t) => (
+                <TableHead key={t} className="w-20 text-center">{t}</TableHead>
+              ))}
+              <TableHead className="w-20 text-center">Tol ±cm</TableHead>
+              <TableHead className="min-w-[120px]">Observación</TableHead>
+              <TableHead className="w-10"></TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {rows.length === 0 && (
+              <TableRow>
+                <TableCell colSpan={tallas.length + 5} className="py-8 text-center text-sm text-slate-400">
+                  Sin medidas. Click en "Medida" para agregar.
+                </TableCell>
+              </TableRow>
+            )}
+            {rows.map((row, i) => (
+              <TableRow key={i}>
+                <TableCell>
+                  <Input
+                    value={row.codigo}
+                    onChange={(e) => actualizar(i, { codigo: e.target.value.toUpperCase().slice(0, 4) })}
+                    className="h-8 text-center font-mono text-xs"
+                  />
+                </TableCell>
+                <TableCell>
+                  <Input
+                    value={row.descripcion}
+                    onChange={(e) => actualizar(i, { descripcion: e.target.value })}
+                    placeholder="LARGO DESDE EL BORDE DE PRETINA"
+                    className="h-8"
+                  />
+                </TableCell>
+                {tallas.map((t) => (
+                  <TableCell key={t}>
+                    <Input
+                      value={row.valores[t] ?? ''}
+                      onChange={(e) => setValor(i, t, e.target.value.replace(/[^\d.]/g, ''))}
+                      placeholder="—"
+                      className="h-8 text-center font-mono text-xs"
+                    />
+                  </TableCell>
+                ))}
+                <TableCell>
+                  <Input
+                    type="number"
+                    step="0.1"
+                    value={row.tolerancia_cm}
+                    onChange={(e) => actualizar(i, { tolerancia_cm: Number(e.target.value) })}
+                    className="h-8 text-center font-mono text-xs"
+                  />
+                </TableCell>
+                <TableCell>
+                  <Input
+                    value={row.observaciones}
+                    onChange={(e) => actualizar(i, { observaciones: e.target.value })}
+                    className="h-8"
+                  />
+                </TableCell>
+                <TableCell>
+                  <Button variant="ghost" size="sm" onClick={() => eliminar(i)}>
+                    <Trash2 className="h-3.5 w-3.5 text-rose-500" />
+                  </Button>
+                </TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      </div>
+    </Card>
+  );
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// IMÁGENES
+// ────────────────────────────────────────────────────────────────────────────
+function ImagenesTab({ fichaId, imagenes }: { fichaId: string; imagenes: FichaImagen[] }) {
+  const router = useRouter();
+  const fileRef = useRef<HTMLInputElement>(null);
+  const [tipo, setTipo] = useState<TipoImagenFicha>('DELANTERO');
+  const [leyenda, setLeyenda] = useState('');
+  const [subiendo, setSubiendo] = useState(false);
+
+  async function handleFile(file: File) {
+    if (!file.type.match(/^image\/(png|jpeg|jpg|webp)$/)) {
+      toast.error('Solo PNG, JPG o WEBP');
+      return;
+    }
+    if (file.size > 10 * 1024 * 1024) {
+      toast.error('Máx 10 MB');
+      return;
+    }
+    setSubiendo(true);
+    try {
+      const buf = await file.arrayBuffer();
+      const base64 = btoa(String.fromCharCode(...new Uint8Array(buf)));
+      const r = await subirImagenFicha(fichaId, {
+        tipo,
+        leyenda: leyenda || null,
+        filename: file.name,
+        mime: file.type as 'image/png' | 'image/jpeg' | 'image/webp',
+        base64,
+      });
+      if (r.ok) {
+        toast.success('Imagen subida');
+        setLeyenda('');
+        if (fileRef.current) fileRef.current.value = '';
+        router.refresh();
+      } else {
+        toast.error(r.error ?? 'Error');
+      }
+    } finally {
+      setSubiendo(false);
+    }
+  }
+
+  async function borrar(id: string) {
+    if (!confirm('¿Eliminar esta imagen?')) return;
+    const r = await eliminarImagenFicha(id);
+    if (r.ok) {
+      toast.success('Imagen eliminada');
+      router.refresh();
+    } else {
+      toast.error(r.error ?? 'Error');
+    }
+  }
+
+  return (
+    <div className="space-y-4">
+      <Card className="space-y-3 p-4">
+        <h4 className="font-display text-sm font-semibold uppercase tracking-wide text-corp-900">
+          <Upload className="mr-1 inline h-3.5 w-3.5" /> Subir nueva imagen
+        </h4>
+        <div className="grid gap-3 sm:grid-cols-[200px_1fr_auto]">
+          <div>
+            <Label className="text-xs">Tipo</Label>
+            <select
+              value={tipo}
+              onChange={(e) => setTipo(e.target.value as TipoImagenFicha)}
+              className="mt-1 h-10 w-full rounded-md border border-input bg-white px-2 text-sm"
+            >
+              {TIPOS_IMAGEN_FICHA.map((t) => (
+                <option key={t} value={t}>{TIPO_IMAGEN_LABEL[t]}</option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <Label className="text-xs">Leyenda (opcional)</Label>
+            <Input
+              value={leyenda}
+              onChange={(e) => setLeyenda(e.target.value)}
+              placeholder="Vista delantera del modelo"
+              className="mt-1"
+            />
+          </div>
+          <div className="flex items-end">
+            <input
+              ref={fileRef}
+              type="file"
+              accept="image/png,image/jpeg,image/webp"
+              onChange={(e) => {
+                const f = e.target.files?.[0];
+                if (f) void handleFile(f);
+              }}
+              className="hidden"
+            />
+            <Button
+              variant="premium"
+              onClick={() => fileRef.current?.click()}
+              disabled={subiendo}
+            >
+              {subiendo ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
+              Subir
+            </Button>
+          </div>
+        </div>
+        <p className="text-[10px] text-slate-400">PNG / JPG / WEBP · máx 10 MB</p>
+      </Card>
+
+      {imagenes.length === 0 ? (
+        <Card className="p-10 text-center">
+          <ImageIcon className="mx-auto h-10 w-10 text-slate-300" />
+          <p className="mt-2 text-sm text-slate-500">Aún no hay imágenes en esta ficha.</p>
+        </Card>
+      ) : (
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          {imagenes.map((img) => (
+            <Card key={img.id} className="overflow-hidden">
+              <div className="aspect-square bg-slate-50">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src={img.url} alt={img.leyenda ?? ''} className="h-full w-full object-contain" />
+              </div>
+              <div className="space-y-1 p-3">
+                <div className="flex items-center justify-between">
+                  <Badge variant="outline" className="text-[10px]">{TIPO_IMAGEN_LABEL[img.tipo]}</Badge>
+                  <Button variant="ghost" size="sm" onClick={() => borrar(img.id)}>
+                    <Trash2 className="h-3 w-3 text-rose-500" />
+                  </Button>
+                </div>
+                {img.leyenda && <p className="text-xs text-slate-600">{img.leyenda}</p>}
+              </div>
+            </Card>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// CONFECCIÓN / ACABADOS
+// ────────────────────────────────────────────────────────────────────────────
+function ConfeccionTab({ ficha }: { ficha: FichaTecnica }) {
+  const [pending, start] = useTransition();
+  const [form, setForm] = useState({
+    puntadas_remalle: ficha.puntadas_remalle ?? '',
+    puntadas_recta: ficha.puntadas_recta ?? '',
+    notas_confeccion: ficha.notas_confeccion ?? '',
+    notas_acabados: ficha.notas_acabados ?? '',
+    envase_primario: ficha.envase_primario ?? '',
+    envase_secundario: ficha.envase_secundario ?? '',
+    cinta_embalaje: ficha.cinta_embalaje ?? '',
+    sticker_talla: ficha.sticker_talla ?? '',
+    rotulado_primario: ficha.rotulado_primario ?? '',
+    rotulado_secundario: ficha.rotulado_secundario ?? '',
+  });
+
+  function save() {
+    start(async () => {
+      const r = await actualizarFichaTecnica(ficha.id, form);
+      if (r.ok) toast.success('Notas guardadas');
+      else toast.error(r.error ?? 'Error');
+    });
+  }
+
+  return (
+    <div className="space-y-4">
+      <Card className="space-y-3 p-5">
+        <h4 className="font-display text-sm font-semibold uppercase tracking-wide text-corp-900">Confección</h4>
+        <div className="grid gap-3 sm:grid-cols-2">
+          <Field label="Puntadas por pulgada — remalle">
+            <Input
+              value={form.puntadas_remalle}
+              onChange={(e) => setForm({ ...form, puntadas_remalle: e.target.value })}
+              placeholder="11 ppp +/- 1"
+              className="mt-1"
+            />
+          </Field>
+          <Field label="Puntadas por pulgada — recta">
+            <Input
+              value={form.puntadas_recta}
+              onChange={(e) => setForm({ ...form, puntadas_recta: e.target.value })}
+              placeholder="10 ppp +/- 1"
+              className="mt-1"
+            />
+          </Field>
+        </div>
+        <Field label="Notas de confección (descripción por sección)">
+          <textarea
+            value={form.notas_confeccion}
+            onChange={(e) => setForm({ ...form, notas_confeccion: e.target.value })}
+            rows={6}
+            placeholder="DELANTERO: El bolsillo delantero consiste en...&#10;TIROS: Dos piezas unidas con remalle de cuatro hilos..."
+            className="mt-1 w-full rounded-md border border-input bg-white p-2 font-mono text-xs"
+          />
+        </Field>
+      </Card>
+
+      <Card className="space-y-3 p-5">
+        <h4 className="font-display text-sm font-semibold uppercase tracking-wide text-corp-900">Acabados y empaque</h4>
+        <Field label="Notas de acabados">
+          <textarea
+            value={form.notas_acabados}
+            onChange={(e) => setForm({ ...form, notas_acabados: e.target.value })}
+            rows={3}
+            placeholder="Planchado o vaporizado, libre de brillo..."
+            className="mt-1 w-full rounded-md border border-input bg-white p-2 text-xs"
+          />
+        </Field>
+        <div className="grid gap-3 sm:grid-cols-2">
+          <Field label="Envase primario (bolsa individual)">
+            <Input
+              value={form.envase_primario}
+              onChange={(e) => setForm({ ...form, envase_primario: e.target.value })}
+              placeholder="Bolsa polietileno 13x20 / 1.5 micras"
+              className="mt-1"
+            />
+          </Field>
+          <Field label="Envase secundario (caja)">
+            <Input
+              value={form.envase_secundario}
+              onChange={(e) => setForm({ ...form, envase_secundario: e.target.value })}
+              placeholder="Cartón corrugado 60x40x40 / 20 unid"
+              className="mt-1"
+            />
+          </Field>
+          <Field label="Cinta de embalaje">
+            <Input
+              value={form.cinta_embalaje}
+              onChange={(e) => setForm({ ...form, cinta_embalaje: e.target.value })}
+              placeholder='3" transparente'
+              className="mt-1"
+            />
+          </Field>
+          <Field label="Sticker de talla">
+            <Input
+              value={form.sticker_talla}
+              onChange={(e) => setForm({ ...form, sticker_talla: e.target.value })}
+              placeholder="Papel adhesivo 1cm fondo blanco"
+              className="mt-1"
+            />
+          </Field>
+          <Field label="Rotulado primario">
+            <Input
+              value={form.rotulado_primario}
+              onChange={(e) => setForm({ ...form, rotulado_primario: e.target.value })}
+              placeholder="Contiene talla, ubicado..."
+              className="mt-1"
+            />
+          </Field>
+          <Field label="Rotulado secundario (caja)">
+            <Input
+              value={form.rotulado_secundario}
+              onChange={(e) => setForm({ ...form, rotulado_secundario: e.target.value })}
+              placeholder="Etiqueta A4 con razón social, RUC, tallas/cantidad"
+              className="mt-1"
+            />
+          </Field>
+        </div>
+      </Card>
+
+      <div className="flex justify-end">
+        <Button variant="premium" size="sm" onClick={save} disabled={pending}>
+          {pending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+          Guardar
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// PRIMITIVOS
+// ────────────────────────────────────────────────────────────────────────────
+function SubTabBtn({ active, onClick, icon, children }: { active: boolean; onClick: () => void; icon: React.ReactNode; children: React.ReactNode }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`-mb-px flex items-center gap-1.5 border-b-2 px-3 py-2 text-xs font-medium transition ${
+        active ? 'border-happy-500 text-happy-700' : 'border-transparent text-slate-500 hover:text-corp-900'
+      }`}
+    >
+      {icon}
+      {children}
+    </button>
+  );
+}
+
+function Field({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <label className="block">
+      <span className="text-xs font-medium text-slate-700">{label}</span>
+      {children}
+    </label>
+  );
+}
