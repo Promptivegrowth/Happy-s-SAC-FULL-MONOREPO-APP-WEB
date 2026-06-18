@@ -793,6 +793,7 @@ export function PosTerminal({
             talla: v.talla,
             precio: Number(v.precio_publico ?? 0),
             producto_nombre: v.productos.nombre,
+            stock: stockPorVariante[v.id] ?? 0,
           }))}
           cajaId={cajaActual.id}
           sesionId={sesionActiva.id}

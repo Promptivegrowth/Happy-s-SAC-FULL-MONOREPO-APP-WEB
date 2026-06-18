@@ -424,6 +424,37 @@ export async function registrarCambio(
       }
     }
 
+    // Validar stock disponible en el almacén para los productos entregados
+    if (data.productos_nuevos.length > 0) {
+      const varIds = data.productos_nuevos.map((p) => p.variante_id);
+      const { data: stocks } = await sb
+        .from('stock_actual')
+        .select('variante_id, cantidad')
+        .eq('almacen_id', data.almacen_id)
+        .in('variante_id', varIds);
+      const stockMap = new Map<string, number>(
+        ((stocks ?? []) as { variante_id: string; cantidad: number | string }[]).map((s) => [
+          s.variante_id,
+          Number(s.cantidad ?? 0),
+        ]),
+      );
+      // Pedir nombre+talla cuando falle, para mensaje útil
+      for (const p of data.productos_nuevos) {
+        const enStock = stockMap.get(p.variante_id) ?? 0;
+        if (p.cantidad > enStock) {
+          const { data: vInfo } = await sb
+            .from('productos_variantes')
+            .select('sku, talla, productos:producto_id(nombre)')
+            .eq('id', p.variante_id)
+            .single();
+          const nombre = vInfo
+            ? `${vInfo.productos?.nombre ?? ''} talla ${String(vInfo.talla ?? '').replace('T', '')} (${vInfo.sku})`
+            : 'el producto entregado';
+          throw new Error(`Sin stock suficiente de ${nombre}: pide ${p.cantidad}, disponible ${enStock}`);
+        }
+      }
+    }
+
     const totalDevuelto = data.lineas_devueltas.reduce((s, l) => s + l.cantidad * l.precio_unitario, 0);
     const totalNuevo = data.productos_nuevos.reduce((s, l) => s + l.cantidad * l.precio_unitario, 0);
     const diferencia = Math.round((totalNuevo - totalDevuelto) * 100) / 100; // + = cobrar, - = devolver

@@ -10,7 +10,7 @@
  *  4. Confirmar → genera devolución + kardex ENTRADA_DEVOLUCION
  */
 
-import { useState, useTransition } from 'react';
+import { useState, useTransition, useMemo } from 'react';
 import { Card } from '@happy/ui/card';
 import { Input } from '@happy/ui/input';
 import { Label } from '@happy/ui/label';
@@ -41,6 +41,7 @@ export type VarianteDev = {
   talla: string;
   precio: number;
   producto_nombre: string;
+  stock: number;
 };
 
 type LineaEntrega = {
@@ -95,15 +96,15 @@ export function DevolucionModal({
   const [entregaScan, setEntregaScan] = useState('');
   const [entregaLineas, setEntregaLineas] = useState<LineaEntrega[]>([]);
 
-  function agregarEntregaPorCodigo(input: string) {
-    const q = input.trim();
-    if (!q) return;
-    const v = variantes.find((x) => x.codigo_barras === q || x.sku.toLowerCase() === q.toLowerCase());
-    if (!v) {
-      toast.error('SKU / código no encontrado');
+  function agregarVarianteAEntrega(v: VarianteDev) {
+    // Validar stock disponible. Si ya hay esa variante en la lista,
+    // sumamos +1 sólo si no supera el stock.
+    const existe = entregaLineas.find((l) => l.variante_id === v.id);
+    const cantActual = existe?.cantidad ?? 0;
+    if (cantActual + 1 > v.stock) {
+      toast.error(`Sin stock: solo hay ${v.stock} unid. de ${v.producto_nombre} talla ${v.talla.replace('T', '')}`);
       return;
     }
-    const existe = entregaLineas.find((l) => l.variante_id === v.id);
     if (existe) {
       setEntregaLineas(entregaLineas.map((l) =>
         l.variante_id === v.id ? { ...l, cantidad: l.cantidad + 1 } : l,
@@ -124,9 +125,43 @@ export function DevolucionModal({
     setEntregaScan('');
   }
 
+  function agregarEntregaPorCodigo(input: string) {
+    const q = input.trim();
+    if (!q) return;
+    // 1) Match exacto por código de barras o SKU (típico escaneo)
+    const exacto = variantes.find(
+      (x) => x.codigo_barras === q || x.sku.toLowerCase() === q.toLowerCase(),
+    );
+    if (exacto) { agregarVarianteAEntrega(exacto); return; }
+    // 2) Si no hubo exacto y la query es texto, intentar primera coincidencia por nombre
+    const primero = coincidenciasEntrega[0];
+    if (primero) { agregarVarianteAEntrega(primero); return; }
+    toast.error('Producto no encontrado');
+  }
+
+  // Búsqueda en tiempo real por nombre / SKU / código de barras
+  const coincidenciasEntrega = useMemo(() => {
+    const q = entregaScan.trim().toLowerCase();
+    if (q.length < 2) return [];
+    return variantes
+      .filter((v) =>
+        v.producto_nombre.toLowerCase().includes(q) ||
+        v.sku.toLowerCase().includes(q) ||
+        (v.codigo_barras ?? '').toLowerCase().includes(q),
+      )
+      .slice(0, 8);
+  }, [entregaScan, variantes]);
+
   function setEntregaCantidad(varId: string, cant: number) {
     if (cant <= 0) {
       setEntregaLineas(entregaLineas.filter((l) => l.variante_id !== varId));
+      return;
+    }
+    // Validar contra stock disponible
+    const v = variantes.find((x) => x.id === varId);
+    const stock = v?.stock ?? 0;
+    if (cant > stock) {
+      toast.error(`Sin stock: solo hay ${stock} unid. disponibles`);
       return;
     }
     setEntregaLineas(entregaLineas.map((l) => l.variante_id === varId ? { ...l, cantidad: cant } : l));
@@ -435,7 +470,7 @@ export function DevolucionModal({
               </Card>
 
               <div>
-                <Label className="text-xs">Buscar por SKU o código de barras</Label>
+                <Label className="text-xs">Buscar por nombre, SKU o código de barras</Label>
                 <div className="relative mt-1">
                   <ScanBarcode className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-indigo-500" />
                   <Input
@@ -445,13 +480,55 @@ export function DevolucionModal({
                       if (e.key === 'Enter') {
                         e.preventDefault();
                         agregarEntregaPorCodigo(entregaScan);
+                      } else if (e.key === 'Escape') {
+                        setEntregaScan('');
                       }
                     }}
-                    placeholder="Escaneá o tipeá SKU + Enter"
+                    placeholder="Ej. 'pantalon verde', SKU o escanear código…"
                     className="pl-9"
                     autoFocus
                   />
                 </div>
+                {/* Dropdown de coincidencias mientras tipea (≥2 chars) */}
+                {coincidenciasEntrega.length > 0 && (
+                  <div className="mt-1 max-h-56 overflow-y-auto rounded-md border border-indigo-200 bg-white shadow-lg">
+                    {coincidenciasEntrega.map((v) => {
+                      const yaAgregado = entregaLineas.find((l) => l.variante_id === v.id)?.cantidad ?? 0;
+                      const disponible = Math.max(0, v.stock - yaAgregado);
+                      const sinStock = disponible === 0;
+                      return (
+                        <button
+                          key={v.id}
+                          type="button"
+                          onClick={() => agregarVarianteAEntrega(v)}
+                          disabled={sinStock}
+                          className={`flex w-full items-center justify-between gap-3 border-b border-slate-100 px-3 py-2 text-left last:border-0 ${
+                            sinStock ? 'cursor-not-allowed bg-slate-50 opacity-60' : 'hover:bg-indigo-50'
+                          }`}
+                        >
+                          <div className="min-w-0 flex-1">
+                            <p className="truncate text-sm font-medium text-corp-900">{v.producto_nombre}</p>
+                            <p className="text-[10px] text-slate-500">
+                              {v.sku} · Talla {v.talla.replace('T', '')}
+                              {v.codigo_barras && <> · {v.codigo_barras}</>}
+                            </p>
+                          </div>
+                          <div className="flex shrink-0 flex-col items-end">
+                            <span className="font-mono text-sm font-semibold text-indigo-700">{formatPEN(v.precio)}</span>
+                            <span className={`text-[10px] ${sinStock ? 'text-rose-600' : disponible <= 3 ? 'text-amber-600' : 'text-emerald-600'}`}>
+                              {sinStock ? 'Sin stock' : `Stock: ${disponible}`}
+                            </span>
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+                {entregaScan.trim().length >= 2 && coincidenciasEntrega.length === 0 && (
+                  <p className="mt-1 text-[11px] text-slate-500">
+                    Sin coincidencias para "{entregaScan}". Probá otro nombre o escaneá el código.
+                  </p>
+                )}
               </div>
 
               {entregaLineas.length > 0 && (
@@ -467,16 +544,21 @@ export function DevolucionModal({
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {entregaLineas.map((l) => (
+                      {entregaLineas.map((l) => {
+                        const stockReal = variantes.find((v) => v.id === l.variante_id)?.stock ?? 0;
+                        return (
                         <TableRow key={l.variante_id}>
                           <TableCell>
                             <div className="text-sm font-medium text-corp-900">{l.producto_nombre}</div>
-                            <div className="text-[10px] text-slate-500">{l.sku} · Talla {l.talla.replace('T', '')}</div>
+                            <div className="text-[10px] text-slate-500">
+                              {l.sku} · Talla {l.talla.replace('T', '')} · Stock: {stockReal}
+                            </div>
                           </TableCell>
                           <TableCell className="text-center">
                             <Input
                               type="number"
                               min={1}
+                              max={stockReal}
                               value={l.cantidad}
                               onChange={(e) => setEntregaCantidad(l.variante_id, Math.max(0, parseInt(e.target.value || '0', 10)))}
                               className="h-8 w-20 text-center font-mono"
@@ -490,7 +572,8 @@ export function DevolucionModal({
                             </Button>
                           </TableCell>
                         </TableRow>
-                      ))}
+                        );
+                      })}
                     </TableBody>
                   </Table>
                 </div>
