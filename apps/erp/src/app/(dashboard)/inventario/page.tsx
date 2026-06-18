@@ -85,11 +85,13 @@ export default async function InventarioPage({ searchParams }: { searchParams: P
     >
       <div className="flex flex-wrap items-center gap-3">
         <SearchAutocomplete items={indexItems} placeholder="Buscar por SKU o nombre del producto…" />
-        <FilterChip href={chipUrl({ vista: '' })} active={!sp.vista}>
-          Con stock
+        {/* "Todos los productos" es el default (vista vacía o vista=todo). Útil para
+            ver el catálogo completo y poder modificar stock incluso de variantes en 0. */}
+        <FilterChip href={chipUrl({ vista: '' })} active={!sp.vista || sp.vista === 'todo'}>
+          Todos los productos
         </FilterChip>
-        <FilterChip href={chipUrl({ vista: 'todo' })} active={sp.vista === 'todo'}>
-          Todo (incluye 0)
+        <FilterChip href={chipUrl({ vista: 'conStock' })} active={sp.vista === 'conStock'}>
+          Solo con stock
         </FilterChip>
         <FilterChip href={chipUrl({ vista: 'bajo' })} active={sp.vista === 'bajo'} variant="destructive">
           <AlertTriangle className="h-3 w-3" /> Stock bajo (≤5)
@@ -129,12 +131,13 @@ type Fila = {
 async function InventarioTable({ q, almacen, vista }: SP) {
   const sb = await createClient();
 
-  // Estrategia:
-  //  - Vista "Con stock" (default) y "Stock bajo": query directa a stock_actual (rápida)
-  //  - Vista "Todo": LEFT JOIN sintético — traemos todas las variantes activas y todos los
-  //    almacenes activos (filtrados si hay almacén elegido), generamos el producto cruz
-  //    y le aplicamos el stock real desde stock_actual (0 si no hay fila).
-  const incluirCeros = vista === 'todo';
+  // Estrategia (default = mostrar todo, incluso variantes en 0)
+  //  - DEFAULT (vista vacía o 'todo'): LEFT JOIN sintético — todas las variantes activas
+  //    × almacenes activos, con stock_actual cuando exista (0 si no hay fila). Útil para
+  //    poder ver/ajustar stock de cualquier variante aunque no haya tenido movimiento aún.
+  //  - 'conStock': query directa a stock_actual con cantidad>0 (rápida).
+  //  - 'bajo': query directa con 0<cantidad<=5.
+  const incluirCeros = !vista || vista === 'todo';
 
   // 1) Cargar stock real
   let stockQuery = sb
@@ -155,6 +158,10 @@ async function InventarioTable({ q, almacen, vista }: SP) {
 
   let filas: Fila[] = [];
 
+  // Normalizar query: el autocomplete devuelve "Nombre · Talla N" — extraemos
+  // solo la primera parte para que la búsqueda matchee aunque el formato sea distinto.
+  const qNorm = q ? (q.split('·')[0]?.trim() ?? q) : '';
+
   if (incluirCeros) {
     // 2a) Variantes activas + almacenes activos → producto cruz
     let varsQuery = sb
@@ -164,7 +171,7 @@ async function InventarioTable({ q, almacen, vista }: SP) {
       .eq('productos.activo', true)
       .order('sku')
       .limit(2000);
-    if (q) varsQuery = varsQuery.or(`sku.ilike.%${q}%,productos.nombre.ilike.%${q}%`);
+    if (qNorm) varsQuery = varsQuery.or(`sku.ilike.%${qNorm}%,productos.nombre.ilike.%${qNorm}%`);
     const { data: varsRaw } = await varsQuery;
     const variantes = ((varsRaw ?? []) as unknown as {
       id: string; sku: string; talla: string; productos: { nombre: string } | null;
@@ -220,9 +227,9 @@ async function InventarioTable({ q, almacen, vista }: SP) {
           cantidad,
         });
       }
-      // Filtro client-side por texto si q presente
-      if (q) {
-        const qq = q.toLowerCase();
+      // Filtro client-side por texto (usando query normalizada — solo el nombre del producto)
+      if (qNorm) {
+        const qq = qNorm.toLowerCase();
         filas = filas.filter((f) => f.sku.toLowerCase().includes(qq) || f.producto_nombre.toLowerCase().includes(qq));
       }
       filas.sort((x, y) => y.cantidad - x.cantidad || x.sku.localeCompare(y.sku));
@@ -238,11 +245,11 @@ async function InventarioTable({ q, almacen, vista }: SP) {
         icon={<Boxes className="h-6 w-6" />}
         title={q ? 'Sin coincidencias' : incluirCeros ? 'Sin variantes' : 'Sin stock'}
         description={
-          q
-            ? `Sin coincidencias para "${q}".`
+          qNorm
+            ? `Sin coincidencias para "${qNorm}".`
             : incluirCeros
               ? 'No hay variantes activas. Creá productos y variantes desde el catálogo.'
-              : 'No hay stock con los filtros seleccionados. Probá "Todo (incluye 0)" para ver variantes sin stock.'
+              : 'No hay stock con los filtros seleccionados. Probá "Todos los productos" para ver variantes sin stock.'
         }
       />
     );
