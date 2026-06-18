@@ -693,8 +693,19 @@ function ImagenesTab({ fichaId, imagenes }: { fichaId: string; imagenes: FichaIm
     }
     setSubiendo(true);
     try {
-      const buf = await file.arrayBuffer();
-      const base64 = btoa(String.fromCharCode(...new Uint8Array(buf)));
+      // FileReader.readAsDataURL es robusto para archivos grandes.
+      // (El anterior `String.fromCharCode(...new Uint8Array(buf))` causaba
+      // "Maximum call stack size exceeded" en imágenes de varios MB porque
+      // el spread operator pasa miles de argumentos a fromCharCode.)
+      const dataUrl = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result as string);
+        reader.onerror = () => reject(new Error('No se pudo leer el archivo'));
+        reader.readAsDataURL(file);
+      });
+      const base64 = dataUrl.split(',')[1] ?? '';
+      if (!base64) throw new Error('Archivo vacío o ilegible');
+
       const r = await subirImagenFicha(fichaId, {
         tipo,
         leyenda: leyenda || null,
@@ -705,11 +716,12 @@ function ImagenesTab({ fichaId, imagenes }: { fichaId: string; imagenes: FichaIm
       if (r.ok) {
         toast.success('Imagen subida');
         setLeyenda('');
-        if (fileRef.current) fileRef.current.value = '';
         router.refresh();
       } else {
         toast.error(r.error ?? 'Error');
       }
+    } catch (e) {
+      toast.error('Error al subir: ' + (e as Error).message);
     } finally {
       setSubiendo(false);
     }
@@ -761,6 +773,10 @@ function ImagenesTab({ fichaId, imagenes }: { fichaId: string; imagenes: FichaIm
               accept="image/png,image/jpeg,image/webp"
               onChange={(e) => {
                 const f = e.target.files?.[0];
+                // Reset INMEDIATO del input — así onChange siempre se dispara
+                // aunque se seleccione el mismo archivo, y nunca queda
+                // "atascado" si el upload falla.
+                e.target.value = '';
                 if (f) void handleFile(f);
               }}
               className="hidden"
@@ -1180,7 +1196,7 @@ function AviosTab({ productoId, avios, procesos }: { productoId: string; avios: 
         <div className="border-b border-slate-200 p-3">
           <h4 className="font-display text-sm font-semibold text-corp-900">Procesos / secuencia de operaciones</h4>
           <p className="text-[11px] text-slate-500">
-            Procesos tomados de <Link href={`/procesos?producto=${productoId}`} className="text-happy-600 hover:underline">/procesos</Link> de este producto. Podés enriquecer "máquina" y "descripción operativa" desde ahí.
+            Procesos tomados de productos_procesos de este producto. Se pueden enriquecer máquina y descripción operativa directamente desde BD por ahora.
           </p>
         </div>
         {procesos.length === 0 ? (
