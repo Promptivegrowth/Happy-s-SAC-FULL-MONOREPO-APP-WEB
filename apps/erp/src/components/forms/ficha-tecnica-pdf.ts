@@ -40,7 +40,9 @@ export async function generarFichaTecnicaPDF(fichaId: string, productoId: string
   const pageW = doc.internal.pageSize.getWidth();
   const pageH = doc.internal.pageSize.getHeight();
   const M = 12;
-  const headerH = 28;
+  const headerH = 24;
+  // Margen útil inferior antes de obligar salto de página
+  const PIE_RESERVA = 14;
 
   let totalPages = 0;
   const productoNombre = (data.producto?.nombre ?? '').toUpperCase();
@@ -105,9 +107,18 @@ export async function generarFichaTecnicaPDF(fichaId: string, productoId: string
     doc.text(`Página ${pageNum}${totalPages ? ` / ${totalPages}` : ''}`, pageW - M, pageH - 6, { align: 'right' });
   }
 
-  function newPage() {
+  function newPage(): number {
     doc.addPage();
     drawHeader();
+    return M + headerH + 2;
+  }
+
+  /** Asegura `mm` de espacio vertical desde y. Si no entra, salta de página. */
+  function ensureSpace(yActual: number, mm: number): number {
+    if (yActual + mm > pageH - PIE_RESERVA) {
+      return newPage();
+    }
+    return yActual;
   }
 
   function sectionTitle(t: string, y: number): number {
@@ -185,7 +196,7 @@ export async function generarFichaTecnicaPDF(fichaId: string, productoId: string
   const delantero = data.imagenes.find((i) => i.tipo === 'DELANTERO');
   const posterior = data.imagenes.find((i) => i.tipo === 'POSTERIOR');
   if (delantero || posterior) {
-    if (y > pageH - 80) { drawFooter(); newPage(); y = M + headerH + 2; }
+    y = ensureSpace(y + 3, 80);
     y = sectionTitle('IMÁGENES REFERENCIALES', y);
     const imgW = (pageW - M * 2 - 4) / 2;
     const imgH = 70;
@@ -199,10 +210,11 @@ export async function generarFichaTecnicaPDF(fichaId: string, productoId: string
   }
 
   // ============================================================================
-  // PÁGINA: HOJA DE CORTE
+  // HOJA DE CORTE — sigue en la misma página si entra
   // ============================================================================
   if (data.piezas.length > 0) {
-    drawFooter(); newPage(); y = M + headerH + 2;
+    // Necesita ≈ 10mm cabecera + (filas×6) min 30mm
+    y = ensureSpace(y + 3, 30);
     y = sectionTitle('HOJA DE CORTE', y);
     autoTable(doc, {
       startY: y,
@@ -222,17 +234,17 @@ export async function generarFichaTecnicaPDF(fichaId: string, productoId: string
     // Diagrama de corte si existe
     const corteDiagrama = data.imagenes.find((i) => i.tipo === 'CORTE_DIAGRAMA');
     if (corteDiagrama) {
-      if (y > pageH - 90) { drawFooter(); newPage(); y = M + headerH + 2; }
+      y = ensureSpace(y, 84);
       try { await drawImageFromUrl(doc, corteDiagrama.url, M, y, pageW - M * 2, 80); } catch { /* ignore */ }
       y += 84;
     }
   }
 
   // ============================================================================
-  // PÁGINA: SECUENCIA DE OPERACIONES
+  // SECUENCIA DE OPERACIONES
   // ============================================================================
   if (data.procesos.length > 0) {
-    drawFooter(); newPage(); y = M + headerH + 2;
+    y = ensureSpace(y + 3, 30);
     y = sectionTitle('SECUENCIA DE OPERACIONES', y);
     autoTable(doc, {
       startY: y,
@@ -261,10 +273,10 @@ export async function generarFichaTecnicaPDF(fichaId: string, productoId: string
   }
 
   // ============================================================================
-  // PÁGINA: HOJA DE CONFECCIÓN (puntadas + notas)
+  // HOJA DE CONFECCIÓN (puntadas + notas)
   // ============================================================================
   if (f.puntadas_remalle || f.puntadas_recta || f.notas_confeccion) {
-    if (y > pageH - 70) { drawFooter(); newPage(); y = M + headerH + 2; }
+    y = ensureSpace(y + 3, 30);
     y = sectionTitle('HOJA DE CONFECCIÓN', y);
     const cnf: [string, string][] = [];
     if (f.puntadas_remalle) cnf.push(['Puntadas por pulgada — remalle', f.puntadas_remalle]);
@@ -292,10 +304,10 @@ export async function generarFichaTecnicaPDF(fichaId: string, productoId: string
   }
 
   // ============================================================================
-  // PÁGINA: CUADRO DE MEDIDAS
+  // CUADRO DE MEDIDAS
   // ============================================================================
   if (data.medidas.length > 0) {
-    drawFooter(); newPage(); y = M + headerH + 2;
+    y = ensureSpace(y + 3, 40);
     y = sectionTitle('CUADRO DE MEDIDAS (cm)', y);
 
     // Detectar tallas únicas ordenadas (preserva orden de aparición)
@@ -327,16 +339,17 @@ export async function generarFichaTecnicaPDF(fichaId: string, productoId: string
     // Diagrama de medidas si existe
     const diagMedidas = data.imagenes.find((i) => i.tipo === 'MEDIDAS_DIAGRAMA');
     if (diagMedidas) {
-      if (y > pageH - 90) { drawFooter(); newPage(); y = M + headerH + 2; }
+      y = ensureSpace(y, 84);
       try { await drawImageFromUrl(doc, diagMedidas.url, M, y, pageW - M * 2, 80); } catch { /* ignore */ }
+      y += 84;
     }
   }
 
   // ============================================================================
-  // PÁGINA: AVÍOS
+  // CUADRO DE AVÍOS
   // ============================================================================
   if (data.avios.length > 0) {
-    drawFooter(); newPage(); y = M + headerH + 2;
+    y = ensureSpace(y + 3, 30);
     y = sectionTitle('CUADRO DE AVÍOS', y);
     autoTable(doc, {
       startY: y,
@@ -351,14 +364,16 @@ export async function generarFichaTecnicaPDF(fichaId: string, productoId: string
       ]),
       margin: { left: M, right: M },
     });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    y = (doc as any).lastAutoTable.finalY + 4;
   }
 
   // ============================================================================
-  // PÁGINA: ACABADOS / EMPAQUE
+  // ACABADOS / EMPAQUE
   // ============================================================================
   const tieneAcabados = !!(f.notas_acabados || f.envase_primario || f.envase_secundario || f.rotulado_primario);
   if (tieneAcabados) {
-    drawFooter(); newPage(); y = M + headerH + 2;
+    y = ensureSpace(y + 3, 30);
     y = sectionTitle('FICHA DE ACABADOS Y EMPAQUE', y);
     const filas: [string, string][] = [];
     if (f.notas_acabados) filas.push(['Notas acabados', f.notas_acabados]);
@@ -382,8 +397,9 @@ export async function generarFichaTecnicaPDF(fichaId: string, productoId: string
     y = (doc as any).lastAutoTable.finalY + 4;
     const doblado = data.imagenes.find((i) => i.tipo === 'ACABADOS_DOBLADO');
     if (doblado) {
-      if (y > pageH - 90) { drawFooter(); newPage(); y = M + headerH + 2; }
+      y = ensureSpace(y, 84);
       try { await drawImageFromUrl(doc, doblado.url, M, y, pageW - M * 2, 80); } catch { /* ignore */ }
+      y += 84;
     }
   }
 
@@ -393,14 +409,14 @@ export async function generarFichaTecnicaPDF(fichaId: string, productoId: string
   const yaUsadas: TipoImagenFicha[] = ['DELANTERO', 'POSTERIOR', 'CORTE_DIAGRAMA', 'MEDIDAS_DIAGRAMA', 'ACABADOS_DOBLADO'];
   const restantes = data.imagenes.filter((i) => !yaUsadas.includes(i.tipo));
   if (restantes.length > 0) {
-    drawFooter(); newPage(); y = M + headerH + 2;
+    y = ensureSpace(y + 3, 80);
     y = sectionTitle('IMÁGENES DE DETALLE', y);
     const imgW = (pageW - M * 2 - 6) / 2;
-    const imgH = 65;
+    const imgH = 60;
     let col = 0;
     for (const img of restantes) {
-      if (y + imgH + 10 > pageH - 10) {
-        drawFooter(); newPage(); y = M + headerH + 2;
+      if (y + imgH + 10 > pageH - PIE_RESERVA) {
+        y = newPage();
         y = sectionTitle('IMÁGENES DE DETALLE (cont.)', y);
         col = 0;
       }

@@ -620,7 +620,13 @@ function MedidasTab({
                 <TableCell>
                   <Input
                     value={row.codigo}
-                    onChange={(e) => actualizar(i, { codigo: e.target.value.toUpperCase().slice(0, 4) })}
+                    onChange={(e) =>
+                      actualizar(i, {
+                        // Solo letras y dígitos, mayúsculas, máx 4 (A, B, A1, M1, etc.)
+                        codigo: e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 4),
+                      })
+                    }
+                    placeholder="A"
                     className="h-8 text-center font-mono text-xs"
                   />
                 </TableCell>
@@ -629,6 +635,7 @@ function MedidasTab({
                     value={row.descripcion}
                     onChange={(e) => actualizar(i, { descripcion: e.target.value })}
                     placeholder="LARGO DESDE EL BORDE DE PRETINA"
+                    maxLength={120}
                     className="h-8"
                   />
                 </TableCell>
@@ -636,7 +643,19 @@ function MedidasTab({
                   <TableCell key={t}>
                     <Input
                       value={row.valores[t] ?? ''}
-                      onChange={(e) => setValor(i, t, e.target.value.replace(/[^\d.]/g, ''))}
+                      inputMode="decimal"
+                      onChange={(e) =>
+                        setValor(
+                          i,
+                          t,
+                          // Permite dígitos, punto y coma; convierte coma a punto;
+                          // mantiene solo el primer punto si vienen varios.
+                          e.target.value
+                            .replace(/[^\d.,]/g, '')
+                            .replace(/,/g, '.')
+                            .replace(/^(\d*\.\d*).*/, '$1'),
+                        )
+                      }
                       placeholder="—"
                       className="h-8 text-center font-mono text-xs"
                     />
@@ -646,8 +665,13 @@ function MedidasTab({
                   <Input
                     type="number"
                     step="0.1"
+                    min={0}
+                    max={50}
                     value={row.tolerancia_cm}
-                    onChange={(e) => actualizar(i, { tolerancia_cm: Number(e.target.value) })}
+                    onChange={(e) => {
+                      const n = Number(e.target.value);
+                      actualizar(i, { tolerancia_cm: Number.isFinite(n) && n >= 0 ? Math.min(n, 50) : 0 });
+                    }}
                     className="h-8 text-center font-mono text-xs"
                   />
                 </TableCell>
@@ -655,6 +679,7 @@ function MedidasTab({
                   <Input
                     value={row.observaciones}
                     onChange={(e) => actualizar(i, { observaciones: e.target.value })}
+                    maxLength={200}
                     className="h-8"
                   />
                 </TableCell>
@@ -1076,6 +1101,7 @@ function CorteTab({ ficha, piezasIniciales }: { ficha: FichaTecnica; piezasInici
                   value={row.descripcion}
                   onChange={(e) => actualizar(i, { descripcion: e.target.value })}
                   placeholder="Delantero, Bolsa menor, Vivos, Franja..."
+                  maxLength={80}
                   className="h-8"
                 />
               </TableCell>
@@ -1083,8 +1109,12 @@ function CorteTab({ ficha, piezasIniciales }: { ficha: FichaTecnica; piezasInici
                 <Input
                   type="number"
                   min={1}
+                  max={999}
+                  step={1}
+                  inputMode="numeric"
                   value={row.cantidad}
-                  onChange={(e) => actualizar(i, { cantidad: e.target.value })}
+                  // Solo enteros positivos (las piezas de corte son unidades enteras)
+                  onChange={(e) => actualizar(i, { cantidad: e.target.value.replace(/[^\d]/g, '') })}
                   className="h-8 text-center font-mono text-xs"
                 />
               </TableCell>
@@ -1116,6 +1146,7 @@ function CorteTab({ ficha, piezasIniciales }: { ficha: FichaTecnica; piezasInici
                 <Input
                   value={row.observaciones}
                   onChange={(e) => actualizar(i, { observaciones: e.target.value })}
+                  maxLength={200}
                   className="h-8"
                 />
               </TableCell>
