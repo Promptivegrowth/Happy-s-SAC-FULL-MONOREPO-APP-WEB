@@ -28,27 +28,35 @@ export default async function TrazabilidadPage({ searchParams }: { searchParams:
   const sp = await searchParams;
   const sb = await createClient();
 
-  // Index para autocomplete: lotes recientes + variantes recientes + OTs recientes
-  const [lotesData, varsData, otsData, statsRes] = await Promise.all([
+  // Index para autocomplete: lotes + variantes + OTs + productos base
+  // Subimos límites para que cualquier ítem activo sea encontrable. Si el
+  // catálogo crece >2000 ítems convendría cambiar a búsqueda server-side.
+  const [lotesData, varsData, otsData, prodsData, statsRes] = await Promise.all([
     sb.from('lotes_pt')
       .select('id, codigo, cantidad_actual, variante:variante_id(sku, producto:producto_id(nombre))')
       .order('created_at', { ascending: false })
-      .limit(100),
+      .limit(300),
     sb.from('productos_variantes')
-      .select('id, sku, talla, producto:producto_id(nombre)')
+      .select('id, sku, talla, producto:producto_id(nombre, codigo)')
       .eq('activo', true)
-      .order('updated_at', { ascending: false })
-      .limit(150),
+      .order('sku')
+      .limit(2000),
     sb.from('ot')
       .select('id, numero, estado')
       .order('created_at', { ascending: false })
-      .limit(80),
+      .limit(200),
+    sb.from('productos')
+      .select('id, codigo, nombre')
+      .eq('activo', true)
+      .order('codigo')
+      .limit(500),
     trazaStats(),
   ]);
 
   type LoteItem = { id: string; codigo: string; cantidad_actual: number; variante: { sku: string; producto: { nombre: string } | null } | null };
-  type VarItem = { id: string; sku: string; talla: string; producto: { nombre: string } | null };
+  type VarItem = { id: string; sku: string; talla: string; producto: { nombre: string; codigo: string } | null };
   type OtItem = { id: string; numero: string; estado: string };
+  type ProdItem = { id: string; codigo: string; nombre: string };
 
   const indexItems = [
     ...((lotesData.data ?? []) as unknown as LoteItem[]).map((l) => ({
@@ -63,7 +71,9 @@ export default async function TrazabilidadPage({ searchParams }: { searchParams:
       label: v.sku,
       sublabel: `SKU · ${v.producto?.nombre ?? ''} · talla ${v.talla.replace('T', '')}`,
       href: `/trazabilidad/variante/${v.id}`,
-      searchKey: `${v.sku} ${v.producto?.nombre ?? ''}`,
+      // searchKey incluye el código del producto base para que "PR0001" matchee
+      // todas las variantes de ese producto (PR0001-T2, PR0001-T6, etc.).
+      searchKey: `${v.sku} ${v.producto?.nombre ?? ''} ${v.producto?.codigo ?? ''}`,
     })),
     ...((otsData.data ?? []) as unknown as OtItem[]).map((o) => ({
       id: `ot-${o.id}`,
@@ -71,6 +81,15 @@ export default async function TrazabilidadPage({ searchParams }: { searchParams:
       sublabel: `OT · ${o.estado.replace(/_/g, ' ')}`,
       href: `/trazabilidad/ot/${o.id}`,
       searchKey: o.numero,
+    })),
+    // Productos base — buscar por código de producto lleva a la primera variante
+    // (la lista de variantes ya está arriba para elegir talla específica)
+    ...((prodsData.data ?? []) as unknown as ProdItem[]).map((p) => ({
+      id: `prod-${p.id}`,
+      label: p.codigo,
+      sublabel: `Producto · ${p.nombre}`,
+      href: `/trazabilidad/producto/${p.id}`,
+      searchKey: `${p.codigo} ${p.nombre}`,
     })),
   ];
 
