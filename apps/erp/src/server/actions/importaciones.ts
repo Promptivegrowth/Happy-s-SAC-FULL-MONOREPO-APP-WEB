@@ -68,6 +68,8 @@ export type ImportacionDetalle = {
   adelanto: number;
   estado: EstadoImportacion;
   observacion: string | null;
+  cif_prorrateado_en: string | null;
+  cif_total_distribuido: number;
   created_at: string;
   updated_at: string;
 };
@@ -238,6 +240,7 @@ export async function obtenerImportacion(
           'fecha_embarque, fecha_arribo_esperada, fecha_arribo_real, ' +
           'flete, seguro, aduanas, otros_costos, costo_total_adicional, adelanto, ' +
           'estado, observacion, created_at, updated_at, ' +
+          'cif_prorrateado_en, cif_total_distribuido, ' +
           'proveedor:proveedor_id(razon_social)',
       )
       .eq('id', id)
@@ -273,6 +276,8 @@ export async function obtenerImportacion(
       adelanto: Number(c.adelanto ?? 0),
       estado: c.estado as EstadoImportacion,
       observacion: c.observacion,
+      cif_prorrateado_en: (c as unknown as { cif_prorrateado_en: string | null }).cif_prorrateado_en ?? null,
+      cif_total_distribuido: Number((c as unknown as { cif_total_distribuido: number | null }).cif_total_distribuido ?? 0),
       created_at: c.created_at,
       updated_at: c.updated_at,
     };
@@ -731,5 +736,50 @@ export async function listarProveedoresParaImportacion(): Promise<ActionResult<P
       numero_documento: p.numero_documento,
       es_importacion: !!p.es_importacion,
     }));
+  });
+}
+
+// ---------- Prorrateo CIF ----------
+
+export type ProrrateoCIFResultado = {
+  ok: boolean;
+  lineas_actualizadas: number;
+  costo_total_distribuido: number;
+  valor_fob_total?: number;
+  materiales_actualizados?: number;
+  mensaje: string;
+};
+
+/**
+ * Llama a la función SQL `prorratear_cif_importacion` que distribuye los
+ * costos adicionales (flete + seguro + aduanas + otros) proporcionalmente al
+ * valor FOB de cada línea recibida vinculada a esta importación.
+ *
+ * Es IDEMPOTENTE: se puede llamar varias veces. Si después de prorratear se
+ * ajustan los costos adicionales, basta con volver a invocar para recalcular.
+ *
+ * NO modifica el kardex_movimientos (histórico FOB). Sí actualiza
+ * materiales.precio_unitario con el costo CIF más reciente para reportes.
+ */
+export async function prorratearCIFImportacion(
+  importacionId: string,
+): Promise<ActionResult<ProrrateoCIFResultado>> {
+  return runAction(async () => {
+    if (!importacionId) throw new Error('Id requerido');
+    const { sb } = await requireUser();
+
+    // RPC nueva (migración 48) — aún no está en los types autogenerados de Supabase.
+    const { data, error } = await (sb as unknown as {
+      rpc: (name: string, args: Record<string, unknown>) => Promise<{ data: unknown; error: { message: string } | null }>;
+    }).rpc('prorratear_cif_importacion', { p_imp_id: importacionId });
+    if (error) throw new Error(error.message);
+
+    const result = data as unknown as ProrrateoCIFResultado;
+    if (!result?.ok) {
+      throw new Error(result?.mensaje ?? 'No se pudo prorratear');
+    }
+
+    await bumpPaths('/compras/importaciones', `/compras/importaciones/${importacionId}`, '/reportes/stock-valorizado');
+    return result;
   });
 }

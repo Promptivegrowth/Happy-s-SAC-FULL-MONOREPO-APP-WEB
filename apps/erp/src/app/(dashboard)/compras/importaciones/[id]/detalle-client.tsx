@@ -38,6 +38,7 @@ import {
   cambiarEstadoImportacion,
   desvincularOCdeImportacion,
   eliminarImportacion,
+  prorratearCIFImportacion,
   vincularOCaImportacion,
   type EstadoImportacion,
   type ImportacionDetalle,
@@ -45,6 +46,7 @@ import {
   type OCVinculada,
 } from '@/server/actions/importaciones';
 import { EstadoBadge } from '../estado-badge';
+import { Calculator, CheckCircle2 } from 'lucide-react';
 
 type Props = {
   importacion: ImportacionDetalle;
@@ -180,6 +182,27 @@ export function ImportacionDetalleClient({
       } else {
         toast.error(r.error ?? 'No se pudo eliminar');
       }
+    });
+  }
+
+  function prorratearCIF() {
+    if (totalAdicional <= 0) {
+      toast.error('No hay costos adicionales para distribuir (flete, seguro, aduanas u otros)');
+      return;
+    }
+    const msg = importacion.cif_prorrateado_en
+      ? `Ya se prorrateó el CIF anteriormente. ¿Recalcular con los costos actuales (S/ ${(totalAdicional * (importacion.tipo_cambio ?? 1)).toFixed(2)})?`
+      : `Distribuir S/ ${(totalAdicional * (importacion.tipo_cambio ?? 1)).toFixed(2)} de costos adicionales sobre las líneas recibidas en las OCs vinculadas?\n\nSe actualizará el costo unitario CIF de cada línea y el precio_unitario del material maestro.`;
+    if (!confirm(msg)) return;
+    start(async () => {
+      const r = await prorratearCIFImportacion(importacion.id);
+      if (!r.ok) {
+        toast.error(r.error ?? 'No se pudo prorratear');
+        return;
+      }
+      const d = r.data!;
+      toast.success(`CIF distribuido: S/ ${d.costo_total_distribuido.toFixed(2)} en ${d.lineas_actualizadas} línea(s)`);
+      router.refresh();
     });
   }
 
@@ -519,6 +542,77 @@ export function ImportacionDetalleClient({
           ) : (
             <span className="text-sm text-slate-500">(estado final, no se puede cambiar)</span>
           )}
+        </div>
+      </Card>
+
+      {/* Prorrateo CIF */}
+      <Card className={`p-5 ${importacion.cif_prorrateado_en ? 'border-emerald-200 bg-emerald-50/40' : 'border-indigo-200 bg-indigo-50/40'}`}>
+        <div className="mb-3 flex items-center justify-between">
+          <h2 className="flex items-center gap-2 font-display text-base font-semibold text-corp-900">
+            <Calculator className="h-4 w-4 text-indigo-600" />
+            Prorrateo CIF (costos adicionales → costo unitario)
+          </h2>
+          {importacion.cif_prorrateado_en && (
+            <Badge variant="secondary" className="bg-emerald-100 text-emerald-800">
+              <CheckCircle2 className="mr-1 h-3 w-3" />
+              Prorrateado
+            </Badge>
+          )}
+        </div>
+        <div className="space-y-3 text-sm">
+          <p className="text-slate-700">
+            Distribuye <strong>flete + seguro + aduanas + otros costos</strong> proporcionalmente al valor FOB
+            de cada línea recibida en las OCs vinculadas. Actualiza el <code className="rounded bg-slate-100 px-1 text-xs">costo_unitario_cif</code> de
+            cada recepción y el <code className="rounded bg-slate-100 px-1 text-xs">precio_unitario</code> del material maestro.
+            <span className="block text-xs text-slate-500">
+              El kardex histórico NO se modifica (mantiene el costo FOB del momento de la recepción).
+            </span>
+          </p>
+          <div className="grid gap-3 sm:grid-cols-3">
+            <div className="rounded-md bg-white p-3 shadow-sm">
+              <div className="text-[10px] uppercase text-slate-500">Costos adicionales a distribuir</div>
+              <div className="font-display text-lg font-semibold text-indigo-700">
+                S/ {(totalAdicional * (importacion.tipo_cambio ?? 1)).toFixed(2)}
+              </div>
+              <div className="text-[10px] text-slate-500">
+                {importacion.moneda} {totalAdicional.toFixed(2)} × TC {importacion.tipo_cambio ?? 1}
+              </div>
+            </div>
+            {importacion.cif_prorrateado_en && (
+              <>
+                <div className="rounded-md bg-white p-3 shadow-sm">
+                  <div className="text-[10px] uppercase text-slate-500">Última ejecución</div>
+                  <div className="text-sm font-medium text-slate-700">
+                    {new Date(importacion.cif_prorrateado_en).toLocaleString('es-PE')}
+                  </div>
+                </div>
+                <div className="rounded-md bg-white p-3 shadow-sm">
+                  <div className="text-[10px] uppercase text-slate-500">Distribuido a líneas</div>
+                  <div className="font-display text-lg font-semibold text-emerald-700">
+                    S/ {Number(importacion.cif_total_distribuido).toFixed(2)}
+                  </div>
+                </div>
+              </>
+            )}
+          </div>
+          <div className="flex items-center justify-between pt-2">
+            <p className="text-xs text-slate-500">
+              {sinOCs
+                ? '⚠ Vincule OCs y registre recepciones antes de prorratear.'
+                : importacion.cif_prorrateado_en
+                  ? 'Puede recalcular si ajustó los costos adicionales después.'
+                  : 'Idealmente al recibir todas las OCs (estado RECIBIDA).'}
+            </p>
+            <Button
+              variant={importacion.cif_prorrateado_en ? 'outline' : 'default'}
+              size="sm"
+              onClick={prorratearCIF}
+              disabled={pending || sinOCs || totalAdicional <= 0}
+            >
+              {pending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Calculator className="h-4 w-4" />}
+              {importacion.cif_prorrateado_en ? 'Recalcular CIF' : 'Prorratear CIF ahora'}
+            </Button>
+          </div>
         </div>
       </Card>
 
