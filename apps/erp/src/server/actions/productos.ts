@@ -199,7 +199,15 @@ export async function actualizarProducto(id: string, _prev: unknown, fd: FormDat
     const data = parseForm(fd);
     const { sb } = await requireUser();
     const cleaned = clean(data);
-    const { error } = await sb.from('productos').update(cleaned).eq('id', id);
+
+    // OJO: el formulario de edición NO incluye input para `codigo` (es identidad
+    // y no debería cambiarse desde acá). Si viene vacío, lo EXCLUIMOS del UPDATE
+    // — sino sobrescribiría el código real con '' y reventaría el constraint
+    // UNIQUE en cuanto otro producto también quedara con código vacío.
+    const { codigo: _omitCodigo, ...patch } = cleaned;
+    void _omitCodigo;
+
+    const { error } = await sb.from('productos').update(patch).eq('id', id);
     if (error) throw new Error(error.message);
 
     // Sincronizar extras (puede ser lista vacía → borra todas)
