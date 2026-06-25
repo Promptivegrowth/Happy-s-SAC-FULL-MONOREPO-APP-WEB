@@ -326,6 +326,91 @@ export async function subirImagenFicha(
   });
 }
 
+/**
+ * Vincula una imagen YA EXISTENTE de la galería del producto a la ficha
+ * técnica, sin re-subir el archivo. Útil cuando la foto principal/posterior
+ * del producto sirve también para la ficha técnica — evita duplicar storage
+ * y permite reusar fotos con un solo click.
+ *
+ * Se valida que la URL pertenezca al producto de la ficha (no a otro
+ * producto cualquiera) para evitar inyección de URLs.
+ */
+const vincularSchema = z.object({
+  tipo: z.enum([
+    'DELANTERO', 'POSTERIOR', 'LATERAL',
+    'CORTE_DIAGRAMA', 'CONFECCION_DETALLE',
+    'MEDIDAS_DIAGRAMA', 'ETIQUETA',
+    'ACABADOS_DOBLADO', 'CALLOUT', 'OTRA',
+  ]),
+  url: z.string().url('URL inválida'),
+  leyenda: z.string().nullable().optional().or(z.literal('')),
+});
+
+export async function vincularImagenDesdeGaleria(
+  fichaId: string,
+  input: z.input<typeof vincularSchema>,
+): Promise<ActionResult<{ id: string; url: string }>> {
+  return runAction(async () => {
+    await requireUser();
+    const parsed = vincularSchema.parse(input);
+    const admin = createServiceClient() as unknown as AnyClient;
+
+    // 1. Verificar que la ficha existe + obtener producto_id
+    const { data: ficha } = await admin
+      .from('productos_fichas_tecnicas')
+      .select('producto_id')
+      .eq('id', fichaId)
+      .single();
+    if (!ficha) throw new Error('Ficha no encontrada');
+
+    // 2. Verificar que la URL pertenece a la galería del mismo producto
+    //    (puede ser productos_imagenes.url o productos.imagen_principal_url)
+    const { data: enGaleria } = await admin
+      .from('productos_imagenes')
+      .select('id')
+      .eq('producto_id', ficha.producto_id)
+      .eq('url', parsed.url)
+      .maybeSingle();
+    let urlValida = !!enGaleria;
+    if (!urlValida) {
+      const { data: prod } = await admin
+        .from('productos')
+        .select('imagen_principal_url')
+        .eq('id', ficha.producto_id)
+        .single();
+      urlValida = prod?.imagen_principal_url === parsed.url;
+    }
+    if (!urlValida) {
+      throw new Error('Esta imagen no pertenece a la galería del producto');
+    }
+
+    // 3. Calcular siguiente orden
+    const { data: existentes } = await admin
+      .from('fichas_imagenes')
+      .select('orden')
+      .eq('ficha_id', fichaId)
+      .order('orden', { ascending: false })
+      .limit(1);
+    const arr = (existentes ?? []) as { orden: number }[];
+    const siguienteOrden = arr[0] ? Number(arr[0].orden) + 1 : 0;
+
+    // 4. Insertar registro nuevo (NO re-sube el archivo, solo apunta a la URL)
+    const { data: img, error } = await admin
+      .from('fichas_imagenes')
+      .insert({
+        ficha_id: fichaId,
+        tipo: parsed.tipo,
+        url: parsed.url,
+        leyenda: parsed.leyenda === '' ? null : (parsed.leyenda ?? null),
+        orden: siguienteOrden,
+      })
+      .select('id, url')
+      .single();
+    if (error) throw new Error(error.message);
+    return { id: img.id as string, url: img.url as string };
+  });
+}
+
 export async function eliminarImagenFicha(imagenId: string): Promise<ActionResult> {
   return runAction(async () => {
     await requireUser();

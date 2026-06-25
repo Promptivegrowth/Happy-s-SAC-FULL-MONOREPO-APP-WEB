@@ -119,6 +119,18 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
             avios={aviosProd}
             procesos={procesosProd}
             revisiones={fichaData?.revisiones ?? []}
+            /* Galería del producto: imagen principal (si existe) + galería —
+               sirve para reusar fotos en la ficha técnica sin re-subir. */
+            galeriaProducto={[
+              ...(prod.imagen_principal_url
+                ? [{ id: 'principal', url: prod.imagen_principal_url as string, alt: prod.nombre as string }]
+                : []),
+              ...((imgs ?? []) as { id: string; url: string; orden: number; es_portada: boolean }[]).map((i) => ({
+                id: i.id,
+                url: i.url,
+                alt: null,
+              })),
+            ]}
           />
         </TabsContent>
         <TabsContent value="publicacion">

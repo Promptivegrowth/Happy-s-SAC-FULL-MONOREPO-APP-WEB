@@ -29,6 +29,7 @@ import {
   actualizarFichaTecnica,
   guardarMedidasFicha,
   subirImagenFicha,
+  vincularImagenDesdeGaleria,
   eliminarImagenFicha,
   guardarPiezasCorte,
   generarLinkPublico,
@@ -55,6 +56,8 @@ import {
   type TipoTela,
 } from '@/server/actions/fichas-tecnicas-helpers';
 
+type GaleriaItem = { id: string; url: string; alt: string | null };
+
 type Props = {
   productoId: string;
   productoNombre: string;
@@ -66,6 +69,8 @@ type Props = {
   avios: AvioRow[];
   procesos: ProcesoFichaRow[];
   revisiones: { id: string; revision: number; vigente: boolean; updated_at: string }[];
+  /** Galería del producto (img principal + adicionales) — para reusar en ficha. */
+  galeriaProducto?: GaleriaItem[];
 };
 
 type SubTab = 'resumen' | 'composicion' | 'medidas' | 'corte' | 'avios' | 'imagenes' | 'confeccion';
@@ -113,7 +118,7 @@ export function FichaTecnicaSection(props: Props) {
 }
 
 function FichaEditor({
-  productoId, productoNombre, tallasProducto, ficha, medidas, imagenes, piezas, avios, procesos, revisiones,
+  productoId, productoNombre, tallasProducto, ficha, medidas, imagenes, piezas, avios, procesos, revisiones, galeriaProducto = [],
 }: Props & { ficha: FichaTecnica }) {
   const router = useRouter();
   const [tab, setTab] = useState<SubTab>('resumen');
@@ -245,7 +250,7 @@ function FichaEditor({
       {tab === 'medidas' && <MedidasTab ficha={ficha} medidasIniciales={medidas} tallasProducto={tallasProducto} />}
       {tab === 'corte' && <CorteTab ficha={ficha} piezasIniciales={piezas} />}
       {tab === 'avios' && <AviosTab productoId={productoId} avios={avios} procesos={procesos} />}
-      {tab === 'imagenes' && <ImagenesTab fichaId={ficha.id} imagenes={imagenes} />}
+      {tab === 'imagenes' && <ImagenesTab fichaId={ficha.id} imagenes={imagenes} galeriaProducto={galeriaProducto} />}
       {tab === 'confeccion' && <ConfeccionTab ficha={ficha} />}
 
       {compartirOpen && (
@@ -700,12 +705,24 @@ function MedidasTab({
 // ────────────────────────────────────────────────────────────────────────────
 // IMÁGENES
 // ────────────────────────────────────────────────────────────────────────────
-function ImagenesTab({ fichaId, imagenes }: { fichaId: string; imagenes: FichaImagen[] }) {
+function ImagenesTab({
+  fichaId,
+  imagenes,
+  galeriaProducto,
+}: {
+  fichaId: string;
+  imagenes: FichaImagen[];
+  galeriaProducto: GaleriaItem[];
+}) {
   const router = useRouter();
   const fileRef = useRef<HTMLInputElement>(null);
   const [tipo, setTipo] = useState<TipoImagenFicha>('DELANTERO');
   const [leyenda, setLeyenda] = useState('');
   const [subiendo, setSubiendo] = useState(false);
+  const [galeriaOpen, setGaleriaOpen] = useState(false);
+
+  // URLs ya vinculadas a esta ficha (para marcar las que ya están en uso)
+  const urlsEnFicha = new Set(imagenes.map((i) => i.url));
 
   async function handleFile(file: File) {
     if (!file.type.match(/^image\/(png|jpeg|jpg|webp)$/)) {
@@ -752,6 +769,27 @@ function ImagenesTab({ fichaId, imagenes }: { fichaId: string; imagenes: FichaIm
     }
   }
 
+  async function vincularDesdeGaleria(url: string) {
+    setSubiendo(true);
+    try {
+      const r = await vincularImagenDesdeGaleria(fichaId, {
+        tipo,
+        url,
+        leyenda: leyenda || null,
+      });
+      if (r.ok) {
+        toast.success(`Imagen vinculada como ${TIPO_IMAGEN_LABEL[tipo]}`);
+        setLeyenda('');
+        setGaleriaOpen(false);
+        router.refresh();
+      } else {
+        toast.error(r.error ?? 'Error');
+      }
+    } finally {
+      setSubiendo(false);
+    }
+  }
+
   async function borrar(id: string) {
     if (!confirm('¿Eliminar esta imagen?')) return;
     const r = await eliminarImagenFicha(id);
@@ -791,7 +829,7 @@ function ImagenesTab({ fichaId, imagenes }: { fichaId: string; imagenes: FichaIm
               className="mt-1"
             />
           </div>
-          <div className="flex items-end">
+          <div className="flex items-end gap-2">
             <input
               ref={fileRef}
               type="file"
@@ -814,10 +852,85 @@ function ImagenesTab({ fichaId, imagenes }: { fichaId: string; imagenes: FichaIm
               {subiendo ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
               Subir
             </Button>
+            {galeriaProducto.length > 0 && (
+              <Button
+                variant="outline"
+                onClick={() => setGaleriaOpen(true)}
+                disabled={subiendo}
+                title="Reutilizar una imagen ya subida en la galería del producto"
+              >
+                <ImageIcon className="h-4 w-4" />
+                Elegir de galería ({galeriaProducto.length})
+              </Button>
+            )}
           </div>
         </div>
-        <p className="text-[10px] text-slate-400">PNG / JPG / WEBP · máx 10 MB</p>
+        <p className="text-[10px] text-slate-400">PNG / JPG / WEBP · máx 10 MB · o reusá imágenes ya subidas en el producto sin duplicar archivo</p>
       </Card>
+
+      {/* Modal: elegir de galería del producto */}
+      {galeriaOpen && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-corp-900/60 backdrop-blur-sm p-4"
+          onClick={() => !subiendo && setGaleriaOpen(false)}
+        >
+          <Card
+            className="w-full max-w-3xl max-h-[85vh] overflow-y-auto p-5 shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="mb-3 flex items-start justify-between gap-3">
+              <div>
+                <h3 className="font-display text-lg font-semibold text-corp-900">
+                  Elegir imagen de la galería del producto
+                </h3>
+                <p className="text-xs text-slate-500">
+                  Se vinculará como <strong>{TIPO_IMAGEN_LABEL[tipo]}</strong> sin duplicar el archivo en storage.
+                </p>
+              </div>
+              <Button variant="ghost" size="sm" onClick={() => setGaleriaOpen(false)} disabled={subiendo}>
+                ✕
+              </Button>
+            </div>
+            <div className="grid gap-3 sm:grid-cols-3 lg:grid-cols-4">
+              {galeriaProducto.map((g) => {
+                const yaUsada = urlsEnFicha.has(g.url);
+                return (
+                  <button
+                    key={g.id}
+                    type="button"
+                    onClick={() => !yaUsada && vincularDesdeGaleria(g.url)}
+                    disabled={subiendo || yaUsada}
+                    className={`group relative overflow-hidden rounded-md border-2 transition ${
+                      yaUsada
+                        ? 'border-slate-200 opacity-50 cursor-not-allowed'
+                        : 'border-slate-200 hover:border-happy-500 hover:shadow-md cursor-pointer'
+                    }`}
+                  >
+                    <div className="aspect-square bg-slate-50">
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img src={g.url} alt={g.alt ?? ''} className="h-full w-full object-contain" />
+                    </div>
+                    {yaUsada && (
+                      <div className="absolute inset-0 flex items-center justify-center bg-white/60">
+                        <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-semibold text-emerald-700">
+                          ✓ Ya en ficha
+                        </span>
+                      </div>
+                    )}
+                    {!yaUsada && (
+                      <div className="absolute inset-0 hidden items-center justify-center bg-happy-500/10 group-hover:flex">
+                        <span className="rounded-full bg-happy-500 px-3 py-1 text-xs font-medium text-white">
+                          Vincular
+                        </span>
+                      </div>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+          </Card>
+        </div>
+      )}
 
       {imagenes.length === 0 ? (
         <Card className="p-10 text-center">
