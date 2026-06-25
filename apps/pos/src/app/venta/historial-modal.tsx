@@ -14,21 +14,41 @@ import { Card } from '@happy/ui/card';
 import { Button } from '@happy/ui/button';
 import { Badge } from '@happy/ui/badge';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@happy/ui/table';
-import { X, Loader2, History, Send, Clock, User } from 'lucide-react';
+import { X, Loader2, History, Send, Clock, User, Users, Banknote, Receipt as ReceiptIcon } from 'lucide-react';
 import { formatPEN, formatDateTime } from '@happy/lib';
-import { obtenerHistorialSesion, obtenerSesionActiva } from '@/server/actions/caja';
-import type { TransaccionRow, SesionCajaDTO } from '@/server/actions/caja-helpers';
+import {
+  obtenerHistorialSesion,
+  obtenerSesionActiva,
+  listarCierresParcialesSesion,
+} from '@/server/actions/caja';
+import type { TransaccionRow, SesionCajaDTO, BalanceCajaDTO } from '@/server/actions/caja-helpers';
 import { construirMensajeWhatsApp, abrirWhatsApp } from './whatsapp-helper';
+
+type CierreParcial = {
+  id: string;
+  fecha: string;
+  cajero_saliente_nombre: string | null;
+  total_ventas: number;
+  total_efectivo: number;
+  diferencia: number;
+  observaciones: string | null;
+};
 
 export function HistorialModal({ onClose, empresaNombre }: { onClose: () => void; empresaNombre: string }) {
   const [rows, setRows] = useState<TransaccionRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [alcance, setAlcance] = useState<'SESION' | 'DIA'>('SESION');
   const [sesion, setSesion] = useState<SesionCajaDTO | null>(null);
+  const [balance, setBalance] = useState<BalanceCajaDTO | null>(null);
+  const [cierresParciales, setCierresParciales] = useState<CierreParcial[]>([]);
 
-  // Cargar metadata de sesión una sola vez (no depende del alcance)
+  // Cargar metadata de sesión + balance + cierres parciales (no depende del alcance)
   useEffect(() => {
-    obtenerSesionActiva().then((r) => setSesion(r?.sesion ?? null));
+    obtenerSesionActiva().then((r) => {
+      setSesion(r?.sesion ?? null);
+      setBalance(r?.balance ?? null);
+    });
+    listarCierresParcialesSesion().then(setCierresParciales).catch(() => setCierresParciales([]));
   }, []);
 
   useEffect(() => {
@@ -107,7 +127,7 @@ export function HistorialModal({ onClose, empresaNombre }: { onClose: () => void
           </button>
         </div>
 
-        {/* Info de la sesión activa (apertura + cajero) */}
+        {/* Info de la sesión activa (apertura + cajero + caja + monto) */}
         {sesion && (
           <div className="flex flex-wrap items-center gap-x-4 gap-y-1 border-b border-slate-200 bg-happy-50/30 px-5 py-2 text-xs">
             <div className="flex items-center gap-1.5 text-slate-600">
@@ -129,6 +149,79 @@ export function HistorialModal({ onClose, empresaNombre }: { onClose: () => void
             <div className="flex items-center gap-1.5 text-slate-600">
               <span className="font-medium text-slate-500">Apertura:</span>
               <span className="font-mono font-semibold text-corp-900">{formatPEN(sesion.monto_apertura)}</span>
+            </div>
+          </div>
+        )}
+
+        {/* Stats acumulados de la sesión (ventas + efectivo cobrado + métodos) */}
+        {balance && (
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-1 border-b border-slate-200 bg-emerald-50/30 px-5 py-2 text-xs">
+            <div className="flex items-center gap-1.5">
+              <ReceiptIcon className="h-3.5 w-3.5 text-emerald-600" />
+              <span className="font-medium text-slate-500">Ventas en sesión:</span>
+              <span className="font-mono font-bold text-corp-900">{balance.cantidad_ventas}</span>
+              <span className="text-slate-400">·</span>
+              <span className="font-mono font-semibold text-emerald-700">{formatPEN(balance.total_ventas)}</span>
+            </div>
+            <div className="flex items-center gap-1.5">
+              <Banknote className="h-3.5 w-3.5 text-emerald-600" />
+              <span className="font-medium text-slate-500">Efectivo cobrado:</span>
+              <span className="font-mono font-semibold text-emerald-700">{formatPEN(balance.total_efectivo)}</span>
+            </div>
+            {balance.total_yape > 0 && (
+              <span className="text-slate-600">Yape <span className="font-mono font-medium text-corp-900">{formatPEN(balance.total_yape)}</span></span>
+            )}
+            {balance.total_plin > 0 && (
+              <span className="text-slate-600">Plin <span className="font-mono font-medium text-corp-900">{formatPEN(balance.total_plin)}</span></span>
+            )}
+            {balance.total_tarjeta > 0 && (
+              <span className="text-slate-600">Tarjeta <span className="font-mono font-medium text-corp-900">{formatPEN(balance.total_tarjeta)}</span></span>
+            )}
+            {balance.total_transferencia > 0 && (
+              <span className="text-slate-600">Transf. <span className="font-mono font-medium text-corp-900">{formatPEN(balance.total_transferencia)}</span></span>
+            )}
+            {balance.total_gastos > 0 && (
+              <span className="text-rose-600">Gastos <span className="font-mono font-semibold">−{formatPEN(balance.total_gastos)}</span></span>
+            )}
+          </div>
+        )}
+
+        {/* Cierres parciales previos (cambios de turno) */}
+        {cierresParciales.length > 0 && (
+          <div className="border-b border-slate-200 bg-amber-50/30 px-5 py-2 text-xs">
+            <div className="flex items-center gap-1.5 mb-1">
+              <Users className="h-3.5 w-3.5 text-amber-600" />
+              <span className="font-medium text-amber-800">
+                Cambios de turno en esta sesión ({cierresParciales.length})
+              </span>
+            </div>
+            <div className="space-y-0.5 pl-5">
+              {cierresParciales.slice(0, 5).map((c) => {
+                const hora = new Date(c.fecha).toLocaleTimeString('es-PE', { hour: '2-digit', minute: '2-digit' });
+                return (
+                  <div key={c.id} className="flex flex-wrap items-center gap-x-2 text-slate-600">
+                    <span className="font-mono font-semibold text-amber-700">{hora}</span>
+                    <span className="text-slate-400">·</span>
+                    <span className="font-medium text-corp-900">{c.cajero_saliente_nombre ?? '—'}</span>
+                    <span className="text-slate-500">cerró turno</span>
+                    <span className="text-slate-400">·</span>
+                    <span>{c.total_ventas} venta{c.total_ventas === 1 ? '' : 's'}</span>
+                    <span className="text-slate-400">·</span>
+                    <span className="font-mono">Efectivo {formatPEN(c.total_efectivo)}</span>
+                    {Math.abs(c.diferencia) > 0.01 && (
+                      <span className={`font-mono font-medium ${c.diferencia > 0 ? 'text-emerald-700' : 'text-rose-700'}`}>
+                        ({c.diferencia > 0 ? '+' : ''}{formatPEN(c.diferencia)})
+                      </span>
+                    )}
+                    {c.observaciones && (
+                      <span className="text-[10px] italic text-slate-500">— {c.observaciones}</span>
+                    )}
+                  </div>
+                );
+              })}
+              {cierresParciales.length > 5 && (
+                <div className="text-[10px] text-slate-500">…{cierresParciales.length - 5} más</div>
+              )}
             </div>
           </div>
         )}
