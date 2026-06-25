@@ -6,13 +6,14 @@ import { Card } from '@happy/ui/card';
 import { Input } from '@happy/ui/input';
 import { Button } from '@happy/ui/button';
 import { Badge } from '@happy/ui/badge';
-import { Trash2, Plus, Minus, ScanBarcode, X, Smartphone, CreditCard, Banknote, Building2, MessageCircle, Loader2, LayoutGrid, ShoppingBag, LogOut, Receipt, History, Send, RotateCcw, Coins, Wallet, MapPin } from 'lucide-react';
+import { Trash2, Plus, Minus, ScanBarcode, X, Smartphone, CreditCard, Banknote, Building2, MessageCircle, Loader2, LayoutGrid, ShoppingBag, LogOut, Receipt, History, Send, RotateCcw, Coins, Wallet, MapPin, LogIn, UserX } from 'lucide-react';
 import { toast } from 'sonner';
 import { formatPEN, ordenTalla } from '@happy/lib';
 import { buildPedidoWaMessage, buildWhatsappUrl } from '@happy/lib/whatsapp';
 import { registrarVenta } from '@/server/actions/venta';
 import { emitirComprobante, obtenerSesionActiva } from '@/server/actions/caja';
 import { aplicarAdelantoAVenta } from '@/server/actions/adelantos';
+import { cerrarSesionUsuario } from '@/server/actions/auth';
 import type { SesionCajaDTO, BalanceCajaDTO } from '@/server/actions/caja-helpers';
 import { AbrirCajaModal } from './abrir-caja-modal';
 import { CerrarCajaModal } from './cerrar-caja-modal';
@@ -106,6 +107,9 @@ export function PosTerminal({
   const [gastosOpen, setGastosOpen] = useState(false);
   const [adelantosOpen, setAdelantosOpen] = useState(false);
   const [stockAlmacenesVarianteId, setStockAlmacenesVarianteId] = useState<string | null>(null);
+  // Modal de apertura de caja — solo se abre cuando el cajero clickea
+  // "Abrir caja" (ya NO se dispara automático al cargar sin sesión)
+  const [abrirCajaOpen, setAbrirCajaOpen] = useState(false);
   const [devolucionOpen, setDevolucionOpen] = useState(false);
   const [efectivoInput, setEfectivoInput] = useState<string>('');
   const [cobrarOpen, setCobrarOpen] = useState(false);
@@ -482,6 +486,21 @@ export function PosTerminal({
               className="gap-1 text-xs"
             >
               <LogOut className="h-3.5 w-3.5" /> Cerrar caja
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => {
+                if (sesionActiva) {
+                  if (!confirm('Tenés caja abierta. ¿Cerrar sesión sin cerrar caja? La caja queda abierta para el próximo turno.')) return;
+                }
+                void cerrarSesionUsuario();
+              }}
+              data-pos-no-focus
+              className="gap-1 text-xs text-slate-500 hover:text-rose-600"
+              title="Cerrar sesión del usuario (salir de la cuenta)"
+            >
+              <UserX className="h-3.5 w-3.5" /> Salir
             </Button>
           </div>
           <div className="relative">
@@ -864,15 +883,46 @@ export function PosTerminal({
         </div>
       </aside>
 
-      {/* MODAL — Apertura de caja (bloquea el terminal cuando no hay sesión) */}
-      {!sesionActiva && (
+      {/* OVERLAY — Cuando no hay sesión: pantalla gris con botón centrado.
+          NO auto-spawnea el modal — el cajero debe clickear "Abrir caja". */}
+      {!sesionActiva && !abrirCajaOpen && (
+        <div className="pointer-events-none fixed inset-0 z-30 flex items-center justify-center bg-slate-900/40 backdrop-blur-[2px]">
+          <div className="pointer-events-auto rounded-2xl bg-white p-8 shadow-2xl text-center max-w-sm">
+            <div className="mx-auto mb-3 flex h-14 w-14 items-center justify-center rounded-full bg-happy-100">
+              <LogIn className="h-7 w-7 text-happy-600" />
+            </div>
+            <h3 className="font-display text-xl font-semibold text-corp-900">No hay caja abierta</h3>
+            <p className="mt-1 text-sm text-slate-500">
+              Para vender necesitás abrir tu turno con un monto inicial.
+            </p>
+            <Button
+              onClick={() => setAbrirCajaOpen(true)}
+              variant="premium"
+              size="lg"
+              className="mt-5 w-full"
+            >
+              <LogIn className="h-4 w-4" /> Abrir caja
+            </Button>
+            <p className="mt-3 text-[10px] text-slate-400">
+              Podés navegar por la app aunque no tengas caja abierta (consultar historial, cerrar sesión).
+            </p>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL — Apertura de caja (solo cuando el cajero lo abre manualmente) */}
+      {!sesionActiva && abrirCajaOpen && (
         <AbrirCajaModal
           cajeroNombre={cajeroNombre}
           cajaNombre={cajaDefault?.nombre ?? null}
           cajaId={cajaDefault?.id ?? null}
           cajasDisponibles={cajas}
           montoDefault={cajaDefault?.monto_apertura_default ?? 100}
-          onAbierta={() => void refrescarSesion()}
+          onAbierta={() => {
+            setAbrirCajaOpen(false);
+            void refrescarSesion();
+          }}
+          onClose={() => setAbrirCajaOpen(false)}
         />
       )}
 

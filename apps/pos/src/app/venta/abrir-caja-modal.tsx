@@ -1,10 +1,11 @@
 'use client';
 
 /**
- * Overlay/modal de APERTURA DE CAJA.
+ * Modal de APERTURA DE CAJA.
  *
- * Aparece SIEMPRE cuando no hay sesión activa. Sin sesión, el resto del
- * terminal está bloqueado (sólo se ve este overlay).
+ * El cajero lo abre manualmente desde el botón "Abrir caja" del terminal
+ * cuando no hay sesión activa. Puede cerrarlo con la X si solo quiere
+ * consultar historial/reportes sin abrir un turno nuevo.
  */
 
 import { useState, useTransition } from 'react';
@@ -12,7 +13,7 @@ import { Card } from '@happy/ui/card';
 import { Input } from '@happy/ui/input';
 import { Label } from '@happy/ui/label';
 import { Button } from '@happy/ui/button';
-import { Banknote, Loader2, LogIn } from 'lucide-react';
+import { Banknote, Loader2, LogIn, X } from 'lucide-react';
 import { toast } from 'sonner';
 import { abrirSesion } from '@/server/actions/caja';
 
@@ -23,6 +24,7 @@ export function AbrirCajaModal({
   cajasDisponibles,
   montoDefault,
   onAbierta,
+  onClose,
 }: {
   cajeroNombre: string;
   cajaNombre: string | null;
@@ -30,6 +32,7 @@ export function AbrirCajaModal({
   cajasDisponibles: { id: string; codigo: string; nombre: string }[];
   montoDefault: number;
   onAbierta: () => void;
+  onClose?: () => void;
 }) {
   const [monto, setMonto] = useState<string>(montoDefault.toFixed(2));
   const [obs, setObs] = useState('');
@@ -70,15 +73,31 @@ export function AbrirCajaModal({
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-corp-900/70 backdrop-blur-sm p-4">
-      <Card className="w-full max-w-md p-6 shadow-2xl">
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-corp-900/70 backdrop-blur-sm p-4"
+      onClick={() => !pending && onClose?.()}
+    >
+      <Card
+        className="relative w-full max-w-md p-6 shadow-2xl"
+        onClick={(e) => e.stopPropagation()}
+      >
+        {onClose && (
+          <button
+            onClick={onClose}
+            disabled={pending}
+            className="absolute right-3 top-3 rounded p-1 text-slate-400 hover:bg-slate-100 disabled:opacity-50"
+            title="Cerrar"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        )}
         <div className="flex items-center gap-3">
           <div className="rounded-full bg-happy-100 p-2">
             <LogIn className="h-5 w-5 text-happy-600" />
           </div>
           <div>
             <h2 className="font-display text-lg font-semibold text-corp-900">Abrir caja</h2>
-            <p className="text-xs text-slate-500">No puedes vender hasta abrir tu sesión de caja.</p>
+            <p className="text-xs text-slate-500">Iniciá tu turno con el monto inicial en efectivo.</p>
           </div>
         </div>
 
