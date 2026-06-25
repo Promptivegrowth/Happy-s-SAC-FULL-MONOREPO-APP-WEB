@@ -296,16 +296,20 @@ export async function historicoMaterial(
   });
 }
 
-/** Lista de almacenes (helper para selectores). */
+/** Lista de almacenes (helper para selectores). Excluye almacenes ocultos
+ * (ej. ALM-MR que el cliente no usa operativamente — migración 52). */
 export async function listarAlmacenes(): Promise<
   ActionResult<{ id: string; codigo: string; nombre: string }[]>
 > {
   return runAction(async () => {
     const { sb } = await requireUser();
-    const { data, error } = await sb
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const sbAny = sb as unknown as { from: (t: string) => any };
+    const { data, error } = await sbAny
       .from('almacenes')
       .select('id, codigo, nombre')
       .eq('activo', true)
+      .eq('oculto_en_selectores', false)
       .order('codigo');
     if (error) throw new Error(error.message);
     return data ?? [];

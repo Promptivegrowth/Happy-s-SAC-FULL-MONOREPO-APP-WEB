@@ -121,10 +121,23 @@ export async function listarProveedoresParaOC(): Promise<ProveedorOpt[]> {
 
 export async function listarAlmacenesParaOC(): Promise<AlmacenOpt[]> {
   const { sb } = await requireUser();
-  const { data } = await sb
+  // Excluir almacenes ocultos (ej. ALM-MR que el cliente no usa en operación)
+  // Cast porque oculto_en_selectores es de migración 52.
+  const { data } = await (sb as unknown as {
+    from: (t: string) => {
+      select: (s: string) => {
+        eq: (k: string, v: unknown) => {
+          eq: (k: string, v: unknown) => {
+            order: (k: string) => Promise<{ data: AlmacenOpt[] | null }>;
+          };
+        };
+      };
+    };
+  })
     .from('almacenes')
     .select('id, codigo, nombre')
     .eq('activo', true)
+    .eq('oculto_en_selectores', false)
     .order('nombre');
   return (data ?? []) as AlmacenOpt[];
 }

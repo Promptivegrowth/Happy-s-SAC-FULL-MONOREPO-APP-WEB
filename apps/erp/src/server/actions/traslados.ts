@@ -62,9 +62,11 @@ export type TrasladoDetalle = {
   almacen_origen_id: string;
   almacen_origen_codigo: string;
   almacen_origen_nombre: string;
+  almacen_origen_direccion: string | null;
   almacen_destino_id: string;
   almacen_destino_codigo: string;
   almacen_destino_nombre: string;
+  almacen_destino_direccion: string | null;
   solicitado_por: string | null;
   despachado_por: string | null;
   recibido_por: string | null;
@@ -220,8 +222,8 @@ export async function obtenerTraslado(
           'solicitado_por, despachado_por, recibido_por, ' +
           'fecha_solicitud, fecha_despacho, fecha_recepcion, ' +
           'guia_remision, motivo, observacion, ' +
-          'almacen_origen_join:almacen_origen(id, codigo, nombre), ' +
-          'almacen_destino_join:almacen_destino(id, codigo, nombre)',
+          'almacen_origen_join:almacen_origen(id, codigo, nombre, direccion), ' +
+          'almacen_destino_join:almacen_destino(id, codigo, nombre, direccion)',
       )
       .eq('id', id)
       .single();
@@ -276,16 +278,21 @@ export async function obtenerTraslado(
       },
     );
 
+    type AlmRaw = { codigo: string; nombre: string; direccion: string | null } | null;
+    const origenRaw = c.almacen_origen_join as unknown as AlmRaw;
+    const destinoRaw = c.almacen_destino_join as unknown as AlmRaw;
     const traslado: TrasladoDetalle = {
       id: c.id,
       codigo: c.codigo,
       estado: c.estado,
       almacen_origen_id: c.almacen_origen,
-      almacen_origen_codigo: c.almacen_origen_join?.codigo ?? '—',
-      almacen_origen_nombre: c.almacen_origen_join?.nombre ?? '—',
+      almacen_origen_codigo: origenRaw?.codigo ?? '—',
+      almacen_origen_nombre: origenRaw?.nombre ?? '—',
+      almacen_origen_direccion: origenRaw?.direccion ?? null,
       almacen_destino_id: c.almacen_destino,
-      almacen_destino_codigo: c.almacen_destino_join?.codigo ?? '—',
-      almacen_destino_nombre: c.almacen_destino_join?.nombre ?? '—',
+      almacen_destino_codigo: destinoRaw?.codigo ?? '—',
+      almacen_destino_nombre: destinoRaw?.nombre ?? '—',
+      almacen_destino_direccion: destinoRaw?.direccion ?? null,
       solicitado_por: c.solicitado_por,
       despachado_por: c.despachado_por,
       recibido_por: c.recibido_por,
@@ -308,6 +315,7 @@ export type VarianteItem = {
   sku: string;
   talla: string;
   producto_nombre: string;
+  codigo_barras: string | null;
 };
 
 export async function listarVariantesParaTraslado(): Promise<ActionResult<VarianteItem[]>> {
@@ -315,7 +323,7 @@ export async function listarVariantesParaTraslado(): Promise<ActionResult<Varian
     const { sb } = await requireUser();
     const { data, error } = await sb
       .from('productos_variantes')
-      .select('id, sku, talla, producto:producto_id(nombre, activo)')
+      .select('id, sku, talla, codigo_barras, producto:producto_id(nombre, activo)')
       .eq('activo', true)
       .order('sku');
     if (error) throw new Error(error.message);
@@ -323,6 +331,7 @@ export async function listarVariantesParaTraslado(): Promise<ActionResult<Varian
       id: string;
       sku: string;
       talla: string;
+      codigo_barras: string | null;
       producto: { nombre: string; activo: boolean } | null;
     };
     return ((data ?? []) as unknown as Row[])
@@ -332,6 +341,7 @@ export async function listarVariantesParaTraslado(): Promise<ActionResult<Varian
         sku: v.sku,
         talla: v.talla,
         producto_nombre: v.producto?.nombre ?? '—',
+        codigo_barras: v.codigo_barras,
       }));
   });
 }

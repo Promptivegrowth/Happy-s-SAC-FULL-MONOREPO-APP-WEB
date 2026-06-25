@@ -26,7 +26,23 @@ export default async function InventarioPage({ searchParams }: { searchParams: P
 
   // Datos para filtros: almacenes activos + index de variantes para autocomplete
   const [{ data: almacenesData }, { data: variantesIndex }] = await Promise.all([
-    sb.from('almacenes').select('id, codigo, nombre, tipo').eq('activo', true).order('nombre'),
+    // Cast porque oculto_en_selectores es de migración 52 (aún no en types autogen)
+    (sb as unknown as {
+      from: (t: string) => {
+        select: (s: string) => {
+          eq: (k: string, v: unknown) => {
+            eq: (k: string, v: unknown) => {
+              order: (k: string) => Promise<{ data: Array<{ id: string; codigo: string; nombre: string; tipo: string }> | null }>;
+            };
+          };
+        };
+      };
+    })
+      .from('almacenes')
+      .select('id, codigo, nombre, tipo')
+      .eq('activo', true)
+      .eq('oculto_en_selectores', false)
+      .order('nombre'),
     sb
       .from('productos_variantes')
       .select('id, sku, talla, productos(nombre)')

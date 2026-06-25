@@ -568,10 +568,12 @@ export async function cancelarPedidoWeb(id: string, motivo: string): Promise<Act
 // ============================================================================
 export async function listarAlmacenesParaPedido(): Promise<{ id: string; codigo: string; nombre: string }[]> {
   const sb = (await createClient()) as unknown as AnyClient;
+  // Excluir almacenes ocultos (migración 52)
   const { data } = await sb
     .from('almacenes')
     .select('id, codigo, nombre, permite_ventas')
     .eq('activo', true)
+    .eq('oculto_en_selectores', false)
     .order('codigo');
   type A = { id: string; codigo: string; nombre: string; permite_ventas: boolean | null };
   return ((data ?? []) as A[]).filter((a) => a.permite_ventas !== false).map((a) => ({

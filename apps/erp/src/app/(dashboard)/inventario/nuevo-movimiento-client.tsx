@@ -19,13 +19,17 @@ import { registrarMovimientoStock } from '@/server/actions/inventario';
 type Almacen = { id: string; nombre: string; codigo: string };
 type Variante = { id: string; sku: string; talla: string; producto_nombre: string };
 
+// Opciones de "Registrar movimiento" — eventos puntuales con motivo claro.
+// NO se incluyen AJUSTE genéricos (ENTRADA_AJUSTE/SALIDA_AJUSTE):
+//   - Si el motivo es corregir el stock por conteo físico → usar el botón
+//     "Corregir cantidad" en la fila del inventario (más específico).
+//   - Si el motivo es algo realmente excepcional, usar ese mismo botón
+//     con motivo "OTRO".
 const TIPOS = [
-  { value: 'ENTRADA_COMPRA', label: '+ Ingreso compra (entrada por compra a proveedor)' },
-  { value: 'ENTRADA_AJUSTE', label: '+ Ajuste manual (entrada — agregar stock)' },
+  { value: 'ENTRADA_COMPRA', label: '+ Ingreso por compra (recepción de proveedor)' },
   { value: 'ENTRADA_DEVOLUCION_CLIENTE', label: '+ Devolución de cliente' },
   { value: 'ENTRADA_DEVOLUCION_TALLER', label: '+ Devolución de taller' },
-  { value: 'SALIDA_AJUSTE', label: '− Ajuste manual (salida — quitar stock)' },
-  { value: 'SALIDA_MERMA', label: '− Merma / descarte' },
+  { value: 'SALIDA_MERMA', label: '− Merma / descarte (pérdida)' },
 ] as const;
 
 export function NuevoMovimientoButton({
@@ -40,7 +44,7 @@ export function NuevoMovimientoButton({
   const [search, setSearch] = useState('');
   const [varianteId, setVarianteId] = useState<string>('');
   const [almacenId, setAlmacenId] = useState<string>(almacenes[0]?.id ?? '');
-  const [tipo, setTipo] = useState<typeof TIPOS[number]['value']>('ENTRADA_AJUSTE');
+  const [tipo, setTipo] = useState<typeof TIPOS[number]['value']>('ENTRADA_COMPRA');
   const [cantidad, setCantidad] = useState('5');
   const [observacion, setObservacion] = useState('');
 
@@ -63,7 +67,7 @@ export function NuevoMovimientoButton({
   function reset() {
     setSearch('');
     setVarianteId('');
-    setTipo('ENTRADA_AJUSTE');
+    setTipo('ENTRADA_COMPRA');
     setCantidad('5');
     setObservacion('');
   }
@@ -106,16 +110,19 @@ export function NuevoMovimientoButton({
 
   return (
     <>
-      <Button variant="premium" className="gap-2" onClick={() => setOpen(true)}>
-        <PackagePlus className="h-4 w-4" /> Nuevo movimiento
+      <Button variant="premium" className="gap-2" onClick={() => setOpen(true)} title="Registrar movimiento puntual (compra, devolución, merma)">
+        <PackagePlus className="h-4 w-4" /> Registrar movimiento
       </Button>
 
       <Dialog open={open} onOpenChange={onOpenChange}>
         <DialogContent className="max-w-xl">
           <DialogHeader>
-            <DialogTitle>Nuevo movimiento de stock</DialogTitle>
+            <DialogTitle>Registrar movimiento puntual de stock</DialogTitle>
             <DialogDescription>
-              Genera un movimiento en kardex y actualiza stock_actual automáticamente. Sirve también para variantes que aún no tienen stock en este almacén.
+              Para eventos específicos con motivo claro: <strong>compra recibida, devolución, merma</strong>.
+              <span className="mt-1 block rounded bg-sky-50 p-2 text-xs text-sky-800">
+                ¿Solo querés ajustar la cantidad por conteo físico? Usá el botón <strong>✏️ Corregir cantidad</strong> al lado de cada fila del inventario — es más simple.
+              </span>
             </DialogDescription>
           </DialogHeader>
 

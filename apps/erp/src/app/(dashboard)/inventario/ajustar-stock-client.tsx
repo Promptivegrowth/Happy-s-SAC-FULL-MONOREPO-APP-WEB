@@ -87,7 +87,7 @@ export function AjustarStockButton(props: Props) {
         variant="ghost"
         size="sm"
         onClick={() => setOpen(true)}
-        title="Ajustar stock"
+        title="Corregir cantidad (conteo físico)"
       >
         <Pencil className="h-3.5 w-3.5" />
       </Button>
@@ -95,10 +95,13 @@ export function AjustarStockButton(props: Props) {
       <Dialog open={open} onOpenChange={onOpenChange}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Ajustar stock</DialogTitle>
+            <DialogTitle>Corregir cantidad por conteo físico</DialogTitle>
             <DialogDescription>
               {props.productoNombre} · talla {props.talla.replace('T', '')} · SKU {props.sku} ·
               almacén {props.almacenNombre}
+              <span className="mt-1 block rounded bg-amber-50 p-2 text-xs text-amber-700">
+                <strong>Usar cuando:</strong> contás físicamente y el sistema no coincide. La cantidad ingresada será el valor final exacto; el sistema genera el ajuste automático para llegar a ese número.
+              </span>
             </DialogDescription>
           </DialogHeader>
 

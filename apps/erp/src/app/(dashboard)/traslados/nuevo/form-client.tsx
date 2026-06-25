@@ -8,7 +8,7 @@ import { FormRow, FormGrid, FormSection } from '@happy/ui/form-row';
 import { Input } from '@happy/ui/input';
 import { Textarea } from '@happy/ui/textarea';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@happy/ui/table';
-import { Loader2, Save, Plus, Trash2, AlertTriangle, Search } from 'lucide-react';
+import { Loader2, Save, Plus, Trash2, AlertTriangle, Search, ScanLine, Zap, Upload } from 'lucide-react';
 import { toast } from 'sonner';
 import {
   crearTraslado,
@@ -112,6 +112,115 @@ export function NuevoTrasladoForm({
         observacion: '',
       },
     ]);
+  }
+
+  // ─── CARGA RÁPIDA ──────────────────────────────────────────────────────
+  // Permite pegar/escanear muchos códigos a la vez para evitar agregar
+  // uno por uno cuando hay que mover decenas de productos.
+  const [bulkText, setBulkText] = useState('');
+  const [bulkQty, setBulkQty] = useState('1');
+  const [scanInput, setScanInput] = useState('');
+  const [bulkResultado, setBulkResultado] = useState<{ ok: number; noEncontrados: string[] } | null>(null);
+
+  function buscarPorCodigo(codigo: string): { tipo: 'VARIANTE'; v: VarianteItem } | { tipo: 'MATERIAL'; m: MaterialItem } | null {
+    const c = codigo.trim();
+    if (!c) return null;
+    const cUpper = c.toUpperCase();
+    // Prioridad: SKU exacto > código de barras > código de material
+    const v = variantes.find(
+      (x) => x.sku.toUpperCase() === cUpper || (x.codigo_barras ?? '').toUpperCase() === cUpper,
+    );
+    if (v) return { tipo: 'VARIANTE', v };
+    const m = materiales.find((x) => x.codigo.toUpperCase() === cUpper);
+    if (m) return { tipo: 'MATERIAL', m };
+    return null;
+  }
+
+  function agregarOSumar(found: NonNullable<ReturnType<typeof buscarPorCodigo>>, cantidadAgregar: number) {
+    // Si ya existe línea con ese mismo ítem, SUMAR cantidad. Si no, crear línea nueva.
+    const matchId = found.tipo === 'VARIANTE' ? found.v.id : found.m.id;
+    const matchTipo = found.tipo;
+    setLineas((prev) => {
+      const idx = prev.findIndex(
+        (l) =>
+          l.tipo === matchTipo &&
+          ((matchTipo === 'VARIANTE' && l.variante_id === matchId) ||
+            (matchTipo === 'MATERIAL' && l.material_id === matchId)),
+      );
+      if (idx >= 0) {
+        const copia = [...prev];
+        const nuevaCant = (Number(copia[idx]!.cantidad) || 0) + cantidadAgregar;
+        copia[idx] = { ...copia[idx]!, cantidad: String(nuevaCant) };
+        return copia;
+      }
+      const nueva: LineaEditable =
+        found.tipo === 'VARIANTE'
+          ? {
+              uid: nextUid(),
+              tipo: 'VARIANTE',
+              variante_id: found.v.id,
+              material_id: '',
+              display: `${found.v.sku} · ${found.v.producto_nombre}`,
+              sub: `Talla ${found.v.talla.replace('T', '')}`,
+              cantidad: String(cantidadAgregar),
+              observacion: '',
+            }
+          : {
+              uid: nextUid(),
+              tipo: 'MATERIAL',
+              variante_id: '',
+              material_id: found.m.id,
+              display: `${found.m.codigo} · ${found.m.nombre}`,
+              sub: found.m.unidad ?? '—',
+              cantidad: String(cantidadAgregar),
+              observacion: '',
+            };
+      return [...prev, nueva];
+    });
+  }
+
+  function procesarBulk() {
+    const qty = Number(bulkQty);
+    if (!qty || qty <= 0) {
+      toast.error('Cantidad inválida');
+      return;
+    }
+    const codigos = bulkText
+      .split(/[\n,;\t]+/)
+      .map((s) => s.trim())
+      .filter(Boolean);
+    if (codigos.length === 0) {
+      toast.error('Pegá al menos un código');
+      return;
+    }
+    let ok = 0;
+    const noEnc: string[] = [];
+    for (const c of codigos) {
+      const f = buscarPorCodigo(c);
+      if (f) {
+        agregarOSumar(f, qty);
+        ok++;
+      } else {
+        noEnc.push(c);
+      }
+    }
+    setBulkResultado({ ok, noEncontrados: noEnc });
+    setBulkText('');
+    if (ok > 0) toast.success(`${ok} ítem(s) agregados`);
+    if (noEnc.length > 0) toast.warning(`${noEnc.length} código(s) no reconocidos`);
+  }
+
+  function procesarScan() {
+    const codigo = scanInput.trim();
+    if (!codigo) return;
+    const f = buscarPorCodigo(codigo);
+    if (f) {
+      agregarOSumar(f, 1);
+      setScanInput('');  // limpiar para siguiente escaneo
+    } else {
+      toast.error(`Código no encontrado: ${codigo}`);
+      setScanInput('');
+    }
   }
 
   function removeLinea(uid: string) {
@@ -250,6 +359,87 @@ export function NuevoTrasladoForm({
             />
           </FormRow>
         </FormGrid>
+      </FormSection>
+
+      {/* ─── CARGA RÁPIDA (escaneo / pegado masivo) ────────────────────────── */}
+      <FormSection
+        title="Carga rápida (opcional)"
+        description="Para traslados grandes: escaneá códigos con el lector o pegá una lista de SKUs/códigos de barras. Más rápido que ingresar línea por línea."
+      >
+        <div className="grid gap-4 md:grid-cols-2">
+          {/* Modo 1: escaneo uno por uno */}
+          <Card className="space-y-2 border-sky-200 bg-sky-50/30 p-3">
+            <div className="flex items-center gap-2 text-xs font-semibold text-sky-700">
+              <ScanLine className="h-4 w-4" />
+              Escanear con lector USB
+            </div>
+            <p className="text-[11px] text-slate-600">
+              Apuntá el cursor al campo de abajo y disparen el lector. Cada escaneo agrega 1 unidad (o suma a la línea existente).
+            </p>
+            <div className="relative">
+              <ScanLine className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-sky-400" />
+              <Input
+                value={scanInput}
+                onChange={(e) => setScanInput(e.target.value)}
+                onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); procesarScan(); } }}
+                placeholder="Esperando escaneo…"
+                className="pl-9"
+                disabled={pending}
+                autoFocus={false}
+              />
+            </div>
+          </Card>
+
+          {/* Modo 2: pegar lista */}
+          <Card className="space-y-2 border-violet-200 bg-violet-50/30 p-3">
+            <div className="flex items-center gap-2 text-xs font-semibold text-violet-700">
+              <Upload className="h-4 w-4" />
+              Pegar lista de códigos
+            </div>
+            <p className="text-[11px] text-slate-600">
+              Uno por línea (o separados por coma). Cada código agregará la cantidad indicada.
+            </p>
+            <Textarea
+              value={bulkText}
+              onChange={(e) => setBulkText(e.target.value)}
+              placeholder="PR0001&#10;AC0002&#10;DT0006-T10&#10;..."
+              rows={4}
+              disabled={pending}
+              className="font-mono text-xs"
+            />
+            <div className="flex items-center gap-2">
+              <label className="text-[11px] text-slate-600">Cantidad por código:</label>
+              <Input
+                type="number"
+                min="1"
+                step="1"
+                value={bulkQty}
+                onChange={(e) => setBulkQty(e.target.value)}
+                className="h-8 w-20 text-sm"
+                disabled={pending}
+              />
+              <Button
+                type="button"
+                onClick={procesarBulk}
+                size="sm"
+                disabled={pending || !bulkText.trim()}
+                className="ml-auto bg-violet-600 text-white hover:bg-violet-700"
+              >
+                <Zap className="h-3 w-3" /> Agregar todos
+              </Button>
+            </div>
+            {bulkResultado && (
+              <div className="rounded-md bg-white p-2 text-xs">
+                <span className="font-medium text-emerald-700">✓ {bulkResultado.ok} agregados</span>
+                {bulkResultado.noEncontrados.length > 0 && (
+                  <div className="mt-1 text-rose-700">
+                    ✗ No encontrados: <span className="font-mono">{bulkResultado.noEncontrados.join(', ')}</span>
+                  </div>
+                )}
+              </div>
+            )}
+          </Card>
+        </div>
       </FormSection>
 
       <FormSection

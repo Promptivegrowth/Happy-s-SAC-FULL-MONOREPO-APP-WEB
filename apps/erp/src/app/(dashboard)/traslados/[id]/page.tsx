@@ -7,8 +7,10 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { ArrowLeft, Warehouse, ArrowRightLeft, Package } from 'lucide-react';
 import { PageShell } from '@/components/page-shell';
 import { obtenerTraslado } from '@/server/actions/traslados';
+import { cargarEmpresaPDF } from '@/server/empresa-pdf-helper';
 import { EstadoBadge } from '../page';
 import { AccionesTraslado } from './acciones-client';
+import { DescargarGuiaButton } from './descargar-guia-button';
 
 export const metadata = { title: 'Detalle de traslado' };
 export const dynamic = 'force-dynamic';
@@ -32,6 +34,7 @@ export default async function TrasladoDetallePage({
   }
 
   const { traslado, lineas } = res.data;
+  const empresa = await cargarEmpresaPDF();
 
   const fmtFecha = (f: string | null) =>
     f
@@ -73,6 +76,10 @@ export default async function TrasladoDetallePage({
               <ArrowLeft className="h-4 w-4" /> Volver
             </Button>
           </Link>
+          {/* Guía de remisión disponible una vez despachado o recibido */}
+          {(traslado.estado === 'DESPACHADO' || traslado.estado === 'RECIBIDO') && lineas.length > 0 && (
+            <DescargarGuiaButton traslado={traslado} lineas={lineas} empresa={empresa} />
+          )}
           <AccionesTraslado
             id={traslado.id}
             codigo={traslado.codigo}
