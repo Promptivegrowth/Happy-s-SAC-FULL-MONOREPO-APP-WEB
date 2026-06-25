@@ -27,6 +27,7 @@ import { toast } from 'sonner';
 import { formatPEN } from '@happy/lib';
 import type { TipoComprobantePOS, TipoDocumentoCliente, FormatoImpresion } from '@/server/actions/caja-helpers';
 import { buscarClientesPOS, crearClienteRapidoPOS, actualizarClientePOS, type ClienteRow } from '@/server/actions/clientes';
+import { obtenerSaldoCliente } from '@/server/actions/adelantos';
 
 export type CobrarPayload = {
   tipo: TipoComprobantePOS;
@@ -43,6 +44,8 @@ export type CobrarPayload = {
     telefono: string | null;
     email: string | null;
   };
+  /** Si el cliente tenía saldo a favor y aceptó aplicarlo, este monto se descuenta. */
+  adelanto_aplicado?: { monto: number } | null;
 };
 
 export function CobrarModal({
@@ -66,6 +69,10 @@ export function CobrarModal({
   type ClienteMode = 'buscar' | 'crear' | 'seleccionado' | 'anonimo';
   const [clienteMode, setClienteMode] = useState<ClienteMode>('buscar');
   const [clienteSeleccionado, setClienteSeleccionado] = useState<ClienteRow | null>(null);
+
+  // Saldo de adelantos del cliente (se carga al seleccionar) + flag de aplicación
+  const [saldoAdelanto, setSaldoAdelanto] = useState(0);
+  const [aplicarAdelanto, setAplicarAdelanto] = useState(true);  // por defecto: aplicar si hay saldo
 
   // Buscador
   const [busqueda, setBusqueda] = useState(defaultCliente?.documento ?? defaultCliente?.nombre ?? '');
@@ -170,6 +177,8 @@ export function CobrarModal({
     setDireccion(c.direccion ?? '');
     setTelefono(c.telefono ?? '');
     setEmail(c.email ?? '');
+    // Consultar saldo de adelantos del cliente (asíncrono, no bloqueante)
+    obtenerSaldoCliente(c.id).then(setSaldoAdelanto).catch(() => setSaldoAdelanto(0));
   }
 
   function irACrearNuevo() {
@@ -197,6 +206,7 @@ export function CobrarModal({
   function volverABuscar() {
     setClienteMode('buscar');
     setClienteSeleccionado(null);
+    setSaldoAdelanto(0);
     setEditandoExistente(false);
   }
 
@@ -382,6 +392,12 @@ export function CobrarModal({
         }
       }
 
+      // Adelanto a aplicar (si corresponde): solo si cliente seleccionado, tiene
+      // saldo, el cajero aceptó (checkbox marcado), y el monto a descontar es > 0
+      const adelantoMonto = aplicarAdelanto && saldoAdelanto > 0.01
+        ? Math.min(saldoAdelanto, total)
+        : 0;
+
       await onConfirmar({
         tipo,
         formato,
@@ -396,6 +412,7 @@ export function CobrarModal({
           telefono: (fuente?.telefono ?? telefono.trim()) || null,
           email: (fuente?.email ?? email.trim()) || null,
         },
+        adelanto_aplicado: adelantoMonto > 0 ? { monto: adelantoMonto } : null,
       });
     } finally {
       setConfirming(false);
@@ -588,6 +605,41 @@ export function CobrarModal({
                         Cambiar
                       </Button>
                     </div>
+                  </div>
+                </Card>
+              )}
+
+              {/* Sugerencia: saldo a favor del cliente (adelantos) */}
+              {clienteMode === 'seleccionado' && clienteSeleccionado && saldoAdelanto > 0.01 && (
+                <Card className="border-violet-300 bg-violet-50/60 p-3">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="checkbox"
+                        id="aplicar-adelanto"
+                        checked={aplicarAdelanto}
+                        onChange={(e) => setAplicarAdelanto(e.target.checked)}
+                        className="h-4 w-4 rounded border-violet-400 text-violet-600"
+                      />
+                      <label htmlFor="aplicar-adelanto" className="cursor-pointer">
+                        <p className="font-display text-sm font-semibold text-violet-700">
+                          💰 Tiene S/ {saldoAdelanto.toFixed(2)} a favor
+                        </p>
+                        <p className="text-[11px] text-violet-600">
+                          {aplicarAdelanto
+                            ? `Se descontará ${formatPEN(Math.min(saldoAdelanto, total))} del total a cobrar.`
+                            : 'Click para aplicar como descuento.'}
+                        </p>
+                      </label>
+                    </div>
+                    {aplicarAdelanto && (
+                      <div className="text-right">
+                        <p className="text-[10px] uppercase text-violet-600">A cobrar</p>
+                        <p className="font-display text-lg font-bold text-violet-700">
+                          {formatPEN(Math.max(0, total - Math.min(saldoAdelanto, total)))}
+                        </p>
+                      </div>
+                    )}
                   </div>
                 </Card>
               )}

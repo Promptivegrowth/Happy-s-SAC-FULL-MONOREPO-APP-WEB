@@ -12,6 +12,7 @@ import { formatPEN, ordenTalla } from '@happy/lib';
 import { buildPedidoWaMessage, buildWhatsappUrl } from '@happy/lib/whatsapp';
 import { registrarVenta } from '@/server/actions/venta';
 import { emitirComprobante, obtenerSesionActiva } from '@/server/actions/caja';
+import { aplicarAdelantoAVenta } from '@/server/actions/adelantos';
 import type { SesionCajaDTO, BalanceCajaDTO } from '@/server/actions/caja-helpers';
 import { AbrirCajaModal } from './abrir-caja-modal';
 import { CerrarCajaModal } from './cerrar-caja-modal';
@@ -30,6 +31,8 @@ type Variante = {
   codigo_barras: string | null;
   talla: string;
   precio_publico: number | null;
+  precio_mayorista_a?: number | null;
+  precio_industrial?: number | null;
   productos: {
     id: string;
     nombre: string;
@@ -42,6 +45,35 @@ type Variante = {
 type Caja = { id: string; codigo: string; nombre: string; almacen_id: string };
 type Categoria = { id: string; nombre: string; activo: boolean };
 type LineaCarrito = { variante: Variante; cantidad: number };
+type ConfigEscalones = { mayorista_desde: number; industrial_desde: number; activos: boolean };
+type EscalonAplicado = 'PUBLICO' | 'MAYORISTA' | 'INDUSTRIAL';
+
+/**
+ * Calcula el precio unitario según la cantidad y la configuración de escalones.
+ * - Si los escalones están desactivados, siempre devuelve precio_publico.
+ * - Si la variante no tiene precio_mayorista_a / precio_industrial cargados,
+ *   cae a precio_publico (no se rompe el flujo de venta).
+ */
+function calcularPrecioPorCantidad(
+  v: Variante,
+  cantidad: number,
+  cfg: ConfigEscalones,
+): { precio: number; escalon: EscalonAplicado } {
+  const publico = Number(v.precio_publico ?? 0);
+  if (!cfg.activos || cantidad < cfg.mayorista_desde) {
+    return { precio: publico, escalon: 'PUBLICO' };
+  }
+  if (cantidad >= cfg.industrial_desde) {
+    const industrial = Number(v.precio_industrial ?? 0);
+    return industrial > 0
+      ? { precio: industrial, escalon: 'INDUSTRIAL' }
+      : { precio: Number(v.precio_mayorista_a ?? publico), escalon: 'MAYORISTA' };
+  }
+  const mayorista = Number(v.precio_mayorista_a ?? 0);
+  return mayorista > 0
+    ? { precio: mayorista, escalon: 'MAYORISTA' }
+    : { precio: publico, escalon: 'PUBLICO' };
+}
 type MetodoCarrito = 'EFECTIVO' | 'YAPE' | 'PLIN' | 'TARJETA_DEBITO' | 'TARJETA_CREDITO' | 'TRANSFERENCIA' | 'WHATSAPP_PENDIENTE';
 type PagoLinea = { metodo: MetodoCarrito; monto: number };
 
@@ -54,6 +86,7 @@ export function PosTerminal({
   cajaDefault,
   sesionInicial,
   empresaNombre = 'HAPPY SAC',
+  configEscalones = { mayorista_desde: 3, industrial_desde: 100, activos: true },
 }: {
   variantes: Variante[];
   cajas: Caja[];
@@ -63,6 +96,7 @@ export function PosTerminal({
   cajaDefault: { id: string; nombre: string; codigo: string; almacen_id: string; monto_apertura_default: number } | null;
   sesionInicial: { sesion: SesionCajaDTO; balance: BalanceCajaDTO } | null;
   empresaNombre?: string;
+  configEscalones?: ConfigEscalones;
 }) {
   // --- Sesión de caja ---
   const [sesionActiva, setSesionActiva] = useState<SesionCajaDTO | null>(sesionInicial?.sesion ?? null);
@@ -125,7 +159,16 @@ export function PosTerminal({
     return () => document.removeEventListener('click', handler);
   }, [vista, productoTallasOpen, sesionActiva, cerrarOpen, cobrarOpen]);
 
-  const total = useMemo(() => carrito.reduce((a, l) => a + l.cantidad * Number(l.variante.precio_publico ?? 0), 0), [carrito]);
+  // Por cada línea, decidir precio según cantidad y escalones
+  const lineasConPrecio = useMemo(
+    () => carrito.map((l) => {
+      const r = calcularPrecioPorCantidad(l.variante, l.cantidad, configEscalones);
+      return { ...l, precio_unitario: r.precio, escalon: r.escalon, subtotal: l.cantidad * r.precio };
+    }),
+    [carrito, configEscalones],
+  );
+
+  const total = useMemo(() => lineasConPrecio.reduce((a, l) => a + l.subtotal, 0), [lineasConPrecio]);
   const pagado = pagos.reduce((a, p) => a + p.monto, 0);
 
   // Agrupar variantes por producto para vista de catálogo
@@ -217,10 +260,10 @@ export function PosTerminal({
         // Forzamos NOTA_VENTA en `registrarVenta` para que NO cree el comprobante ahí —
         // la emisión real (con el cliente que vino del modal) la hace `emitirComprobante`.
         tipo_comprobante: 'NOTA_VENTA',
-        items: carrito.map((l) => ({
+        items: lineasConPrecio.map((l) => ({
           variante_id: l.variante.id,
           cantidad: l.cantidad,
-          precio_unitario: Number(l.variante.precio_publico ?? 0),
+          precio_unitario: l.precio_unitario,
           descuento_monto: 0,
         })),
         pagos: pagos.map((p) => ({ metodo: p.metodo, monto: p.monto })),
@@ -228,6 +271,25 @@ export function PosTerminal({
       if (!r.ok) {
         toast.error(r.error);
         return;
+      }
+
+      // 1.5) Si hay adelanto a aplicar, registrar la APLICACION (consume saldo del cliente)
+      if (payload.adelanto_aplicado && payload.cliente.cliente_id) {
+        try {
+          const ra = await aplicarAdelantoAVenta({
+            cliente_id: payload.cliente.cliente_id,
+            venta_id: r.venta_id,
+            monto: payload.adelanto_aplicado.monto,
+          });
+          if (ra.ok) {
+            toast.success(`Adelanto aplicado · ${ra.numero}`);
+          } else {
+            // No abortamos la venta — solo avisamos. El cajero puede aplicar manualmente después.
+            toast.warning(`Venta OK pero adelanto no se pudo aplicar: ${ra.error ?? '?'}`);
+          }
+        } catch (e) {
+          toast.warning(`Venta OK pero error aplicando adelanto: ${(e as Error).message}`);
+        }
       }
 
       // 2) Emitir comprobante real (BOLETA, FACTURA o NOTA_VENTA)
@@ -307,9 +369,9 @@ export function PosTerminal({
     if (carrito.length === 0) return;
     const msg = buildPedidoWaMessage({
       cliente: { nombre: nombreCliente, documento: docCliente },
-      items: carrito.map((l) => ({
+      items: lineasConPrecio.map((l) => ({
         sku: l.variante.sku, nombre: l.variante.productos.nombre, talla: l.variante.talla,
-        cantidad: l.cantidad, precioUnit: Number(l.variante.precio_publico ?? 0),
+        cantidad: l.cantidad, precioUnit: l.precio_unitario,
       })),
       canal: 'POS',
     });
@@ -613,25 +675,54 @@ export function PosTerminal({
             </div>
           ) : (
             <ul className="space-y-2">
-              {carrito.map((l) => (
-                <li key={l.variante.id}>
-                  <Card className="flex items-center gap-3 p-3">
-                    <div className="flex-1">
-                      <p className="font-medium">{l.variante.productos.nombre}</p>
-                      <p className="text-xs text-slate-500">SKU {l.variante.sku} · Talla {l.variante.talla.replace('T','')} · {formatPEN(Number(l.variante.precio_publico ?? 0))} c/u</p>
-                    </div>
-                    <div className="flex items-center rounded-md border">
-                      <button onClick={() => setQty(l.variante.id, l.cantidad - 1)} className="px-3 py-2 hover:bg-slate-50"><Minus className="h-4 w-4" /></button>
-                      <span className="min-w-10 text-center font-semibold">{l.cantidad}</span>
-                      <button onClick={() => setQty(l.variante.id, l.cantidad + 1)} className="px-3 py-2 hover:bg-slate-50"><Plus className="h-4 w-4" /></button>
-                    </div>
-                    <div className="w-24 text-right font-display text-base font-semibold">
-                      {formatPEN(l.cantidad * Number(l.variante.precio_publico ?? 0))}
-                    </div>
-                    <button onClick={() => eliminar(l.variante.id)} className="rounded p-2 text-red-500 hover:bg-red-50"><Trash2 className="h-4 w-4" /></button>
-                  </Card>
-                </li>
-              ))}
+              {lineasConPrecio.map((l) => {
+                const precioPublico = Number(l.variante.precio_publico ?? 0);
+                const tieneDescuento = l.escalon !== 'PUBLICO' && precioPublico > 0 && l.precio_unitario < precioPublico;
+                const ahorroPorUnidad = tieneDescuento ? precioPublico - l.precio_unitario : 0;
+                return (
+                  <li key={l.variante.id}>
+                    <Card className="flex items-center gap-3 p-3">
+                      <div className="flex-1">
+                        <p className="font-medium">{l.variante.productos.nombre}</p>
+                        <p className="text-xs text-slate-500">
+                          SKU {l.variante.sku} · Talla {l.variante.talla.replace('T','')} ·{' '}
+                          {tieneDescuento ? (
+                            <>
+                              <span className="line-through text-slate-400">{formatPEN(precioPublico)}</span>{' '}
+                              <span className="font-semibold text-emerald-700">{formatPEN(l.precio_unitario)}</span>{' '}
+                              c/u
+                            </>
+                          ) : (
+                            <>{formatPEN(l.precio_unitario)} c/u</>
+                          )}
+                        </p>
+                        {l.escalon !== 'PUBLICO' && (
+                          <Badge
+                            variant="secondary"
+                            className={`mt-1 text-[10px] ${
+                              l.escalon === 'MAYORISTA'
+                                ? 'bg-amber-100 text-amber-700'
+                                : 'bg-violet-100 text-violet-700'
+                            }`}
+                          >
+                            {l.escalon === 'MAYORISTA' ? '🏷 Precio mayorista' : '🏭 Precio fábrica'}
+                            {ahorroPorUnidad > 0 && ` · ahorra ${formatPEN(ahorroPorUnidad * l.cantidad)}`}
+                          </Badge>
+                        )}
+                      </div>
+                      <div className="flex items-center rounded-md border">
+                        <button onClick={() => setQty(l.variante.id, l.cantidad - 1)} className="px-3 py-2 hover:bg-slate-50"><Minus className="h-4 w-4" /></button>
+                        <span className="min-w-10 text-center font-semibold">{l.cantidad}</span>
+                        <button onClick={() => setQty(l.variante.id, l.cantidad + 1)} className="px-3 py-2 hover:bg-slate-50"><Plus className="h-4 w-4" /></button>
+                      </div>
+                      <div className="w-24 text-right font-display text-base font-semibold">
+                        {formatPEN(l.subtotal)}
+                      </div>
+                      <button onClick={() => eliminar(l.variante.id)} className="rounded p-2 text-red-500 hover:bg-red-50"><Trash2 className="h-4 w-4" /></button>
+                    </Card>
+                  </li>
+                );
+              })}
             </ul>
           )}
         </div>

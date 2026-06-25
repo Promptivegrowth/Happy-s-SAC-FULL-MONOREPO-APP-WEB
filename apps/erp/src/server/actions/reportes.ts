@@ -39,6 +39,7 @@ export type FiltrosVentas = {
   canal?: CanalVenta | '';
   almacen_id?: string;
   vendedor_id?: string;
+  tipo_comprobante?: 'BOLETA' | 'FACTURA' | 'NOTA_VENTA' | '';
 };
 
 export type VentaRow = {
@@ -49,7 +50,13 @@ export type VentaRow = {
   almacen: string;
   vendedor: string;
   cliente: string;
+  cliente_documento: string;
   total: number;
+  // Tipo y N° del comprobante emitido (BOLETA/FACTURA/NOTA_VENTA — null si no se emitió)
+  tipo_comprobante: 'BOLETA' | 'FACTURA' | 'NOTA_VENTA' | null;
+  numero_comprobante: string | null;
+  // Métodos de pago usados en la venta (concatenados con coma) — útil para reporte consolidado
+  metodos_pago: string;
 };
 
 export type ReporteVentasResult = {
@@ -68,9 +75,9 @@ export async function reporteVentas(f: FiltrosVentas): Promise<ReporteVentasResu
   let q = sb
     .from('ventas')
     .select(
-      'id, numero, fecha, canal, total, estado, ' +
+      'id, numero, fecha, canal, total, estado, documento_cliente, ' +
         'almacen:almacen_id(codigo, nombre), ' +
-        'cliente:cliente_id(razon_social, nombres, apellido_paterno, apellido_materno), ' +
+        'cliente:cliente_id(razon_social, nombres, apellido_paterno, apellido_materno, tipo_documento, numero_documento), ' +
         'nombre_cliente_rapido, vendedor_usuario_id, vendedor_b2b_id',
     )
     .gte('fecha', `${f.desde}T00:00:00`)
@@ -94,9 +101,17 @@ export async function reporteVentas(f: FiltrosVentas): Promise<ReporteVentasResu
     total: string | number;
     almacen: { codigo: string; nombre: string } | null;
     cliente:
-      | { razon_social: string | null; nombres: string | null; apellido_paterno: string | null; apellido_materno: string | null }
+      | {
+          razon_social: string | null;
+          nombres: string | null;
+          apellido_paterno: string | null;
+          apellido_materno: string | null;
+          tipo_documento: string | null;
+          numero_documento: string | null;
+        }
       | null;
     nombre_cliente_rapido: string | null;
+    documento_cliente: string | null;
     vendedor_usuario_id: string | null;
     vendedor_b2b_id: string | null;
   };
@@ -120,8 +135,41 @@ export async function reporteVentas(f: FiltrosVentas): Promise<ReporteVentasResu
     }
   }
 
-  const rows: VentaRow[] = ((data ?? []) as VentaRaw[]).map((v) => {
+  const ventasIds = ((data ?? []) as VentaRaw[]).map((v) => v.id);
+
+  // Cargar comprobantes (tipo + número) — UNA fila por venta (la última emitida)
+  const compPorVenta = new Map<string, { tipo: 'BOLETA' | 'FACTURA' | 'NOTA_VENTA'; numero_completo: string }>();
+  if (ventasIds.length > 0) {
+    const { data: comps } = await sb
+      .from('comprobantes')
+      .select('venta_id, tipo, numero_completo')
+      .in('venta_id', ventasIds)
+      .order('created_at', { ascending: false });
+    for (const c of (comps ?? []) as { venta_id: string; tipo: 'BOLETA' | 'FACTURA' | 'NOTA_VENTA'; numero_completo: string }[]) {
+      if (!compPorVenta.has(c.venta_id)) {
+        compPorVenta.set(c.venta_id, { tipo: c.tipo, numero_completo: c.numero_completo });
+      }
+    }
+  }
+
+  // Cargar métodos de pago por venta (puede haber N por pago dividido)
+  const pagosPorVenta = new Map<string, string[]>();
+  if (ventasIds.length > 0) {
+    const { data: pagos } = await sb
+      .from('ventas_pagos')
+      .select('venta_id, metodo')
+      .in('venta_id', ventasIds);
+    for (const p of (pagos ?? []) as { venta_id: string; metodo: string }[]) {
+      const arr = pagosPorVenta.get(p.venta_id) ?? [];
+      arr.push(p.metodo);
+      pagosPorVenta.set(p.venta_id, arr);
+    }
+  }
+
+  let rows: VentaRow[] = ((data ?? []) as VentaRaw[]).map((v) => {
     const vid = v.vendedor_usuario_id ?? v.vendedor_b2b_id;
+    const comp = compPorVenta.get(v.id) ?? null;
+    const metodos = Array.from(new Set(pagosPorVenta.get(v.id) ?? []));
     return {
       id: v.id,
       fecha: v.fecha,
@@ -136,9 +184,18 @@ export async function reporteVentas(f: FiltrosVentas): Promise<ReporteVentasResu
           .join(' ') ||
         v.nombre_cliente_rapido ||
         '—',
+      cliente_documento: v.cliente?.numero_documento || v.documento_cliente || '',
       total: Number(v.total),
+      tipo_comprobante: comp?.tipo ?? null,
+      numero_comprobante: comp?.numero_completo ?? null,
+      metodos_pago: metodos.join(', '),
     };
   });
+
+  // Filtro post-query por tipo de comprobante (más simple que joinear en SQL)
+  if (f.tipo_comprobante) {
+    rows = rows.filter((r) => r.tipo_comprobante === f.tipo_comprobante);
+  }
 
   const total_ventas = rows.reduce((s, r) => s + r.total, 0);
   const cant = rows.length;

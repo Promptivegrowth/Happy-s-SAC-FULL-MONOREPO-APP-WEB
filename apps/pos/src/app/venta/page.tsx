@@ -12,6 +12,8 @@ type VarianteRow = {
   codigo_barras: string | null;
   talla: string;
   precio_publico: number | null;
+  precio_mayorista_a: number | null;
+  precio_industrial: number | null;
   productos: {
     id: string;
     nombre: string;
@@ -61,9 +63,29 @@ export default async function VentaPage() {
   // Sesión activa (si existe)
   const sesionData = await obtenerSesionActiva();
 
-  // Datos de la empresa para mensajes (WhatsApp, etc.)
-  const { data: empresa } = await sb.from('empresa').select('razon_social, nombre_comercial').single();
+  // Datos de la empresa para mensajes (WhatsApp, etc.) + config escalones precio
+  // Cast porque las columnas escalon_* son de migración 51 (aún no en types autogen).
+  const { data: empresaRaw } = await (sb as unknown as {
+    from: (t: string) => {
+      select: (s: string) => { single: () => Promise<{ data: Record<string, unknown> | null }> };
+    };
+  })
+    .from('empresa')
+    .select('razon_social, nombre_comercial, escalon_mayorista_desde, escalon_industrial_desde, escalones_activos')
+    .single();
+  const empresa = empresaRaw as {
+    razon_social: string | null;
+    nombre_comercial: string | null;
+    escalon_mayorista_desde: number | null;
+    escalon_industrial_desde: number | null;
+    escalones_activos: boolean | null;
+  } | null;
   const empresaNombre = empresa?.nombre_comercial || empresa?.razon_social || 'HAPPY SAC';
+  const configEscalones = {
+    mayorista_desde: Number(empresa?.escalon_mayorista_desde ?? 3),
+    industrial_desde: Number(empresa?.escalon_industrial_desde ?? 100),
+    activos: empresa?.escalones_activos ?? true,
+  };
 
   // Catálogo (siempre se carga; el overlay de apertura sólo bloquea visualmente)
   const [{ data: variantesRaw }, { data: cajas }, { data: categoriasRaw }, { data: stocks }] =
@@ -71,7 +93,7 @@ export default async function VentaPage() {
       sb
         .from('productos_variantes')
         .select(
-          'id, sku, codigo_barras, talla, precio_publico, productos!inner(id, nombre, codigo, imagen_principal_url, categoria_id, activo, categorias!productos_categoria_id_fkey(id, nombre, activo))',
+          'id, sku, codigo_barras, talla, precio_publico, precio_mayorista_a, precio_industrial, productos!inner(id, nombre, codigo, imagen_principal_url, categoria_id, activo, categorias!productos_categoria_id_fkey(id, nombre, activo))',
         )
         .eq('activo', true)
         .eq('productos.activo', true)
@@ -103,6 +125,7 @@ export default async function VentaPage() {
       cajaDefault={cajaDefault}
       sesionInicial={sesionData}
       empresaNombre={empresaNombre}
+      configEscalones={configEscalones}
     />
   );
 }
