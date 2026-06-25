@@ -14,16 +14,22 @@ import { Card } from '@happy/ui/card';
 import { Button } from '@happy/ui/button';
 import { Badge } from '@happy/ui/badge';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@happy/ui/table';
-import { X, Loader2, History, Send } from 'lucide-react';
-import { formatPEN } from '@happy/lib';
-import { obtenerHistorialSesion } from '@/server/actions/caja';
-import type { TransaccionRow } from '@/server/actions/caja-helpers';
+import { X, Loader2, History, Send, Clock, User } from 'lucide-react';
+import { formatPEN, formatDateTime } from '@happy/lib';
+import { obtenerHistorialSesion, obtenerSesionActiva } from '@/server/actions/caja';
+import type { TransaccionRow, SesionCajaDTO } from '@/server/actions/caja-helpers';
 import { construirMensajeWhatsApp, abrirWhatsApp } from './whatsapp-helper';
 
 export function HistorialModal({ onClose, empresaNombre }: { onClose: () => void; empresaNombre: string }) {
   const [rows, setRows] = useState<TransaccionRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [alcance, setAlcance] = useState<'SESION' | 'DIA'>('SESION');
+  const [sesion, setSesion] = useState<SesionCajaDTO | null>(null);
+
+  // Cargar metadata de sesión una sola vez (no depende del alcance)
+  useEffect(() => {
+    obtenerSesionActiva().then((r) => setSesion(r?.sesion ?? null));
+  }, []);
 
   useEffect(() => {
     setLoading(true);
@@ -100,6 +106,32 @@ export function HistorialModal({ onClose, empresaNombre }: { onClose: () => void
             Hoy completo (todas las sesiones de la caja)
           </button>
         </div>
+
+        {/* Info de la sesión activa (apertura + cajero) */}
+        {sesion && (
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-1 border-b border-slate-200 bg-happy-50/30 px-5 py-2 text-xs">
+            <div className="flex items-center gap-1.5 text-slate-600">
+              <Clock className="h-3.5 w-3.5 text-happy-600" />
+              <span className="font-medium text-slate-500">Caja abierta desde:</span>
+              <span className="font-mono font-semibold text-corp-900">{formatDateTime(sesion.abierta_en)}</span>
+            </div>
+            <div className="flex items-center gap-1.5 text-slate-600">
+              <User className="h-3.5 w-3.5 text-happy-600" />
+              <span className="font-medium text-slate-500">Cajero:</span>
+              <span className="font-semibold text-corp-900">{sesion.cajero_nombre}</span>
+            </div>
+            <div className="flex items-center gap-1.5 text-slate-600">
+              <span className="font-medium text-slate-500">Caja:</span>
+              <span className="font-mono font-semibold text-corp-900">{sesion.caja_codigo}</span>
+              <span className="text-slate-400">·</span>
+              <span className="text-slate-600">{sesion.caja_nombre}</span>
+            </div>
+            <div className="flex items-center gap-1.5 text-slate-600">
+              <span className="font-medium text-slate-500">Apertura:</span>
+              <span className="font-mono font-semibold text-corp-900">{formatPEN(sesion.monto_apertura)}</span>
+            </div>
+          </div>
+        )}
 
         {/* Body */}
         <div className="max-h-[70vh] overflow-y-auto">
