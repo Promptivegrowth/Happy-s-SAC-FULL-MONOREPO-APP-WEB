@@ -85,7 +85,9 @@ export type BalanceCajaDTO = {
   cantidad_ventas: number;
   // Cuadre efectivo
   monto_apertura: number;
-  esperado_efectivo: number; // apertura + total_efectivo
+  total_gastos: number; // egresos de caja chica (en efectivo)
+  total_ingresos_extra: number; // ingresos de caja chica no asociados a venta
+  esperado_efectivo: number; // apertura + total_efectivo + total_ingresos_extra - total_gastos
 };
 
 export type EmpresaPDF = {

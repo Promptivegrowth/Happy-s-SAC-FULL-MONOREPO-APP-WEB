@@ -6,7 +6,7 @@ import { Card } from '@happy/ui/card';
 import { Input } from '@happy/ui/input';
 import { Button } from '@happy/ui/button';
 import { Badge } from '@happy/ui/badge';
-import { Trash2, Plus, Minus, ScanBarcode, X, Smartphone, CreditCard, Banknote, Building2, MessageCircle, Loader2, LayoutGrid, ShoppingBag, LogOut, Receipt, History, Send, RotateCcw } from 'lucide-react';
+import { Trash2, Plus, Minus, ScanBarcode, X, Smartphone, CreditCard, Banknote, Building2, MessageCircle, Loader2, LayoutGrid, ShoppingBag, LogOut, Receipt, History, Send, RotateCcw, Coins, Wallet, MapPin } from 'lucide-react';
 import { toast } from 'sonner';
 import { formatPEN, ordenTalla } from '@happy/lib';
 import { buildPedidoWaMessage, buildWhatsappUrl } from '@happy/lib/whatsapp';
@@ -18,6 +18,9 @@ import { CerrarCajaModal } from './cerrar-caja-modal';
 import { CobrarModal, type CobrarPayload } from './cobrar-modal';
 import { generarTicket, generarA4, abrirPDF } from './comprobante-pdf';
 import { HistorialModal } from './historial-modal';
+import { GastosModal } from './gastos-modal';
+import { AdelantosModal } from './adelantos-modal';
+import { StockAlmacenesModal } from './stock-almacenes-modal';
 import { DevolucionModal } from './devolucion-modal';
 import { construirMensajeWhatsApp, abrirWhatsApp } from './whatsapp-helper';
 
@@ -66,6 +69,9 @@ export function PosTerminal({
   const [balanceActual, setBalanceActual] = useState<BalanceCajaDTO | null>(sesionInicial?.balance ?? null);
   const [cerrarOpen, setCerrarOpen] = useState(false);
   const [historialOpen, setHistorialOpen] = useState(false);
+  const [gastosOpen, setGastosOpen] = useState(false);
+  const [adelantosOpen, setAdelantosOpen] = useState(false);
+  const [stockAlmacenesVarianteId, setStockAlmacenesVarianteId] = useState<string | null>(null);
   const [devolucionOpen, setDevolucionOpen] = useState(false);
   const [efectivoInput, setEfectivoInput] = useState<string>('');
   const [cobrarOpen, setCobrarOpen] = useState(false);
@@ -384,6 +390,28 @@ export function PosTerminal({
               <RotateCcw className="h-3.5 w-3.5" /> Devolución
             </Button>
             <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setGastosOpen(true)}
+              disabled={!sesionActiva}
+              data-pos-no-focus
+              className="gap-1 text-xs"
+              title="Gastos de caja chica (combustible, comida, etc.)"
+            >
+              <Coins className="h-3.5 w-3.5" /> Gastos
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setAdelantosOpen(true)}
+              disabled={!sesionActiva}
+              data-pos-no-focus
+              className="gap-1 text-xs"
+              title="Adelantos de cliente (saldo a favor)"
+            >
+              <Wallet className="h-3.5 w-3.5" /> Adelantos
+            </Button>
+            <Button
               variant="outline"
               size="sm"
               onClick={() => setCerrarOpen(true)}
@@ -536,22 +564,31 @@ export function PosTerminal({
                         const stock = stockPorVariante[v.id] ?? 0;
                         const sinStock = stock <= 0;
                         return (
-                          <button
-                            key={v.id}
-                            onClick={() => agregarVariante(v)}
-                            className={`flex flex-col items-center gap-1 rounded-lg border-2 p-3 transition ${
-                              sinStock
-                                ? 'border-dashed border-red-200 bg-red-50/40 text-red-600'
-                                : 'border-slate-200 bg-white text-corp-900 hover:border-happy-400 hover:bg-happy-50'
-                            }`}
-                          >
-                            <span className="font-display text-lg font-bold">{v.talla.replace('T', '')}</span>
-                            <span className="text-[10px] font-mono text-slate-500">{v.sku}</span>
-                            <span className="text-xs font-semibold text-happy-600">{formatPEN(Number(v.precio_publico ?? 0))}</span>
-                            <span className={`text-[9px] ${sinStock ? 'text-red-600 font-medium' : 'text-slate-400'}`}>
-                              {sinStock ? 'Sin stock' : `Stock: ${stock}`}
-                            </span>
-                          </button>
+                          <div key={v.id} className="relative">
+                            <button
+                              onClick={() => agregarVariante(v)}
+                              className={`flex w-full flex-col items-center gap-1 rounded-lg border-2 p-3 transition ${
+                                sinStock
+                                  ? 'border-dashed border-red-200 bg-red-50/40 text-red-600'
+                                  : 'border-slate-200 bg-white text-corp-900 hover:border-happy-400 hover:bg-happy-50'
+                              }`}
+                            >
+                              <span className="font-display text-lg font-bold">{v.talla.replace('T', '')}</span>
+                              <span className="text-[10px] font-mono text-slate-500">{v.sku}</span>
+                              <span className="text-xs font-semibold text-happy-600">{formatPEN(Number(v.precio_publico ?? 0))}</span>
+                              <span className={`text-[9px] ${sinStock ? 'text-red-600 font-medium' : 'text-slate-400'}`}>
+                                {sinStock ? 'Sin stock' : `Stock: ${stock}`}
+                              </span>
+                            </button>
+                            <button
+                              type="button"
+                              onClick={(e) => { e.stopPropagation(); setStockAlmacenesVarianteId(v.id); }}
+                              className="absolute right-1 top-1 rounded-full bg-white p-1 text-slate-500 shadow-sm ring-1 ring-slate-200 hover:bg-happy-50 hover:text-happy-600"
+                              title="Ver stock en todos los almacenes"
+                            >
+                              <MapPin className="h-3 w-3" />
+                            </button>
+                          </div>
                         );
                       })}
                     </div>
@@ -780,6 +817,24 @@ export function PosTerminal({
         <HistorialModal
           onClose={() => setHistorialOpen(false)}
           empresaNombre={empresaNombre}
+        />
+      )}
+
+      {/* MODAL — Gastos / Caja chica */}
+      {gastosOpen && sesionActiva && (
+        <GastosModal onClose={() => setGastosOpen(false)} />
+      )}
+
+      {/* MODAL — Adelantos de cliente */}
+      {adelantosOpen && sesionActiva && (
+        <AdelantosModal onClose={() => setAdelantosOpen(false)} />
+      )}
+
+      {/* MODAL — Stock por almacén (lupita) */}
+      {stockAlmacenesVarianteId && (
+        <StockAlmacenesModal
+          varianteId={stockAlmacenesVarianteId}
+          onClose={() => setStockAlmacenesVarianteId(null)}
         />
       )}
 

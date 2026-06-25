@@ -250,6 +250,24 @@ async function calcularBalanceInterno(
     }
   }
 
+  // Gastos e ingresos extra de caja chica (solo EFECTIVO afecta el cuadre)
+  let totalGastos = 0;
+  let totalIngresosExtra = 0;
+  try {
+    const { data: movs } = await sb
+      .from('caja_chica_movimientos')
+      .select('tipo, monto, metodo')
+      .eq('sesion_id', sesionId);
+    for (const m of (movs ?? []) as Array<{ tipo: string; monto: number | string; metodo: string }>) {
+      if (m.metodo !== 'EFECTIVO') continue;  // solo efectivo afecta el cuadre
+      const monto = Number(m.monto ?? 0);
+      if (m.tipo === 'EGRESO') totalGastos += monto;
+      else if (m.tipo === 'INGRESO') totalIngresosExtra += monto;
+    }
+  } catch {
+    // tabla puede tener problemas de RLS, ignorar
+  }
+
   return {
     total_efectivo: efectivo,
     total_yape: yape,
@@ -260,7 +278,9 @@ async function calcularBalanceInterno(
     total_ventas: totalVentas,
     cantidad_ventas: (ventas ?? []).length,
     monto_apertura: montoApertura,
-    esperado_efectivo: montoApertura + efectivo,
+    total_gastos: totalGastos,
+    total_ingresos_extra: totalIngresosExtra,
+    esperado_efectivo: montoApertura + efectivo + totalIngresosExtra - totalGastos,
   };
 }
 
@@ -274,7 +294,9 @@ async function calcularBalanceInterno(
 // (el TYPE TransaccionRow vive en caja-helpers.ts — los archivos 'use server'
 // no deben exportar tipos, rompe el bundle del cliente)
 
-export async function obtenerHistorialSesion(): Promise<import('./caja-helpers').TransaccionRow[]> {
+export async function obtenerHistorialSesion(
+  alcance: 'SESION' | 'DIA' = 'SESION',
+): Promise<import('./caja-helpers').TransaccionRow[]> {
   const sb = await createClient();
   const { data: { user } } = await sb.auth.getUser();
   if (!user) return [];
@@ -286,23 +308,37 @@ export async function obtenerHistorialSesion(): Promise<import('./caja-helpers')
     return [];
   }
 
-  const { data: sesion } = await sb
-    .from('cajas_sesiones')
-    .select('id')
-    .eq('caja_id', caja.id)
-    .is('cerrada_en', null)
-    .maybeSingle();
-  if (!sesion) return [];
-
-  const { data: ventas } = await sb
+  // Filtro: por sesión actual (default) o por día completo en esta caja
+  let ventasQ = sb
     .from('ventas')
     .select(
       'id, numero, fecha, total, estado, nombre_cliente_rapido, documento_cliente, ' +
         'cliente:cliente_id(razon_social, nombres, apellido_paterno, apellido_materno, telefono)',
     )
-    .eq('caja_sesion_id', sesion.id)
     .order('fecha', { ascending: false })
     .limit(500);
+
+  if (alcance === 'SESION') {
+    const { data: sesion } = await sb
+      .from('cajas_sesiones')
+      .select('id')
+      .eq('caja_id', caja.id)
+      .is('cerrada_en', null)
+      .maybeSingle();
+    if (!sesion) return [];
+    ventasQ = ventasQ.eq('caja_sesion_id', sesion.id);
+  } else {
+    // Día completo: hoy 00:00 a 23:59:59, todas las ventas de esta caja
+    const hoy = new Date();
+    const inicio = new Date(hoy.getFullYear(), hoy.getMonth(), hoy.getDate()).toISOString();
+    const fin = new Date(hoy.getFullYear(), hoy.getMonth(), hoy.getDate(), 23, 59, 59).toISOString();
+    ventasQ = ventasQ
+      .eq('caja_id', caja.id)
+      .gte('fecha', inicio)
+      .lte('fecha', fin);
+  }
+
+  const { data: ventas } = await ventasQ;
 
   type VR = {
     id: string;
@@ -1116,4 +1152,264 @@ export async function emitirComprobante(input: z.infer<typeof emitirSchema>): Pr
   // user no se usa más, pero requerirlo asegura la sesión
   void user;
   return { id: comprobanteId, numero_completo: numeroCompleto, pdf_data: pdfData };
+}
+
+// ============================================================================
+// CIERRE PARCIAL DE CAJA (cambio de turno)
+// ============================================================================
+//
+// Sirve para cambio de cajero a mitad del día SIN cerrar la sesión:
+//   - Calcula totales del turno (desde último cierre parcial o desde apertura)
+//   - Registra el cuadre en cajas_cierres_parciales
+//   - La sesión sigue ABIERTA (cerrada_en queda NULL)
+//   - El siguiente turno arranca con el efectivo_contado como nueva base
+//
+// Para calcular el balance del TURNO actual, miramos ventas/pagos/gastos
+// posteriores al último cierre parcial (o a la apertura si no hubo).
+
+const cerrarParcialSchema = z.object({
+  monto_contado_efectivo: z.number().min(0),
+  cajero_entrante_id: z.string().uuid().nullable().optional(),
+  observacion: z.string().max(500).optional().nullable(),
+});
+
+export type CierreParcialResultado = {
+  id: string;
+  cierre_numero: number;
+  diferencia: number;
+  esperado: number;
+  contado: number;
+  total_ventas: number;
+  total_efectivo: number;
+  total_gastos: number;
+};
+
+export async function cerrarParcialSesion(input: {
+  monto_contado_efectivo: number;
+  cajero_entrante_id?: string | null;
+  observacion?: string | null;
+}): Promise<CierreParcialResultado> {
+  const parsed = cerrarParcialSchema.parse(input);
+  const sb = await createClient();
+  const user = await requireUser(sb);
+  const { caja } = await getCajaDefault(sb, user.id);
+
+  // Sesión activa
+  const { data: sesion } = await sb
+    .from('cajas_sesiones')
+    .select('id, monto_apertura, abierta_en')
+    .eq('caja_id', caja.id)
+    .is('cerrada_en', null)
+    .maybeSingle();
+  if (!sesion) throw new Error('No hay sesión de caja abierta.');
+
+  // Determinar "desde cuándo" mirar movimientos: último cierre parcial o apertura.
+  // Cast porque cajas_cierres_parciales es de migración 50 (aún no en types autogen).
+  const { data: ultimoParcialRaw } = await (sb as unknown as {
+    from: (t: string) => {
+      select: (s: string) => {
+        eq: (k: string, v: unknown) => {
+          order: (k: string, o: { ascending: boolean }) => {
+            limit: (n: number) => {
+              maybeSingle: () => Promise<{ data: { fecha: string; efectivo_contado: number } | null }>;
+            };
+          };
+        };
+      };
+    };
+  })
+    .from('cajas_cierres_parciales')
+    .select('fecha, efectivo_contado')
+    .eq('sesion_id', sesion.id)
+    .order('fecha', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  const ultimoParcial = ultimoParcialRaw;
+  const desde = (ultimoParcial?.fecha ?? sesion.abierta_en) as string;
+  const baseEfectivo = ultimoParcial
+    ? Number(ultimoParcial.efectivo_contado ?? 0)
+    : Number(sesion.monto_apertura ?? 0);
+
+  // Ventas del turno (desde 'desde')
+  const { data: ventas } = await sb
+    .from('ventas')
+    .select('id, total')
+    .eq('caja_sesion_id', sesion.id)
+    .eq('estado', 'COMPLETADA')
+    .gte('fecha', desde);
+  const ventaIds = (ventas ?? []).map((v) => v.id);
+  const totalVentas = (ventas ?? []).reduce((s, v) => s + Number(v.total ?? 0), 0);
+
+  // Pagos del turno por método
+  let efectivo = 0, yape = 0, plin = 0, tarjeta = 0, transferencia = 0, otros = 0;
+  if (ventaIds.length > 0) {
+    const { data: pagos } = await sb
+      .from('ventas_pagos')
+      .select('metodo, monto')
+      .in('venta_id', ventaIds);
+    for (const p of pagos ?? []) {
+      const monto = Number(p.monto ?? 0);
+      const m = String(p.metodo);
+      if (m === 'EFECTIVO') efectivo += monto;
+      else if (m === 'YAPE') yape += monto;
+      else if (m === 'PLIN') plin += monto;
+      else if (m.startsWith('TARJETA')) tarjeta += monto;
+      else if (m === 'TRANSFERENCIA') transferencia += monto;
+      else otros += monto;
+    }
+  }
+
+  // Gastos del turno (egresos de caja chica)
+  let totalGastos = 0;
+  try {
+    const { data: gastos } = await (sb as unknown as {
+      from: (t: string) => {
+        select: (s: string) => { eq: (k: string, v: unknown) => { eq: (k: string, v: unknown) => { gte: (k: string, v: string) => Promise<{ data: Array<{ monto: number | string }> | null }> } } };
+      };
+    })
+      .from('caja_chica_movimientos')
+      .select('monto')
+      .eq('sesion_id', sesion.id)
+      .eq('tipo', 'EGRESO')
+      .gte('created_at', desde);
+    for (const g of gastos ?? []) totalGastos += Number(g.monto ?? 0);
+  } catch {
+    // tabla puede no tener filas o columna distinta; ignorar errores
+  }
+
+  const esperado = baseEfectivo + efectivo - totalGastos;
+  const diferencia = parsed.monto_contado_efectivo - esperado;
+
+  // Insertar cierre parcial
+  const { data: cierre, error } = await (sb as unknown as {
+    from: (t: string) => {
+      insert: (r: Record<string, unknown>) => {
+        select: (s: string) => { single: () => Promise<{ data: { id: string } | null; error: { message: string } | null }> };
+      };
+    };
+  })
+    .from('cajas_cierres_parciales')
+    .insert({
+      sesion_id: sesion.id,
+      caja_id: caja.id,
+      cajero_saliente: user.id,
+      cajero_entrante: parsed.cajero_entrante_id ?? null,
+      total_ventas: ventaIds.length,
+      total_efectivo: efectivo,
+      total_yape: yape,
+      total_plin: plin,
+      total_tarjeta: tarjeta,
+      total_transferencia: transferencia,
+      total_otros: otros,
+      total_gastos: totalGastos,
+      efectivo_esperado: esperado,
+      efectivo_contado: parsed.monto_contado_efectivo,
+      diferencia,
+      observaciones: parsed.observacion,
+    })
+    .select('id')
+    .single();
+  if (error || !cierre) throw new Error(`No se pudo guardar el cierre parcial: ${error?.message ?? '?'}`);
+
+  // Contar cuántos cierres parciales lleva la sesión (para numerarlo en el ticket)
+  const { count: cierreCount } = await (sb as unknown as {
+    from: (t: string) => {
+      select: (s: string, o: { count: 'exact'; head: boolean }) => {
+        eq: (k: string, v: unknown) => Promise<{ count: number | null }>;
+      };
+    };
+  })
+    .from('cajas_cierres_parciales')
+    .select('id', { count: 'exact', head: true })
+    .eq('sesion_id', sesion.id);
+
+  revalidatePath('/venta');
+  return {
+    id: cierre.id,
+    cierre_numero: cierreCount ?? 1,
+    diferencia,
+    esperado,
+    contado: parsed.monto_contado_efectivo,
+    total_ventas: ventaIds.length,
+    total_efectivo: efectivo,
+    total_gastos: totalGastos,
+  };
+}
+
+// Lista cajeros disponibles para asignar como entrantes (todos los usuarios
+// excepto el actual). El cajero entrante es opcional al hacer cierre parcial.
+export async function listarCajerosDisponibles(): Promise<Array<{ id: string; nombre: string }>> {
+  const sb = await createClient();
+  const user = await requireUser(sb);
+  const { data } = await sb
+    .from('perfiles')
+    .select('id, nombre_completo')
+    .neq('id', user.id)
+    .order('nombre_completo');
+  type R = { id: string; nombre_completo: string | null };
+  return ((data ?? []) as R[])
+    .filter((p) => p.nombre_completo)
+    .map((p) => ({ id: p.id, nombre: p.nombre_completo! }));
+}
+
+// Lista cierres parciales de la sesión actual (para mostrar historial)
+export async function listarCierresParcialesSesion(): Promise<Array<{
+  id: string;
+  fecha: string;
+  cajero_saliente_nombre: string | null;
+  total_ventas: number;
+  total_efectivo: number;
+  diferencia: number;
+  observaciones: string | null;
+}>> {
+  const sb = await createClient();
+  const user = await requireUser(sb);
+  const { caja } = await getCajaDefault(sb, user.id);
+  const { data: sesion } = await sb
+    .from('cajas_sesiones')
+    .select('id')
+    .eq('caja_id', caja.id)
+    .is('cerrada_en', null)
+    .maybeSingle();
+  if (!sesion) return [];
+
+  const { data: cierres } = await (sb as unknown as {
+    from: (t: string) => {
+      select: (s: string) => { eq: (k: string, v: unknown) => { order: (k: string, o: { ascending: boolean }) => Promise<{ data: Array<Record<string, unknown>> | null }> } };
+    };
+  })
+    .from('cajas_cierres_parciales')
+    .select('id, fecha, cajero_saliente, total_ventas, total_efectivo, diferencia, observaciones')
+    .eq('sesion_id', sesion.id)
+    .order('fecha', { ascending: false });
+
+  type R = {
+    id: string;
+    fecha: string;
+    cajero_saliente: string;
+    total_ventas: number;
+    total_efectivo: number | string;
+    diferencia: number | string;
+    observaciones: string | null;
+  };
+  const rows = ((cierres ?? []) as unknown as R[]);
+  const userIds = Array.from(new Set(rows.map((r) => r.cajero_saliente)));
+  const nombresById = new Map<string, string>();
+  if (userIds.length > 0) {
+    const { data: perfiles } = await sb
+      .from('perfiles')
+      .select('id, nombre_completo')
+      .in('id', userIds);
+    for (const p of perfiles ?? []) nombresById.set(p.id, p.nombre_completo ?? '');
+  }
+
+  return rows.map((r) => ({
+    id: r.id,
+    fecha: r.fecha,
+    cajero_saliente_nombre: nombresById.get(r.cajero_saliente) ?? null,
+    total_ventas: r.total_ventas,
+    total_efectivo: Number(r.total_efectivo),
+    diferencia: Number(r.diferencia),
+    observaciones: r.observaciones,
+  }));
 }

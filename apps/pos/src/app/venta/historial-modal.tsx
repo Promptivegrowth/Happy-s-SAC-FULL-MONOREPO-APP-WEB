@@ -23,16 +23,18 @@ import { construirMensajeWhatsApp, abrirWhatsApp } from './whatsapp-helper';
 export function HistorialModal({ onClose, empresaNombre }: { onClose: () => void; empresaNombre: string }) {
   const [rows, setRows] = useState<TransaccionRow[]>([]);
   const [loading, setLoading] = useState(true);
+  const [alcance, setAlcance] = useState<'SESION' | 'DIA'>('SESION');
 
   useEffect(() => {
+    setLoading(true);
     (async () => {
       try {
-        setRows(await obtenerHistorialSesion());
+        setRows(await obtenerHistorialSesion(alcance));
       } finally {
         setLoading(false);
       }
     })();
-  }, []);
+  }, [alcance]);
 
   const total = rows.reduce((s, r) => s + r.total, 0);
 
@@ -56,7 +58,9 @@ export function HistorialModal({ onClose, empresaNombre }: { onClose: () => void
         <div className="flex items-center justify-between border-b border-slate-200 px-5 py-3">
           <div className="flex items-center gap-2">
             <History className="h-5 w-5 text-happy-600" />
-            <h2 className="font-display text-lg font-semibold text-corp-900">Historial de la sesión</h2>
+            <h2 className="font-display text-lg font-semibold text-corp-900">
+              {alcance === 'SESION' ? 'Historial de la sesión' : 'Ventas del día'}
+            </h2>
             <Badge variant="outline" className="ml-2 text-[10px]">
               {rows.length} transacc{rows.length === 1 ? 'ión' : 'iones'}
             </Badge>
@@ -69,6 +73,32 @@ export function HistorialModal({ onClose, empresaNombre }: { onClose: () => void
               <X className="h-4 w-4" />
             </button>
           </div>
+        </div>
+
+        {/* Toggle de alcance */}
+        <div className="flex border-b border-slate-200 bg-slate-50/50 px-5 py-2 gap-2">
+          <button
+            type="button"
+            onClick={() => setAlcance('SESION')}
+            className={`rounded-md px-3 py-1 text-xs font-medium transition ${
+              alcance === 'SESION'
+                ? 'bg-white text-happy-700 shadow-sm ring-1 ring-slate-200'
+                : 'text-slate-500 hover:text-slate-700'
+            }`}
+          >
+            Esta sesión (turno actual)
+          </button>
+          <button
+            type="button"
+            onClick={() => setAlcance('DIA')}
+            className={`rounded-md px-3 py-1 text-xs font-medium transition ${
+              alcance === 'DIA'
+                ? 'bg-white text-happy-700 shadow-sm ring-1 ring-slate-200'
+                : 'text-slate-500 hover:text-slate-700'
+            }`}
+          >
+            Hoy completo (todas las sesiones de la caja)
+          </button>
         </div>
 
         {/* Body */}

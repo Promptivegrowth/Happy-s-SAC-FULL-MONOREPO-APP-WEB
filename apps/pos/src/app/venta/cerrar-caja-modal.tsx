@@ -17,12 +17,18 @@ import { Label } from '@happy/ui/label';
 import { Button } from '@happy/ui/button';
 import {
   AlertTriangle, Banknote, CheckCircle2, CreditCard, Building2, Loader2, LogOut,
-  Smartphone, X, FileSpreadsheet, RefreshCw,
+  Smartphone, X, FileSpreadsheet, RefreshCw, Users, UserCheck,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { formatPEN, formatDateTime } from '@happy/lib';
-import { balanceCajaActiva, cerrarSesion, generarExcelCierre } from '@/server/actions/caja';
+import {
+  balanceCajaActiva, cerrarSesion, generarExcelCierre,
+  cerrarParcialSesion, listarCajerosDisponibles,
+} from '@/server/actions/caja';
 import type { BalanceCajaDTO, SesionCajaDTO } from '@/server/actions/caja-helpers';
+
+type Cajero = { id: string; nombre: string };
+type ModoCierre = 'DEFINITIVO' | 'PARCIAL';
 
 export function CerrarCajaModal({
   sesion,
@@ -41,6 +47,18 @@ export function CerrarCajaModal({
   const [pending, start] = useTransition();
   const [refreshing, setRefreshing] = useState(false);
   const [generandoExcel, setGenerandoExcel] = useState(false);
+
+  // Modo: cierre PARCIAL (cambio de turno) vs DEFINITIVO (fin de día)
+  const [modo, setModo] = useState<ModoCierre>('DEFINITIVO');
+  const [cajeros, setCajeros] = useState<Cajero[]>([]);
+  const [cajeroEntranteId, setCajeroEntranteId] = useState<string>('');
+
+  // Cargar cajeros disponibles cuando elige PARCIAL
+  useEffect(() => {
+    if (modo === 'PARCIAL' && cajeros.length === 0) {
+      void listarCajerosDisponibles().then(setCajeros).catch(() => setCajeros([]));
+    }
+  }, [modo, cajeros.length]);
 
   const contadoNum = Number(contado);
   const diferencia = Number.isFinite(contadoNum) ? contadoNum - balance.esperado_efectivo : 0;
@@ -104,6 +122,27 @@ export function CerrarCajaModal({
     }
     if (Math.abs(diferencia) > 5 && !confirm(`Diferencia de ${formatPEN(diferencia)}. ¿Confirmar cierre?`)) return;
 
+    if (modo === 'PARCIAL') {
+      // Cambio de turno — la sesión NO se cierra
+      start(async () => {
+        try {
+          const r = await cerrarParcialSesion({
+            monto_contado_efectivo: contadoNum,
+            cajero_entrante_id: cajeroEntranteId || null,
+            observacion: obs || null,
+          });
+          toast.success(
+            `Cierre parcial #${r.cierre_numero} registrado · ${r.total_ventas} venta${r.total_ventas === 1 ? '' : 's'} en el turno`,
+          );
+          onClose();  // cierra el modal pero la sesión sigue abierta
+        } catch (e) {
+          toast.error((e as Error).message ?? 'Error en el cierre parcial');
+        }
+      });
+      return;
+    }
+
+    // Cierre definitivo
     start(async () => {
       try {
         await cerrarSesion({ monto_contado_efectivo: contadoNum, observacion: obs || null });
@@ -135,10 +174,59 @@ export function CerrarCajaModal({
           </button>
         </div>
 
+        {/* Selector de tipo de cierre */}
+        <div className="mt-4 grid grid-cols-2 gap-2">
+          <button
+            type="button"
+            onClick={() => setModo('PARCIAL')}
+            disabled={pending}
+            className={`flex flex-col items-start gap-1 rounded-lg border-2 p-3 text-left transition ${
+              modo === 'PARCIAL'
+                ? 'border-amber-400 bg-amber-50 shadow-sm'
+                : 'border-slate-200 bg-white hover:border-slate-300'
+            }`}
+          >
+            <div className="flex items-center gap-2 text-sm font-semibold text-amber-700">
+              <Users className="h-4 w-4" />
+              Cambio de turno
+            </div>
+            <p className="text-[11px] text-slate-600">
+              Cuadra efectivo y pasa la posta al siguiente cajero.
+              <strong className="block text-amber-700">La caja sigue abierta.</strong>
+            </p>
+          </button>
+          <button
+            type="button"
+            onClick={() => setModo('DEFINITIVO')}
+            disabled={pending}
+            className={`flex flex-col items-start gap-1 rounded-lg border-2 p-3 text-left transition ${
+              modo === 'DEFINITIVO'
+                ? 'border-rose-400 bg-rose-50 shadow-sm'
+                : 'border-slate-200 bg-white hover:border-slate-300'
+            }`}
+          >
+            <div className="flex items-center gap-2 text-sm font-semibold text-rose-700">
+              <LogOut className="h-4 w-4" />
+              Cierre definitivo
+            </div>
+            <p className="text-[11px] text-slate-600">
+              Fin de día: cierra la caja por completo.
+              <strong className="block text-rose-700">Hay que abrirla otra vez para vender.</strong>
+            </p>
+          </button>
+        </div>
+
         {/* Stats apertura/ventas/esperado */}
-        <div className="mt-5 grid gap-2 sm:grid-cols-3">
+        <div className="mt-5 grid gap-2 sm:grid-cols-4">
           <Stat label="Apertura" value={formatPEN(balance.monto_apertura)} />
           <Stat label="Ventas" value={`${balance.cantidad_ventas}`} sub={formatPEN(balance.total_ventas)} />
+          {(balance.total_gastos > 0 || balance.total_ingresos_extra > 0) && (
+            <Stat
+              label="Caja chica"
+              value={formatPEN(balance.total_ingresos_extra - balance.total_gastos)}
+              sub={`+${formatPEN(balance.total_ingresos_extra)} / -${formatPEN(balance.total_gastos)}`}
+            />
+          )}
           <Stat label="Esperado en caja" value={formatPEN(balance.esperado_efectivo)} highlight />
         </div>
 
@@ -203,12 +291,33 @@ export function CerrarCajaModal({
             </div>
           </div>
 
+          {modo === 'PARCIAL' && (
+            <div className="mt-3">
+              <Label className="text-xs">Cajero entrante (opcional)</Label>
+              <select
+                value={cajeroEntranteId}
+                onChange={(e) => setCajeroEntranteId(e.target.value)}
+                className="mt-1 h-10 w-full rounded-md border border-input bg-white px-3 text-sm"
+              >
+                <option value="">— Sin asignar (se completa al cambiar de usuario) —</option>
+                {cajeros.map((c) => (
+                  <option key={c.id} value={c.id}>{c.nombre}</option>
+                ))}
+              </select>
+              <p className="mt-1 text-[11px] text-slate-500">
+                Quién toma la posta. Útil solo para el reporte; el siguiente cajero deberá entrar con su propio usuario.
+              </p>
+            </div>
+          )}
+
           <div className="mt-3">
             <Label className="text-xs">Observación (opcional)</Label>
             <Input
               value={obs}
               onChange={(e) => setObs(e.target.value)}
-              placeholder="Ej. retiro a banco, motivo del faltante…"
+              placeholder={modo === 'PARCIAL'
+                ? 'Ej. cambio de turno mediodía, retiro a banco, etc.'
+                : 'Ej. retiro a banco, motivo del faltante…'}
               className="mt-1"
             />
           </div>
@@ -228,10 +337,22 @@ export function CerrarCajaModal({
             {generandoExcel ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileSpreadsheet className="h-4 w-4" />}
             Generar Excel
           </Button>
-          <Button variant="premium" size="lg" onClick={confirmarCierre} disabled={pending}>
-            {pending ? <Loader2 className="h-4 w-4 animate-spin" /> : <LogOut className="h-4 w-4" />}
-            Cerrar caja
-          </Button>
+          {modo === 'PARCIAL' ? (
+            <Button
+              size="lg"
+              onClick={confirmarCierre}
+              disabled={pending}
+              className="bg-amber-600 text-white hover:bg-amber-700"
+            >
+              {pending ? <Loader2 className="h-4 w-4 animate-spin" /> : <UserCheck className="h-4 w-4" />}
+              Registrar cambio de turno
+            </Button>
+          ) : (
+            <Button variant="premium" size="lg" onClick={confirmarCierre} disabled={pending}>
+              {pending ? <Loader2 className="h-4 w-4 animate-spin" /> : <LogOut className="h-4 w-4" />}
+              Cerrar caja
+            </Button>
+          )}
         </div>
       </Card>
     </div>
