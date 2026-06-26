@@ -5,7 +5,7 @@ import { Button } from '@happy/ui/button';
 import { Card, CardContent } from '@happy/ui/card';
 import { EmptyState } from '@happy/ui/empty-state';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@happy/ui/table';
-import { ArrowRightLeft, Plus, Warehouse } from 'lucide-react';
+import { ArrowRightLeft, Plus, Warehouse, FileText } from 'lucide-react';
 import { PageShell } from '@/components/page-shell';
 import { TableSkeleton } from '@/components/skeletons';
 import { listarTraslados, type EstadoTraslado } from '@/server/actions/traslados';
@@ -191,6 +191,7 @@ async function TrasladosTabla({ almacen, estado, desde, hasta, pagina }: SP) {
                 <TableHead className="text-right">Líneas</TableHead>
                 <TableHead className="text-right">Cantidad</TableHead>
                 <TableHead>Estado</TableHead>
+                <TableHead className="w-20"></TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -235,6 +236,17 @@ async function TrasladosTabla({ almacen, estado, desde, hasta, pagina }: SP) {
                     </TableCell>
                     <TableCell>
                       <EstadoBadge estado={r.estado} />
+                    </TableCell>
+                    <TableCell>
+                      {(r.estado === 'DESPACHADO' || r.estado === 'RECIBIDO') && (
+                        <Link
+                          href={`/traslados/${r.id}?guia=1`}
+                          title="Descargar guía de remisión"
+                          className="inline-flex items-center gap-1 rounded-md border border-amber-300 bg-amber-50 px-2 py-1 text-[10px] font-medium text-amber-700 hover:bg-amber-100"
+                        >
+                          <FileText className="h-3 w-3" /> Guía
+                        </Link>
+                      )}
                     </TableCell>
                   </TableRow>
                 );

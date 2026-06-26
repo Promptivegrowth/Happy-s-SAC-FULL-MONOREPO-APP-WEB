@@ -87,9 +87,16 @@ export function OtAcciones({ otId, estado, almacenes, areasReceta = [] }: {
       {estado === 'EN_CONTROL_CALIDAD' ? (
         showCierre ? (
           <div className="flex items-center gap-2 rounded-lg border bg-white p-2">
-            <select value={almacenSel} onChange={(e) => setAlmacenSel(e.target.value)} className="h-9 rounded-md border bg-white px-2 text-sm">
-              {almacenes.map((a) => <option key={a.id} value={a.id}>{a.nombre}</option>)}
-            </select>
+            {almacenes.length === 1 ? (
+              // 1 solo almacén PT — no mostrar dropdown, solo confirmar
+              <span className="rounded-md bg-emerald-50 px-3 py-1.5 text-xs font-medium text-emerald-700">
+                → {almacenes[0]!.nombre}
+              </span>
+            ) : (
+              <select value={almacenSel} onChange={(e) => setAlmacenSel(e.target.value)} className="h-9 rounded-md border bg-white px-2 text-sm">
+                {almacenes.map((a) => <option key={a.id} value={a.id}>{a.nombre}</option>)}
+              </select>
+            )}
             <Button variant="premium" size="sm" onClick={cerrar} disabled={pending}>
               {pending ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />}
               Confirmar cierre
@@ -98,7 +105,10 @@ export function OtAcciones({ otId, estado, almacenes, areasReceta = [] }: {
           </div>
         ) : (
           <Button variant="premium" onClick={() => setShowCierre(true)} disabled={pending}>
-            <CheckCircle2 className="h-4 w-4" /> Cerrar OT (declarar PT)
+            <CheckCircle2 className="h-4 w-4" />
+            {almacenes.length === 1
+              ? `Cerrar OT (entra a ${almacenes[0]!.codigo})`
+              : 'Cerrar OT (declarar PT)'}
           </Button>
         )
       ) : (

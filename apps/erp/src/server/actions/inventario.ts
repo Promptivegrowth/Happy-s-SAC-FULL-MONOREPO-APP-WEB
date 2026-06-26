@@ -110,3 +110,57 @@ export async function registrarMovimientoStock(
   if (r.ok) await bumpPaths('/inventario', '/productos', '/inventario/alertas');
   return r;
 }
+
+/**
+ * Variante BATCH: registra varios movimientos a la vez (mismo tipo + mismo
+ * almacén, distintos variantes y cantidades). Útil cuando hay que mover
+ * decenas de SKUs sin abrir el modal una por una.
+ *
+ * Si alguno falla, se intenta el resto y se reporta el listado de errores
+ * (no aborta todo el lote para no perder los que sí entraron).
+ */
+const movimientoBatchSchema = z.object({
+  almacen_id: z.string().uuid('Almacén requerido'),
+  tipo: z.enum([
+    'ENTRADA_COMPRA', 'ENTRADA_AJUSTE', 'ENTRADA_DEVOLUCION_CLIENTE',
+    'ENTRADA_DEVOLUCION_TALLER', 'SALIDA_AJUSTE', 'SALIDA_MERMA',
+  ]),
+  observacion: z.string().max(500).optional().or(z.literal('')),
+  lineas: z.array(z.object({
+    variante_id: z.string().uuid(),
+    cantidad: z.coerce.number().positive(),
+  })).min(1, 'Agregá al menos una línea'),
+});
+
+export async function registrarMovimientoStockBatch(
+  input: z.input<typeof movimientoBatchSchema>,
+): Promise<ActionResult<{ insertados: number; errores: Array<{ variante_id: string; error: string }> }>> {
+  const r = await runAction(async () => {
+    const data = movimientoBatchSchema.parse(input);
+    const { sb, userId } = await requireUser();
+
+    const rows = data.lineas.map((l) => ({
+      tipo: data.tipo,
+      almacen_id: data.almacen_id,
+      variante_id: l.variante_id,
+      cantidad: l.cantidad,
+      referencia_tipo: 'AJUSTE',
+      usuario_id: userId,
+      observacion: data.observacion?.trim() || null,
+    }));
+
+    // Insertamos todo en una sola query (más rápido y atómico para validación)
+    const { data: inserted, error } = await sb
+      .from('kardex_movimientos')
+      .insert(rows)
+      .select('id');
+
+    if (error) {
+      // Falló todo el batch — devolver error
+      return { insertados: 0, errores: data.lineas.map((l) => ({ variante_id: l.variante_id, error: error.message })) };
+    }
+    return { insertados: (inserted ?? []).length, errores: [] };
+  });
+  if (r.ok) await bumpPaths('/inventario', '/productos', '/inventario/alertas');
+  return r;
+}

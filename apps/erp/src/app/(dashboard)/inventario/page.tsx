@@ -14,6 +14,7 @@ import { formatNumber } from '@happy/lib';
 import { Boxes, AlertTriangle, History } from 'lucide-react';
 import { AjustarStockButton } from './ajustar-stock-client';
 import { NuevoMovimientoButton } from './nuevo-movimiento-client';
+import { MovimientoMasivoButton } from './movimiento-masivo-client';
 
 export const metadata = { title: 'Inventario' };
 export const dynamic = 'force-dynamic';
@@ -91,6 +92,7 @@ export default async function InventarioPage({ searchParams }: { searchParams: P
       actions={
         <div className="flex items-center gap-2">
           <NuevoMovimientoButton almacenes={almacenes} variantes={variantesParaModal} />
+          <MovimientoMasivoButton almacenes={almacenes} variantes={variantesParaModal} />
           <Link href="/inventario/alertas">
             <Button variant="outline" className="gap-2">
               <AlertTriangle className="h-4 w-4 text-amber-500" /> Ver alertas
@@ -155,7 +157,21 @@ async function InventarioTable({ q, almacen, vista }: SP) {
   //  - 'bajo': query directa con 0<cantidad<=5.
   const incluirCeros = !vista || vista === 'todo';
 
-  // 1) Cargar stock real
+  // 1) IDs de almacenes ocultos (merma, etc.) para excluir del listado de stock.
+  //    El stock real ahí existe pero no se muestra en pantalla operativa.
+  const { data: ocultosRaw } = await (sb as unknown as {
+    from: (t: string) => {
+      select: (s: string) => {
+        eq: (k: string, v: unknown) => Promise<{ data: Array<{ id: string }> | null }>;
+      };
+    };
+  })
+    .from('almacenes')
+    .select('id')
+    .eq('oculto_en_selectores', true);
+  const almacenesOcultos = new Set((ocultosRaw ?? []).map((a) => a.id));
+
+  // 2) Cargar stock real
   let stockQuery = sb
     .from('stock_actual')
     .select('cantidad, almacen_id, variante_id')
@@ -169,6 +185,7 @@ async function InventarioTable({ q, almacen, vista }: SP) {
   const { data: stocksRaw } = await stockQuery;
   const stocksMap = new Map<string, number>(); // key = almacen|variante
   for (const s of (stocksRaw ?? []) as { variante_id: string; almacen_id: string; cantidad: string | number }[]) {
+    if (almacenesOcultos.has(s.almacen_id)) continue;  // omitir merma del listado operativo
     stocksMap.set(`${s.almacen_id}|${s.variante_id}`, Number(s.cantidad ?? 0));
   }
 
@@ -203,7 +220,23 @@ async function InventarioTable({ q, almacen, vista }: SP) {
       );
     }
 
-    const { data: almsAll } = await sb.from('almacenes').select('id, nombre').eq('activo', true).order('nombre');
+    // Cast porque oculto_en_selectores es de migración 52 (aún no en types autogen)
+    const { data: almsAll } = await (sb as unknown as {
+      from: (t: string) => {
+        select: (s: string) => {
+          eq: (k: string, v: unknown) => {
+            eq: (k: string, v: unknown) => {
+              order: (k: string) => Promise<{ data: Array<{ id: string; nombre: string }> | null }>;
+            };
+          };
+        };
+      };
+    })
+      .from('almacenes')
+      .select('id, nombre')
+      .eq('activo', true)
+      .eq('oculto_en_selectores', false)
+      .order('nombre');
     const almacenes = ((almsAll ?? []) as { id: string; nombre: string }[]).filter(
       (a) => !almacen || a.id === almacen,
     );

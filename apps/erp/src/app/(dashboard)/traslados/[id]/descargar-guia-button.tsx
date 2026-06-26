@@ -1,6 +1,7 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import { useSearchParams, useRouter } from 'next/navigation';
 import { Button } from '@happy/ui/button';
 import { FileText, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
@@ -18,6 +19,9 @@ export function DescargarGuiaButton({
   empresa: EmpresaPDFData | null;
 }) {
   const [pending, setPending] = useState(false);
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const autoTriggeredRef = useRef(false);
 
   async function descargar() {
     setPending(true);
@@ -30,6 +34,20 @@ export function DescargarGuiaButton({
       setPending(false);
     }
   }
+
+  // Auto-disparo: si la URL viene con ?guia=1 (desde el botón del listado),
+  // descarga automáticamente y limpia el query param.
+  useEffect(() => {
+    if (autoTriggeredRef.current) return;
+    if (searchParams.get('guia') === '1') {
+      autoTriggeredRef.current = true;
+      void descargar().finally(() => {
+        // Limpiar el query param sin recargar
+        router.replace(`/traslados/${traslado.id}`, { scroll: false });
+      });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams]);
 
   return (
     <Button

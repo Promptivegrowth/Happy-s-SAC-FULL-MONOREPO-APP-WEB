@@ -181,7 +181,12 @@ export function NuevoMovimientoButton({
 
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1.5">
-                <Label htmlFor="almacen">Almacén destino</Label>
+                <Label htmlFor="almacen">
+                  Almacén{' '}
+                  <span className="text-[10px] font-normal text-slate-500">
+                    ({tipo.startsWith('ENTRADA') ? 'donde llega el stock' : 'de donde sale el stock'})
+                  </span>
+                </Label>
                 <select
                   id="almacen"
                   value={almacenId}

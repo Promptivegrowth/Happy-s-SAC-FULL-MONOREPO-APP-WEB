@@ -10,11 +10,16 @@ import { runAction, requireUser, type ActionResult } from './_helpers';
  * por almacén). Suma stock_actual de TODOS los almacenes — si la suma cae
  * bajo el mínimo, alerta. Para distinguir por almacén usar el filtro.
  *
- * Para VARIANTES: el schema actual no tiene stock_minimo configurable
- * (TODO en mig 22). Usamos el umbral default de 5 unidades.
+ * Para VARIANTES: usa `almacenes.stock_minimo_default` (mig 53) — cada
+ * almacén define SU propio umbral. Alerta cuando el stock de la variante
+ * en ESE almacén cae bajo el umbral del almacén. Permite mínimos distintos:
+ *   - Santa Bárbara: 5
+ *   - Tienda La Quinta: 3
+ *   - Tienda Huallaga: 1
+ *   - Materia Prima / Merma: 0 (no alertan)
  */
 
-const UMBRAL_VARIANTE_DEFAULT = 5;
+const UMBRAL_VARIANTE_FALLBACK = 5;  // si almacen.stock_minimo_default es null
 
 const filtrosSchema = z.object({
   almacen_id: z.string().uuid().optional().or(z.literal('')),
@@ -82,61 +87,91 @@ export async function listarStockBajo(
       }
     }
 
-    // ── VARIANTES ── (umbral fijo por ahora)
+    // ── VARIANTES ── (umbral por almacén — mig 53)
     let total_variantes_alert = 0;
     if (!data.tipo || data.tipo === 'VARIANTE') {
-      // Traer todas las variantes con stock total
+      // 1) Cargar umbral por almacén (cast porque stock_minimo_default es de mig 53)
+      const { data: almsRaw } = await (sb as unknown as {
+        from: (t: string) => {
+          select: (s: string) => {
+            eq: (k: string, v: unknown) => Promise<{ data: Array<{ id: string; codigo: string; nombre: string; stock_minimo_default: number | null }> | null }>;
+          };
+        };
+      })
+        .from('almacenes')
+        .select('id, codigo, nombre, stock_minimo_default')
+        .eq('activo', true);
+      const umbralPorAlmacen = new Map<string, { umbral: number; codigo: string; nombre: string }>();
+      for (const a of almsRaw ?? []) {
+        umbralPorAlmacen.set(a.id, {
+          umbral: Number(a.stock_minimo_default ?? UMBRAL_VARIANTE_FALLBACK),
+          codigo: a.codigo,
+          nombre: a.nombre,
+        });
+      }
+
+      // 2) Traer stock por (almacen, variante) — NO agrupar por variante.
+      //    Cada fila de stock_actual representa el stock real de UNA variante en UN almacén.
       let stockQ = sb
         .from('stock_actual')
-        .select('cantidad, almacen_id, variante_id, almacen:almacen_id(id, codigo, nombre)')
+        .select('cantidad, almacen_id, variante_id')
         .not('variante_id', 'is', null);
       if (data.almacen_id) stockQ = stockQ.eq('almacen_id', data.almacen_id);
       const { data: stocks } = await stockQ;
 
-      // Agrupar por variante
-      const porVariante = new Map<string, { stock: number; almacen?: { id: string; codigo: string; nombre: string } | null }>();
-      for (const s of (stocks ?? []) as { cantidad: number | string; variante_id: string; almacen: { id: string; codigo: string; nombre: string } | null }[]) {
-        const cur = porVariante.get(s.variante_id) ?? { stock: 0, almacen: s.almacen };
-        cur.stock += Number(s.cantidad);
-        porVariante.set(s.variante_id, cur);
+      // 3) Filtrar las que están bajo el umbral de SU almacén
+      type Comb = { variante_id: string; almacen_id: string; stock: number; umbral: number };
+      const bajos: Comb[] = [];
+      for (const s of (stocks ?? []) as { cantidad: number | string; variante_id: string; almacen_id: string }[]) {
+        const meta = umbralPorAlmacen.get(s.almacen_id);
+        if (!meta || meta.umbral <= 0) continue;  // almacén sin umbral configurado = no alerta
+        const cant = Number(s.cantidad);
+        if (cant < meta.umbral) {
+          bajos.push({ variante_id: s.variante_id, almacen_id: s.almacen_id, stock: cant, umbral: meta.umbral });
+        }
       }
+      total_variantes_alert = bajos.length;
 
-      // Filtrar las bajo umbral
-      const variantesBajo: string[] = [];
-      for (const [vid, info] of porVariante) {
-        if (info.stock < UMBRAL_VARIANTE_DEFAULT) variantesBajo.push(vid);
-      }
-      total_variantes_alert = variantesBajo.length;
-
-      if (variantesBajo.length > 0) {
-        // Cargar detalle de las variantes bajo
-        // (chunkear para no exceder URL limit)
+      if (bajos.length > 0) {
+        const varianteIdsUnicos = Array.from(new Set(bajos.map((b) => b.variante_id)));
         const CHUNK = 200;
-        for (let i = 0; i < variantesBajo.length; i += CHUNK) {
-          const ids = variantesBajo.slice(i, i + CHUNK);
+        const varMeta = new Map<string, { sku: string; talla: string; producto_nombre: string; categoria: string }>();
+        for (let i = 0; i < varianteIdsUnicos.length; i += CHUNK) {
+          const ids = varianteIdsUnicos.slice(i, i + CHUNK);
           const { data: vars } = await sb
             .from('productos_variantes')
-            .select('id, sku, talla, producto:producto_id(id, codigo, nombre, categoria:categoria_id(codigo, nombre))')
+            .select('id, sku, talla, producto:producto_id(nombre, categoria:categoria_id(codigo))')
             .in('id', ids)
             .eq('activo', true);
-          for (const v of (vars ?? []) as { id: string; sku: string; talla: string; producto: { id: string; codigo: string; nombre: string; categoria: { codigo: string; nombre: string } | null } | null }[]) {
+          for (const v of (vars ?? []) as { id: string; sku: string; talla: string; producto: { nombre: string; categoria: { codigo: string } | null } | null }[]) {
             if (!v.producto) continue;
-            const info = porVariante.get(v.id)!;
-            alertas.push({
-              tipo: 'VARIANTE',
-              id: v.id,
-              nombre: v.producto.nombre,
-              codigo: v.sku,
-              detalle: `Talla ${v.talla.replace('T', '')}`,
-              stock_actual: info.stock,
-              stock_minimo: UMBRAL_VARIANTE_DEFAULT,
-              faltante: Math.max(0, UMBRAL_VARIANTE_DEFAULT - info.stock),
-              unidad: 'unid',
-              almacen: info.almacen ?? undefined,
+            varMeta.set(v.id, {
+              sku: v.sku,
+              talla: v.talla,
+              producto_nombre: v.producto.nombre,
               categoria: v.producto.categoria?.codigo ?? '—',
-              href_kardex: `/kardex/variante/${v.id}`,
             });
           }
+        }
+        // 4) Emitir una alerta por cada combinación (variante × almacén) bajo
+        for (const b of bajos) {
+          const v = varMeta.get(b.variante_id);
+          const alm = umbralPorAlmacen.get(b.almacen_id);
+          if (!v || !alm) continue;
+          alertas.push({
+            tipo: 'VARIANTE',
+            id: `${b.variante_id}|${b.almacen_id}`,  // único por combinación
+            nombre: v.producto_nombre,
+            codigo: v.sku,
+            detalle: `Talla ${v.talla.replace('T', '')}`,
+            stock_actual: b.stock,
+            stock_minimo: b.umbral,
+            faltante: Math.max(0, b.umbral - b.stock),
+            unidad: 'unid',
+            almacen: { id: b.almacen_id, codigo: alm.codigo, nombre: alm.nombre },
+            categoria: v.categoria,
+            href_kardex: `/kardex/variante/${b.variante_id}`,
+          });
         }
       }
     }
