@@ -200,16 +200,24 @@ export function PosTerminal({
   }
 
   function agregarVariante(v: Variante) {
-    const stock = stockPorVariante[v.id] ?? 0;
-    if (stock <= 0) {
-      // Permitir vender igual pero avisar
-      toast.warning(`Talla ${v.talla.replace('T', '')} sin stock — se venderá igual`);
+    const stockDisp = Math.max(0, stockPorVariante[v.id] ?? 0);
+    // Política: NO permitir vender sin stock. Validamos en front (UX inmediata)
+    // y el server (venta.ts) también valida para evitar bypass.
+    if (stockDisp <= 0) {
+      toast.error(`${v.productos.nombre} talla ${v.talla.replace('T', '')} — sin stock en este almacén`);
+      return;
     }
+    // Si la línea ya existe, validar que sumar 1 no exceda el stock disponible
     setCarrito((prev) => {
       const idx = prev.findIndex((l) => l.variante.id === v.id);
       if (idx >= 0) {
+        const cantActual = prev[idx]!.cantidad;
+        if (cantActual + 1 > stockDisp) {
+          toast.error(`Stock máximo de ${stockDisp} unidades para ${v.sku}`);
+          return prev;
+        }
         const copy = [...prev];
-        copy[idx] = { ...copy[idx]!, cantidad: copy[idx]!.cantidad + 1 };
+        copy[idx] = { ...copy[idx]!, cantidad: cantActual + 1 };
         return copy;
       }
       return [...prev, { variante: v, cantidad: 1 }];
@@ -218,7 +226,18 @@ export function PosTerminal({
   }
 
   function setQty(varianteId: string, qty: number) {
-    setCarrito((prev) => prev.map((l) => l.variante.id === varianteId ? { ...l, cantidad: Math.max(1, qty) } : l));
+    setCarrito((prev) =>
+      prev.map((l) => {
+        if (l.variante.id !== varianteId) return l;
+        const stockDisp = Math.max(0, stockPorVariante[l.variante.id] ?? 0);
+        const nueva = Math.max(1, qty);
+        if (nueva > stockDisp) {
+          toast.error(`Stock máximo de ${stockDisp} unidades para ${l.variante.sku}`);
+          return { ...l, cantidad: stockDisp };  // cap al máximo disponible
+        }
+        return { ...l, cantidad: nueva };
+      }),
+    );
   }
 
   function eliminar(varianteId: string) {
@@ -652,11 +671,13 @@ export function PosTerminal({
                           <div key={v.id} className="relative">
                             <button
                               onClick={() => agregarVariante(v)}
+                              disabled={sinStock}
                               className={`flex w-full flex-col items-center gap-1 rounded-lg border-2 p-3 transition ${
                                 sinStock
-                                  ? 'border-dashed border-red-200 bg-red-50/40 text-red-600'
+                                  ? 'border-dashed border-red-200 bg-red-50/40 text-red-400 cursor-not-allowed opacity-60'
                                   : 'border-slate-200 bg-white text-corp-900 hover:border-happy-400 hover:bg-happy-50'
                               }`}
+                              title={sinStock ? 'Sin stock — no se puede vender' : ''}
                             >
                               <span className="font-display text-lg font-bold">{v.talla.replace('T', '')}</span>
                               <span className="text-[10px] font-mono text-slate-500">{v.sku}</span>
