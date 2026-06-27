@@ -55,6 +55,50 @@ export async function registrarVenta(input: VentaInput): Promise<VentaResultado>
     return { ok: false, error: `Pago insuficiente: faltan S/ ${(subTotal - totalPagado).toFixed(2)}` };
   }
 
+  // VALIDACIÓN DE STOCK — NO permitir vender sin stock en el almacén de la caja.
+  // Sumamos cantidad por variante (por si se agregó el mismo SKU dos veces) y
+  // comparamos contra el stock_actual de ese almacén. Si falta stock de algún
+  // ítem, rechazamos toda la venta (no se procesa parcial).
+  const cantPorVariante = new Map<string, number>();
+  for (const i of parsed.items) {
+    cantPorVariante.set(i.variante_id, (cantPorVariante.get(i.variante_id) ?? 0) + i.cantidad);
+  }
+  const varianteIds = Array.from(cantPorVariante.keys());
+  if (varianteIds.length > 0) {
+    const { data: stocks } = await sb
+      .from('stock_actual')
+      .select('variante_id, cantidad')
+      .eq('almacen_id', parsed.almacen_id)
+      .in('variante_id', varianteIds);
+    const stockPorVar = new Map<string, number>();
+    for (const s of (stocks ?? []) as { variante_id: string; cantidad: number | string }[]) {
+      stockPorVar.set(s.variante_id, Number(s.cantidad ?? 0));
+    }
+    const faltantes: string[] = [];
+    for (const [vid, cant] of cantPorVariante) {
+      const stock = stockPorVar.get(vid) ?? 0;
+      if (stock < cant) {
+        // Buscar el SKU para mensaje claro
+        const { data: v } = await sb
+          .from('productos_variantes')
+          .select('sku, talla, productos(nombre)')
+          .eq('id', vid)
+          .maybeSingle();
+        const vr = v as unknown as { sku: string; talla: string; productos: { nombre: string } | null } | null;
+        const desc = vr
+          ? `${vr.productos?.nombre ?? 'producto'} talla ${vr.talla.replace('T', '')} (${vr.sku})`
+          : `variante ${vid.slice(0, 8)}`;
+        faltantes.push(`${desc}: pide ${cant}, hay ${stock}`);
+      }
+    }
+    if (faltantes.length > 0) {
+      return {
+        ok: false,
+        error: `Sin stock suficiente para vender:\n${faltantes.map((f) => '· ' + f).join('\n')}`,
+      };
+    }
+  }
+
   // Caja: buscar sesión abierta o crearla con apertura por defecto
   const { data: sesion } = await sb.from('cajas_sesiones')
     .select('id').eq('caja_id', parsed.caja_id).is('cerrada_en', null).maybeSingle();

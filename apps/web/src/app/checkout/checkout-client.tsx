@@ -98,7 +98,14 @@ export function CheckoutClient() {
         }),
       });
       const json = await res.json();
-      if (!res.ok) throw new Error(json.error ?? 'Error');
+      if (!res.ok) {
+        // Caso especial: stock insuficiente (mensaje multilínea más explicativo)
+        if (res.status === 409 && json.mensaje) {
+          toast.error(json.mensaje, { duration: 10000 });
+          return;
+        }
+        throw new Error(json.error ?? 'Error');
+      }
       clear();
       toast.success(`Pedido ${json.numero} creado. Te contactaremos para coordinar el pago.`);
       router.push(`/cuenta/pedidos/${json.id}`);

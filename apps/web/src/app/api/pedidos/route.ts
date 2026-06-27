@@ -39,6 +39,66 @@ export async function POST(req: Request) {
 
   const sb = createServiceClient();
 
+  // 0. VALIDACIÓN DE STOCK — sumar cantidades por variante (por si el carrito
+  //    tiene el mismo SKU duplicado) y comparar contra stock disponible total
+  //    (excluyendo almacenes ocultos como ALM-MR).
+  const cantPorVariante = new Map<string, number>();
+  for (const i of body.items) {
+    cantPorVariante.set(i.varianteId, (cantPorVariante.get(i.varianteId) ?? 0) + i.cantidad);
+  }
+  const varianteIds = Array.from(cantPorVariante.keys());
+  // IDs de almacenes ocultos (no cuentan como disponibles para web)
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const sbAny = sb as unknown as { from: (t: string) => any };
+  const { data: ocultos } = await sbAny
+    .from('almacenes')
+    .select('id')
+    .eq('oculto_en_selectores', true);
+  const almacenesExcluidos = new Set((ocultos ?? []).map((a: { id: string }) => a.id));
+
+  const { data: stockRows } = await sb
+    .from('stock_actual')
+    .select('variante_id, almacen_id, cantidad')
+    .in('variante_id', varianteIds);
+  const stockTotalPorVar = new Map<string, number>();
+  for (const s of (stockRows ?? []) as { variante_id: string; almacen_id: string; cantidad: number | string }[]) {
+    if (almacenesExcluidos.has(s.almacen_id)) continue;
+    const cant = Math.max(0, Number(s.cantidad ?? 0)); // ignorar negativos
+    stockTotalPorVar.set(s.variante_id, (stockTotalPorVar.get(s.variante_id) ?? 0) + cant);
+  }
+
+  const faltantes: { varianteId: string; pide: number; hay: number; sku?: string; nombre?: string }[] = [];
+  for (const [vid, cant] of cantPorVariante) {
+    const stock = stockTotalPorVar.get(vid) ?? 0;
+    if (stock < cant) {
+      faltantes.push({ varianteId: vid, pide: cant, hay: stock });
+    }
+  }
+  if (faltantes.length > 0) {
+    // Buscar nombres para mensaje claro al usuario
+    const { data: vars } = await sb
+      .from('productos_variantes')
+      .select('id, sku, talla, productos(nombre)')
+      .in('id', faltantes.map((f) => f.varianteId));
+    type VR = { id: string; sku: string; talla: string; productos: { nombre: string } | null };
+    const meta = new Map<string, VR>(((vars ?? []) as unknown as VR[]).map((v) => [v.id, v]));
+    const mensajes = faltantes.map((f) => {
+      const v = meta.get(f.varianteId);
+      const desc = v
+        ? `${v.productos?.nombre ?? 'producto'} talla ${v.talla.replace('T', '')}`
+        : 'producto';
+      return `${desc}: pediste ${f.pide}, solo hay ${f.hay} disponible${f.hay === 1 ? '' : 's'}`;
+    });
+    return NextResponse.json(
+      {
+        error: 'Sin stock suficiente',
+        mensaje: `No podemos procesar tu pedido. Algunos productos no tienen stock disponible:\n${mensajes.join('\n')}\n\nPor favor actualizá tu carrito y volvé a intentar.`,
+        faltantes,
+      },
+      { status: 409 },  // Conflict
+    );
+  }
+
   // 1. Upsert cliente (sin RLS)
   const { data: existCliente } = await sb.from('clientes')
     .select('id')
