@@ -75,9 +75,11 @@ export async function registrarVenta(input: VentaInput): Promise<VentaResultado>
       stockPorVar.set(s.variante_id, Number(s.cantidad ?? 0));
     }
     const faltantes: string[] = [];
+    const variantesFaltantes: string[] = [];
     for (const [vid, cant] of cantPorVariante) {
       const stock = stockPorVar.get(vid) ?? 0;
       if (stock < cant) {
+        variantesFaltantes.push(vid);
         // Buscar el SKU para mensaje claro
         const { data: v } = await sb
           .from('productos_variantes')
@@ -92,9 +94,30 @@ export async function registrarVenta(input: VentaInput): Promise<VentaResultado>
       }
     }
     if (faltantes.length > 0) {
+      // Ayuda extra: buscar dónde SÍ hay stock disponible (en otros almacenes
+      // no ocultos) para sugerir al cajero un traslado o pedirle al cliente
+      // si puede ir a otra sucursal.
+      let sugerencias = '';
+      try {
+        const { data: otros } = await sb
+          .from('stock_actual')
+          .select('variante_id, cantidad, almacen:almacen_id(codigo, nombre, oculto_en_selectores)')
+          .in('variante_id', variantesFaltantes)
+          .neq('almacen_id', parsed.almacen_id)
+          .gt('cantidad', 0);
+        type Row = { variante_id: string; cantidad: number | string; almacen: { codigo: string; nombre: string; oculto_en_selectores: boolean } | null };
+        const enOtros = ((otros ?? []) as unknown as Row[])
+          .filter((r) => r.almacen && !r.almacen.oculto_en_selectores)
+          .map((r) => `${r.almacen!.codigo}: ${Number(r.cantidad)}`);
+        if (enOtros.length > 0) {
+          sugerencias = `\n\nHay stock en otros almacenes: ${enOtros.join(', ')}. Pedí un traslado o derivá al cliente.`;
+        }
+      } catch {
+        // sin sugerencias si falla
+      }
       return {
         ok: false,
-        error: `Sin stock suficiente para vender:\n${faltantes.map((f) => '· ' + f).join('\n')}`,
+        error: `Sin stock suficiente en este almacén:\n${faltantes.map((f) => '· ' + f).join('\n')}${sugerencias}`,
       };
     }
   }

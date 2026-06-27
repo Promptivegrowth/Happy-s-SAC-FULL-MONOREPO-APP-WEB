@@ -87,8 +87,14 @@ export default async function VentaPage() {
     activos: empresa?.escalones_activos ?? true,
   };
 
+  // Determinar el almacén ACTIVO (de la sesión POS o de la caja default).
+  // El stock que se muestra en el catálogo es el de ESE almacén — no la suma
+  // de todos. Esto evita que el cajero vea "20 unidades" globales y luego
+  // el cobro le diga "sin stock" porque en su tienda específica hay 0.
+  const almacenActivoId = sesionData?.sesion.almacen_id ?? cajaDefault?.almacen_id ?? null;
+
   // Catálogo (siempre se carga; el overlay de apertura sólo bloquea visualmente)
-  const [{ data: variantesRaw }, { data: cajas }, { data: categoriasRaw }, { data: stocks }] =
+  const [{ data: variantesRaw }, { data: cajas }, { data: categoriasRaw }, stocksRes] =
     await Promise.all([
       sb
         .from('productos_variantes')
@@ -100,8 +106,20 @@ export default async function VentaPage() {
         .limit(2000),
       sb.from('cajas').select('id, codigo, nombre, almacen_id').eq('activo', true),
       sb.from('categorias').select('id, nombre, activo').eq('activo', true).order('orden_web'),
-      sb.from('v_stock_variante_total').select('variante_id, stock_total'),
+      // Stock del almacén activo (si hay caja); si no, total global como fallback.
+      almacenActivoId
+        ? sb.from('stock_actual')
+            .select('variante_id, cantidad')
+            .eq('almacen_id', almacenActivoId)
+            .not('variante_id', 'is', null)
+        : sb.from('v_stock_variante_total').select('variante_id, stock_total'),
     ]);
+  // Normalizar las dos variantes de respuesta a un mismo formato
+  type StockRow = { variante_id: string; cantidad?: number | string; stock_total?: number | string };
+  const stocks = ((stocksRes.data ?? []) as StockRow[]).map((s) => ({
+    variante_id: s.variante_id,
+    stock_total: Math.max(0, Number(s.cantidad ?? s.stock_total ?? 0)),
+  }));
 
   // Cascada: filtrar variantes cuya categoría esté apagada.
   const variantes = ((variantesRaw ?? []) as unknown as VarianteRow[]).filter((v) => {
