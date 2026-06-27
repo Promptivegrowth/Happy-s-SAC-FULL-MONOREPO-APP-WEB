@@ -579,7 +579,11 @@ export function PosTerminal({
                     const precioMin = Math.min(
                       ...vars.map((v) => Number(v.precio_publico ?? 0)).filter((x) => x > 0),
                     );
-                    const stockTotal = vars.reduce((a, v) => a + (stockPorVariante[v.id] ?? 0), 0);
+                    // Si alguna variante tiene stock > 0 hay stock disponible.
+                    // (NO usar suma porque variantes con stock negativo —dato
+                    // corrupto de pruebas— harían que stockTotal sea -1 y la
+                    // comparación stockTotal === 0 fallaba.)
+                    const stockTotal = vars.reduce((a, v) => a + Math.max(0, stockPorVariante[v.id] ?? 0), 0);
                     return (
                       <button
                         key={producto.id}
