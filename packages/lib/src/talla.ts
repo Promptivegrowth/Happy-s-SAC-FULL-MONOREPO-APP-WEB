@@ -33,3 +33,27 @@ export function ordenarTallas<T extends { talla: string }>(items: T[]): T[] {
 export function labelTalla(t: string): string {
   return t.replace(/^T/i, '');
 }
+
+/**
+ * Etiqueta DESCRIPTIVA de la talla para usuario final.
+ *   - T0..T16 → "0", "2", ..., "16"
+ *   - TS      → "ESTÁNDAR" (talla única, para accesorios como pañuelos, pelucas)
+ *   - TAD     → "ADULTO"
+ *
+ * Reemplaza el patrón `talla.replace('T', '')` que en TS resultaba "S" (confuso
+ * para el cajero/cliente — no sabía si era talla S o standard).
+ */
+export function formatTalla(talla: string | null | undefined): string {
+  if (!talla) return '—';
+  if (talla === 'TS') return 'ESTÁNDAR';
+  if (talla === 'TAD') return 'ADULTO';
+  return talla.replace(/^T/i, '');
+}
+
+/** Versión corta para chips/botones pequeños donde "ESTÁNDAR" no entra. */
+export function formatTallaCorto(talla: string | null | undefined): string {
+  if (!talla) return '—';
+  if (talla === 'TS') return 'U';   // Única
+  if (talla === 'TAD') return 'AD';
+  return talla.replace(/^T/i, '');
+}

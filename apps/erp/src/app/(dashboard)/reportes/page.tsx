@@ -37,6 +37,14 @@ const REPORTES: ReporteCard[] = [
     badge: 'Nuevo',
   },
   {
+    href: '/reportes/ventas-por-vendedor',
+    titulo: 'Ventas por vendedor',
+    descripcion: 'Ranking de vendedores con cantidad, total y ticket promedio. Útil para comisiones.',
+    icono: TrendingUp,
+    categoria: 'Ventas',
+    badge: 'Nuevo',
+  },
+  {
     href: '/reportes/productos-temporada',
     titulo: 'Productos por temporada',
     descripcion: 'Top vendidos en Halloween, Navidad, Fiestas Patrias y categorías custom.',

@@ -19,17 +19,15 @@ import { registrarMovimientoStock } from '@/server/actions/inventario';
 type Almacen = { id: string; nombre: string; codigo: string };
 type Variante = { id: string; sku: string; talla: string; producto_nombre: string };
 
-// Opciones de "Registrar movimiento" — eventos puntuales con motivo claro.
-// NO se incluyen AJUSTE genéricos (ENTRADA_AJUSTE/SALIDA_AJUSTE):
-//   - Si el motivo es corregir el stock por conteo físico → usar el botón
-//     "Corregir cantidad" en la fila del inventario (más específico).
-//   - Si el motivo es algo realmente excepcional, usar ese mismo botón
-//     con motivo "OTRO".
+// Opciones de "Registrar movimiento" — solo AJUSTES manuales.
+// Por decisión del cliente (reunión 27/06/2026):
+//   - Los movimientos como compra, devolución, merma se generan AUTOMÁTICO
+//     desde sus flujos (recepciones OC, devoluciones POS, control de calidad).
+//   - Este modal queda RESTRINGIDO al gerente, solo para ajustes manuales
+//     (corrección de inventario tras conteo, recuperación de errores, etc.)
 const TIPOS = [
-  { value: 'ENTRADA_COMPRA', label: '+ Ingreso por compra (recepción de proveedor)' },
-  { value: 'ENTRADA_DEVOLUCION_CLIENTE', label: '+ Devolución de cliente' },
-  { value: 'ENTRADA_DEVOLUCION_TALLER', label: '+ Devolución de taller' },
-  { value: 'SALIDA_MERMA', label: '− Merma / descarte (pérdida)' },
+  { value: 'ENTRADA_AJUSTE', label: '+ Ajuste de inventario (entrada / agregar stock)' },
+  { value: 'SALIDA_AJUSTE', label: '− Ajuste de inventario (salida / restar stock)' },
 ] as const;
 
 export function NuevoMovimientoButton({
@@ -44,7 +42,7 @@ export function NuevoMovimientoButton({
   const [search, setSearch] = useState('');
   const [varianteId, setVarianteId] = useState<string>('');
   const [almacenId, setAlmacenId] = useState<string>(almacenes[0]?.id ?? '');
-  const [tipo, setTipo] = useState<typeof TIPOS[number]['value']>('ENTRADA_COMPRA');
+  const [tipo, setTipo] = useState<typeof TIPOS[number]['value']>('ENTRADA_AJUSTE');
   const [cantidad, setCantidad] = useState('5');
   const [observacion, setObservacion] = useState('');
 
@@ -67,7 +65,7 @@ export function NuevoMovimientoButton({
   function reset() {
     setSearch('');
     setVarianteId('');
-    setTipo('ENTRADA_COMPRA');
+    setTipo('ENTRADA_AJUSTE');
     setCantidad('5');
     setObservacion('');
   }

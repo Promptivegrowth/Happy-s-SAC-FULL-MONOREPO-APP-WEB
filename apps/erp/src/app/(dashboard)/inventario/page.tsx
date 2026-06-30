@@ -128,9 +128,31 @@ export default async function InventarioPage({ searchParams }: { searchParams: P
         ))}
       </div>
 
-      <Suspense key={tableKey} fallback={<TableSkeleton rows={10} cols={5} />}>
-        <InventarioTable {...sp} />
-      </Suspense>
+      {/* Si el cliente filtra por un almacén tipo MATERIA_PRIMA, redirigimos
+          la consulta al módulo de Materiales (donde sí se ven insumos). */}
+      {(() => {
+        const almSel = almacenes.find((a) => a.id === sp.almacen);
+        if (almSel && (almSel as { tipo: string }).tipo === 'MATERIA_PRIMA') {
+          return (
+            <div className="rounded-lg border border-amber-300 bg-amber-50 p-6 text-center">
+              <p className="text-sm font-medium text-amber-800">
+                <strong>{almSel.nombre}</strong> es un almacén de insumos y materiales.
+              </p>
+              <p className="mt-1 text-xs text-amber-700">
+                Esta pantalla muestra stock de productos terminados (prendas). Para ver materiales (telas, avíos, hilos) usá el módulo dedicado.
+              </p>
+              <Link href="/materiales" className="mt-3 inline-block rounded-md bg-amber-600 px-4 py-2 text-xs font-medium text-white hover:bg-amber-700">
+                Ir a Materiales →
+              </Link>
+            </div>
+          );
+        }
+        return (
+          <Suspense key={tableKey} fallback={<TableSkeleton rows={10} cols={5} />}>
+            <InventarioTable {...sp} />
+          </Suspense>
+        );
+      })()}
     </PageShell>
   );
 }

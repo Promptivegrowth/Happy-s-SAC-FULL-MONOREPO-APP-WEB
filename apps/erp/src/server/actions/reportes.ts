@@ -1261,3 +1261,103 @@ export async function listarTalleresLookup(): Promise<Lookup[]> {
     nombre: t.nombre,
   }));
 }
+
+// ============================================================================
+// REPORTE DE VENTAS POR VENDEDOR (para cálculo de comisiones)
+// ============================================================================
+// Caso de uso: el cliente paga comisión por ventas a sus vendedoras (Yulissa,
+// Renzo, Luis, José). Cada venta tiene vendedor_usuario_id que es quien
+// atendió (puede ser distinto al cajero logueado). Este reporte agrupa por
+// vendedor y devuelve totales del período.
+
+export type FiltrosVentasVendedor = {
+  desde: string;
+  hasta: string;
+  canal?: CanalVenta | '';
+  almacen_id?: string;
+};
+
+export type VentaPorVendedorRow = {
+  vendedor_id: string;
+  vendedor_nombre: string;
+  cantidad_ventas: number;
+  total_vendido: number;
+  ticket_promedio: number;
+  pct_del_total: number;
+};
+
+export type ReporteVentasVendedorResult = {
+  metricas: {
+    total_general: number;
+    cantidad_vendedores: number;
+    top_vendedor_nombre: string | null;
+    top_vendedor_monto: number;
+  };
+  rows: VentaPorVendedorRow[];
+};
+
+export async function reporteVentasPorVendedor(
+  f: FiltrosVentasVendedor,
+): Promise<ReporteVentasVendedorResult> {
+  const sb = await sbReadonly();
+
+  let q = sb
+    .from('ventas')
+    .select('vendedor_usuario_id, total, estado')
+    .gte('fecha', `${f.desde}T00:00:00`)
+    .lte('fecha', `${f.hasta}T23:59:59`)
+    .neq('estado', 'ANULADA')
+    .not('vendedor_usuario_id', 'is', null)
+    .limit(20000);
+  if (f.canal) q = q.eq('canal', f.canal);
+  if (f.almacen_id) q = q.eq('almacen_id', f.almacen_id);
+
+  const { data, error } = await q;
+  if (error) throw new Error(error.message);
+
+  // Agrupar por vendedor
+  type R = { vendedor_usuario_id: string; total: string | number };
+  const porVendedor = new Map<string, { count: number; total: number }>();
+  for (const v of ((data ?? []) as R[])) {
+    const cur = porVendedor.get(v.vendedor_usuario_id) ?? { count: 0, total: 0 };
+    cur.count += 1;
+    cur.total += Number(v.total ?? 0);
+    porVendedor.set(v.vendedor_usuario_id, cur);
+  }
+
+  // Lookup de nombres
+  const ids = Array.from(porVendedor.keys());
+  const nombrePorId = new Map<string, string>();
+  if (ids.length > 0) {
+    const { data: perfiles } = await sb
+      .from('perfiles')
+      .select('id, nombre_completo')
+      .in('id', ids);
+    for (const p of (perfiles ?? []) as { id: string; nombre_completo: string | null }[]) {
+      if (p.nombre_completo) nombrePorId.set(p.id, p.nombre_completo);
+    }
+  }
+
+  const total_general = Array.from(porVendedor.values()).reduce((s, v) => s + v.total, 0);
+  const rows: VentaPorVendedorRow[] = Array.from(porVendedor.entries())
+    .map(([id, info]) => ({
+      vendedor_id: id,
+      vendedor_nombre: nombrePorId.get(id) ?? `Usuario ${id.slice(0, 8)}`,
+      cantidad_ventas: info.count,
+      total_vendido: info.total,
+      ticket_promedio: info.count > 0 ? info.total / info.count : 0,
+      pct_del_total: total_general > 0 ? (info.total / total_general) * 100 : 0,
+    }))
+    .sort((a, b) => b.total_vendido - a.total_vendido);
+
+  const top = rows[0];
+  return {
+    metricas: {
+      total_general,
+      cantidad_vendedores: rows.length,
+      top_vendedor_nombre: top?.vendedor_nombre ?? null,
+      top_vendedor_monto: top?.total_vendido ?? 0,
+    },
+    rows,
+  };
+}

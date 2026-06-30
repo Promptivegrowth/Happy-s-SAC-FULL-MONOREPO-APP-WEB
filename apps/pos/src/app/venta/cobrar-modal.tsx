@@ -28,6 +28,7 @@ import { formatPEN } from '@happy/lib';
 import type { TipoComprobantePOS, TipoDocumentoCliente, FormatoImpresion } from '@/server/actions/caja-helpers';
 import { buscarClientesPOS, crearClienteRapidoPOS, actualizarClientePOS, type ClienteRow } from '@/server/actions/clientes';
 import { obtenerSaldoCliente } from '@/server/actions/adelantos';
+import { listarVendedoresPOS, type VendedorOpcion } from '@/server/actions/vendedores';
 
 export type CobrarPayload = {
   tipo: TipoComprobantePOS;
@@ -46,6 +47,9 @@ export type CobrarPayload = {
   };
   /** Si el cliente tenía saldo a favor y aceptó aplicarlo, este monto se descuenta. */
   adelanto_aplicado?: { monto: number } | null;
+  /** Vendedor que atendió esta venta (puede ser distinto al cajero logueado).
+   *  Si null/undefined, se usa el cajero logueado en el server. */
+  vendedor_usuario_id?: string | null;
 };
 
 export function CobrarModal({
@@ -73,6 +77,15 @@ export function CobrarModal({
   // Saldo de adelantos del cliente (se carga al seleccionar) + flag de aplicación
   const [saldoAdelanto, setSaldoAdelanto] = useState(0);
   const [aplicarAdelanto, setAplicarAdelanto] = useState(true);  // por defecto: aplicar si hay saldo
+
+  // Vendedor que atendió la venta (puede ser distinto al cajero)
+  const [vendedores, setVendedores] = useState<VendedorOpcion[]>([]);
+  const [vendedorId, setVendedorId] = useState<string>('');
+  useEffect(() => {
+    listarVendedoresPOS().then((vs) => {
+      setVendedores(vs);
+    }).catch(() => setVendedores([]));
+  }, []);
 
   // Buscador
   const [busqueda, setBusqueda] = useState(defaultCliente?.documento ?? defaultCliente?.nombre ?? '');
@@ -413,6 +426,7 @@ export function CobrarModal({
           email: (fuente?.email ?? email.trim()) || null,
         },
         adelanto_aplicado: adelantoMonto > 0 ? { monto: adelantoMonto } : null,
+        vendedor_usuario_id: vendedorId || null,
       });
     } finally {
       setConfirming(false);
@@ -819,21 +833,46 @@ export function CobrarModal({
         {/* STEP 3 — FORMATO */}
         {step === 'formato' && (
           <>
-            <div className="mt-5 grid gap-3 sm:grid-cols-2">
-              <FormatoCard
-                icon={<Printer className="h-6 w-6" />}
-                title="Ticketera 80mm"
-                desc="Papel térmico, formato compacto"
-                selected={formato === 'TICKET_80MM'}
-                onClick={() => setFormato('TICKET_80MM')}
-              />
-              <FormatoCard
-                icon={<FileType2 className="h-6 w-6" />}
-                title="A4"
-                desc="Hoja completa con logo y datos"
-                selected={formato === 'A4'}
-                onClick={() => setFormato('A4')}
-              />
+            {/* Selector de VENDEDOR (obligatorio) — atribuye la venta a quien atendió.
+                Útil cuando varias vendedoras comparten una caja (comisiones). */}
+            <div className="mt-5 rounded-lg border-2 border-happy-200 bg-happy-50/30 p-4">
+              <Label className="text-xs font-semibold text-happy-700">
+                Vendedor que atendió esta venta *
+              </Label>
+              <select
+                value={vendedorId}
+                onChange={(e) => setVendedorId(e.target.value)}
+                className="mt-1 h-10 w-full rounded-md border border-input bg-white px-3 text-sm font-medium"
+                required
+              >
+                <option value="">— Seleccioná tu nombre —</option>
+                {vendedores.map((v) => (
+                  <option key={v.id} value={v.id}>{v.nombre}</option>
+                ))}
+              </select>
+              <p className="mt-1 text-[11px] text-slate-600">
+                Aparece en el reporte de ventas para cálculo de comisiones. Si no lo seleccionás, queda como el cajero logueado.
+              </p>
+            </div>
+
+            <div className="mt-4">
+              <Label className="text-xs text-slate-600">Formato de impresión</Label>
+              <div className="mt-2 grid gap-3 sm:grid-cols-2">
+                <FormatoCard
+                  icon={<Printer className="h-6 w-6" />}
+                  title="Ticketera 80mm"
+                  desc="Papel térmico (recomendado)"
+                  selected={formato === 'TICKET_80MM'}
+                  onClick={() => setFormato('TICKET_80MM')}
+                />
+                <FormatoCard
+                  icon={<FileType2 className="h-6 w-6" />}
+                  title="A4"
+                  desc="Hoja completa con logo"
+                  selected={formato === 'A4'}
+                  onClick={() => setFormato('A4')}
+                />
+              </div>
             </div>
 
             <div className="mt-6 flex justify-between gap-2">

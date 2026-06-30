@@ -87,12 +87,41 @@ const movimientoSchema = z.object({
   observacion: z.string().max(500).optional().or(z.literal('')),
 });
 
+/**
+ * RESTRINGIDO A GERENTE. Por decisión del cliente (reunión 27/06/2026):
+ * los ajustes manuales de stock solo pueden hacerse desde el rol gerente
+ * para evitar que cualquier usuario altere el inventario sin trazabilidad
+ * de autorización. Los movimientos normales (ventas, recepciones, traslados,
+ * producción) siguen siendo libres porque vienen de sus flujos respectivos.
+ */
 export async function registrarMovimientoStock(
   input: z.input<typeof movimientoSchema>,
 ): Promise<ActionResult<{ tipo: string; cantidad: number }>> {
   const r = await runAction(async () => {
     const data = movimientoSchema.parse(input);
     const { sb, userId } = await requireUser();
+
+    // Validar rol gerente
+    const { data: roles } = await sb
+      .from('usuarios_roles')
+      .select('rol')
+      .eq('usuario_id', userId);
+    const esGerente = (roles ?? []).some((r) => (r as { rol: string }).rol === 'gerente');
+    if (!esGerente) {
+      throw new Error('Solo el gerente puede registrar ajustes manuales de stock. Pedile a alguien con ese rol que lo haga.');
+    }
+
+    // Restricción adicional: solo permitir tipos de AJUSTE manual.
+    // Los otros tipos (ENTRADA_COMPRA, DEVOLUCION_*, SALIDA_MERMA) deben
+    // generarse desde sus flujos automáticos (recepciones, devoluciones POS,
+    // control de calidad). Si llegan acá es porque alguien intentó bypassear
+    // la UI nueva — rechazar.
+    if (data.tipo !== 'ENTRADA_AJUSTE' && data.tipo !== 'SALIDA_AJUSTE') {
+      throw new Error(
+        `Este modal solo registra ajustes de inventario (ENTRADA/SALIDA_AJUSTE). ` +
+        `Para ${data.tipo} usá el módulo correspondiente (recepciones, devoluciones POS, control de calidad).`,
+      );
+    }
 
     const { error } = await sb.from('kardex_movimientos').insert({
       tipo: data.tipo,
@@ -121,10 +150,7 @@ export async function registrarMovimientoStock(
  */
 const movimientoBatchSchema = z.object({
   almacen_id: z.string().uuid('Almacén requerido'),
-  tipo: z.enum([
-    'ENTRADA_COMPRA', 'ENTRADA_AJUSTE', 'ENTRADA_DEVOLUCION_CLIENTE',
-    'ENTRADA_DEVOLUCION_TALLER', 'SALIDA_AJUSTE', 'SALIDA_MERMA',
-  ]),
+  tipo: z.enum(['ENTRADA_AJUSTE', 'SALIDA_AJUSTE']),
   observacion: z.string().max(500).optional().or(z.literal('')),
   lineas: z.array(z.object({
     variante_id: z.string().uuid(),
@@ -138,6 +164,16 @@ export async function registrarMovimientoStockBatch(
   const r = await runAction(async () => {
     const data = movimientoBatchSchema.parse(input);
     const { sb, userId } = await requireUser();
+
+    // Restringido a gerente (igual que registrarMovimientoStock)
+    const { data: roles } = await sb
+      .from('usuarios_roles')
+      .select('rol')
+      .eq('usuario_id', userId);
+    const esGerente = (roles ?? []).some((r) => (r as { rol: string }).rol === 'gerente');
+    if (!esGerente) {
+      throw new Error('Solo el gerente puede registrar ajustes masivos de stock.');
+    }
 
     const rows = data.lineas.map((l) => ({
       tipo: data.tipo,

@@ -23,11 +23,10 @@ import { registrarMovimientoStockBatch } from '@/server/actions/inventario';
 type Almacen = { id: string; nombre: string; codigo: string };
 type Variante = { id: string; sku: string; talla: string; producto_nombre: string };
 
+// Solo AJUSTES (decisión cliente). Otros tipos vienen de sus flujos automáticos.
 const TIPOS = [
-  { value: 'ENTRADA_COMPRA', label: '+ Ingreso por compra' },
-  { value: 'ENTRADA_DEVOLUCION_CLIENTE', label: '+ Devolución de cliente' },
-  { value: 'ENTRADA_DEVOLUCION_TALLER', label: '+ Devolución de taller' },
-  { value: 'SALIDA_MERMA', label: '− Merma / descarte' },
+  { value: 'ENTRADA_AJUSTE', label: '+ Ajuste de inventario (entrada)' },
+  { value: 'SALIDA_AJUSTE', label: '− Ajuste de inventario (salida)' },
 ] as const;
 
 type Linea = { uid: string; varianteId: string; sku: string; producto: string; talla: string; cantidad: string };
@@ -46,7 +45,7 @@ export function MovimientoMasivoButton({
   const [pending, start] = useTransition();
 
   const [almacenId, setAlmacenId] = useState<string>(almacenes[0]?.id ?? '');
-  const [tipo, setTipo] = useState<typeof TIPOS[number]['value']>('ENTRADA_COMPRA');
+  const [tipo, setTipo] = useState<typeof TIPOS[number]['value']>('ENTRADA_AJUSTE');
   const [observacion, setObservacion] = useState('');
   const [lineas, setLineas] = useState<Linea[]>([]);
 

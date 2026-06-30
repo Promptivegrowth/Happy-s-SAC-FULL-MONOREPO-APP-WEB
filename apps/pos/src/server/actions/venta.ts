@@ -24,6 +24,10 @@ const ventaSchema = z.object({
     monto: z.number().min(0),
     referencia: z.string().optional().nullable(),
   })).min(1),
+  // Vendedor opcional — si no se manda, queda el usuario logueado (cajero).
+  // Permite atribuir la venta a otra persona del equipo (caso: 4 vendedoras
+  // comparten 1 caja y cada una marca su nombre al cobrar).
+  vendedor_usuario_id: z.string().uuid().optional().nullable(),
 });
 
 export type VentaInput = z.infer<typeof ventaSchema>;
@@ -154,7 +158,9 @@ export async function registrarVenta(input: VentaInput): Promise<VentaResultado>
     tipo_documento_cliente: parsed.tipo_documento_cliente ?? null,
     documento_cliente: parsed.documento_cliente ?? null,
     nombre_cliente_rapido: parsed.nombre_cliente_rapido ?? null,
-    vendedor_usuario_id: user.id,
+    // Si el cajero seleccionó otro vendedor en el modal cobrar, usar ese;
+    // si no, queda el usuario logueado (default).
+    vendedor_usuario_id: parsed.vendedor_usuario_id ?? user.id,
     sub_total: +(subTotal - igv).toFixed(2),
     descuento_total: parsed.items.reduce((a, i) => a + i.descuento_monto, 0),
     igv,

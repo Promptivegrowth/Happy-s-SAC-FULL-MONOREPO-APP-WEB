@@ -8,7 +8,7 @@ import { Button } from '@happy/ui/button';
 import { Badge } from '@happy/ui/badge';
 import { Trash2, Plus, Minus, ScanBarcode, X, Smartphone, CreditCard, Banknote, Building2, MessageCircle, Loader2, LayoutGrid, ShoppingBag, LogOut, Receipt, History, Send, RotateCcw, Coins, Wallet, MapPin, LogIn, UserX } from 'lucide-react';
 import { toast } from 'sonner';
-import { formatPEN, ordenTalla } from '@happy/lib';
+import { formatPEN, ordenTalla, formatTalla } from '@happy/lib';
 import { buildPedidoWaMessage, buildWhatsappUrl } from '@happy/lib/whatsapp';
 import { registrarVenta } from '@/server/actions/venta';
 import { emitirComprobante, obtenerSesionActiva } from '@/server/actions/caja';
@@ -204,7 +204,7 @@ export function PosTerminal({
     // Política: NO permitir vender sin stock. Validamos en front (UX inmediata)
     // y el server (venta.ts) también valida para evitar bypass.
     if (stockDisp <= 0) {
-      toast.error(`${v.productos.nombre} talla ${v.talla.replace('T', '')} — sin stock en este almacén`);
+      toast.error(`${v.productos.nombre} talla ${formatTalla(v.talla)} — sin stock en este almacén`);
       return;
     }
     // Si la línea ya existe, validar que sumar 1 no exceda el stock disponible
@@ -419,7 +419,7 @@ export function PosTerminal({
   }, [productoTallasOpen, variantes]);
 
   return (
-    <div className="grid h-screen grid-cols-1 lg:grid-cols-[1fr_420px]">
+    <div className="grid h-screen grid-cols-1 lg:grid-cols-[1fr_580px]">
       {/* IZQUIERDA — Búsqueda + carrito */}
       <section className="flex h-screen flex-col bg-white">
         <header className="border-b p-4">
@@ -550,7 +550,7 @@ export function PosTerminal({
                       variant={stock <= 0 ? 'destructive' : 'outline'}
                       className={`text-[10px] ${stock <= 0 ? 'line-through' : ''}`}
                     >
-                      {v.talla.replace('T', '')}
+                      {formatTalla(v.talla)}
                     </Badge>
                     <div className="font-semibold text-happy-600">{formatPEN(Number(v.precio_publico ?? 0))}</div>
                   </button>
@@ -679,7 +679,7 @@ export function PosTerminal({
                               }`}
                               title={sinStock ? 'Sin stock — no se puede vender' : ''}
                             >
-                              <span className="font-display text-lg font-bold">{v.talla.replace('T', '')}</span>
+                              <span className="font-display text-lg font-bold">{formatTalla(v.talla)}</span>
                               <span className="text-[10px] font-mono text-slate-500">{v.sku}</span>
                               <span className="text-xs font-semibold text-happy-600">{formatPEN(Number(v.precio_publico ?? 0))}</span>
                               <span className={`text-[9px] ${sinStock ? 'text-red-600 font-medium' : 'text-slate-400'}`}>
@@ -729,7 +729,7 @@ export function PosTerminal({
                       <div className="flex-1">
                         <p className="font-medium">{l.variante.productos.nombre}</p>
                         <p className="text-xs text-slate-500">
-                          SKU {l.variante.sku} · Talla {l.variante.talla.replace('T','')} ·{' '}
+                          SKU {l.variante.sku} · Talla {formatTalla(l.variante.talla)} ·{' '}
                           {tieneDescuento ? (
                             <>
                               <span className="line-through text-slate-400">{formatPEN(precioPublico)}</span>{' '}

@@ -78,6 +78,26 @@ export async function agregarImagenProducto(
       return { id: existing.id as string, orden: (existing.orden as number) ?? 0 };
     }
 
+    // Validar tope de imágenes por producto (configurable desde empresa,
+    // mig 54 — default 8: 3 técnicas + hasta 5 colores).
+    const { count: existentes } = await sb
+      .from('productos_imagenes')
+      .select('id', { count: 'exact', head: true })
+      .eq('producto_id', productoId);
+    // Cast porque max_imagenes_producto es de mig 54
+    const { data: empConfigRaw } = await (sb as unknown as {
+      from: (t: string) => {
+        select: (s: string) => { single: () => Promise<{ data: { max_imagenes_producto: number | null } | null }> };
+      };
+    })
+      .from('empresa')
+      .select('max_imagenes_producto')
+      .single();
+    const MAX = Number(empConfigRaw?.max_imagenes_producto ?? 8);
+    if ((existentes ?? 0) >= MAX) {
+      throw new Error(`Máximo ${MAX} imágenes por producto. Eliminá alguna antes de subir otra.`);
+    }
+
     const { data: max } = await sb
       .from('productos_imagenes')
       .select('orden')

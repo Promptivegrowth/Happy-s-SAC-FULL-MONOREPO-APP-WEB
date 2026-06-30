@@ -56,9 +56,13 @@ export function GaleriaSection({ productoId, imagenes }: { productoId: string; i
       <div className="mb-4 flex items-start justify-between">
         <div>
           <h2 className="font-display text-base font-semibold text-corp-900">Galería de fotos</h2>
-          <p className="text-sm text-slate-500">Estas fotos aparecen en la página del producto en la web.</p>
+          <p className="text-sm text-slate-500">
+            Estas fotos aparecen en la página del producto en la web. Máximo <strong>8 fotos</strong> por producto (3 técnicas + hasta 5 colores).
+          </p>
         </div>
-        <Badge variant="secondary">{list.length} foto(s)</Badge>
+        <Badge variant={list.length >= 8 ? 'destructive' : 'secondary'}>
+          {list.length} / 8 foto(s)
+        </Badge>
       </div>
 
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
@@ -79,15 +83,17 @@ export function GaleriaSection({ productoId, imagenes }: { productoId: string; i
             </button>
           </div>
         ))}
-        {/* Slot para agregar */}
-        <div className="aspect-square">
-          <ImageUploader
-            value={null}
-            onChange={add}
-            label={pending ? 'Subiendo…' : 'Agregar foto'}
-            prefix={`productos/${productoId}`}
-          />
-        </div>
+        {/* Slot para agregar (oculto si ya alcanzó el tope de 8) */}
+        {list.length < 8 && (
+          <div className="aspect-square">
+            <ImageUploader
+              value={null}
+              onChange={add}
+              label={pending ? 'Subiendo…' : 'Agregar foto'}
+              prefix={`productos/${productoId}`}
+            />
+          </div>
+        )}
       </div>
 
       {pending && (
