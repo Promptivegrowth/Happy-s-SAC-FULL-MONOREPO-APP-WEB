@@ -548,16 +548,45 @@ export async function generarA4(data: ComprobantePDFData): Promise<Blob> {
 }
 
 // ----------------------------------------------------------------------------
-// Util — descargar/abrir Blob
+// Util — descargar/abrir/imprimir Blob
 // ----------------------------------------------------------------------------
-export function abrirPDF(blob: Blob, filename: string) {
+/**
+ * Abre el PDF generado y opcionalmente dispara la impresión automática.
+ *
+ * Comportamiento:
+ *   1. Descarga el PDF (queda en /Descargas como respaldo siempre)
+ *   2. Abre una ventana nueva con el PDF
+ *   3. Si autoPrint=true (default), invoca window.print() al cargar →
+ *      el navegador muestra el diálogo de impresión inmediatamente.
+ *      Si el cajero tiene su impresora térmica configurada como default
+ *      del SO, solo confirma y se imprime directo en ticket 80mm.
+ *
+ * Cliente pidió "que se imprima automáticamente" (no que requiera Ctrl+P).
+ * Pasar autoPrint=false desactiva el print automático y solo abre.
+ */
+export function abrirPDF(blob: Blob, filename: string, autoPrint: boolean = true) {
   const url = URL.createObjectURL(blob);
+
+  // 1) Descarga de respaldo
   const a = document.createElement('a');
   a.href = url;
   a.download = filename;
   document.body.appendChild(a);
   a.click();
   document.body.removeChild(a);
-  window.open(url, '_blank');
+
+  // 2) Abrir + opcional auto-print
+  const w = window.open(url, '_blank');
+  if (w && autoPrint) {
+    // Algunos navegadores bloquean print() en cross-origin o tras eventos
+    // no-trusted — el try/catch evita crash silencioso. Si falla, el cajero
+    // ve el PDF abierto y puede dar Ctrl+P manual.
+    const tryPrint = () => { try { w.focus(); w.print(); } catch { /* ignore */ } };
+    // Algunos PDFs nativos del navegador ya están "loaded" al abrir —
+    // intentamos ambos: load event Y un timeout de respaldo.
+    w.addEventListener('load', tryPrint);
+    setTimeout(tryPrint, 700);
+  }
+
   setTimeout(() => URL.revokeObjectURL(url), 30_000);
 }

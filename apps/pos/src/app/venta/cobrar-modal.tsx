@@ -855,24 +855,22 @@ export function CobrarModal({
               </p>
             </div>
 
-            <div className="mt-4">
-              <Label className="text-xs text-slate-600">Formato de impresión</Label>
-              <div className="mt-2 grid gap-3 sm:grid-cols-2">
-                <FormatoCard
-                  icon={<Printer className="h-6 w-6" />}
-                  title="Ticketera 80mm"
-                  desc="Papel térmico (recomendado)"
-                  selected={formato === 'TICKET_80MM'}
-                  onClick={() => setFormato('TICKET_80MM')}
-                />
-                <FormatoCard
-                  icon={<FileType2 className="h-6 w-6" />}
-                  title="A4"
-                  desc="Hoja completa con logo"
-                  selected={formato === 'A4'}
-                  onClick={() => setFormato('A4')}
-                />
-              </div>
+            {/* Formato de impresión — compacto. Default ticketera 80mm.
+                El cliente pidió que no haya un paso extra de selección — solo
+                un link opcional para cambiar a A4 si el caso lo amerita
+                (ej. factura corporativa). */}
+            <div className="mt-4 flex items-center justify-between rounded-md border bg-slate-50/50 px-3 py-2 text-xs">
+              <span className="flex items-center gap-2 text-slate-700">
+                <Printer className="h-3.5 w-3.5 text-emerald-600" />
+                Se imprimirá en <strong>ticketera 80mm</strong> automáticamente
+              </span>
+              <button
+                type="button"
+                onClick={() => setFormato(formato === 'TICKET_80MM' ? 'A4' : 'TICKET_80MM')}
+                className="text-[11px] text-slate-500 underline hover:text-corp-700"
+              >
+                {formato === 'TICKET_80MM' ? 'usar A4 esta vez' : '← volver a 80mm'}
+              </button>
             </div>
 
             <div className="mt-6 flex justify-between gap-2">
