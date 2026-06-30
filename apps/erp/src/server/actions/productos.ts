@@ -380,12 +380,24 @@ const publicacionSchema = z.object({
   precio_oferta: z.coerce.number().min(0).optional().or(z.literal('')),
   descuento_porcentaje: z.coerce.number().int().min(0).max(99).optional().or(z.literal('')),
   descuento_excluir_tallas: z.array(z.string()).default([]),
+  // SEO — palabras clave / sinónimos para que Google encuentre el producto con
+  // cualquier nombre que el usuario use al buscar
+  palabras_clave: z.string().max(500).optional().or(z.literal('')),
+  seo_titulo: z.string().max(60).optional().or(z.literal('')),
+  seo_descripcion: z.string().max(160).optional().or(z.literal('')),
+  etiquetas: z.array(z.string()).default([]),
 });
 
 export async function actualizarPublicacion(productoId: string, _prev: unknown, fd: FormData): Promise<ActionResult> {
   const r = await runAction(async () => {
     // Tallas excluidas: vienen como múltiples valores con name="descuento_excluir_tallas".
     const tallasExcluidas = fd.getAll('descuento_excluir_tallas').map(String).filter(Boolean);
+
+    // Etiquetas vienen como string separado por comas en el input — lo convertimos a array
+    const etiquetasRaw = String(fd.get('etiquetas') ?? '').trim();
+    const etiquetas = etiquetasRaw
+      ? etiquetasRaw.split(/[,;\n]+/).map((s) => s.trim()).filter(Boolean)
+      : [];
 
     const data = publicacionSchema.parse({
       titulo_web: fd.get('titulo_web') || '',
@@ -397,6 +409,10 @@ export async function actualizarPublicacion(productoId: string, _prev: unknown, 
       precio_oferta: fd.get('precio_oferta') || '',
       descuento_porcentaje: fd.get('descuento_porcentaje') || '',
       descuento_excluir_tallas: tallasExcluidas,
+      palabras_clave: fd.get('palabras_clave') || '',
+      seo_titulo: fd.get('seo_titulo') || '',
+      seo_descripcion: fd.get('seo_descripcion') || '',
+      etiquetas,
     });
     const { sb } = await requireUser();
     const { error } = await sb.from('productos_publicacion').upsert({
@@ -413,6 +429,10 @@ export async function actualizarPublicacion(productoId: string, _prev: unknown, 
           ? null
           : Number(data.descuento_porcentaje),
       descuento_excluir_tallas: data.descuento_excluir_tallas,
+      palabras_clave: data.palabras_clave || null,
+      seo_titulo: data.seo_titulo || null,
+      seo_descripcion: data.seo_descripcion || null,
+      etiquetas: data.etiquetas,
     }, { onConflict: 'producto_id' });
     if (error) throw new Error(error.message);
     return null;

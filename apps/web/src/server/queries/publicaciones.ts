@@ -42,7 +42,13 @@ export async function loadPublicaciones(opts: LoadOpts = {}): Promise<ProductCar
       .order('orden_web')
       .limit(opts.limit ?? 60);
 
-    if (opts.q) query = query.ilike('titulo_web', `%${opts.q}%`);
+    // Búsqueda: matchea titulo_web O palabras_clave (sinónimos SEO). Así si el
+    // usuario escribe "spiderman" encuentra el producto "araña económico" que
+    // tenga "spiderman" cargado como palabra clave.
+    if (opts.q) {
+      const q = opts.q.replace(/[%,]/g, '');  // sanitizar para .or()
+      query = query.or(`titulo_web.ilike.%${q}%,palabras_clave.ilike.%${q}%`);
+    }
     if (opts.categoriaId) {
       // El producto puede aparecer en una categoría como principal O como
       // extra (red de seguridad para que no desaparezca al rotar temporada).

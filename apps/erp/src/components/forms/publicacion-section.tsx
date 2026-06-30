@@ -24,6 +24,11 @@ type Pub = {
   publicado_en?: string | null;
   descuento_porcentaje?: number | null;
   descuento_excluir_tallas?: string[] | null;
+  // SEO — sinónimos del producto para que Google lo encuentre con cualquier nombre
+  palabras_clave?: string | null;
+  seo_titulo?: string | null;
+  seo_descripcion?: string | null;
+  etiquetas?: string[] | null;
 };
 
 const TALLAS_OPCIONES = ['T0','T2','T4','T6','T8','T10','T12','T14','T16','TS','TAD'] as const;
@@ -220,6 +225,69 @@ export function PublicacionSection({
             </div>
           )}
         </div>
+
+        {/* Sección SEO — para posicionar el producto en Google */}
+        <div className="rounded-xl border-2 border-dashed border-sky-300 bg-sky-50/40 p-4">
+          <h3 className="mb-2 flex items-center gap-2 font-display text-sm font-semibold text-corp-900">
+            🔍 SEO — posicionamiento en Google
+          </h3>
+          <p className="mb-4 text-xs text-slate-600">
+            Cuando alguien busca el producto con un nombre distinto al oficial (ej. <em>"disfraz spiderman niño"</em> en vez de
+            <em>"araña económico"</em>), agregá esos sinónimos acá. Mientras más nombres pongas, más fácil te encuentra Google.
+          </p>
+
+          <div className="space-y-3">
+            <FormRow
+              label="Palabras clave / sinónimos del producto"
+              hint='Separá con comas. Ej: "spiderman, hombre araña, araña sublimado, disfraz superhéroe rojo"'
+            >
+              <Textarea
+                name="palabras_clave"
+                defaultValue={pub?.palabras_clave ?? ''}
+                rows={2}
+                placeholder="spiderman, hombre araña, araña económico, disfraz superhéroe, halloween niño…"
+              />
+            </FormRow>
+
+            <FormRow
+              label="Etiquetas / Tags (opcional)"
+              hint='Separá con comas. Ej: "nuevo, oferta, halloween, premium"'
+            >
+              <Input
+                name="etiquetas"
+                defaultValue={(pub?.etiquetas ?? []).join(', ')}
+                placeholder="nuevo, oferta, premium"
+              />
+            </FormRow>
+
+            <FormGrid cols={1}>
+              <FormRow
+                label="Título SEO (meta title)"
+                hint="Lo que aparece como título en Google. Si vacío usa el título de la web. Máx 60 caracteres."
+              >
+                <Input
+                  name="seo_titulo"
+                  defaultValue={pub?.seo_titulo ?? ''}
+                  maxLength={60}
+                  placeholder={`${productoNombre} | Comprar en HAPPY SAC`}
+                />
+              </FormRow>
+              <FormRow
+                label="Descripción SEO (meta description)"
+                hint="Lo que aparece como descripción en resultados de Google. Máx 160 caracteres."
+              >
+                <Textarea
+                  name="seo_descripcion"
+                  defaultValue={pub?.seo_descripcion ?? ''}
+                  rows={2}
+                  maxLength={160}
+                  placeholder={`Compra ${productoNombre} en HAPPY SAC. Envío a todo Perú. Modelos para niño, niña y adulto.`}
+                />
+              </FormRow>
+            </FormGrid>
+          </div>
+        </div>
+
         <div className="flex justify-end">
           <Button type="submit" variant="premium" disabled={pending}>
             {pending && <Loader2 className="h-4 w-4 animate-spin" />}

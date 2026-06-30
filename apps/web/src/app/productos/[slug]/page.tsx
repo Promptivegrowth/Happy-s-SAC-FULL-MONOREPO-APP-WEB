@@ -20,13 +20,36 @@ export async function generateMetadata({ params }: { params: Promise<{ slug: str
     const sb = await createClient();
     const { data } = await sb
       .from('productos_publicacion')
-      .select('titulo_web, descripcion_corta, productos(nombre)')
+      .select('titulo_web, descripcion_corta, seo_titulo, seo_descripcion, palabras_clave, productos(nombre)')
       .eq('slug', slug)
       .maybeSingle();
-    const prod = (data as unknown as { productos: { nombre: string } } | null)?.productos;
+    type Pub = {
+      titulo_web: string | null;
+      descripcion_corta: string | null;
+      seo_titulo: string | null;
+      seo_descripcion: string | null;
+      palabras_clave: string | null;
+      productos: { nombre: string } | null;
+    };
+    const d = data as unknown as Pub | null;
+    const prodNombre = d?.productos?.nombre ?? 'Producto';
+    // Prioridad: seo_titulo (cargado por el gerente para SEO) > titulo_web > nombre
+    const title = d?.seo_titulo ?? d?.titulo_web ?? prodNombre;
+    // Prioridad: seo_descripcion > descripcion_corta
+    const description = d?.seo_descripcion ?? d?.descripcion_corta ?? '';
+    // palabras_clave: viene como string separado por comas — pasamos como meta keywords
+    const keywords = d?.palabras_clave
+      ? d.palabras_clave.split(/[,;\n]+/).map((s) => s.trim()).filter(Boolean)
+      : undefined;
     return {
-      title: data?.titulo_web ?? prod?.nombre ?? 'Producto',
-      description: data?.descripcion_corta ?? '',
+      title,
+      description,
+      ...(keywords && keywords.length > 0 ? { keywords } : {}),
+      openGraph: {
+        title,
+        description,
+        type: 'website',
+      },
     };
   } catch {
     return { title: 'Producto' };
