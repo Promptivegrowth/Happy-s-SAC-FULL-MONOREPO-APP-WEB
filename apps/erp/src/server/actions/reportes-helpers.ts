@@ -26,7 +26,7 @@ export const BRAND = {
 // ============================================================================
 // CANALES / ESTADOS
 // ============================================================================
-export const CANALES_VENTA = ['POS', 'WEB', 'B2B', 'WHATSAPP', 'REDES'] as const;
+export const CANALES_VENTA = ['POS', 'WEB', 'B2B', 'WHATSAPP', 'REDES', 'EXPORTACION'] as const;
 export type CanalVenta = (typeof CANALES_VENTA)[number];
 
 export const ESTADOS_OT = [

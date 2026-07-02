@@ -5,7 +5,7 @@ import { Badge } from '@happy/ui/badge';
 import { Button } from '@happy/ui/button';
 import { PageShell } from '@/components/page-shell';
 import { requireRol } from '@/server/session';
-import { Ruler, Receipt, Factory, Tags } from 'lucide-react';
+import { Ruler, Receipt, Factory, Tags, FileText, Globe } from 'lucide-react';
 
 export const metadata = { title: 'Configuración' };
 export const dynamic = 'force-dynamic';
@@ -66,7 +66,33 @@ export default async function ConfiguracionPage() {
               </div>
               <div className="flex-1">
                 <p className="font-display text-sm font-semibold text-corp-900">SUNAT</p>
-                <p className="text-xs text-slate-500">Series, comprobantes y emisión</p>
+                <p className="text-xs text-slate-500">Credenciales SOL, certificado digital, ambiente</p>
+              </div>
+            </CardContent>
+          </Card>
+        </Link>
+        <Link href="/configuracion/series">
+          <Card className="group cursor-pointer transition hover:-translate-y-0.5 hover:border-happy-300 hover:shadow-md">
+            <CardContent className="flex items-center gap-3 p-4">
+              <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-happy-50 text-happy-600 transition group-hover:bg-happy-500 group-hover:text-white">
+                <FileText className="h-5 w-5" />
+              </div>
+              <div className="flex-1">
+                <p className="font-display text-sm font-semibold text-corp-900">Series de comprobantes</p>
+                <p className="text-xs text-slate-500">Boleta, factura, factura de exportación</p>
+              </div>
+            </CardContent>
+          </Card>
+        </Link>
+        <Link href="/configuracion/paises-exportacion">
+          <Card className="group cursor-pointer transition hover:-translate-y-0.5 hover:border-happy-300 hover:shadow-md">
+            <CardContent className="flex items-center gap-3 p-4">
+              <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-happy-50 text-happy-600 transition group-hover:bg-happy-500 group-hover:text-white">
+                <Globe className="h-5 w-5" />
+              </div>
+              <div className="flex-1">
+                <p className="font-display text-sm font-semibold text-corp-900">Países de exportación</p>
+                <p className="text-xs text-slate-500">Ecuador, Chile, Venezuela + agregar más</p>
               </div>
             </CardContent>
           </Card>

@@ -10,6 +10,7 @@ import { formatDate, formatPEN } from '@happy/lib';
 import {
   reporteVentas,
   listarAlmacenesLookup,
+  listarVendedoresLookup,
   type FiltrosVentas,
 } from '@/server/actions/reportes';
 import { CANALES_VENTA, hoy, inicioDeMes } from '@/server/actions/reportes-helpers';
@@ -33,17 +34,20 @@ export default async function Page({ searchParams }: { searchParams: Promise<SP>
   const vendedor_id = sp.vendedor_id || '';
   const tipo_comprobante = (sp.tipo_comprobante as FiltrosVentas['tipo_comprobante']) || '';
 
-  const [resultado, almacenes] = await Promise.all([
+  const [resultado, almacenes, vendedores] = await Promise.all([
     reporteVentas({ desde, hasta, canal, almacen_id, vendedor_id, tipo_comprobante }),
     listarAlmacenesLookup(),
+    listarVendedoresLookup(),
   ]);
 
   const { metricas, rows } = resultado;
+  const vendedorNombre = vendedores.find((v) => v.id === vendedor_id)?.nombre;
   const filtros: string[] = [
     `Desde ${formatDate(desde)} hasta ${formatDate(hasta)}`,
     canal ? `Canal: ${canal}` : null,
     almacen_id ? `Almacén: ${almacenes.find((a) => a.id === almacen_id)?.nombre ?? almacen_id}` : null,
     tipo_comprobante ? `Tipo: ${tipo_comprobante}` : null,
+    vendedor_id && vendedorNombre ? `Vendedor: ${vendedorNombre}` : null,
   ].filter(Boolean) as string[];
 
   // Desglose por tipo de comprobante para ver la mezcla del período
@@ -158,8 +162,13 @@ export default async function Page({ searchParams }: { searchParams: Promise<SP>
           </select>
         </div>
         <div>
-          <label className="mb-1 block text-[10px] font-medium uppercase tracking-wider text-slate-500">Vendedor (UUID)</label>
-          <input type="text" name="vendedor_id" defaultValue={vendedor_id} placeholder="opcional" className="h-9 w-44 rounded-md border px-2 text-sm" />
+          <label className="mb-1 block text-[10px] font-medium uppercase tracking-wider text-slate-500">Vendedor</label>
+          <select name="vendedor_id" defaultValue={vendedor_id} className="h-9 rounded-md border bg-white px-2 text-sm min-w-[180px]">
+            <option value="">Todos</option>
+            {vendedores.map((v) => (
+              <option key={v.id} value={v.id}>{v.nombre}</option>
+            ))}
+          </select>
         </div>
         <button type="submit" className="h-9 rounded-md bg-happy-500 px-4 text-sm font-medium text-white hover:bg-happy-600">
           Aplicar

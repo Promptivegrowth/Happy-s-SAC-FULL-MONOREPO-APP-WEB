@@ -1235,6 +1235,54 @@ export async function listarAlmacenesLookup(): Promise<Lookup[]> {
   return (data ?? []) as Lookup[];
 }
 
+/**
+ * Lookup de vendedores para filtros de reportes.
+ * Devuelve TODOS los usuarios que alguna vez fueron vendedor de una venta
+ * (ventas.vendedor_usuario_id) — incluye tanto activos como inactivos, porque
+ * al filtrar histórico interesa ver quién vendió en cada período.
+ * Ordenados por nombre completo.
+ */
+export async function listarVendedoresLookup(): Promise<Lookup[]> {
+  const sb = await sbReadonly();
+
+  // 1) IDs distintos de usuarios que aparecen como vendedor en alguna venta
+  const { data: ventasVendedores } = await sb
+    .from('ventas')
+    .select('vendedor_usuario_id')
+    .not('vendedor_usuario_id', 'is', null);
+  const idsUnicos = Array.from(
+    new Set(((ventasVendedores ?? []) as { vendedor_usuario_id: string }[]).map((v) => v.vendedor_usuario_id)),
+  );
+
+  // 2) Además incluir usuarios con rol cajero/vendedor_b2b/gerente (por si son
+  //    nuevos y aún no vendieron nada — igual queremos que aparezcan en el filtro)
+  const { data: rolesRows } = await sb
+    .from('usuarios_roles')
+    .select('usuario_id, rol')
+    .in('rol', ['gerente', 'cajero', 'vendedor_b2b']);
+  for (const r of (rolesRows ?? []) as { usuario_id: string }[]) {
+    if (!idsUnicos.includes(r.usuario_id)) idsUnicos.push(r.usuario_id);
+  }
+
+  if (idsUnicos.length === 0) return [];
+
+  // 3) Traer nombres desde perfiles
+  const { data: perfiles } = await sb
+    .from('perfiles')
+    .select('id, nombre_completo, dni')
+    .in('id', idsUnicos)
+    .order('nombre_completo');
+
+  type P = { id: string; nombre_completo: string | null; dni: string | null };
+  return ((perfiles ?? []) as P[])
+    .filter((p) => p.nombre_completo)
+    .map((p) => ({
+      id: p.id,
+      codigo: p.dni ?? '',
+      nombre: p.nombre_completo!,
+    }));
+}
+
 export async function listarCategoriasLookup(): Promise<Lookup[]> {
   const sb = await sbReadonly();
   const { data } = await sb.from('categorias').select('id, codigo, nombre').order('nombre');

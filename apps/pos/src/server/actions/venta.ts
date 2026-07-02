@@ -5,6 +5,20 @@ import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 import { createClient } from '@happy/db/server';
 
+// Datos de exportación (Art. 33 Ley IGV): cuando la venta es exportación,
+// IGV=0, se usa serie de factura de exportación y se requieren país destino,
+// moneda extranjera y tipo de cambio.
+const exportacionSchema = z.object({
+  es_exportacion: z.literal(true),
+  pais_destino_iso: z.string().length(2),          // 'EC', 'CL', 'VE'
+  incoterm: z.enum(['EXW','FCA','FAS','FOB','CFR','CIF','CPT','CIP','DAP','DPU','DDP']).optional().nullable(),
+  moneda: z.enum(['USD','EUR','PEN']).default('USD'),
+  tipo_cambio: z.number().positive(),              // moneda origen → PEN
+  puerto_salida: z.string().optional().nullable(),
+  codigo_operacion_sunat: z.string().default('0200'), // '0200' = Exportación de bienes
+  numero_dua: z.string().optional().nullable(),
+});
+
 const ventaSchema = z.object({
   caja_id: z.string().uuid(),
   almacen_id: z.string().uuid(),
@@ -28,6 +42,8 @@ const ventaSchema = z.object({
   // Permite atribuir la venta a otra persona del equipo (caso: 4 vendedoras
   // comparten 1 caja y cada una marca su nombre al cobrar).
   vendedor_usuario_id: z.string().uuid().optional().nullable(),
+  // Datos de exportación: opcional. Si viene, se fuerza IGV=0 y tipo=FACTURA.
+  exportacion: exportacionSchema.optional().nullable(),
 });
 
 export type VentaInput = z.infer<typeof ventaSchema>;
@@ -52,11 +68,36 @@ export async function registrarVenta(input: VentaInput): Promise<VentaResultado>
   const { data: { user } } = await sb.auth.getUser();
   if (!user) return { ok: false, error: 'No autenticado' };
 
+  // Validaciones exportación → forzar consistencia
+  const esExport = parsed.exportacion?.es_exportacion === true;
+  if (esExport && parsed.tipo_comprobante !== 'FACTURA') {
+    return { ok: false, error: 'Exportación exige tipo de comprobante FACTURA (SUNAT Art. 33 Ley IGV).' };
+  }
+  if (esExport) {
+    // Validar que exista serie de exportación activa (si no la hay, cliente
+    // debe configurarla antes desde Configuración → Series de comprobantes).
+    const { data: serieExp } = await sb
+      .from('series_comprobantes')
+      .select('serie, activa')
+      .eq('tipo', 'FACTURA')
+      .eq('canal', 'EXPORTACION')
+      .eq('activa', true)
+      .maybeSingle();
+    if (!serieExp) {
+      return {
+        ok: false,
+        error:
+          'No hay serie de Factura de Exportación activa. Configurala en Configuración → Series de Comprobantes ' +
+          '(la serie oficial la asigna SUNAT — activá cuando la tengas).',
+      };
+    }
+  }
+
   // Validaciones
   const subTotal = parsed.items.reduce((a, i) => a + (i.cantidad * i.precio_unitario - i.descuento_monto), 0);
   const totalPagado = parsed.pagos.reduce((a, p) => a + p.monto, 0);
   if (totalPagado < subTotal - 0.01) {
-    return { ok: false, error: `Pago insuficiente: faltan S/ ${(subTotal - totalPagado).toFixed(2)}` };
+    return { ok: false, error: `Pago insuficiente: faltan ${(subTotal - totalPagado).toFixed(2)}` };
   }
 
   // VALIDACIÓN DE STOCK — NO permitir vender sin stock en el almacén de la caja.
@@ -145,11 +186,14 @@ export async function registrarVenta(input: VentaInput): Promise<VentaResultado>
   const { data: numVenta } = await sb.rpc('next_correlativo', { p_clave: 'VENTA', p_padding: 6 });
   const numero = `VEN-${numVenta}`;
 
-  // Insertar venta
-  const igv = +(subTotal - subTotal / 1.18).toFixed(2);
+  // Insertar venta — en exportación IGV=0 y el subtotal es igual al total
+  // (no se factura IGV, Art. 33 Ley IGV). En ventas nacionales el IGV va
+  // incluido en el precio unitario (subTotal ya incluye IGV).
+  const igv = esExport ? 0 : +(subTotal - subTotal / 1.18).toFixed(2);
+  const exp = parsed.exportacion;
   const { data: venta, error: errVenta } = await sb.from('ventas').insert({
     numero,
-    canal: 'POS',
+    canal: esExport ? 'EXPORTACION' : 'POS',
     fecha: new Date().toISOString(),
     almacen_id: parsed.almacen_id,
     caja_sesion_id: sesionId,
@@ -161,24 +205,35 @@ export async function registrarVenta(input: VentaInput): Promise<VentaResultado>
     // Si el cajero seleccionó otro vendedor en el modal cobrar, usar ese;
     // si no, queda el usuario logueado (default).
     vendedor_usuario_id: parsed.vendedor_usuario_id ?? user.id,
-    sub_total: +(subTotal - igv).toFixed(2),
+    sub_total: esExport ? subTotal : +(subTotal - igv).toFixed(2),
     descuento_total: parsed.items.reduce((a, i) => a + i.descuento_monto, 0),
     igv,
     total: subTotal,
-    moneda: 'PEN',
+    moneda: esExport ? (exp!.moneda ?? 'USD') : 'PEN',
     estado: 'COMPLETADA',
+    // Campos exportación (null cuando es venta nacional)
+    es_exportacion: esExport,
+    pais_destino_iso: esExport ? exp!.pais_destino_iso : null,
+    incoterm: esExport ? (exp!.incoterm ?? null) : null,
+    tipo_cambio: esExport ? exp!.tipo_cambio : null,
+    puerto_salida: esExport ? (exp!.puerto_salida ?? null) : null,
+    codigo_operacion_sunat: esExport ? (exp!.codigo_operacion_sunat ?? '0200') : null,
   }).select('id').single();
   if (errVenta) return { ok: false, error: `Error venta: ${errVenta.message}` };
 
-  // Líneas
-  const lineas = parsed.items.map((i) => ({
-    venta_id: venta.id,
-    variante_id: i.variante_id,
-    cantidad: i.cantidad,
-    precio_unitario: i.precio_unitario,
-    descuento_monto: i.descuento_monto,
-    igv: +(i.cantidad * i.precio_unitario - i.descuento_monto - (i.cantidad * i.precio_unitario - i.descuento_monto) / 1.18).toFixed(2),
-  }));
+  // Líneas — IGV por línea = 0 en exportación
+  const lineas = parsed.items.map((i) => {
+    const bruto = i.cantidad * i.precio_unitario - i.descuento_monto;
+    const igvLinea = esExport ? 0 : +(bruto - bruto / 1.18).toFixed(2);
+    return {
+      venta_id: venta.id,
+      variante_id: i.variante_id,
+      cantidad: i.cantidad,
+      precio_unitario: i.precio_unitario,
+      descuento_monto: i.descuento_monto,
+      igv: igvLinea,
+    };
+  });
   const { error: errLin } = await sb.from('ventas_lineas').insert(lineas);
   if (errLin) return { ok: false, error: `Error líneas: ${errLin.message}` };
 
@@ -208,8 +263,24 @@ export async function registrarVenta(input: VentaInput): Promise<VentaResultado>
   // Crear comprobante en estado BORRADOR
   let comprobanteRes: { id: string; serie: string; numero: number } | undefined;
   if (parsed.tipo_comprobante !== 'NOTA_VENTA') {
-    const { data: caja } = await sb.from('cajas').select('serie_boleta, serie_factura').eq('id', parsed.caja_id).single();
-    const serie = parsed.tipo_comprobante === 'FACTURA' ? caja?.serie_factura : caja?.serie_boleta;
+    // Selección de serie:
+    //  - Exportación: usa la serie de FACTURA + canal=EXPORTACION registrada
+    //    en series_comprobantes (asignada por SUNAT).
+    //  - Nacional: usa la serie de la caja (comportamiento original).
+    let serie: string | undefined;
+    if (esExport) {
+      const { data: serieExp } = await sb
+        .from('series_comprobantes')
+        .select('serie')
+        .eq('tipo', 'FACTURA')
+        .eq('canal', 'EXPORTACION')
+        .eq('activa', true)
+        .maybeSingle();
+      serie = serieExp?.serie;
+    } else {
+      const { data: caja } = await sb.from('cajas').select('serie_boleta, serie_factura').eq('id', parsed.caja_id).single();
+      serie = (parsed.tipo_comprobante === 'FACTURA' ? caja?.serie_factura : caja?.serie_boleta) ?? undefined;
+    }
     if (serie) {
       const { data: numComp } = await sb.rpc('next_correlativo', { p_clave: `COMP_${serie}`, p_padding: 8 });
       const numeroNum = Number(numComp);
@@ -223,32 +294,49 @@ export async function registrarVenta(input: VentaInput): Promise<VentaResultado>
         numero_documento_cliente: parsed.documento_cliente ?? null,
         razon_social_cliente: parsed.nombre_cliente_rapido ?? null,
         fecha_emision: new Date().toISOString(),
-        sub_total: +(subTotal - igv).toFixed(2),
+        sub_total: esExport ? subTotal : +(subTotal - igv).toFixed(2),
         igv,
         total: subTotal,
-        moneda: 'PEN',
+        moneda: esExport ? (exp!.moneda ?? 'USD') : 'PEN',
+        tipo_cambio: esExport ? exp!.tipo_cambio : 1,
         estado: 'BORRADOR',
         forma_pago: 'CONTADO',
+        // Campos exportación
+        es_exportacion: esExport,
+        pais_destino_iso: esExport ? exp!.pais_destino_iso : null,
+        incoterm: esExport ? (exp!.incoterm ?? null) : null,
+        puerto_salida: esExport ? (exp!.puerto_salida ?? null) : null,
+        codigo_operacion_sunat: esExport ? (exp!.codigo_operacion_sunat ?? '0200') : null,
+        numero_dua: esExport ? (exp!.numero_dua ?? null) : null,
       }).select('id, serie, numero').single();
       if (!errComp && comp) {
-        // Líneas de comprobante
-        const compLineas = parsed.items.map((i) => ({
-          comprobante_id: comp.id,
-          variante_id: i.variante_id,
-          codigo: '',
-          descripcion: '',
-          cantidad: i.cantidad,
-          unidad_sunat: 'NIU',
-          precio_unitario: i.precio_unitario,
-          descuento: i.descuento_monto,
-          sub_total: +((i.cantidad * i.precio_unitario - i.descuento_monto) / 1.18).toFixed(2),
-          igv: +(i.cantidad * i.precio_unitario - i.descuento_monto - (i.cantidad * i.precio_unitario - i.descuento_monto) / 1.18).toFixed(2),
-          total: i.cantidad * i.precio_unitario - i.descuento_monto,
-        }));
+        // Líneas de comprobante — en exportación, IGV=0 y afectación='40' (Inafecto por exportación)
+        const compLineas = parsed.items.map((i) => {
+          const bruto = i.cantidad * i.precio_unitario - i.descuento_monto;
+          return {
+            comprobante_id: comp.id,
+            variante_id: i.variante_id,
+            codigo: '',
+            descripcion: '',
+            cantidad: i.cantidad,
+            unidad_sunat: 'NIU',
+            precio_unitario: i.precio_unitario,
+            descuento: i.descuento_monto,
+            sub_total: esExport ? bruto : +(bruto / 1.18).toFixed(2),
+            igv: esExport ? 0 : +(bruto - bruto / 1.18).toFixed(2),
+            total: bruto,
+            afectacion_igv: esExport ? '40' : '10',   // '40' = Exportación, '10' = Gravado
+          };
+        });
         await sb.from('comprobantes_lineas').insert(compLineas);
         await sb.from('ventas').update({ comprobante_id: comp.id }).eq('id', venta.id);
         comprobanteRes = comp;
+      } else if (errComp) {
+        return { ok: false, error: `Error comprobante: ${errComp.message}` };
       }
+    } else if (esExport) {
+      // La validación previa ya cortó antes, pero doble red por seguridad.
+      return { ok: false, error: 'No se encontró serie de Factura de Exportación activa.' };
     }
   }
 
