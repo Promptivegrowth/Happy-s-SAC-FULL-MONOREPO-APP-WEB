@@ -2172,6 +2172,30 @@ export type Database = {
           },
         ]
       }
+      exportacion_parametros: {
+        Row: {
+          clave: string
+          descripcion: string | null
+          updated_at: string | null
+          valor_num: number | null
+          valor_txt: string | null
+        }
+        Insert: {
+          clave: string
+          descripcion?: string | null
+          updated_at?: string | null
+          valor_num?: number | null
+          valor_txt?: string | null
+        }
+        Update: {
+          clave?: string
+          descripcion?: string | null
+          updated_at?: string | null
+          valor_num?: number | null
+          valor_txt?: string | null
+        }
+        Relationships: []
+      }
       fichas_imagenes: {
         Row: {
           created_at: string | null
@@ -4697,30 +4721,51 @@ export type Database = {
       paises_exportacion: {
         Row: {
           activo: boolean
+          acuerdo_comercial: string | null
+          arancel_preferencial_pct: number | null
+          certificado_origen_requerido: boolean
           codigo_iso: string
           codigo_sunat: string
           created_at: string | null
+          incoterm_default: string | null
+          iva_pais_destino_pct: number | null
           moneda_sugerida: string | null
           nombre: string
+          observaciones: string | null
           orden: number
+          puerto_default: string | null
         }
         Insert: {
           activo?: boolean
+          acuerdo_comercial?: string | null
+          arancel_preferencial_pct?: number | null
+          certificado_origen_requerido?: boolean
           codigo_iso: string
           codigo_sunat: string
           created_at?: string | null
+          incoterm_default?: string | null
+          iva_pais_destino_pct?: number | null
           moneda_sugerida?: string | null
           nombre: string
+          observaciones?: string | null
           orden?: number
+          puerto_default?: string | null
         }
         Update: {
           activo?: boolean
+          acuerdo_comercial?: string | null
+          arancel_preferencial_pct?: number | null
+          certificado_origen_requerido?: boolean
           codigo_iso?: string
           codigo_sunat?: string
           created_at?: string | null
+          incoterm_default?: string | null
+          iva_pais_destino_pct?: number | null
           moneda_sugerida?: string | null
           nombre?: string
+          observaciones?: string | null
           orden?: number
+          puerto_default?: string | null
         }
         Relationships: []
       }
@@ -7657,6 +7702,7 @@ export type Database = {
           cupon_id: string | null
           descuento_total: number | null
           documento_cliente: string | null
+          drawback_estimado_pen: number | null
           es_apartado: boolean | null
           es_exportacion: boolean
           estado: string
@@ -7673,6 +7719,7 @@ export type Database = {
           pedido_b2b_id: string | null
           pedido_web_id: string | null
           puerto_salida: string | null
+          saldo_favor_exportador_pen: number | null
           sub_total: number
           tipo_cambio: number | null
           tipo_documento_cliente:
@@ -7695,6 +7742,7 @@ export type Database = {
           cupon_id?: string | null
           descuento_total?: number | null
           documento_cliente?: string | null
+          drawback_estimado_pen?: number | null
           es_apartado?: boolean | null
           es_exportacion?: boolean
           estado?: string
@@ -7711,6 +7759,7 @@ export type Database = {
           pedido_b2b_id?: string | null
           pedido_web_id?: string | null
           puerto_salida?: string | null
+          saldo_favor_exportador_pen?: number | null
           sub_total?: number
           tipo_cambio?: number | null
           tipo_documento_cliente?:
@@ -7733,6 +7782,7 @@ export type Database = {
           cupon_id?: string | null
           descuento_total?: number | null
           documento_cliente?: string | null
+          drawback_estimado_pen?: number | null
           es_apartado?: boolean | null
           es_exportacion?: boolean
           estado?: string
@@ -7749,6 +7799,7 @@ export type Database = {
           pedido_b2b_id?: string | null
           pedido_web_id?: string | null
           puerto_salida?: string | null
+          saldo_favor_exportador_pen?: number | null
           sub_total?: number
           tipo_cambio?: number | null
           tipo_documento_cliente?:

@@ -130,6 +130,27 @@ export async function registrarVentaExportacion(input: VentaExportInput): Promis
   // 4) Insertar venta
   const subTotal = parsed.items.reduce((a, i) => a + (i.cantidad * i.precio_unitario - i.descuento_monto), 0);
 
+  // Calcular drawback y SFE al momento de emitir (referenciales — la
+  // devolución real depende de la Solicitud SUNAT). Se persisten para
+  // que queden inmutables aunque después cambien los parámetros.
+  const { data: params } = await sb
+    .from('exportacion_parametros')
+    .select('clave, valor_num')
+    .in('clave', ['DRAWBACK_PCT', 'IGV_PCT']);
+  const pmap = new Map<string, number>();
+  for (const r of (params ?? []) as { clave: string; valor_num: number | null }[]) {
+    pmap.set(r.clave, Number(r.valor_num ?? 0));
+  }
+  const drawbackPct = pmap.get('DRAWBACK_PCT') ?? 3;
+  const igvPct = pmap.get('IGV_PCT') ?? 18;
+
+  const totalPen = subTotal * parsed.tipo_cambio;
+  const drawbackEstimado = +(totalPen * drawbackPct / 100).toFixed(2);
+  // SFE = IGV que se recuperaría si toda la compra fuese nacional con IGV.
+  // Es la cota superior teórica; el real depende de las facturas de compra
+  // vinculadas al producto exportado. Base: total FOB dividido (1 + IGV%).
+  const saldoFavorExportador = +(totalPen - totalPen / (1 + igvPct / 100)).toFixed(2);
+
   const { data: numVenta } = await sb.rpc('next_correlativo', { p_clave: 'VENTA', p_padding: 6 });
   const numero = `VEN-${numVenta}`;
 
@@ -157,6 +178,9 @@ export async function registrarVentaExportacion(input: VentaExportInput): Promis
     tipo_cambio: parsed.tipo_cambio,
     puerto_salida: parsed.puerto_salida ?? null,
     codigo_operacion_sunat: parsed.codigo_operacion_sunat,
+    // Cálculos automáticos (referenciales)
+    drawback_estimado_pen: drawbackEstimado,
+    saldo_favor_exportador_pen: saldoFavorExportador,
   }).select('id').single();
   if (errVenta) return { ok: false, error: `Error venta: ${errVenta.message}` };
 

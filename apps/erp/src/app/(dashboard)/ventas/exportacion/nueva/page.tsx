@@ -2,6 +2,7 @@ import { createClient } from '@happy/db/server';
 import { PageShell } from '@/components/page-shell';
 import { requireRol } from '@/server/session';
 import { listarPaisesExportacion } from '@/server/actions/paises-exportacion';
+import { obtenerParametrosExportacion } from '@/server/actions/tipo-cambio';
 import { NuevaVentaExportForm } from './form';
 import { redirect } from 'next/navigation';
 
@@ -24,7 +25,7 @@ export default async function Page() {
     redirect('/ventas/exportacion');
   }
 
-  const [paises, { data: almacenes }, { data: variantes }] = await Promise.all([
+  const [paises, { data: almacenes }, { data: variantes }, parametros] = await Promise.all([
     listarPaisesExportacion(true),
     sb.from('almacenes').select('id, codigo, nombre').eq('activo', true).order('codigo'),
     sb
@@ -32,6 +33,7 @@ export default async function Page() {
       .select('id, sku, talla, precio_publico, productos(nombre, codigo)')
       .order('sku')
       .limit(2000),
+    obtenerParametrosExportacion(),
   ]);
 
   return (
@@ -52,6 +54,7 @@ export default async function Page() {
           }>)
         }
         serie={serieExp.serie}
+        parametros={parametros}
       />
     </PageShell>
   );

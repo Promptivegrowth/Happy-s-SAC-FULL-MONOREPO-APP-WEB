@@ -63,13 +63,20 @@ export type PaisExportacionRow = {
   moneda_sugerida: string;
   activo: boolean;
   orden: number;
+  puerto_default: string | null;
+  incoterm_default: string | null;
+  acuerdo_comercial: string | null;
+  certificado_origen_requerido: boolean;
+  arancel_preferencial_pct: number;
+  iva_pais_destino_pct: number | null;
+  observaciones: string | null;
 };
 
 export async function listarPaisesExportacion(soloActivos = false): Promise<PaisExportacionRow[]> {
   const sb = await createClient();
   let q = sb
     .from('paises_exportacion')
-    .select('codigo_iso, codigo_sunat, nombre, moneda_sugerida, activo, orden')
+    .select('codigo_iso, codigo_sunat, nombre, moneda_sugerida, activo, orden, puerto_default, incoterm_default, acuerdo_comercial, certificado_origen_requerido, arancel_preferencial_pct, iva_pais_destino_pct, observaciones')
     .order('orden')
     .order('nombre');
   if (soloActivos) q = q.eq('activo', true);
@@ -81,5 +88,12 @@ export async function listarPaisesExportacion(soloActivos = false): Promise<Pais
     moneda_sugerida: p.moneda_sugerida ?? 'USD',
     activo: p.activo ?? true,
     orden: p.orden ?? 100,
+    puerto_default: p.puerto_default ?? null,
+    incoterm_default: p.incoterm_default ?? null,
+    acuerdo_comercial: p.acuerdo_comercial ?? null,
+    certificado_origen_requerido: p.certificado_origen_requerido ?? true,
+    arancel_preferencial_pct: Number(p.arancel_preferencial_pct ?? 0),
+    iva_pais_destino_pct: p.iva_pais_destino_pct != null ? Number(p.iva_pais_destino_pct) : null,
+    observaciones: p.observaciones ?? null,
   }));
 }

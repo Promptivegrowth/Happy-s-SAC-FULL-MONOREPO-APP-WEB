@@ -26,17 +26,35 @@ export default async function Page() {
     .eq('activa', true)
     .maybeSingle();
 
-  // Listar ventas de exportación
+  // Listar ventas de exportación + drawback / SFE persistidos en ventas
   const { data: ventas } = await sb
     .from('v_ventas_exportacion')
     .select('*')
     .order('fecha', { ascending: false })
     .limit(200);
 
+  // Cargar drawback/SFE persistidos (no están en la vista, están en ventas)
+  const ventaIds = (ventas ?? []).map((v) => (v as { id: string }).id);
+  const drawbackPorVenta = new Map<string, { drawback: number; sfe: number }>();
+  if (ventaIds.length > 0) {
+    const { data: extras } = await sb
+      .from('ventas')
+      .select('id, drawback_estimado_pen, saldo_favor_exportador_pen')
+      .in('id', ventaIds);
+    for (const r of (extras ?? []) as { id: string; drawback_estimado_pen: number | null; saldo_favor_exportador_pen: number | null }[]) {
+      drawbackPorVenta.set(r.id, {
+        drawback: Number(r.drawback_estimado_pen ?? 0),
+        sfe: Number(r.saldo_favor_exportador_pen ?? 0),
+      });
+    }
+  }
+
   const totalUSD = (ventas ?? [])
     .filter((v) => (v as { moneda: string }).moneda === 'USD')
     .reduce((s, v) => s + Number((v as { total: number }).total), 0);
   const totalPEN = (ventas ?? []).reduce((s, v) => s + Number((v as { total_pen: number }).total_pen), 0);
+  const totalDrawback = Array.from(drawbackPorVenta.values()).reduce((s, x) => s + x.drawback, 0);
+  const totalSFE = Array.from(drawbackPorVenta.values()).reduce((s, x) => s + x.sfe, 0);
 
   return (
     <PageShell
@@ -75,23 +93,37 @@ export default async function Page() {
         </Card>
       )}
 
-      <div className="grid gap-3 sm:grid-cols-3">
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
         <Card className="p-4">
           <p className="text-xs text-slate-500">Total exportaciones</p>
-          <p className="mt-1 font-display text-2xl font-semibold text-emerald-700">
+          <p className="mt-1 font-display text-xl font-semibold text-emerald-700">
             S/ {totalPEN.toLocaleString('es-PE', { minimumFractionDigits: 2 })}
           </p>
-          <p className="text-[10px] text-slate-400">Equivalente en soles al tipo de cambio de cada venta</p>
+          <p className="text-[10px] text-slate-400">Equivalente en soles</p>
         </Card>
         <Card className="p-4">
           <p className="text-xs text-slate-500">Facturado USD</p>
-          <p className="mt-1 font-display text-2xl font-semibold text-corp-900">
+          <p className="mt-1 font-display text-xl font-semibold text-corp-900">
             $ {totalUSD.toLocaleString('en-US', { minimumFractionDigits: 2 })}
           </p>
         </Card>
         <Card className="p-4">
-          <p className="text-xs text-slate-500"># Facturas emitidas</p>
-          <p className="mt-1 font-display text-2xl font-semibold text-corp-900">{ventas?.length ?? 0}</p>
+          <p className="text-xs text-slate-500"># Facturas</p>
+          <p className="mt-1 font-display text-xl font-semibold text-corp-900">{ventas?.length ?? 0}</p>
+        </Card>
+        <Card className="p-4 border-happy-200 bg-happy-50/40">
+          <p className="text-xs text-happy-700">Drawback estimado</p>
+          <p className="mt-1 font-display text-xl font-semibold text-happy-900">
+            S/ {totalDrawback.toLocaleString('es-PE', { minimumFractionDigits: 2 })}
+          </p>
+          <p className="text-[10px] text-happy-700">Solicitar a SUNAT</p>
+        </Card>
+        <Card className="p-4 border-indigo-200 bg-indigo-50/40">
+          <p className="text-xs text-indigo-700">SFE (Art. 34)</p>
+          <p className="mt-1 font-display text-xl font-semibold text-indigo-900">
+            S/ {totalSFE.toLocaleString('es-PE', { minimumFractionDigits: 2 })}
+          </p>
+          <p className="text-[10px] text-indigo-700">Saldo a favor exportador</p>
         </Card>
       </div>
 
