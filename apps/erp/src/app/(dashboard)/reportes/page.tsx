@@ -9,6 +9,8 @@ import {
   Banknote,
   Boxes,
   History,
+  Factory,
+  Scale,
   type LucideIcon,
 } from 'lucide-react';
 import { PageShell } from '@/components/page-shell';
@@ -74,6 +76,22 @@ const REPORTES: ReporteCard[] = [
     descripcion: 'Abiertas, cerradas y atrasadas. Días en proceso vs fecha objetivo.',
     icono: ClipboardList,
     categoria: 'Producción',
+  },
+  {
+    href: '/reportes/produccion-periodo',
+    titulo: 'Producción por período',
+    descripcion: 'Cierre mensual: OTs cerradas, unidades terminadas, costos reales y horas invertidas.',
+    icono: Factory,
+    categoria: 'Producción',
+    badge: 'Nuevo',
+  },
+  {
+    href: '/reportes/costeo-comparativo',
+    titulo: 'Cotización vs Costo Real',
+    descripcion: 'Comparativo por OT: costo teórico (receta + tarifas) vs real (kardex + talleres). Detecta desviaciones.',
+    icono: Scale,
+    categoria: 'Producción',
+    badge: 'Nuevo',
   },
   {
     href: '/reportes/caja',

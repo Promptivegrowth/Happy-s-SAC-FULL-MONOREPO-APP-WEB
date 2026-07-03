@@ -28,6 +28,18 @@ export default async function Page({ searchParams }: { searchParams: Promise<SP>
   ]);
   const { metricas, rows } = resultado;
 
+  // Desglose por almacén cuando estamos viendo "Todos" — el gerente ve el
+  // global arriba y abajo cuánto vale cada almacén individualmente. Cliente
+  // pidió explícitamente ver "el total de los 3 almacenes" a la vez.
+  const porAlmacen = new Map<string, number>();
+  if (!almacen_id) {
+    for (const r of rows) {
+      porAlmacen.set(r.almacen, (porAlmacen.get(r.almacen) ?? 0) + r.valor_total);
+    }
+  }
+  const desgloseAlmacenes = Array.from(porAlmacen.entries())
+    .sort((a, b) => b[1] - a[1]);
+
   const exportPayload = {
     titulo: 'Stock valorizado',
     subtitulo: `Snapshot al ${new Date().toLocaleString('es-PE')}`,
@@ -133,6 +145,29 @@ export default async function Page({ searchParams }: { searchParams: Promise<SP>
           )}
         </Card>
       </div>
+
+      {!almacen_id && desgloseAlmacenes.length > 0 && (
+        <div>
+          <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-slate-500">
+            Desglose por almacén ({desgloseAlmacenes.length})
+          </p>
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            {desgloseAlmacenes.map(([nombre, valor]) => {
+              const pct = metricas.valor_total > 0 ? (valor / metricas.valor_total) * 100 : 0;
+              return (
+                <Card key={nombre} className="p-3">
+                  <p className="text-xs font-medium text-slate-600 truncate" title={nombre}>{nombre}</p>
+                  <p className="mt-1 font-display text-lg font-semibold text-corp-900">{PEN(valor)}</p>
+                  <div className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-slate-100">
+                    <div className="h-full bg-happy-500" style={{ width: `${pct}%` }} />
+                  </div>
+                  <p className="mt-1 text-[10px] text-slate-400">{pct.toFixed(1)}% del total</p>
+                </Card>
+              );
+            })}
+          </div>
+        </div>
+      )}
 
       {rows.length === 0 ? (
         <EmptyState icon={<Package className="h-6 w-6" />} title="Sin stock" description="No hay items con stock en los filtros." />
