@@ -64,11 +64,14 @@ export async function obtenerStockPorAlmacen(varianteId: string): Promise<{
     /* ignore */
   }
 
-  // 3. Todos los almacenes activos (para mostrar incluso los que tienen stock=0)
+  // 3. Almacenes activos donde SÍ se guarda producto terminado (excluye
+  //    MATERIA_PRIMA porque ahí van telas/insumos, no productos vendibles —
+  //    cliente reportó ruido en la lupita al ver ALM-MP con stock 0 de disfraces).
   const { data: almacenes } = await sb
     .from('almacenes')
     .select('id, codigo, nombre, tipo')
     .eq('activo', true)
+    .neq('tipo', 'MATERIA_PRIMA')
     .order('nombre');
 
   // 4. Stock de la variante en cada almacén

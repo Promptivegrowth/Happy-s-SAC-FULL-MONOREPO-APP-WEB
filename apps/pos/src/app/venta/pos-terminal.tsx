@@ -419,7 +419,7 @@ export function PosTerminal({
   }, [productoTallasOpen, variantes]);
 
   return (
-    <div className="grid h-screen grid-cols-1 lg:grid-cols-[1fr_580px]">
+    <div className="grid h-screen grid-cols-1 lg:grid-cols-[1fr_720px]">
       {/* IZQUIERDA — Búsqueda + carrito */}
       <section className="flex h-screen flex-col bg-white">
         <header className="border-b p-4">
@@ -649,21 +649,21 @@ export function PosTerminal({
                   onClick={() => setProductoTallasOpen(null)}
                 >
                   <Card
-                    className="w-full max-w-md p-5"
+                    className="w-full max-w-2xl p-6"
                     onClick={(e) => e.stopPropagation()}
                   >
-                    <div className="mb-3 flex items-start justify-between">
+                    <div className="mb-4 flex items-start justify-between">
                       <div>
-                        <h3 className="font-display text-base font-semibold text-corp-900">
+                        <h3 className="font-display text-xl font-semibold text-corp-900">
                           {tallasDelProductoOpen[0]?.productos.nombre}
                         </h3>
-                        <p className="text-xs text-slate-500">Selecciona una talla</p>
+                        <p className="mt-0.5 text-sm text-slate-500">Selecciona una talla</p>
                       </div>
-                      <button onClick={() => setProductoTallasOpen(null)} className="rounded p-1 text-slate-400 hover:bg-slate-100">
-                        <X className="h-4 w-4" />
+                      <button onClick={() => setProductoTallasOpen(null)} className="rounded p-1.5 text-slate-400 hover:bg-slate-100">
+                        <X className="h-5 w-5" />
                       </button>
                     </div>
-                    <div className="grid grid-cols-3 gap-2">
+                    <div className="grid grid-cols-4 gap-3">
                       {tallasDelProductoOpen.map((v) => {
                         const stock = stockPorVariante[v.id] ?? 0;
                         const sinStock = stock <= 0;
@@ -672,17 +672,17 @@ export function PosTerminal({
                             <button
                               onClick={() => agregarVariante(v)}
                               disabled={sinStock}
-                              className={`flex w-full flex-col items-center gap-1 rounded-lg border-2 p-3 transition ${
+                              className={`flex w-full flex-col items-center gap-1.5 rounded-xl border-2 p-4 transition ${
                                 sinStock
                                   ? 'border-dashed border-red-200 bg-red-50/40 text-red-400 cursor-not-allowed opacity-60'
                                   : 'border-slate-200 bg-white text-corp-900 hover:border-happy-400 hover:bg-happy-50'
                               }`}
                               title={sinStock ? 'Sin stock — no se puede vender' : ''}
                             >
-                              <span className="font-display text-lg font-bold">{formatTalla(v.talla)}</span>
-                              <span className="text-[10px] font-mono text-slate-500">{v.sku}</span>
-                              <span className="text-xs font-semibold text-happy-600">{formatPEN(Number(v.precio_publico ?? 0))}</span>
-                              <span className={`text-[9px] ${sinStock ? 'text-red-600 font-medium' : 'text-slate-400'}`}>
+                              <span className="font-display text-2xl font-bold">{formatTalla(v.talla)}</span>
+                              <span className="text-xs font-mono text-slate-500">{v.sku}</span>
+                              <span className="text-sm font-semibold text-happy-600">{formatPEN(Number(v.precio_publico ?? 0))}</span>
+                              <span className={`text-[11px] ${sinStock ? 'text-red-600 font-medium' : 'text-slate-500'}`}>
                                 {sinStock ? 'Sin stock' : `Stock: ${stock}`}
                               </span>
                             </button>
