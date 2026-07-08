@@ -98,6 +98,10 @@ type Proceso = {
   tiempo_estandar_min: number | null;
   es_tercerizado: boolean;
   observacion: string | null;
+  // Descripción específica del paso dentro del proceso (ej: "DESEMBOLSADO DE
+  // PAQUETES" dentro de ACABADO). Permite diferenciar múltiples filas con el
+  // mismo enum de proceso en la misma área.
+  descripcion_operativa: string | null;
   version?: string;
   areas_produccion?: { id: string; codigo: string; nombre: string; valor_minuto: number | null } | null;
 };
@@ -1253,6 +1257,11 @@ function ProcesosEditor({
   // no a la definición de la receta). Se envía false por default al server
   // para mantener la columna en BD funcionando.
   const [obs, setObs] = useState('');
+  // Descripción operativa: paso específico dentro del proceso enum. Ej. dentro
+  // de ACABADO puede haber "DESEMBOLSADO", "LIMPIEZA", "DOBLADO", etc. El enum
+  // tiene solo 15 valores; esta descripción permite diferenciar sub-pasos sin
+  // reventar la lista de enums.
+  const [descripcionOperativa, setDescripcionOperativa] = useState('');
 
   function reset() {
     setProceso('');
@@ -1260,6 +1269,7 @@ function ProcesosEditor({
     setTallaProc('');
     setTiempo('');
     setObs('');
+    setDescripcionOperativa('');
   }
 
   function agregar() {
@@ -1277,6 +1287,7 @@ function ProcesosEditor({
         tiempo_estandar_min: tiempo === '' ? '' : Number(tiempo),
         es_tercerizado: false, // siempre false desde la receta (ver nota arriba)
         observacion: obs,
+        descripcion_operativa: descripcionOperativa,
       });
       if (r.ok) {
         toast.success('Operación agregada');
@@ -1437,6 +1448,17 @@ function ProcesosEditor({
                 de la receta. Si en un futuro se agrega esa decisión, debería
                 vivir en el módulo de planeamiento/OT, no acá. */}
           </FormGrid>
+          <FormRow
+            label="Descripción operativa"
+            hint="Nombre específico del paso (ej: DESEMBOLSADO DE PAQUETES, LIMPIEZA, DOBLADO Y EMBOLSADO). Útil cuando hay varios pasos con el mismo proceso — p.ej. varios ACABADO en el mismo producto."
+          >
+            <Input
+              value={descripcionOperativa}
+              onChange={(e) => setDescripcionOperativa(e.target.value)}
+              maxLength={200}
+              placeholder="Ej: DESEMBOLSADO DE PAQUETES"
+            />
+          </FormRow>
           <FormRow label="Observación">
             <Input value={obs} onChange={(e) => setObs(e.target.value)} />
           </FormRow>
@@ -1471,6 +1493,13 @@ function ProcesosEditor({
               start(async () => {
                 const r = await actualizarProceso(id, { tiempo_estandar_min: v });
                 if (r.ok) toast.success('Tiempo actualizado');
+                else toast.error(r.error ?? 'Error');
+              });
+            }}
+            onActualizarDescripcion={(id, v) => {
+              start(async () => {
+                const r = await actualizarProceso(id, { descripcion_operativa: v || null });
+                if (r.ok) toast.success('Descripción actualizada');
                 else toast.error(r.error ?? 'Error');
               });
             }}
@@ -1638,6 +1667,7 @@ function ProcesosTabla({
   productoId,
   onEliminar,
   onActualizarTiempo,
+  onActualizarDescripcion,
   pending,
 }: {
   procesos: Proceso[];
@@ -1645,6 +1675,7 @@ function ProcesosTabla({
   productoId: string;
   onEliminar: (id: string) => void;
   onActualizarTiempo: (id: string, v: number) => void;
+  onActualizarDescripcion: (id: string, v: string) => void;
   pending: boolean;
 }) {
   // Estado local para reflejar el orden visualmente al instante (optimistic).
@@ -1684,7 +1715,7 @@ function ProcesosTabla({
               <TableHead className="w-8"></TableHead>
               <TableHead className="w-16">Orden</TableHead>
               <TableHead>Área</TableHead>
-              <TableHead>Proceso</TableHead>
+              <TableHead>Proceso / Paso</TableHead>
               <TableHead>Talla</TableHead>
               <TableHead className="text-right">Tiempo (min)</TableHead>
               <TableHead className="text-right">Costo</TableHead>
@@ -1699,6 +1730,7 @@ function ProcesosTabla({
                 proceso={p}
                 onEliminar={onEliminar}
                 onActualizarTiempo={onActualizarTiempo}
+                onActualizarDescripcion={onActualizarDescripcion}
                 pending={pending}
                 dndDisabled={dndDisabled}
               />
@@ -1719,12 +1751,14 @@ function ProcesoFila({
   proceso: p,
   onEliminar,
   onActualizarTiempo,
+  onActualizarDescripcion,
   pending,
   dndDisabled,
 }: {
   proceso: Proceso;
   onEliminar: (id: string) => void;
   onActualizarTiempo: (id: string, v: number) => void;
+  onActualizarDescripcion: (id: string, v: string) => void;
   pending: boolean;
   dndDisabled: boolean;
 }) {
@@ -1765,7 +1799,15 @@ function ProcesoFila({
           <span className="text-xs text-slate-400">—</span>
         )}
       </TableCell>
-      <TableCell className="font-medium">{p.proceso.replace('_', ' ')}</TableCell>
+      <TableCell className="font-medium">
+        <div className="flex flex-col gap-0.5">
+          <span>{p.proceso.replace('_', ' ')}</span>
+          <InlineDescripcion
+            valor={p.descripcion_operativa ?? ''}
+            onChange={(v) => onActualizarDescripcion(p.id, v)}
+          />
+        </div>
+      </TableCell>
       <TableCell>
         {p.talla ? (
           <Badge variant="outline">{p.talla.replace('T', '')}</Badge>
@@ -1786,6 +1828,26 @@ function ProcesoFila({
         </Button>
       </TableCell>
     </TableRow>
+  );
+}
+
+/** Edita la descripción operativa en línea (subtítulo bajo el proceso enum).
+ *  Vacío se muestra como placeholder "+ agregar paso específico" para invitar
+ *  al usuario a distinguir filas repetidas (ej. 5 rows de ACABADO). */
+function InlineDescripcion({ valor, onChange }: { valor: string; onChange: (v: string) => void }) {
+  const [v, setV] = useState(valor);
+  useEffect(() => { setV(valor); }, [valor]);
+  return (
+    <input
+      type="text"
+      maxLength={200}
+      value={v}
+      onChange={(e) => setV(e.target.value)}
+      onBlur={() => { if (v.trim() !== valor.trim()) onChange(v.trim()); }}
+      onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }}
+      placeholder="+ paso específico (ej: DESEMBOLSADO)"
+      className="w-full max-w-[240px] rounded border border-transparent bg-transparent px-1 py-0.5 text-[11px] font-normal text-slate-600 placeholder:text-[10px] placeholder:italic placeholder:text-slate-400 hover:border-slate-200 focus:border-happy-400 focus:bg-white focus:outline-none focus:ring-2 focus:ring-happy-100"
+    />
   );
 }
 

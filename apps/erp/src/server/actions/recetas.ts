@@ -565,6 +565,7 @@ const procesoSchema = z.object({
   tiempo_estandar_min: z.coerce.number().min(0).optional().or(z.literal('')),
   es_tercerizado: z.boolean().default(false),
   observacion: z.string().optional().or(z.literal('')),
+  descripcion_operativa: z.string().max(200).optional().or(z.literal('')),
 });
 
 export async function agregarProceso(
@@ -604,6 +605,7 @@ export async function agregarProceso(
         tiempo_estandar_min: data.tiempo_estandar_min === '' ? null : Number(data.tiempo_estandar_min),
         es_tercerizado: data.es_tercerizado,
         observacion: data.observacion || null,
+        descripcion_operativa: data.descripcion_operativa?.trim() || null,
       })
       .select('id')
       .single();
@@ -616,7 +618,15 @@ export async function agregarProceso(
 
 export async function actualizarProceso(
   id: string,
-  patch: Partial<{ tiempo_estandar_min: number; orden: number; es_tercerizado: boolean; observacion: string; area_id: string }>,
+  patch: Partial<{
+    tiempo_estandar_min: number;
+    orden: number;
+    es_tercerizado: boolean;
+    observacion: string;
+    area_id: string;
+    descripcion_operativa: string | null;
+    proceso: (typeof PROCESOS)[number];
+  }>,
 ): Promise<ActionResult> {
   const r = await runAction(async () => {
     const { sb } = await requireEditorReceta();
@@ -704,7 +714,7 @@ export async function duplicarProcesos(
     // 1) Cargar todos los procesos ACTIVOS del origen (no copiar versiones viejas)
     const { data: origen, error: errO } = await sbAny
       .from('productos_procesos')
-      .select('proceso, area_id, talla, tiempo_estandar_min, es_tercerizado, observacion')
+      .select('proceso, area_id, talla, tiempo_estandar_min, es_tercerizado, observacion, descripcion_operativa')
       .eq('producto_id', productoOrigenId)
       .eq('activo', true)
       .order('orden');
@@ -725,7 +735,7 @@ export async function duplicarProcesos(
     const ordenBase = ((maxRow?.orden as number | undefined) ?? 0);
 
     // 3) Insertar copias con orden incremental
-    type OrigenRow = { proceso: string; area_id: string | null; talla: string | null; tiempo_estandar_min: number | null; es_tercerizado: boolean; observacion: string | null };
+    type OrigenRow = { proceso: string; area_id: string | null; talla: string | null; tiempo_estandar_min: number | null; es_tercerizado: boolean; observacion: string | null; descripcion_operativa: string | null };
     const filas = (origen as OrigenRow[]).map((p, i) => ({
       producto_id: productoDestinoId,
       proceso: p.proceso,
@@ -735,6 +745,7 @@ export async function duplicarProcesos(
       tiempo_estandar_min: p.tiempo_estandar_min,
       es_tercerizado: p.es_tercerizado,
       observacion: p.observacion,
+      descripcion_operativa: p.descripcion_operativa,
     }));
     const { error: errIns } = await sbAny.from('productos_procesos').insert(filas);
     if (errIns) throw new Error(errIns.message);

@@ -71,6 +71,9 @@ type Props = {
   revisiones: { id: string; revision: number; vigente: boolean; updated_at: string }[];
   /** Galería del producto (img principal + adicionales) — para reusar en ficha. */
   galeriaProducto?: GaleriaItem[];
+  /** ID de la receta activa del producto — necesario para linkear al editor
+   *  de operaciones (post-2026-07-08, cliente no encontraba el link). */
+  recetaActivaId?: string | null;
 };
 
 type SubTab = 'resumen' | 'composicion' | 'medidas' | 'corte' | 'avios' | 'imagenes' | 'confeccion';
@@ -1363,7 +1366,7 @@ function AviosTab({ productoId, avios, procesos }: { productoId: string; avios: 
         <div className="border-b border-slate-200 p-3">
           <h4 className="font-display text-sm font-semibold text-corp-900">Procesos / secuencia de operaciones</h4>
           <p className="text-[11px] text-slate-500">
-            Procesos tomados de productos_procesos de este producto. Se pueden enriquecer máquina y descripción operativa directamente desde BD por ahora.
+            Vista previa. Para <strong>agregar, editar o reordenar</strong> pasos, andá al editor de recetas (botón &quot;Ver receta BOM&quot; arriba).
           </p>
         </div>
         {procesos.length === 0 ? (

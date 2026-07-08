@@ -34,7 +34,7 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
     sb.from('areas_produccion').select('id, codigo, nombre, valor_minuto').eq('activa', true).order('nombre'),
     sbAny
       .from('productos_procesos')
-      .select('id, proceso, area_id, talla, orden, tiempo_estandar_min, es_tercerizado, observacion, version, areas_produccion(id, codigo, nombre, valor_minuto)')
+      .select('id, proceso, area_id, talla, orden, tiempo_estandar_min, es_tercerizado, observacion, descripcion_operativa, version, areas_produccion(id, codigo, nombre, valor_minuto)')
       .eq('producto_id', prod.id)
       .eq('activo', true) // solo la versión vigente (mig 38)
       .order('orden'),
