@@ -123,6 +123,22 @@ export async function registrarMovimientoStock(
       );
     }
 
+    // Guardarraíl: NO permitir cargar productos terminados (variante_id) en un
+    // almacén tipo MATERIA_PRIMA. Ahí van telas/avíos/insumos, no prendas.
+    // Cliente encontró 149 unidades de Abejita mal ubicadas por este motivo.
+    const { data: almRow } = await sb
+      .from('almacenes')
+      .select('tipo, nombre')
+      .eq('id', data.almacen_id)
+      .single();
+    const almTipo = (almRow as { tipo?: string; nombre?: string } | null)?.tipo;
+    if (almTipo === 'MATERIA_PRIMA') {
+      throw new Error(
+        `No se puede cargar productos terminados en "${(almRow as { nombre: string }).nombre}" — es un almacén de materia prima. ` +
+        `Elegí un almacén de tienda o de producto terminado.`,
+      );
+    }
+
     const { error } = await sb.from('kardex_movimientos').insert({
       tipo: data.tipo,
       almacen_id: data.almacen_id,
@@ -173,6 +189,19 @@ export async function registrarMovimientoStockBatch(
     const esGerente = (roles ?? []).some((r) => (r as { rol: string }).rol === 'gerente');
     if (!esGerente) {
       throw new Error('Solo el gerente puede registrar ajustes masivos de stock.');
+    }
+
+    // Guardarraíl: bloquear si el almacén destino es MATERIA_PRIMA (ahí van
+    // telas/insumos, no prendas). Ver registrarMovimientoStock para el motivo.
+    const { data: almRow } = await sb
+      .from('almacenes')
+      .select('tipo, nombre')
+      .eq('id', data.almacen_id)
+      .single();
+    if ((almRow as { tipo?: string } | null)?.tipo === 'MATERIA_PRIMA') {
+      throw new Error(
+        `No se puede cargar productos terminados en "${(almRow as { nombre: string }).nombre}" — es un almacén de materia prima.`,
+      );
     }
 
     const rows = data.lineas.map((l) => ({

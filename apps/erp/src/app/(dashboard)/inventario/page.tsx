@@ -179,19 +179,24 @@ async function InventarioTable({ q, almacen, vista }: SP) {
   //  - 'bajo': query directa con 0<cantidad<=5.
   const incluirCeros = !vista || vista === 'todo';
 
-  // 1) IDs de almacenes ocultos (merma, etc.) para excluir del listado de stock.
-  //    El stock real ahí existe pero no se muestra en pantalla operativa.
-  const { data: ocultosRaw } = await (sb as unknown as {
+  // 1) IDs de almacenes ocultos (merma, etc.) + almacenes de MATERIA_PRIMA:
+  //    ambos se excluyen del listado operativo de productos terminados.
+  //    · Merma: oculto_en_selectores = true.
+  //    · Materia prima: la vista de "Stock actual" es para PT (prendas), no
+  //      para insumos/telas. Si el gerente quiere ver materia prima usa el
+  //      chip específico (que dispara el aviso amber redirigiendo a Materiales)
+  //      o el módulo Materiales dedicado.
+  const { data: excluirRaw } = await (sb as unknown as {
     from: (t: string) => {
       select: (s: string) => {
-        eq: (k: string, v: unknown) => Promise<{ data: Array<{ id: string }> | null }>;
+        or: (cond: string) => Promise<{ data: Array<{ id: string; tipo: string; oculto_en_selectores: boolean }> | null }>;
       };
     };
   })
     .from('almacenes')
-    .select('id')
-    .eq('oculto_en_selectores', true);
-  const almacenesOcultos = new Set((ocultosRaw ?? []).map((a) => a.id));
+    .select('id, tipo, oculto_en_selectores')
+    .or('oculto_en_selectores.eq.true,tipo.eq.MATERIA_PRIMA');
+  const almacenesExcluidos = new Set((excluirRaw ?? []).map((a) => a.id));
 
   // 2) Cargar stock real
   let stockQuery = sb
@@ -207,7 +212,7 @@ async function InventarioTable({ q, almacen, vista }: SP) {
   const { data: stocksRaw } = await stockQuery;
   const stocksMap = new Map<string, number>(); // key = almacen|variante
   for (const s of (stocksRaw ?? []) as { variante_id: string; almacen_id: string; cantidad: string | number }[]) {
-    if (almacenesOcultos.has(s.almacen_id)) continue;  // omitir merma del listado operativo
+    if (almacenesExcluidos.has(s.almacen_id)) continue;  // omitir merma del listado operativo
     stocksMap.set(`${s.almacen_id}|${s.variante_id}`, Number(s.cantidad ?? 0));
   }
 
@@ -259,8 +264,10 @@ async function InventarioTable({ q, almacen, vista }: SP) {
       .eq('activo', true)
       .eq('oculto_en_selectores', false)
       .order('nombre');
+    // Excluir MATERIA_PRIMA/merma de la vista de PT — salvo que el usuario
+    // haya filtrado explícitamente por ese almacén.
     const almacenes = ((almsAll ?? []) as { id: string; nombre: string }[]).filter(
-      (a) => !almacen || a.id === almacen,
+      (a) => !almacen ? !almacenesExcluidos.has(a.id) : a.id === almacen,
     );
 
     for (const v of variantes) {
