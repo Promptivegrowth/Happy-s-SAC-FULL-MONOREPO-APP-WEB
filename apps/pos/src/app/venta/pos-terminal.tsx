@@ -202,13 +202,29 @@ export function PosTerminal({
   function agregarPorBarcode(input: string) {
     const barcode = input.trim();
     if (!barcode) return;
-    const v = variantes.find((x) => x.codigo_barras === barcode || x.sku === barcode);
-    if (!v) {
-      toast.error(`Producto no encontrado: ${barcode}`);
+    // 1) Match exacto por código de barras o SKU — para lectora de pistola.
+    const exacto = variantes.find((x) => x.codigo_barras === barcode || x.sku === barcode);
+    if (exacto) {
+      agregarVariante(exacto);
+      setSearch('');
       return;
     }
-    agregarVariante(v);
-    setSearch('');
+    // 2) Sin match exacto → buscar por NOMBRE del producto (partial). Cliente
+    //    reporto Enter con "bombero" tiraba "Producto no encontrado" porque
+    //    "bombero" no es un SKU. Ahora: si hay al menos 1 producto que
+    //    matchea el nombre, abrir el modal de tallas del primero para que
+    //    el cajero elija talla. Si hay varios, tambien abrimos el primero
+    //    (el dropdown de sugerencias ya listaba todos abajo del input).
+    const q = barcode.toLowerCase();
+    const productoMatch = productosAgrupados.find(({ producto }) =>
+      producto.nombre.toLowerCase().includes(q),
+    );
+    if (productoMatch) {
+      setProductoTallasOpen(productoMatch.producto.id);
+      // No limpiamos el search — el usuario puede querer refinar
+      return;
+    }
+    toast.error(`Producto no encontrado: ${barcode}`);
   }
 
   function agregarVariante(v: Variante) {
@@ -860,12 +876,43 @@ export function PosTerminal({
             </div>
           ) : (
             <ul className="flex-1 overflow-auto p-2">
-              {lineasConPrecio.map((l) => {
+              {/* Cliente pidió (reunión post-2026-07-08) que el ÚLTIMO producto
+                  seleccionado aparezca ARRIBA de la lista — cuando cargan 20
+                  ítems y sigue apareciendo abajo el último, no lo ven y
+                  cometen errores de conteo. reverse() para invertir el orden. */}
+              {[...lineasConPrecio].reverse().map((l, idx) => {
                 const precioPublico = Number(l.variante.precio_publico ?? 0);
                 const enOferta = l.escalon !== 'PUBLICO' && precioPublico > 0 && l.precio_unitario < precioPublico;
+                const esUltimo = idx === 0;
+                const imagen = l.variante.productos.imagen_principal_url;
                 return (
-                  <li key={l.variante.id} className="mb-1.5 rounded-md border bg-white p-2 last:mb-0">
+                  <li
+                    key={l.variante.id}
+                    className={`mb-1.5 rounded-md border p-2 last:mb-0 ${
+                      esUltimo ? 'border-happy-300 bg-happy-50/40' : 'bg-white'
+                    }`}
+                  >
                     <div className="flex items-start gap-2">
+                      {/* Foto miniatura — cliente pidió que se vea la imagen del
+                          producto en el carrito para reconocimiento visual rápido. */}
+                      <div className="relative h-12 w-12 shrink-0 overflow-hidden rounded-md border bg-slate-100">
+                        {imagen ? (
+                          // eslint-disable-next-line @next/next/no-img-element
+                          <img
+                            src={imagen}
+                            alt={l.variante.productos.nombre}
+                            className="h-full w-full object-cover"
+                            loading="lazy"
+                          />
+                        ) : (
+                          <div className="flex h-full items-center justify-center text-lg">🎭</div>
+                        )}
+                        {esUltimo && (
+                          <span className="absolute -right-1 -top-1 rounded-full bg-happy-500 px-1 text-[8px] font-bold text-white shadow">
+                            NUEVO
+                          </span>
+                        )}
+                      </div>
                       <div className="min-w-0 flex-1">
                         <p className="truncate text-xs font-medium text-corp-900">{l.variante.productos.nombre}</p>
                         <p className="text-[10px] text-slate-500">
@@ -880,7 +927,7 @@ export function PosTerminal({
                       </div>
                       <div className="flex flex-col items-end gap-1">
                         <span className="font-display text-sm font-semibold text-corp-900">{formatPEN(l.subtotal)}</span>
-                        <div className="flex items-center rounded border">
+                        <div className="flex items-center rounded border bg-white">
                           <button
                             onClick={() => setQty(l.variante.id, l.cantidad - 1)}
                             className="px-1.5 py-0.5 text-slate-600 hover:bg-slate-50"
