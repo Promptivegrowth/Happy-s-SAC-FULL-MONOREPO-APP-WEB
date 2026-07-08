@@ -12,19 +12,25 @@ import { Input } from '@happy/ui/input';
 import { Label } from '@happy/ui/label';
 import { Button } from '@happy/ui/button';
 import { Badge } from '@happy/ui/badge';
-import { CreditCard, MessageCircle, Smartphone, Truck, Building2, Loader2 } from 'lucide-react';
+import { CreditCard, MessageCircle, Smartphone, Truck, Building2, Loader2, Lock } from 'lucide-react';
 import { toast } from 'sonner';
 import { useRouter } from 'next/navigation';
 import { buildPedidoWaMessage, buildWhatsappUrl } from '@happy/lib/whatsapp';
 
 type Metodo = 'yape' | 'plin' | 'culqi_card' | 'transferencia' | 'whatsapp';
 
-const METODOS: { id: Metodo; label: string; descripcion: string; icon: React.ReactNode }[] = [
-  { id: 'yape',          label: 'Yape',           descripcion: 'Sube captura para verificar', icon: <Smartphone className="h-5 w-5 text-purple-600" /> },
-  { id: 'plin',          label: 'Plin',           descripcion: 'Sube captura para verificar', icon: <Smartphone className="h-5 w-5 text-blue-600" /> },
-  { id: 'culqi_card',    label: 'Tarjeta',        descripcion: 'Visa / MasterCard / Amex',     icon: <CreditCard className="h-5 w-5 text-emerald-600" /> },
-  { id: 'transferencia', label: 'Transferencia',  descripcion: 'BCP / BBVA / Interbank',       icon: <Building2 className="h-5 w-5 text-slate-600" /> },
-  { id: 'whatsapp',      label: 'WhatsApp',       descripcion: 'Coordinar pago con asesor',    icon: <MessageCircle className="h-5 w-5 text-emerald-500" /> },
+// Cliente pidió (post-2026-07-08): solo WhatsApp está habilitado hoy.
+// Los otros medios (Yape, Plin, Tarjeta, Transferencia) se mostrarán como
+// "Próximamente" hasta que se active Culqi para tarjeta y se habilite el
+// flujo de sube-captura para Yape/Plin/Transferencia (pendiente de decisión
+// operativa). WhatsApp queda como método principal — dispara chat directo
+// con asesor con el pedido pre-cargado.
+const METODOS: { id: Metodo; label: string; descripcion: string; icon: React.ReactNode; habilitado: boolean }[] = [
+  { id: 'whatsapp',      label: 'WhatsApp',       descripcion: 'Coordinar pago con asesor',    icon: <MessageCircle className="h-5 w-5 text-emerald-500" />, habilitado: true },
+  { id: 'yape',          label: 'Yape',           descripcion: 'Próximamente',                 icon: <Smartphone className="h-5 w-5 text-purple-600" />,     habilitado: false },
+  { id: 'plin',          label: 'Plin',           descripcion: 'Próximamente',                 icon: <Smartphone className="h-5 w-5 text-blue-600" />,       habilitado: false },
+  { id: 'culqi_card',    label: 'Tarjeta',        descripcion: 'Próximamente',                 icon: <CreditCard className="h-5 w-5 text-emerald-600" />,    habilitado: false },
+  { id: 'transferencia', label: 'Transferencia',  descripcion: 'Próximamente',                 icon: <Building2 className="h-5 w-5 text-slate-600" />,       habilitado: false },
 ];
 
 // Envío GRATIS a partir de S/ 249 (cliente reportó post-2026-07-08).
@@ -49,7 +55,7 @@ export function CheckoutClient() {
   const [referencia, setReferencia] = useState('');
   const [ubigeo, setUbigeo] = useState('');
   const [entrega, setEntrega] = useState<'DELIVERY' | 'RECOJO_TIENDA'>('DELIVERY');
-  const [metodo, setMetodo] = useState<Metodo>('yape');
+  const [metodo, setMetodo] = useState<Metodo>('whatsapp');
   const [necesitaFactura, setNecesitaFactura] = useState(false);
   const [enviando, setEnviando] = useState(false);
 
@@ -248,22 +254,55 @@ export function CheckoutClient() {
 
         {/* PAGO */}
         <Card className="p-6">
-          <h2 className="mb-4 font-display text-lg font-semibold">3. Método de pago</h2>
+          <h2 className="mb-1 font-display text-lg font-semibold">3. Método de pago</h2>
+          <p className="mb-4 text-xs text-slate-500">
+            Hoy solo aceptamos coordinación por WhatsApp. Yape, Plin, tarjeta y transferencia
+            estarán disponibles próximamente.
+          </p>
           <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-            {METODOS.map((m) => (
-              <button key={m.id} onClick={() => setMetodo(m.id)} className={`flex items-start gap-3 rounded-lg border p-4 text-left transition ${metodo === m.id ? 'border-happy-500 bg-happy-50' : 'hover:border-slate-400'}`}>
-                {m.icon}
-                <div>
-                  <p className="text-sm font-medium">{m.label}</p>
-                  <p className="text-xs text-slate-500">{m.descripcion}</p>
-                </div>
-              </button>
-            ))}
+            {METODOS.map((m) => {
+              const activo = metodo === m.id;
+              const bloqueado = !m.habilitado;
+              return (
+                <button
+                  key={m.id}
+                  type="button"
+                  onClick={() => {
+                    if (bloqueado) {
+                      toast.info(`${m.label} estará disponible próximamente. Por ahora coordiná por WhatsApp.`);
+                      return;
+                    }
+                    setMetodo(m.id);
+                  }}
+                  aria-disabled={bloqueado}
+                  className={`relative flex items-start gap-3 rounded-lg border p-4 text-left transition ${
+                    activo
+                      ? 'border-happy-500 bg-happy-50'
+                      : bloqueado
+                        ? 'cursor-not-allowed border-dashed border-slate-200 bg-slate-50 opacity-60'
+                        : 'hover:border-slate-400'
+                  }`}
+                >
+                  {m.icon}
+                  <div>
+                    <p className="text-sm font-medium">{m.label}</p>
+                    <p className={`text-xs ${bloqueado ? 'text-slate-400' : 'text-slate-500'}`}>{m.descripcion}</p>
+                  </div>
+                  {bloqueado && (
+                    <Lock className="absolute right-2 top-2 h-3.5 w-3.5 text-slate-400" aria-label="No habilitado aún" />
+                  )}
+                </button>
+              );
+            })}
           </div>
           {metodo === 'whatsapp' && (
-            <p className="mt-3 rounded-md bg-emerald-50 p-3 text-xs text-emerald-700">
-              Te enviaremos al WhatsApp +51 903 064 120 con todos los detalles del pedido pre-cargados. Coordinaremos el pago contigo.
-            </p>
+            <div className="mt-3 rounded-md border border-emerald-200 bg-emerald-50 p-3 text-xs text-emerald-800">
+              <p className="font-semibold">Chat directo con un asesor</p>
+              <p className="mt-1">
+                Al finalizar la compra abriremos WhatsApp con un asesor real. Te enviaremos el resumen del pedido pre-cargado
+                y coordinaremos el método de pago que prefieras (Yape / Plin / tarjeta / transferencia / efectivo contra entrega).
+              </p>
+            </div>
           )}
         </Card>
       </div>
@@ -300,7 +339,13 @@ export function CheckoutClient() {
           </div>
         </div>
         <Button onClick={enviarPedido} variant="premium" size="lg" className="mt-5 w-full" disabled={enviando}>
-          {enviando ? <><Loader2 className="h-4 w-4 animate-spin" /> Procesando...</> : metodo === 'whatsapp' ? 'Enviar pedido por WhatsApp' : 'Finalizar compra'}
+          {enviando ? (
+            <><Loader2 className="h-4 w-4 animate-spin" /> Procesando...</>
+          ) : metodo === 'whatsapp' ? (
+            <><MessageCircle className="h-4 w-4" /> Abrir chat con asesor por WhatsApp</>
+          ) : (
+            'Finalizar compra'
+          )}
         </Button>
         <p className="mt-3 text-center text-[10px] text-slate-400">
           Tus datos están protegidos. <a href="/politica-de-privacidad" className="underline">Política de privacidad</a>

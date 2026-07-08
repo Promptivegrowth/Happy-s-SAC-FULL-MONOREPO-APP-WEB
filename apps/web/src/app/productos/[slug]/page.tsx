@@ -11,6 +11,7 @@ import { ProductCard, type ProductCardData } from '@/components/product-card';
 import { WHATSAPP_NUMERO, WHATSAPP_NUMERO_HUMAN, CORREO_CONTACTO } from '@/lib/contacto';
 import { TablaMedidas, type MedidaFila } from '@/components/tabla-medidas';
 import { GaleriaProducto } from '@/components/galeria-producto';
+import { DescripcionFormateada } from '@/components/descripcion-formateada';
 
 export const dynamic = 'force-dynamic';
 
@@ -358,11 +359,11 @@ export default async function ProductoDetallePage({ params }: { params: Promise<
         </div>
       </div>
 
-      {/* Descripción larga */}
+      {/* Descripción larga — con formato automático (secciones, alertas, párrafos) */}
       {pub.descripcion_larga && (
-        <section className="prose prose-sm mt-16 max-w-3xl border-t pt-12">
-          <h2 className="font-display text-2xl font-semibold text-corp-900">Descripción</h2>
-          <div dangerouslySetInnerHTML={{ __html: pub.descripcion_larga }} />
+        <section className="mt-16 max-w-3xl border-t pt-12">
+          <h2 className="mb-5 font-display text-2xl font-semibold text-corp-900">Descripción</h2>
+          <DescripcionFormateada texto={pub.descripcion_larga} />
         </section>
       )}
 

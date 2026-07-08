@@ -174,7 +174,10 @@ export function ProductoForm({
       </FormSection>
 
       <FormSection title="Composición física">
-        <FormRow label="Piezas que incluye" hint='Ej: "Pantalón + Chaqueta + Gorro + Guantes"'>
+        <FormRow
+          label='Incluye (aparece en la ficha del producto en la web como "Incluye: ...")'
+          hint='Ej: "Chaqueta + pantalón + sombrero + botas"'
+        >
           <Input name="piezas_descripcion" defaultValue={initial?.piezas_descripcion ?? ''} maxLength={300} />
         </FormRow>
         <label className="flex items-center gap-3 text-sm">
