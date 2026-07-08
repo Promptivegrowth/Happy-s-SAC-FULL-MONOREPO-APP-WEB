@@ -111,7 +111,12 @@ export function ProductoDetalleClient({
       nombre,
       talla: seleccionada.talla,
       imagenUrl: imagen,
-      precio: precioFinal,
+      // El "precio" es el público (retail) — se guarda como base. El carrito
+      // recalcula dinámicamente según total de items del carrito completo:
+      // mayorista >=6, fábrica >=100.
+      precio: seleccionada.precio,
+      precioMayorista: seleccionada.precioMayorista,
+      precioFabrica: seleccionada.precioFabrica,
       cantidad,
     };
     add(item);

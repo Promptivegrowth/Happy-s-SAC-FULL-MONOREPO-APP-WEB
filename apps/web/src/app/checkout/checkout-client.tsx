@@ -2,7 +2,11 @@
 
 import { useMemo, useState } from 'react';
 import Link from 'next/link';
-import { useCart } from '@/store/cart';
+import {
+  useCart,
+  precioEfectivoLinea,
+  escalonPorTotalItems,
+} from '@/store/cart';
 import { Card } from '@happy/ui/card';
 import { Input } from '@happy/ui/input';
 import { Label } from '@happy/ui/label';
@@ -23,10 +27,17 @@ const METODOS: { id: Metodo; label: string; descripcion: string; icon: React.Rea
   { id: 'whatsapp',      label: 'WhatsApp',       descripcion: 'Coordinar pago con asesor',    icon: <MessageCircle className="h-5 w-5 text-emerald-500" /> },
 ];
 
+// Envío GRATIS a partir de S/ 249 (cliente reportó post-2026-07-08).
+// Antes era S/ 199 — se subió el umbral.
+const ENVIO_GRATIS_DESDE = 249;
+const COSTO_ENVIO_DEFECTO = 15;
+
 export function CheckoutClient() {
   const router = useRouter();
   const items = useCart((s) => s.items);
   const total = useCart((s) => s.total());
+  const totalDisfraces = useCart((s) => s.totalItems());
+  const escalon = escalonPorTotalItems(totalDisfraces);
   const clear = useCart((s) => s.clear);
 
   const [tipoDoc, setTipoDoc] = useState<'DNI' | 'RUC'>('DNI');
@@ -42,21 +53,38 @@ export function CheckoutClient() {
   const [necesitaFactura, setNecesitaFactura] = useState(false);
   const [enviando, setEnviando] = useState(false);
 
-  const envio = useMemo(() => entrega === 'RECOJO_TIENDA' ? 0 : (total >= 199 ? 0 : 15), [entrega, total]);
+  const envio = useMemo(
+    () => entrega === 'RECOJO_TIENDA' ? 0 : (total >= ENVIO_GRATIS_DESDE ? 0 : COSTO_ENVIO_DEFECTO),
+    [entrega, total],
+  );
   const totalFinal = total + envio;
 
   async function consultarDoc() {
-    if (!doc) return;
+    if (!doc) return toast.error('Ingresá el número de documento');
+    // Validar formato mínimo antes de pegarle al backend
+    const digitosSolo = doc.replace(/\D/g, '');
+    if (tipoDoc === 'DNI' && digitosSolo.length !== 8) {
+      return toast.error('El DNI debe tener 8 dígitos');
+    }
+    if (tipoDoc === 'RUC' && digitosSolo.length !== 11) {
+      return toast.error('El RUC debe tener 11 dígitos');
+    }
     const tipo = tipoDoc.toLowerCase();
     try {
-      const res = await fetch(`${process.env.NEXT_PUBLIC_ERP_URL ?? ''}/api/sunat/${tipo}/${doc}`);
-      if (!res.ok) throw new Error('No se pudo consultar');
+      // Antes: fetch al ERP → requería sesión autenticada → siempre daba 401.
+      // Ahora: endpoint público interno de la WEB que consulta Decolecta
+      // sin exponer el token al cliente (el token queda en el server).
+      const res = await fetch(`/api/sunat/${tipo}/${digitosSolo}`);
       const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data?.error ?? 'No se pudo consultar');
+      }
       setNombre(data.nombreCompleto ?? data.razonSocial ?? '');
       if (data.direccion) setDireccion(data.direccion);
       toast.success('Datos cargados');
-    } catch {
-      toast.error('No se encontró el documento');
+    } catch (e) {
+      const msg = (e as Error).message;
+      toast.error(msg.includes('no encontrado') ? 'No se encontró el documento' : msg);
     }
   }
 
@@ -72,7 +100,8 @@ export function CheckoutClient() {
         ubigeo,
         items: items.map((i) => ({
           sku: i.sku, nombre: i.nombre, talla: i.talla,
-          cantidad: i.cantidad, precioUnit: i.precio,
+          // Precio efectivo aplicando escalón mayor/fábrica según total.
+          cantidad: i.cantidad, precioUnit: precioEfectivoLinea(i, escalon),
         })),
         envio,
         canal: 'WEB',
@@ -92,7 +121,8 @@ export function CheckoutClient() {
           entrega: { metodo: entrega, direccion, referencia, ubigeo },
           metodoPago: metodo,
           necesitaFactura,
-          items,
+          // Pasar el precio efectivo aplicado (con escalón mayor/fábrica).
+          items: items.map((i) => ({ ...i, precio: precioEfectivoLinea(i, escalon) })),
           envio,
           total: totalFinal,
         }),
@@ -170,18 +200,29 @@ export function CheckoutClient() {
         <Card className="p-6">
           <h2 className="mb-4 font-display text-lg font-semibold">2. Entrega</h2>
           <div className="grid gap-2 sm:grid-cols-2">
-            <button onClick={() => setEntrega('DELIVERY')} className={`flex items-center gap-3 rounded-lg border p-4 text-left ${entrega === 'DELIVERY' ? 'border-happy-500 bg-happy-50' : 'hover:border-slate-400'}`}>
-              <Truck className="h-5 w-5 text-happy-600" />
+            <button onClick={() => setEntrega('DELIVERY')} className={`flex items-start gap-3 rounded-lg border p-4 text-left ${entrega === 'DELIVERY' ? 'border-happy-500 bg-happy-50' : 'hover:border-slate-400'}`}>
+              <Truck className="mt-0.5 h-5 w-5 shrink-0 text-happy-600" />
               <div>
                 <p className="text-sm font-medium">Envío a domicilio</p>
-                <p className="text-xs text-slate-500">{total >= 199 ? '🎁 GRATIS por compra mayor a S/ 199' : 'S/ 15 Lima Metropolitana'}</p>
+                {total >= ENVIO_GRATIS_DESDE ? (
+                  <p className="text-xs text-emerald-700">
+                    🎁 GRATIS a Lima Metropolitana (tu compra pasa los S/ {ENVIO_GRATIS_DESDE})
+                  </p>
+                ) : (
+                  <p className="text-xs text-slate-500">
+                    Compras mayores a <strong>S/ {ENVIO_GRATIS_DESDE}</strong> envío GRATIS a Lima Metropolitana.
+                    Menores, el cliente paga el envío directo al motorizado.
+                  </p>
+                )}
               </div>
             </button>
-            <button onClick={() => setEntrega('RECOJO_TIENDA')} className={`flex items-center gap-3 rounded-lg border p-4 text-left ${entrega === 'RECOJO_TIENDA' ? 'border-happy-500 bg-happy-50' : 'hover:border-slate-400'}`}>
-              <Building2 className="h-5 w-5 text-happy-600" />
+            <button onClick={() => setEntrega('RECOJO_TIENDA')} className={`flex items-start gap-3 rounded-lg border p-4 text-left ${entrega === 'RECOJO_TIENDA' ? 'border-happy-500 bg-happy-50' : 'hover:border-slate-400'}`}>
+              <Building2 className="mt-0.5 h-5 w-5 shrink-0 text-happy-600" />
               <div>
-                <p className="text-sm font-medium">Recojo en tienda</p>
-                <p className="text-xs text-slate-500">Huallaga · La Quinta</p>
+                <p className="text-sm font-medium">Recojo en tienda · Tda. Huallaga</p>
+                <p className="text-xs text-slate-500">
+                  Jr. Huallaga 726 int. 150, Cercado de Lima
+                </p>
               </div>
             </button>
           </div>
@@ -229,14 +270,26 @@ export function CheckoutClient() {
 
       {/* RESUMEN */}
       <Card className="h-fit p-5">
-        <h3 className="mb-4 font-display text-lg font-semibold">Resumen</h3>
+        <h3 className="mb-1 font-display text-lg font-semibold">Resumen</h3>
+        <p className="mb-3 text-xs text-slate-600">
+          Total de disfraces: <strong className="text-corp-900">{totalDisfraces}</strong>
+          {escalon === 'MAYORISTA' && (
+            <Badge className="ml-2 bg-emerald-500 text-[9px]">Precio mayorista</Badge>
+          )}
+          {escalon === 'FABRICA' && (
+            <Badge className="ml-2 bg-blue-600 text-[9px] hover:bg-blue-600">Precio de fábrica</Badge>
+          )}
+        </p>
         <div className="space-y-2 text-sm">
-          {items.map((i) => (
-            <div key={i.varianteId} className="flex justify-between">
-              <span className="text-slate-600">{i.cantidad}× {i.nombre} <Badge variant="outline" className="ml-1 text-[9px]">{i.talla.replace('T','')}</Badge></span>
-              <span>S/ {(i.precio * i.cantidad).toFixed(2)}</span>
-            </div>
-          ))}
+          {items.map((i) => {
+            const precioUnit = precioEfectivoLinea(i, escalon);
+            return (
+              <div key={i.varianteId} className="flex justify-between">
+                <span className="text-slate-600">{i.cantidad}× {i.nombre} <Badge variant="outline" className="ml-1 text-[9px]">{i.talla.replace('T', '')}</Badge></span>
+                <span>S/ {(precioUnit * i.cantidad).toFixed(2)}</span>
+              </div>
+            );
+          })}
           <hr className="my-2" />
           <div className="flex justify-between"><span>Subtotal</span><span>S/ {total.toFixed(2)}</span></div>
           <div className="flex justify-between"><span>Envío</span><span>{envio === 0 ? 'GRATIS' : `S/ ${envio.toFixed(2)}`}</span></div>
