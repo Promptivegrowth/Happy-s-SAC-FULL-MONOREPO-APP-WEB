@@ -299,7 +299,7 @@ export async function historicoMaterial(
 /** Lista de almacenes (helper para selectores). Excluye almacenes ocultos
  * (ej. ALM-MR que el cliente no usa operativamente — migración 52). */
 export async function listarAlmacenes(): Promise<
-  ActionResult<{ id: string; codigo: string; nombre: string }[]>
+  ActionResult<{ id: string; codigo: string; nombre: string; tipo: string }[]>
 > {
   return runAction(async () => {
     const { sb } = await requireUser();
@@ -307,7 +307,7 @@ export async function listarAlmacenes(): Promise<
     const sbAny = sb as unknown as { from: (t: string) => any };
     const { data, error } = await sbAny
       .from('almacenes')
-      .select('id, codigo, nombre')
+      .select('id, codigo, nombre, tipo')
       .eq('activo', true)
       .eq('oculto_en_selectores', false)
       .order('codigo');

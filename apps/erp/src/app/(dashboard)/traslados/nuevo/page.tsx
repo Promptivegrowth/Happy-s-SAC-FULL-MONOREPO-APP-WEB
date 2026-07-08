@@ -19,7 +19,12 @@ export default async function NuevoTrasladoPage() {
     listarVariantesParaTraslado(),
     listarMaterialesParaTraslado(),
   ]);
-  const almacenes = resAlms.ok ? (resAlms.data ?? []) : [];
+  // Excluir MATERIA_PRIMA: los traslados entre almacenes son de productos
+  // terminados / materiales, no se hacen contra MP (ahí van telas al comprar,
+  // no se transfieren a tiendas). Cliente lo pidió explícito.
+  const almacenes = resAlms.ok
+    ? (resAlms.data ?? []).filter((a) => a.tipo !== 'MATERIA_PRIMA')
+    : [];
   const variantes = resVars.ok ? (resVars.data ?? []) : [];
   const materiales = resMats.ok ? (resMats.data ?? []) : [];
 

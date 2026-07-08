@@ -265,6 +265,9 @@ export function NuevoTrasladoForm({
       if (!cant || cant <= 0) {
         return toast.error(`Cantidad inválida en línea "${l.display || '(vacía)'}"`);
       }
+      if (l.tipo === 'VARIANTE' && !Number.isInteger(cant)) {
+        return toast.error(`Los productos se trasladan en unidades enteras. Corregí "${l.display}" (cantidad ${cant})`);
+      }
     }
 
     const payload = {
@@ -361,12 +364,19 @@ export function NuevoTrasladoForm({
         </FormGrid>
       </FormSection>
 
-      {/* ─── CARGA RÁPIDA (escaneo / pegado masivo) ────────────────────────── */}
-      <FormSection
-        title="Carga rápida (opcional)"
-        description="Para traslados grandes: escaneá códigos con el lector o pegá una lista de SKUs/códigos de barras. Más rápido que ingresar línea por línea."
-      >
-        <div className="grid gap-4 md:grid-cols-2">
+      {/* ─── CARGA RÁPIDA (escaneo / pegado masivo) — COLAPSABLE ─────────────
+          Cliente pidió reducir esta sección porque en el 90% de casos el
+          usuario agrega 2-3 líneas manualmente. La carga rápida solo hace
+          falta en traslados grandes (>10 SKUs), así queda escondida por
+          default y el foco visual va a "Líneas" que es lo que se usa siempre. */}
+      <details className="rounded-xl border border-slate-200 bg-white/50">
+        <summary className="cursor-pointer select-none px-4 py-2 text-sm font-medium text-corp-900 hover:bg-slate-50">
+          <ScanLine className="mr-1.5 inline h-4 w-4 text-sky-600" />
+          Carga rápida (opcional) — escanear o pegar lista
+          <span className="ml-2 text-xs font-normal text-slate-500">para traslados grandes</span>
+        </summary>
+        <div className="border-t p-4">
+        <div className="grid gap-3 md:grid-cols-2">
           {/* Modo 1: escaneo uno por uno */}
           <Card className="space-y-2 border-sky-200 bg-sky-50/30 p-3">
             <div className="flex items-center gap-2 text-xs font-semibold text-sky-700">
@@ -440,7 +450,8 @@ export function NuevoTrasladoForm({
             )}
           </Card>
         </div>
-      </FormSection>
+        </div>
+      </details>
 
       <FormSection
         title="Líneas"
@@ -456,15 +467,15 @@ export function NuevoTrasladoForm({
               Aún no hay líneas. Haz clic en &quot;Agregar línea&quot;.
             </p>
           ) : (
-            <Card>
+            <Card className="overflow-x-auto overflow-y-visible">
               <Table>
                 <TableHeader>
                   <TableRow>
                     <TableHead className="w-24">Tipo</TableHead>
-                    <TableHead>Ítem</TableHead>
-                    <TableHead className="text-right">Stock origen</TableHead>
-                    <TableHead className="w-28 text-right">Cantidad</TableHead>
-                    <TableHead>Observación</TableHead>
+                    <TableHead className="min-w-[380px]">Ítem</TableHead>
+                    <TableHead className="w-28 text-right">Stock origen</TableHead>
+                    <TableHead className="w-24 text-right">Cantidad</TableHead>
+                    <TableHead className="w-40">Observación</TableHead>
                     <TableHead className="w-12"></TableHead>
                   </TableRow>
                 </TableHeader>
@@ -557,12 +568,25 @@ export function NuevoTrasladoForm({
                           <div className="flex items-center gap-1">
                             <Input
                               type="number"
-                              step="0.0001"
-                              min="0"
+                              // Variantes (productos) siempre enteros — no se
+                              // trasladan medias unidades. Materiales pueden
+                              // tener decimales (ej: 2.5 metros de tela).
+                              step={l.tipo === 'VARIANTE' ? '1' : '0.0001'}
+                              min={l.tipo === 'VARIANTE' ? '1' : '0'}
                               value={l.cantidad}
-                              onChange={(e) =>
-                                updateLinea(l.uid, { cantidad: e.target.value })
-                              }
+                              onChange={(e) => {
+                                let v = e.target.value;
+                                if (l.tipo === 'VARIANTE') {
+                                  // Bloquear puntos/comas para forzar entero
+                                  v = v.replace(/[.,]/g, '');
+                                }
+                                updateLinea(l.uid, { cantidad: v });
+                              }}
+                              onKeyDown={(e) => {
+                                if (l.tipo === 'VARIANTE' && (e.key === '.' || e.key === ',')) {
+                                  e.preventDefault();
+                                }
+                              }}
                               disabled={pending}
                               className={`h-8 text-right ${insuficiente ? 'border-rose-400' : ''}`}
                             />
@@ -717,7 +741,7 @@ function ComboBase<T>({
         />
       </div>
       {open && filtered.length > 0 && (
-        <div className="absolute left-0 right-0 top-full z-20 mt-1 max-h-64 overflow-auto rounded-md border bg-white shadow-lg">
+        <div className="absolute left-0 top-full z-30 mt-1 max-h-96 w-full min-w-[380px] overflow-auto rounded-md border bg-white shadow-xl">
           {filtered.map((it, idx) => (
             <button
               key={idx}
@@ -728,10 +752,10 @@ function ComboBase<T>({
                 setQuery('');
                 setOpen(false);
               }}
-              className="flex w-full flex-col items-start gap-0.5 border-b px-3 py-1.5 text-left text-xs last:border-0 hover:bg-happy-50"
+              className="flex w-full flex-col items-start gap-0.5 border-b px-3 py-2 text-left text-sm last:border-0 hover:bg-happy-50"
             >
               <span className="font-medium text-corp-900">{renderLabel(it)}</span>
-              <span className="text-[10px] text-slate-500">{renderSub(it)}</span>
+              <span className="text-[11px] text-slate-500">{renderSub(it)}</span>
             </button>
           ))}
         </div>
