@@ -76,6 +76,19 @@ export type TrasladoDetalle = {
   guia_remision: string | null;
   motivo: string | null;
   observacion: string | null;
+  // Datos vehículo/conductor (mig 58)
+  modalidad: 'PRIVADO' | 'PUBLICO';
+  chofer_nombre: string | null;
+  chofer_dni: string | null;
+  chofer_licencia: string | null;
+  vehiculo_placa: string | null;
+  vehiculo_marca: string | null;
+  vehiculo_tarjeta_circulacion: string | null;
+  transportista_ruc: string | null;
+  transportista_razon_social: string | null;
+  cantidad_bultos: number | null;
+  tipo_bulto: string | null;
+  peso_total_kg: number | null;
 };
 
 // ---------- Helpers internos ----------
@@ -190,6 +203,18 @@ type DetalleRaw = {
   guia_remision: string | null;
   motivo: string | null;
   observacion: string | null;
+  modalidad: 'PRIVADO' | 'PUBLICO' | null;
+  chofer_nombre: string | null;
+  chofer_dni: string | null;
+  chofer_licencia: string | null;
+  vehiculo_placa: string | null;
+  vehiculo_marca: string | null;
+  vehiculo_tarjeta_circulacion: string | null;
+  transportista_ruc: string | null;
+  transportista_razon_social: string | null;
+  cantidad_bultos: number | null;
+  tipo_bulto: string | null;
+  peso_total_kg: number | string | null;
 };
 
 type LineaRaw = {
@@ -222,6 +247,10 @@ export async function obtenerTraslado(
           'solicitado_por, despachado_por, recibido_por, ' +
           'fecha_solicitud, fecha_despacho, fecha_recepcion, ' +
           'guia_remision, motivo, observacion, ' +
+          'modalidad, chofer_nombre, chofer_dni, chofer_licencia, ' +
+          'vehiculo_placa, vehiculo_marca, vehiculo_tarjeta_circulacion, ' +
+          'transportista_ruc, transportista_razon_social, ' +
+          'cantidad_bultos, tipo_bulto, peso_total_kg, ' +
           'almacen_origen_join:almacen_origen(id, codigo, nombre, direccion), ' +
           'almacen_destino_join:almacen_destino(id, codigo, nombre, direccion)',
       )
@@ -302,6 +331,18 @@ export async function obtenerTraslado(
       guia_remision: c.guia_remision,
       motivo: c.motivo,
       observacion: c.observacion,
+      modalidad: c.modalidad ?? 'PRIVADO',
+      chofer_nombre: c.chofer_nombre,
+      chofer_dni: c.chofer_dni,
+      chofer_licencia: c.chofer_licencia,
+      vehiculo_placa: c.vehiculo_placa,
+      vehiculo_marca: c.vehiculo_marca,
+      vehiculo_tarjeta_circulacion: c.vehiculo_tarjeta_circulacion,
+      transportista_ruc: c.transportista_ruc,
+      transportista_razon_social: c.transportista_razon_social,
+      cantidad_bultos: c.cantidad_bultos,
+      tipo_bulto: c.tipo_bulto,
+      peso_total_kg: c.peso_total_kg != null ? Number(c.peso_total_kg) : null,
     };
 
     return { traslado, lineas: lineasMapped };
@@ -443,6 +484,24 @@ const crearSchema = z
     motivo: z.string().max(500).optional().or(z.literal('')),
     observacion: z.string().max(500).optional().or(z.literal('')),
     lineas: z.array(lineaInputSchema).min(1, 'Debe incluir al menos una línea'),
+    // Datos vehículo/conductor (mig 58) — todos opcionales, si vienen se guardan
+    modalidad: z.enum(['PRIVADO', 'PUBLICO']).optional(),
+    chofer_nombre: z.string().max(200).optional().or(z.literal('')),
+    chofer_dni: z.string().max(20).optional().or(z.literal('')),
+    chofer_licencia: z.string().max(50).optional().or(z.literal('')),
+    vehiculo_placa: z.string().max(20).optional().or(z.literal('')),
+    vehiculo_marca: z.string().max(50).optional().or(z.literal('')),
+    vehiculo_tarjeta_circulacion: z.string().max(50).optional().or(z.literal('')),
+    transportista_ruc: z.string().max(15).optional().or(z.literal('')),
+    transportista_razon_social: z.string().max(200).optional().or(z.literal('')),
+    cantidad_bultos: z.coerce.number().int().min(0).optional(),
+    tipo_bulto: z.string().max(50).optional().or(z.literal('')),
+    peso_total_kg: z.coerce.number().min(0).optional(),
+    // Flag: si viene ejecutar_ahora=true, hace SALIDA + ENTRADA + estado=RECIBIDO
+    // en el mismo call (traslado inmediato, sin flujo de recepción posterior).
+    // Es lo que el cliente espera por default — su sistema anterior no
+    // diferencia despacho/recepción.
+    ejecutar_ahora: z.boolean().optional(),
   })
   .refine((d) => d.almacen_origen !== d.almacen_destino, {
     message: 'Origen y destino deben ser distintos',
@@ -487,6 +546,19 @@ export async function crearTraslado(
         solicitado_por: userId,
         motivo: data.motivo?.trim() || null,
         observacion: data.observacion?.trim() || null,
+        // Datos vehículo/conductor (mig 58)
+        modalidad: data.modalidad ?? 'PRIVADO',
+        chofer_nombre: data.chofer_nombre?.trim() || null,
+        chofer_dni: data.chofer_dni?.trim() || null,
+        chofer_licencia: data.chofer_licencia?.trim() || null,
+        vehiculo_placa: data.vehiculo_placa?.trim().toUpperCase() || null,
+        vehiculo_marca: data.vehiculo_marca?.trim() || null,
+        vehiculo_tarjeta_circulacion: data.vehiculo_tarjeta_circulacion?.trim() || null,
+        transportista_ruc: data.transportista_ruc?.trim() || null,
+        transportista_razon_social: data.transportista_razon_social?.trim() || null,
+        cantidad_bultos: data.cantidad_bultos ?? null,
+        tipo_bulto: data.tipo_bulto?.trim().toUpperCase() || null,
+        peso_total_kg: data.peso_total_kg ?? null,
       })
       .select('id')
       .single();
@@ -507,10 +579,32 @@ export async function crearTraslado(
       throw new Error(`No se pudieron insertar líneas: ${errLin.message}`);
     }
 
+    // Si el cliente eligió ejecutar_ahora=true, hacer despacho + recepción
+    // en el mismo call — traslado inmediato. El sistema previo del cliente
+    // (Hydra) no diferenciaba despacho/recepción, y él espera que "hacer
+    // el traslado" mueva stock a ambos lados de una.
+    if (data.ejecutar_ahora) {
+      const rDesp = await despacharTraslado(trasladoId);
+      if (!rDesp.ok) {
+        // Rollback: si el despacho falló (típicamente por stock), borramos
+        // el traslado y sus líneas para no dejar basura.
+        await sb.from('traslados_lineas').delete().eq('traslado_id', trasladoId);
+        await sb.from('traslados').delete().eq('id', trasladoId);
+        throw new Error(rDesp.error ?? 'Error al despachar');
+      }
+      const rRec = await recibirTraslado(trasladoId);
+      if (!rRec.ok) {
+        // Si la recepción falla, el kardex de SALIDA ya quedó insertado y
+        // el traslado en DESPACHADO. No hacemos rollback destructivo — el
+        // gerente puede darle "Recibir" manualmente después.
+        throw new Error(`Despachado pero falló recepción: ${rRec.error}. Ir al detalle del traslado para recibir manualmente.`);
+      }
+    }
+
     return { id: trasladoId, codigo };
   });
 
-  if (r.ok) await bumpPaths('/traslados');
+  if (r.ok) await bumpPaths('/traslados', '/kardex', '/inventario');
   return r;
 }
 

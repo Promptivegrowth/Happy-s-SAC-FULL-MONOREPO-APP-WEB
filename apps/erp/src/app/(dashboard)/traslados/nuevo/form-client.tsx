@@ -54,6 +54,20 @@ export function NuevoTrasladoForm({
   const [observacion, setObservacion] = useState('');
   const [lineas, setLineas] = useState<LineaEditable[]>([]);
 
+  // Datos vehículo/conductor + bultos (mig 58) — todos opcionales.
+  const [modalidad, setModalidad] = useState<'PRIVADO' | 'PUBLICO'>('PRIVADO');
+  const [choferNombre, setChoferNombre] = useState('');
+  const [choferDni, setChoferDni] = useState('');
+  const [choferLicencia, setChoferLicencia] = useState('');
+  const [vehiculoPlaca, setVehiculoPlaca] = useState('');
+  const [vehiculoMarca, setVehiculoMarca] = useState('');
+  const [vehiculoTarjeta, setVehiculoTarjeta] = useState('');
+  const [transportistaRuc, setTransportistaRuc] = useState('');
+  const [transportistaRazon, setTransportistaRazon] = useState('');
+  const [cantidadBultos, setCantidadBultos] = useState('');
+  const [tipoBulto, setTipoBulto] = useState('COSTALES');
+  const [pesoTotal, setPesoTotal] = useState('');
+
   // Stock disponible en el almacén origen (por variante / material id).
   const [stockVar, setStockVar] = useState<Record<string, number>>({});
   const [stockMat, setStockMat] = useState<Record<string, number>>({});
@@ -251,7 +265,10 @@ export function NuevoTrasladoForm({
     });
   }
 
-  function enviar() {
+  // Modal post-guardado: ¿imprimir la guía?
+  const [saved, setSaved] = useState<{ id: string; codigo: string } | null>(null);
+
+  function enviar(ejecutarAhora: boolean) {
     if (!origenId) return toast.error('Selecciona almacén origen');
     if (!destinoId) return toast.error('Selecciona almacén destino');
     if (origenId === destinoId) return toast.error('Origen y destino deben ser distintos');
@@ -281,13 +298,31 @@ export function NuevoTrasladoForm({
         cantidad: Number(l.cantidad),
         observacion: l.observacion,
       })),
+      modalidad,
+      chofer_nombre: choferNombre,
+      chofer_dni: choferDni,
+      chofer_licencia: choferLicencia,
+      vehiculo_placa: vehiculoPlaca,
+      vehiculo_marca: vehiculoMarca,
+      vehiculo_tarjeta_circulacion: vehiculoTarjeta,
+      transportista_ruc: transportistaRuc,
+      transportista_razon_social: transportistaRazon,
+      cantidad_bultos: cantidadBultos ? Number(cantidadBultos) : undefined,
+      tipo_bulto: tipoBulto,
+      peso_total_kg: pesoTotal ? Number(pesoTotal) : undefined,
+      ejecutar_ahora: ejecutarAhora,
     };
 
     start(async () => {
       const r = await crearTraslado(payload);
       if (r.ok && r.data) {
-        toast.success(`Traslado ${r.data.codigo} creado en borrador`);
-        router.push(`/traslados/${r.data.id}`);
+        toast.success(
+          ejecutarAhora
+            ? `Traslado ${r.data.codigo} ejecutado — stock movido`
+            : `Traslado ${r.data.codigo} creado en borrador`,
+        );
+        // Preguntar si quiere imprimir
+        setSaved({ id: r.data.id, codigo: r.data.codigo });
       } else {
         toast.error(r.error ?? 'Error al crear traslado');
       }
@@ -362,6 +397,99 @@ export function NuevoTrasladoForm({
             />
           </FormRow>
         </FormGrid>
+      </FormSection>
+
+      {/* Vehículo y conductor — se pre-imprimen en la guía de remisión.
+          Todos son opcionales — si están vacíos, la guía deja líneas para
+          completar a mano (mismo comportamiento que el sistema anterior). */}
+      <FormSection
+        title="Vehículo y conductor (opcional)"
+        description="Se pre-imprimen en la guía de remisión. Si los dejas vacíos, la guía trae líneas para llenar a mano."
+      >
+        <FormGrid cols={3}>
+          <FormRow label="Modalidad">
+            <select
+              value={modalidad}
+              onChange={(e) => setModalidad(e.target.value as 'PRIVADO' | 'PUBLICO')}
+              className="h-9 w-full rounded-md border border-input bg-white px-2 text-sm"
+              disabled={pending}
+            >
+              <option value="PRIVADO">PRIVADO (vehículo del remitente)</option>
+              <option value="PUBLICO">PÚBLICO (transportista externo)</option>
+            </select>
+          </FormRow>
+          <FormRow label="Placa vehículo">
+            <Input value={vehiculoPlaca} onChange={(e) => setVehiculoPlaca(e.target.value.toUpperCase())} placeholder="ABC-123" disabled={pending} />
+          </FormRow>
+          <FormRow label="Marca vehículo">
+            <Input value={vehiculoMarca} onChange={(e) => setVehiculoMarca(e.target.value)} placeholder="Chevrolet, Toyota…" disabled={pending} />
+          </FormRow>
+          <FormRow label="Chofer (nombre completo)">
+            <Input value={choferNombre} onChange={(e) => setChoferNombre(e.target.value)} placeholder="Javier Mauricio Ramírez" disabled={pending} />
+          </FormRow>
+          <FormRow label="DNI chofer">
+            <Input value={choferDni} onChange={(e) => setChoferDni(e.target.value.replace(/\D/g, ''))} maxLength={8} placeholder="12345678" disabled={pending} />
+          </FormRow>
+          <FormRow label="N° Licencia">
+            <Input value={choferLicencia} onChange={(e) => setChoferLicencia(e.target.value)} placeholder="Q40541396" disabled={pending} />
+          </FormRow>
+          <FormRow label="N° Tarjeta circulación (MTC)">
+            <Input value={vehiculoTarjeta} onChange={(e) => setVehiculoTarjeta(e.target.value)} disabled={pending} />
+          </FormRow>
+          {modalidad === 'PUBLICO' && (
+            <>
+              <FormRow label="RUC transportista" required>
+                <Input value={transportistaRuc} onChange={(e) => setTransportistaRuc(e.target.value.replace(/\D/g, ''))} maxLength={11} placeholder="20601234567" disabled={pending} />
+              </FormRow>
+              <FormRow label="Razón social transportista" required>
+                <Input value={transportistaRazon} onChange={(e) => setTransportistaRazon(e.target.value)} disabled={pending} />
+              </FormRow>
+            </>
+          )}
+        </FormGrid>
+
+        <div className="mt-4 border-t pt-4">
+          <p className="mb-2 text-xs font-medium text-slate-500 uppercase tracking-wide">Bultos transportados</p>
+          <FormGrid cols={3}>
+            <FormRow label="Cantidad de bultos">
+              <Input
+                type="number"
+                min="0"
+                step="1"
+                value={cantidadBultos}
+                onChange={(e) => setCantidadBultos(e.target.value.replace(/[.,]/g, ''))}
+                placeholder="5"
+                disabled={pending}
+              />
+            </FormRow>
+            <FormRow label="Tipo de bulto">
+              <select
+                value={tipoBulto}
+                onChange={(e) => setTipoBulto(e.target.value)}
+                className="h-9 w-full rounded-md border border-input bg-white px-2 text-sm"
+                disabled={pending}
+              >
+                <option value="COSTALES">Costales</option>
+                <option value="CAJAS">Cajas</option>
+                <option value="PAQUETES">Paquetes</option>
+                <option value="BULTOS">Bultos</option>
+                <option value="ROLLOS">Rollos</option>
+                <option value="OTROS">Otros</option>
+              </select>
+            </FormRow>
+            <FormRow label="Peso total (kg)" hint="Opcional — se imprime en la guía">
+              <Input
+                type="number"
+                min="0"
+                step="0.01"
+                value={pesoTotal}
+                onChange={(e) => setPesoTotal(e.target.value)}
+                placeholder="0.00"
+                disabled={pending}
+              />
+            </FormRow>
+          </FormGrid>
+        </div>
       </FormSection>
 
       {/* ─── CARGA RÁPIDA (escaneo / pegado masivo) — COLAPSABLE ─────────────
@@ -643,18 +771,63 @@ export function NuevoTrasladoForm({
             {totalCantidad.toLocaleString('es-PE', { maximumFractionDigits: 4 })}
           </p>
           <p className="text-[10px] text-slate-500">
-            {lineas.length} línea(s) · stock se moverá al despachar
+            {lineas.length} línea(s)
           </p>
         </div>
-        <Button
-          onClick={enviar}
-          disabled={pending || !origenId || !destinoId || lineas.length === 0}
-          variant="premium"
-        >
-          {pending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
-          Crear traslado (borrador)
-        </Button>
+        <div className="flex flex-wrap gap-2">
+          <Button
+            onClick={() => enviar(false)}
+            disabled={pending || !origenId || !destinoId || lineas.length === 0}
+            variant="outline"
+            title="Solo guarda el traslado en BORRADOR. El stock no se mueve hasta que despachas manualmente."
+          >
+            {pending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+            Guardar borrador
+          </Button>
+          <Button
+            onClick={() => enviar(true)}
+            disabled={pending || !origenId || !destinoId || lineas.length === 0}
+            variant="premium"
+            title="Guarda y ejecuta el traslado en un paso: descuenta stock del origen y lo suma al destino."
+          >
+            {pending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+            Guardar y ejecutar traslado
+          </Button>
+        </div>
       </div>
+
+      {/* Dialog: ¿imprimir la guía? — se abre al guardar exitosamente */}
+      {saved && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+          <div className="w-full max-w-md rounded-xl bg-white p-6 shadow-2xl">
+            <h3 className="mb-2 font-display text-lg font-semibold text-corp-900">
+              Traslado {saved.codigo} guardado
+            </h3>
+            <p className="mb-6 text-sm text-slate-600">
+              ¿Querés imprimir la guía de remisión ahora? Ya quedó guardada en el sistema — podés imprimirla más tarde desde el detalle.
+            </p>
+            <div className="flex flex-wrap justify-end gap-2">
+              <Button
+                variant="outline"
+                onClick={() => {
+                  router.push(`/traslados/${saved.id}`);
+                }}
+              >
+                No, solo guardar
+              </Button>
+              <Button
+                variant="premium"
+                onClick={() => {
+                  // Redirigir al detalle con ?guia=1 → auto-descarga PDF
+                  router.push(`/traslados/${saved.id}?guia=1`);
+                }}
+              >
+                Sí, imprimir PDF
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

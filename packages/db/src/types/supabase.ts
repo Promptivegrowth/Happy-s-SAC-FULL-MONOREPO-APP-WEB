@@ -7309,6 +7309,10 @@ export type Database = {
         Row: {
           almacen_destino: string
           almacen_origen: string
+          cantidad_bultos: number | null
+          chofer_dni: string | null
+          chofer_licencia: string | null
+          chofer_nombre: string | null
           codigo: string
           created_at: string | null
           despachado_por: string | null
@@ -7318,15 +7322,27 @@ export type Database = {
           fecha_solicitud: string | null
           guia_remision: string | null
           id: string
+          modalidad: string
           motivo: string | null
           observacion: string | null
+          peso_total_kg: number | null
           recibido_por: string | null
           solicitado_por: string | null
+          tipo_bulto: string | null
+          transportista_razon_social: string | null
+          transportista_ruc: string | null
           updated_at: string | null
+          vehiculo_marca: string | null
+          vehiculo_placa: string | null
+          vehiculo_tarjeta_circulacion: string | null
         }
         Insert: {
           almacen_destino: string
           almacen_origen: string
+          cantidad_bultos?: number | null
+          chofer_dni?: string | null
+          chofer_licencia?: string | null
+          chofer_nombre?: string | null
           codigo: string
           created_at?: string | null
           despachado_por?: string | null
@@ -7336,15 +7352,27 @@ export type Database = {
           fecha_solicitud?: string | null
           guia_remision?: string | null
           id?: string
+          modalidad?: string
           motivo?: string | null
           observacion?: string | null
+          peso_total_kg?: number | null
           recibido_por?: string | null
           solicitado_por?: string | null
+          tipo_bulto?: string | null
+          transportista_razon_social?: string | null
+          transportista_ruc?: string | null
           updated_at?: string | null
+          vehiculo_marca?: string | null
+          vehiculo_placa?: string | null
+          vehiculo_tarjeta_circulacion?: string | null
         }
         Update: {
           almacen_destino?: string
           almacen_origen?: string
+          cantidad_bultos?: number | null
+          chofer_dni?: string | null
+          chofer_licencia?: string | null
+          chofer_nombre?: string | null
           codigo?: string
           created_at?: string | null
           despachado_por?: string | null
@@ -7354,11 +7382,19 @@ export type Database = {
           fecha_solicitud?: string | null
           guia_remision?: string | null
           id?: string
+          modalidad?: string
           motivo?: string | null
           observacion?: string | null
+          peso_total_kg?: number | null
           recibido_por?: string | null
           solicitado_por?: string | null
+          tipo_bulto?: string | null
+          transportista_razon_social?: string | null
+          transportista_ruc?: string | null
           updated_at?: string | null
+          vehiculo_marca?: string | null
+          vehiculo_placa?: string | null
+          vehiculo_tarjeta_circulacion?: string | null
         }
         Relationships: [
           {

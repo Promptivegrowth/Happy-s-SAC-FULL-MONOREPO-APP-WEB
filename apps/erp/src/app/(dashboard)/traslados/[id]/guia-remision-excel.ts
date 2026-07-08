@@ -101,15 +101,48 @@ export async function generarGuiaRemisionExcel(
   row++;
   writePair(ws, row, 'Motivo', 'Traslado entre establecimientos del mismo contribuyente');
   row++;
-  writePair(ws, row, 'Modalidad', 'PRIVADO');
+  const modalidadExcel = traslado.modalidad === 'PUBLICO'
+    ? `PÚBLICO — ${traslado.transportista_razon_social ?? '—'} (RUC ${traslado.transportista_ruc ?? '—'})`
+    : 'PRIVADO (vehículo del remitente)';
+  writePair(ws, row, 'Modalidad', modalidadExcel);
   row++;
-  writePair(ws, row, 'N° de guía interna', traslado.guia_remision ?? '—');
+  writePair(ws, row, 'N° de guía interna', traslado.guia_remision ?? traslado.codigo);
   row++;
   if (traslado.motivo) {
-    writePair(ws, row, 'Observación', traslado.motivo);
+    writePair(ws, row, 'Detalle', traslado.motivo);
     row++;
   }
   row++;
+
+  // Vehículo y conductor (si están cargados)
+  if (traslado.vehiculo_placa || traslado.chofer_nombre) {
+    const vehHdr = ws.getCell(`A${row}`);
+    ws.mergeCells(`A${row}:F${row}`);
+    vehHdr.value = 'VEHÍCULO Y CONDUCTOR';
+    vehHdr.font = { bold: true, size: 11, color: { argb: 'FFFFFFFF' } };
+    vehHdr.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: AZUL } };
+    vehHdr.alignment = { horizontal: 'left', vertical: 'middle', indent: 1 };
+    ws.getRow(row).height = 20;
+    row++;
+    if (traslado.vehiculo_placa) { writePair(ws, row, 'Placa', traslado.vehiculo_placa); row++; }
+    if (traslado.vehiculo_marca) { writePair(ws, row, 'Marca', traslado.vehiculo_marca); row++; }
+    if (traslado.vehiculo_tarjeta_circulacion) { writePair(ws, row, 'N° Tarjeta circulación', traslado.vehiculo_tarjeta_circulacion); row++; }
+    if (traslado.chofer_nombre) { writePair(ws, row, 'Chofer', traslado.chofer_nombre); row++; }
+    if (traslado.chofer_dni) { writePair(ws, row, 'DNI chofer', traslado.chofer_dni); row++; }
+    if (traslado.chofer_licencia) { writePair(ws, row, 'N° Licencia', traslado.chofer_licencia); row++; }
+    row++;
+  }
+
+  // Bultos si están cargados
+  if (traslado.cantidad_bultos != null && traslado.cantidad_bultos > 0) {
+    const bultosLabel = `${traslado.cantidad_bultos} ${traslado.tipo_bulto ?? 'BULTOS'}`;
+    const pesoTxt = traslado.peso_total_kg != null && traslado.peso_total_kg > 0
+      ? ` · Peso total: ${traslado.peso_total_kg.toFixed(2)} kg`
+      : '';
+    writePair(ws, row, 'Bultos transportados', bultosLabel + pesoTxt);
+    row++;
+    row++;
+  }
 
   // ═══════════════════════════════════════════════════════════════════════
   // PARTIDA + LLEGADA
