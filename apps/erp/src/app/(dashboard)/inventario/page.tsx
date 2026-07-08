@@ -112,7 +112,7 @@ export default async function InventarioPage({ searchParams }: { searchParams: P
           Solo con stock
         </FilterChip>
         <FilterChip href={chipUrl({ vista: 'bajo' })} active={sp.vista === 'bajo'} variant="destructive">
-          <AlertTriangle className="h-3 w-3" /> Stock bajo (≤5)
+          <AlertTriangle className="h-3 w-3" /> Stock bajo por almacén
         </FilterChip>
       </div>
 
@@ -166,6 +166,9 @@ type Fila = {
   almacen_id: string;
   almacen_nombre: string;
   cantidad: number;
+  /** Umbral de stock mínimo configurado para ESTE almacén (mig 53).
+   *  Se usa para colorear amber cuando cantidad <= umbral. 0 = no alerta. */
+  umbral: number;
 };
 
 async function InventarioTable({ q, almacen, vista }: SP) {
@@ -181,22 +184,18 @@ async function InventarioTable({ q, almacen, vista }: SP) {
 
   // 1) IDs de almacenes ocultos (merma, etc.) + almacenes de MATERIA_PRIMA:
   //    ambos se excluyen del listado operativo de productos terminados.
-  //    · Merma: oculto_en_selectores = true.
-  //    · Materia prima: la vista de "Stock actual" es para PT (prendas), no
-  //      para insumos/telas. Si el gerente quiere ver materia prima usa el
-  //      chip específico (que dispara el aviso amber redirigiendo a Materiales)
-  //      o el módulo Materiales dedicado.
-  const { data: excluirRaw } = await (sb as unknown as {
+  //    Además traemos stock_minimo_default para colorear "stock bajo" según
+  //    umbral configurado POR ALMACÉN (ALM-SB=5, TDA-LQ=3, TDA-HU=1).
+  const { data: almsRaw } = await (sb as unknown as {
     from: (t: string) => {
-      select: (s: string) => {
-        or: (cond: string) => Promise<{ data: Array<{ id: string; tipo: string; oculto_en_selectores: boolean }> | null }>;
-      };
+      select: (s: string) => Promise<{ data: Array<{ id: string; tipo: string; oculto_en_selectores: boolean; stock_minimo_default: number | null }> | null }>;
     };
   })
     .from('almacenes')
-    .select('id, tipo, oculto_en_selectores')
-    .or('oculto_en_selectores.eq.true,tipo.eq.MATERIA_PRIMA');
-  const almacenesExcluidos = new Set((excluirRaw ?? []).map((a) => a.id));
+    .select('id, tipo, oculto_en_selectores, stock_minimo_default');
+  const almsAll = (almsRaw ?? []) as { id: string; tipo: string; oculto_en_selectores: boolean; stock_minimo_default: number | null }[];
+  const almacenesExcluidos = new Set(almsAll.filter(a => a.oculto_en_selectores || a.tipo === 'MATERIA_PRIMA').map(a => a.id));
+  const umbralPorAlmacen = new Map(almsAll.map(a => [a.id, Number(a.stock_minimo_default ?? 0)]));
 
   // 2) Cargar stock real
   let stockQuery = sb
@@ -205,15 +204,21 @@ async function InventarioTable({ q, almacen, vista }: SP) {
     .not('variante_id', 'is', null)
     .limit(5000);
   if (almacen) stockQuery = stockQuery.eq('almacen_id', almacen);
-  if (!incluirCeros) {
-    if (vista === 'bajo') stockQuery = stockQuery.lte('cantidad', 5).gt('cantidad', 0);
-    else stockQuery = stockQuery.gt('cantidad', 0);
+  if (!incluirCeros && vista !== 'bajo') {
+    stockQuery = stockQuery.gt('cantidad', 0);
   }
+  // Nota: vista=bajo NO se puede filtrar en la query porque el umbral es
+  // POR ALMACÉN (mig 53). Se filtra client-side comparando con el mapa.
   const { data: stocksRaw } = await stockQuery;
   const stocksMap = new Map<string, number>(); // key = almacen|variante
   for (const s of (stocksRaw ?? []) as { variante_id: string; almacen_id: string; cantidad: string | number }[]) {
     if (almacenesExcluidos.has(s.almacen_id)) continue;  // omitir merma del listado operativo
-    stocksMap.set(`${s.almacen_id}|${s.variante_id}`, Number(s.cantidad ?? 0));
+    const cant = Number(s.cantidad ?? 0);
+    if (vista === 'bajo') {
+      const umbral = umbralPorAlmacen.get(s.almacen_id) ?? 0;
+      if (umbral <= 0 || cant <= 0 || cant > umbral) continue;
+    }
+    stocksMap.set(`${s.almacen_id}|${s.variante_id}`, cant);
   }
 
   let filas: Fila[] = [];
@@ -280,6 +285,7 @@ async function InventarioTable({ q, almacen, vista }: SP) {
           almacen_id: a.id,
           almacen_nombre: a.nombre,
           cantidad: stocksMap.get(`${a.id}|${v.id}`) ?? 0,
+          umbral: umbralPorAlmacen.get(a.id) ?? 0,
         });
       }
     }
@@ -313,6 +319,7 @@ async function InventarioTable({ q, almacen, vista }: SP) {
           almacen_id: a.id,
           almacen_nombre: a.nombre,
           cantidad,
+          umbral: umbralPorAlmacen.get(a.id) ?? 0,
         });
       }
       // Filtro client-side por texto (usando query normalizada — solo el nombre del producto)
@@ -359,7 +366,8 @@ async function InventarioTable({ q, almacen, vista }: SP) {
           </TableHeader>
           <TableBody>
             {filasMostrar.map((f) => {
-              const bajo = f.cantidad > 0 && f.cantidad <= 5;
+              // Umbral por almacén (mig 53). Si no está configurado (0), no alerta.
+              const bajo = f.umbral > 0 && f.cantidad > 0 && f.cantidad <= f.umbral;
               const cero = f.cantidad === 0;
               return (
                 <TableRow key={`${f.almacen_id}-${f.variante_id}`} className={cero ? 'opacity-60' : ''}>

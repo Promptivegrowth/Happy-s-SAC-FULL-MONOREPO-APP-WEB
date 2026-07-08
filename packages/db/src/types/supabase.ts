@@ -8508,6 +8508,7 @@ export type Database = {
       v_stock_alertas: {
         Row: {
           almacen: string | null
+          almacen_codigo: string | null
           almacen_id: string | null
           cantidad: number | null
           producto: string | null
