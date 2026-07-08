@@ -1,15 +1,36 @@
 'use client';
 
 import Link from 'next/link';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { ChevronDown } from 'lucide-react';
 import { Badge } from '@happy/ui/badge';
-import { MEGA_MENU } from '@/lib/megamenu';
+import { MEGA_MENU, type MegaItem } from '@/lib/megamenu';
+import type { CampanaVigente } from '@/server/queries/header-data';
 
-export function MegaMenu() {
+/**
+ * Reemplaza el link fijo de campaña del megamenu por la campaña VIGENTE
+ * (por fecha) traida desde DB. Si no hay campaña vigente, se oculta.
+ * El link "Día de la Madre 2026" que estaba hardcoded en megamenu.ts se
+ * marca para ser el placeholder — se detecta por href que empieza con
+ * "/campanias/".
+ */
+function aplicarCampana(items: MegaItem[], campana: CampanaVigente | null): MegaItem[] {
+  return items
+    .map((item): MegaItem | null => {
+      if (item.kind === 'link' && item.href.startsWith('/campanias/')) {
+        if (!campana) return null; // sin vigente → ocultar
+        return { ...item, label: campana.nombre, href: `/campanias/${campana.slug}` };
+      }
+      return item;
+    })
+    .filter((x): x is MegaItem => x !== null);
+}
+
+export function MegaMenu({ campanaVigente = null }: { campanaVigente?: CampanaVigente | null }) {
   const [open, setOpen] = useState<string | null>(null);
   const closeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
+  const items = useMemo(() => aplicarCampana(MEGA_MENU, campanaVigente), [campanaVigente]);
 
   function openItem(label: string) {
     if (closeTimer.current) clearTimeout(closeTimer.current);
@@ -32,7 +53,7 @@ export function MegaMenu() {
   return (
     <div ref={wrapRef} className="relative w-full bg-corp-700 text-white">
       <nav className="container hidden h-12 items-center gap-1 px-4 lg:flex">
-        {MEGA_MENU.map((item) => {
+        {items.map((item) => {
           const isOpen = open === item.label;
           const hasFlyout = item.kind === 'mega' || item.kind === 'dropdown';
 
@@ -80,7 +101,7 @@ export function MegaMenu() {
       </nav>
 
       {/* Mega-flyout: ocupa todo el ancho del header debajo del nav */}
-      {MEGA_MENU.map((item) => {
+      {items.map((item) => {
         if (item.kind !== 'mega') return null;
         const isOpen = open === item.label;
         if (!isOpen) return null;
@@ -131,13 +152,20 @@ export function MegaMenu() {
 /**
  * Versión mobile del menú: lista accordion simple en lugar de hover.
  */
-export function MegaMenuMobile({ onClose }: { onClose: () => void }) {
+export function MegaMenuMobile({
+  onClose,
+  campanaVigente = null,
+}: {
+  onClose: () => void;
+  campanaVigente?: CampanaVigente | null;
+}) {
+  const items = useMemo(() => aplicarCampana(MEGA_MENU, campanaVigente), [campanaVigente]);
   const [openSection, setOpenSection] = useState<string | null>(null);
 
   return (
     <nav className="border-t bg-white p-4 lg:hidden">
       <ul className="space-y-1">
-        {MEGA_MENU.map((item) => {
+        {items.map((item) => {
           const isOpen = openSection === item.label;
           if (item.kind === 'link') {
             return (

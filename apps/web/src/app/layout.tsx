@@ -6,6 +6,7 @@ import './globals.css';
 import { SiteHeader } from '@/components/site-header';
 import { SiteFooter } from '@/components/site-footer';
 import { WhatsappFab } from '@/components/whatsapp-fab';
+import { cargarDatosHeader } from '@/server/queries/header-data';
 
 const inter = Inter({ subsets: ['latin'], variable: '--font-sans', display: 'swap' });
 const fraunces = Fraunces({ subsets: ['latin'], variable: '--font-display', display: 'swap' });
@@ -45,11 +46,18 @@ export const viewport: Viewport = {
   themeColor: '#ff4d0d',
 };
 
-export default function RootLayout({ children }: { children: React.ReactNode }) {
+export default async function RootLayout({ children }: { children: React.ReactNode }) {
+  // Datos server-side para el header: campaña vigente por fecha (reemplaza el
+  // link hardcoded de "Día de la Madre 2026" que ya venció) + índice de
+  // productos para el autocomplete del buscador.
+  const { campanaVigente, productosParaBusqueda } = await cargarDatosHeader();
   return (
     <html lang="es-PE" className={`${inter.variable} ${fraunces.variable} ${fredoka.variable}`}>
       <body className="flex min-h-screen flex-col bg-white font-sans antialiased">
-        <SiteHeader />
+        <SiteHeader
+          campanaVigente={campanaVigente}
+          productosParaBusqueda={productosParaBusqueda}
+        />
         <main className="flex-1">{children}</main>
         <SiteFooter />
         <WhatsappFab />
