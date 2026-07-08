@@ -3,6 +3,27 @@
 import { z } from 'zod';
 import { runAction, requireUser, bumpPaths, type ActionResult } from './_helpers';
 
+/**
+ * Cliente pidió (reunión post-2026-07-08): las recetas son sensibles al costo
+ * de producción, no pueden ser modificadas por cualquier usuario. Solo el
+ * gerente o el jefe de producción pueden editar/eliminar/agregar líneas y
+ * procesos. Los demás roles pueden VER (via requireUser normal en lecturas)
+ * pero no mutar.
+ */
+async function requireEditorReceta() {
+  const { sb, userId } = await requireUser();
+  const { data: roles } = await sb.from('usuarios_roles').select('rol').eq('usuario_id', userId);
+  const arr = ((roles ?? []) as { rol: string }[]).map((r) => r.rol);
+  const puedeEditar = arr.includes('gerente') || arr.includes('jefe_produccion');
+  if (!puedeEditar) {
+    throw new Error(
+      'Solo el gerente o el jefe de producción pueden modificar recetas. ' +
+      'Pedile a alguien con ese rol que lo haga.',
+    );
+  }
+  return { sb, userId };
+}
+
 const TALLAS = ['T0','T2','T4','T6','T8','T10','T12','T14','T16','TS','TAD'] as const;
 
 const PROCESOS = [
@@ -227,7 +248,7 @@ const lineaSchema = z.object({
 export async function crearReceta(productoId: string): Promise<ActionResult<{ id: string }>> {
   const r = await runAction(async () => {
     if (!productoId) throw new Error('Producto requerido');
-    const { sb } = await requireUser();
+    const { sb } = await requireEditorReceta();
 
     // Verificar que el producto no tenga ya una receta activa
     const { data: existente } = await sb
@@ -267,7 +288,7 @@ export async function upsertReceta(_prev: unknown, fd: FormData): Promise<Action
     // Bloquear solo si la TALLA específica ya entró a producción.
     // upsertReceta puede ejecutarse desde formularios legacy — aplicamos
     // la guarda igual que el resto.
-    const { sb } = await requireUser();
+    const { sb } = await requireEditorReceta();
     await bloquearSiTallaEnRecetaPosterior(sb, data.receta_id, data.talla);
     const { error } = await sb.from('recetas_lineas').upsert({
       receta_id: data.receta_id,
@@ -307,7 +328,7 @@ export async function upsertRecetaMulti(
 ): Promise<ActionResult<{ insertadas: number }>> {
   const r = await runAction(async () => {
     const data = upsertMultiSchema.parse(input);
-    const { sb } = await requireUser();
+    const { sb } = await requireEditorReceta();
     // Validar talla por talla: rechazamos solo las que están congeladas y
     // dejamos pasar el resto, o abortamos si TODAS están congeladas. Para
     // evitar inserciones parciales sorpresivas, abortamos si CUALQUIERA
@@ -348,7 +369,7 @@ export async function upsertRecetaMulti(
 
 export async function eliminarLinea(id: string): Promise<ActionResult> {
   const r = await runAction(async () => {
-    const { sb } = await requireUser();
+    const { sb } = await requireEditorReceta();
     await bloquearSiLineaEnProduccion(sb, id);
     const { error } = await sb.from('recetas_lineas').delete().eq('id', id);
     if (error) throw new Error(error.message);
@@ -361,7 +382,7 @@ export async function eliminarLinea(id: string): Promise<ActionResult> {
 /** Toggle inline rápido del flag sale_a_servicio en una línea. */
 export async function toggleSaleAServicio(id: string, valor: boolean): Promise<ActionResult> {
   const r = await runAction(async () => {
-    const { sb } = await requireUser();
+    const { sb } = await requireEditorReceta();
     await bloquearSiLineaEnProduccion(sb, id);
     const { error } = await sb.from('recetas_lineas').update({ sale_a_servicio: valor }).eq('id', id);
     if (error) throw new Error(error.message);
@@ -388,7 +409,7 @@ export async function duplicarReceta(
   tallaDestino?: string,
 ): Promise<ActionResult<{ lineas: number }>> {
   const r = await runAction(async () => {
-    const { sb } = await requireUser();
+    const { sb } = await requireEditorReceta();
 
     // 1. Cargar líneas de la receta origen (filtradas por talla si aplica)
     let q = sb
@@ -477,7 +498,7 @@ export async function actualizarLineaReceta(
 ): Promise<ActionResult> {
   const r = await runAction(async () => {
     // chequeo de versionado: bloquear si el producto está en producción
-    const { sb } = await requireUser();
+    const { sb } = await requireEditorReceta();
     await bloquearSiLineaEnProduccion(sb, id);
     const { error } = await sb.from('recetas_lineas').update(patch).eq('id', id);
     if (error) throw new Error(error.message);
@@ -500,7 +521,7 @@ export async function duplicarLineasTalla(
 ): Promise<ActionResult<{ lineas: number }>> {
   const r = await runAction(async () => {
     if (tallaOrigen === tallaDestino) throw new Error('Talla origen y destino son iguales');
-    const { sb } = await requireUser();
+    const { sb } = await requireEditorReceta();
     // Solo bloquear si la TALLA DESTINO ya está en producción (la origen no se toca).
     await bloquearSiTallaEnRecetaPosterior(sb, recetaId, tallaDestino);
     const { data: lineas, error: errL } = await sb
@@ -552,7 +573,7 @@ export async function agregarProceso(
 ): Promise<ActionResult<{ id: string }>> {
   const r = await runAction(async () => {
     const data = procesoSchema.parse({ ...input, producto_id: productoId });
-    const { sb } = await requireUser();
+    const { sb } = await requireEditorReceta();
     // Bloquear solo si la talla específica está en producción (o cualquiera si talla es null).
     await bloquearSiTallaEnProductoProduccion(sb, productoId, data.talla || null);
 
@@ -598,7 +619,7 @@ export async function actualizarProceso(
   patch: Partial<{ tiempo_estandar_min: number; orden: number; es_tercerizado: boolean; observacion: string; area_id: string }>,
 ): Promise<ActionResult> {
   const r = await runAction(async () => {
-    const { sb } = await requireUser();
+    const { sb } = await requireEditorReceta();
     await bloquearSiProcesoEnProduccion(sb, id);
     const { error } = await sb.from('productos_procesos').update(patch).eq('id', id);
     if (error) throw new Error(error.message);
@@ -619,7 +640,7 @@ export async function reordenarProcesos(
 ): Promise<ActionResult<{ actualizadas: number }>> {
   const r = await runAction(async () => {
     if (idsEnOrden.length === 0) return { actualizadas: 0 };
-    const { sb } = await requireUser();
+    const { sb } = await requireEditorReceta();
     await bloquearSiProductoEnProduccion(sb, productoId);
     let count = 0;
     // Una transacción real requiere PL/pgSQL; acá hacemos updates secuenciales
@@ -644,7 +665,7 @@ export async function reordenarProcesos(
 
 export async function eliminarProceso(id: string): Promise<ActionResult> {
   const r = await runAction(async () => {
-    const { sb } = await requireUser();
+    const { sb } = await requireEditorReceta();
     await bloquearSiProcesoEnProduccion(sb, id);
     const { error } = await sb.from('productos_procesos').delete().eq('id', id);
     if (error) throw new Error(error.message);
@@ -674,7 +695,7 @@ export async function duplicarProcesos(
     if (productoOrigenId === productoDestinoId) {
       throw new Error('El producto origen y destino no pueden ser el mismo.');
     }
-    const { sb } = await requireUser();
+    const { sb } = await requireEditorReceta();
     // El destino es el que se va a modificar — bloquear si está en producción.
     await bloquearSiProductoEnProduccion(sb, productoDestinoId);
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -740,7 +761,7 @@ export async function versionarRecetaMateriales(
   productoId: string,
 ): Promise<ActionResult<{ recetaId: string; version: string; lineas: number }>> {
   const r = await runAction(async () => {
-    const { sb } = await requireUser();
+    const { sb } = await requireEditorReceta();
 
     // 1) Receta activa actual
     const { data: actual, error: errA } = await sb
@@ -822,7 +843,7 @@ export async function versionarProcesosProducto(
   productoId: string,
 ): Promise<ActionResult<{ procesos: number; version: string }>> {
   const r = await runAction(async () => {
-    const { sb } = await requireUser();
+    const { sb } = await requireEditorReceta();
 
     // 1) Procesos vigentes
     // eslint-disable-next-line @typescript-eslint/no-explicit-any

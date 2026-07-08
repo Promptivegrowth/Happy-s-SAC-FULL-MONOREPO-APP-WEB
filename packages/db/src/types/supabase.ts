@@ -5607,6 +5607,41 @@ export type Database = {
           tela_principal_composicion: string | null
           tela_principal_densidad: string | null
           tela_principal_nombre: string | null
+          tela_secundaria_2_ancho: string | null
+          tela_secundaria_2_color: string | null
+          tela_secundaria_2_composicion: string | null
+          tela_secundaria_2_densidad: string | null
+          tela_secundaria_2_nombre: string | null
+          tela_secundaria_3_ancho: string | null
+          tela_secundaria_3_color: string | null
+          tela_secundaria_3_composicion: string | null
+          tela_secundaria_3_densidad: string | null
+          tela_secundaria_3_nombre: string | null
+          tela_secundaria_4_ancho: string | null
+          tela_secundaria_4_color: string | null
+          tela_secundaria_4_composicion: string | null
+          tela_secundaria_4_densidad: string | null
+          tela_secundaria_4_nombre: string | null
+          tela_secundaria_5_ancho: string | null
+          tela_secundaria_5_color: string | null
+          tela_secundaria_5_composicion: string | null
+          tela_secundaria_5_densidad: string | null
+          tela_secundaria_5_nombre: string | null
+          tela_secundaria_6_ancho: string | null
+          tela_secundaria_6_color: string | null
+          tela_secundaria_6_composicion: string | null
+          tela_secundaria_6_densidad: string | null
+          tela_secundaria_6_nombre: string | null
+          tela_secundaria_7_ancho: string | null
+          tela_secundaria_7_color: string | null
+          tela_secundaria_7_composicion: string | null
+          tela_secundaria_7_densidad: string | null
+          tela_secundaria_7_nombre: string | null
+          tela_secundaria_8_ancho: string | null
+          tela_secundaria_8_color: string | null
+          tela_secundaria_8_composicion: string | null
+          tela_secundaria_8_densidad: string | null
+          tela_secundaria_8_nombre: string | null
           tela_secundaria_ancho: string | null
           tela_secundaria_color: string | null
           tela_secundaria_composicion: string | null
@@ -5643,6 +5678,41 @@ export type Database = {
           tela_principal_composicion?: string | null
           tela_principal_densidad?: string | null
           tela_principal_nombre?: string | null
+          tela_secundaria_2_ancho?: string | null
+          tela_secundaria_2_color?: string | null
+          tela_secundaria_2_composicion?: string | null
+          tela_secundaria_2_densidad?: string | null
+          tela_secundaria_2_nombre?: string | null
+          tela_secundaria_3_ancho?: string | null
+          tela_secundaria_3_color?: string | null
+          tela_secundaria_3_composicion?: string | null
+          tela_secundaria_3_densidad?: string | null
+          tela_secundaria_3_nombre?: string | null
+          tela_secundaria_4_ancho?: string | null
+          tela_secundaria_4_color?: string | null
+          tela_secundaria_4_composicion?: string | null
+          tela_secundaria_4_densidad?: string | null
+          tela_secundaria_4_nombre?: string | null
+          tela_secundaria_5_ancho?: string | null
+          tela_secundaria_5_color?: string | null
+          tela_secundaria_5_composicion?: string | null
+          tela_secundaria_5_densidad?: string | null
+          tela_secundaria_5_nombre?: string | null
+          tela_secundaria_6_ancho?: string | null
+          tela_secundaria_6_color?: string | null
+          tela_secundaria_6_composicion?: string | null
+          tela_secundaria_6_densidad?: string | null
+          tela_secundaria_6_nombre?: string | null
+          tela_secundaria_7_ancho?: string | null
+          tela_secundaria_7_color?: string | null
+          tela_secundaria_7_composicion?: string | null
+          tela_secundaria_7_densidad?: string | null
+          tela_secundaria_7_nombre?: string | null
+          tela_secundaria_8_ancho?: string | null
+          tela_secundaria_8_color?: string | null
+          tela_secundaria_8_composicion?: string | null
+          tela_secundaria_8_densidad?: string | null
+          tela_secundaria_8_nombre?: string | null
           tela_secundaria_ancho?: string | null
           tela_secundaria_color?: string | null
           tela_secundaria_composicion?: string | null
@@ -5679,6 +5749,41 @@ export type Database = {
           tela_principal_composicion?: string | null
           tela_principal_densidad?: string | null
           tela_principal_nombre?: string | null
+          tela_secundaria_2_ancho?: string | null
+          tela_secundaria_2_color?: string | null
+          tela_secundaria_2_composicion?: string | null
+          tela_secundaria_2_densidad?: string | null
+          tela_secundaria_2_nombre?: string | null
+          tela_secundaria_3_ancho?: string | null
+          tela_secundaria_3_color?: string | null
+          tela_secundaria_3_composicion?: string | null
+          tela_secundaria_3_densidad?: string | null
+          tela_secundaria_3_nombre?: string | null
+          tela_secundaria_4_ancho?: string | null
+          tela_secundaria_4_color?: string | null
+          tela_secundaria_4_composicion?: string | null
+          tela_secundaria_4_densidad?: string | null
+          tela_secundaria_4_nombre?: string | null
+          tela_secundaria_5_ancho?: string | null
+          tela_secundaria_5_color?: string | null
+          tela_secundaria_5_composicion?: string | null
+          tela_secundaria_5_densidad?: string | null
+          tela_secundaria_5_nombre?: string | null
+          tela_secundaria_6_ancho?: string | null
+          tela_secundaria_6_color?: string | null
+          tela_secundaria_6_composicion?: string | null
+          tela_secundaria_6_densidad?: string | null
+          tela_secundaria_6_nombre?: string | null
+          tela_secundaria_7_ancho?: string | null
+          tela_secundaria_7_color?: string | null
+          tela_secundaria_7_composicion?: string | null
+          tela_secundaria_7_densidad?: string | null
+          tela_secundaria_7_nombre?: string | null
+          tela_secundaria_8_ancho?: string | null
+          tela_secundaria_8_color?: string | null
+          tela_secundaria_8_composicion?: string | null
+          tela_secundaria_8_densidad?: string | null
+          tela_secundaria_8_nombre?: string | null
           tela_secundaria_ancho?: string | null
           tela_secundaria_color?: string | null
           tela_secundaria_composicion?: string | null

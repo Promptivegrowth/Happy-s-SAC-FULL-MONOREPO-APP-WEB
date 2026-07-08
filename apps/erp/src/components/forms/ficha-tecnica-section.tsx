@@ -372,17 +372,37 @@ function ResumenTab({ ficha }: { ficha: FichaTecnica }) {
 // ────────────────────────────────────────────────────────────────────────────
 function ComposicionTab({ ficha }: { ficha: FichaTecnica }) {
   const [pending, start] = useTransition();
-  const [form, setForm] = useState({
-    tela_principal_nombre: ficha.tela_principal_nombre ?? '',
-    tela_principal_composicion: ficha.tela_principal_composicion ?? '',
-    tela_principal_color: ficha.tela_principal_color ?? '',
-    tela_principal_densidad: ficha.tela_principal_densidad ?? '',
-    tela_principal_ancho: ficha.tela_principal_ancho ?? '',
-    tela_secundaria_nombre: ficha.tela_secundaria_nombre ?? '',
-    tela_secundaria_composicion: ficha.tela_secundaria_composicion ?? '',
-    tela_secundaria_color: ficha.tela_secundaria_color ?? '',
-    tela_secundaria_densidad: ficha.tela_secundaria_densidad ?? '',
-    tela_secundaria_ancho: ficha.tela_secundaria_ancho ?? '',
+
+  // Cliente reportó (post-2026-07-08): "nuestros disfraces requieren hasta
+  // 9 tipos de tela". Ampliamos de 2 (principal + secundaria) a 9 (principal
+  // + 8 secundarias). Los prefijos son:
+  //   - tela_principal
+  //   - tela_secundaria (la secundaria original, mantiene el nombre por compat)
+  //   - tela_secundaria_2 hasta tela_secundaria_8 (mig 59)
+  const PREFIXES = ['tela_principal', 'tela_secundaria', 'tela_secundaria_2', 'tela_secundaria_3',
+    'tela_secundaria_4', 'tela_secundaria_5', 'tela_secundaria_6', 'tela_secundaria_7',
+    'tela_secundaria_8'] as const;
+  const SUFIJOS = ['nombre', 'composicion', 'color', 'densidad', 'ancho'] as const;
+
+  const initial: Record<string, string> = {};
+  for (const p of PREFIXES) {
+    for (const s of SUFIJOS) {
+      const key = `${p}_${s}`;
+      initial[key] = (ficha as unknown as Record<string, string | null>)[key] ?? '';
+    }
+  }
+  const [form, setForm] = useState<Record<string, string>>(initial);
+
+  // Cuántas telas secundarias "expandir" por default: mostramos hasta la
+  // última con datos + 1 vacía. Así si la ficha tiene 3 telas usadas, muestra 4.
+  const [telasVisibles, setTelasVisibles] = useState(() => {
+    let ultimaConDatos = 1; // 1 = solo principal
+    for (let i = 1; i < PREFIXES.length; i++) {
+      const p = PREFIXES[i]!;
+      const hayDatos = SUFIJOS.some((s) => initial[`${p}_${s}`]);
+      if (hayDatos) ultimaConDatos = i + 1;
+    }
+    return Math.min(9, Math.max(2, ultimaConDatos + 1));
   });
 
   function save() {
@@ -395,29 +415,32 @@ function ComposicionTab({ ficha }: { ficha: FichaTecnica }) {
 
   return (
     <div className="space-y-4">
-      <Card className="space-y-3 p-5">
-        <h4 className="font-display text-sm font-semibold uppercase tracking-wide text-corp-900">
-          <Layers className="mr-1 inline h-3.5 w-3.5" /> Tela principal
-        </h4>
-        <TelaForm
-          prefix="tela_principal"
-          values={form}
-          onChange={(v) => setForm({ ...form, ...v })}
-        />
-      </Card>
+      {PREFIXES.slice(0, telasVisibles).map((prefix, idx) => (
+        <Card key={prefix} className="space-y-3 p-5">
+          <h4 className="font-display text-sm font-semibold uppercase tracking-wide text-corp-900">
+            <Layers className="mr-1 inline h-3.5 w-3.5" />
+            {idx === 0 ? 'Tela principal' : `Tela secundaria ${idx === 1 ? '' : idx} (opcional)`}
+          </h4>
+          <TelaForm
+            prefix={prefix}
+            values={form}
+            onChange={(v) => setForm({ ...form, ...v })}
+          />
+        </Card>
+      ))}
 
-      <Card className="space-y-3 p-5">
-        <h4 className="font-display text-sm font-semibold uppercase tracking-wide text-corp-900">
-          <Layers className="mr-1 inline h-3.5 w-3.5" /> Tela secundaria (opcional)
-        </h4>
-        <TelaForm
-          prefix="tela_secundaria"
-          values={form}
-          onChange={(v) => setForm({ ...form, ...v })}
-        />
-      </Card>
-
-      <div className="flex justify-end">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        {telasVisibles < 9 && (
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setTelasVisibles((n) => Math.min(9, n + 1))}
+            type="button"
+          >
+            + Agregar tela {telasVisibles === 1 ? 'secundaria' : `secundaria ${telasVisibles}`}
+          </Button>
+        )}
+        {telasVisibles >= 9 && <span className="text-xs text-slate-500">Máximo 9 telas</span>}
         <Button variant="premium" size="sm" onClick={save} disabled={pending}>
           {pending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
           Guardar composición
@@ -430,7 +453,7 @@ function ComposicionTab({ ficha }: { ficha: FichaTecnica }) {
 function TelaForm({
   prefix, values, onChange,
 }: {
-  prefix: 'tela_principal' | 'tela_secundaria';
+  prefix: string;   // Ampliado para soportar tela_secundaria_2..8 (mig 59)
   values: Record<string, string>;
   onChange: (v: Record<string, string>) => void;
 }) {

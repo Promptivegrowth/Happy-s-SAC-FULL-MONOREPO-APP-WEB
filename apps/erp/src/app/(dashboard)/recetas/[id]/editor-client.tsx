@@ -576,7 +576,7 @@ function BomEditor({
 
             <FormGrid cols={2}>
               <FormRow label="Cantidad por unidad" required>
-                <Input name="cantidad" type="number" step="0.0001" min="0" required placeholder="Ej. 1.5" />
+                <Input name="cantidad" type="number" step="0.001" min="0" required placeholder="Ej. 1.5" />
               </FormRow>
               <FormRow
                 label="Unidad"
@@ -628,7 +628,7 @@ function BomEditor({
               </div>
               {saleAServicio && (
                 <FormRow label="Cant. queda en alm." className="w-36">
-                  <Input name="cantidad_almacen" type="number" step="0.0001" min="0" defaultValue={0} />
+                  <Input name="cantidad_almacen" type="number" step="0.001" min="0" defaultValue={0} />
                 </FormRow>
               )}
             </div>
@@ -786,7 +786,7 @@ function RecetaTabla({
               <TableCell className="text-right">
                 <InlineNumber
                   valor={Number(l.cantidad)}
-                  step={0.0001}
+                  step={0.001}
                   onChange={(v) => actualizarCampo(l.id, { cantidad: v })}
                   disabled={congelada}
                 />
@@ -808,7 +808,7 @@ function RecetaTabla({
                 {l.sale_a_servicio ? (
                   <InlineNumber
                     valor={Number(l.cantidad_almacen ?? 0)}
-                    step={0.0001}
+                    step={0.001}
                     onChange={(v) => actualizarCampo(l.id, { cantidad_almacen: v })}
                     disabled={congelada}
                   />
