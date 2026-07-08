@@ -15,7 +15,7 @@ import { Label } from '@happy/ui/label';
 import { Button } from '@happy/ui/button';
 import { Badge } from '@happy/ui/badge';
 import {
-  ArrowDown, ArrowUp, Coins, Loader2, Plus, Trash2, X, Receipt,
+  ArrowDown, ArrowUp, Coins, Loader2, Plus, Trash2, X, Receipt, Printer,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { formatPEN } from '@happy/lib';
@@ -101,6 +101,67 @@ export function GastosModal({ onClose }: { onClose: () => void }) {
 
   const totalEgresos = movs.filter((m) => m.tipo === 'EGRESO').reduce((s, m) => s + m.monto, 0);
   const totalIngresos = movs.filter((m) => m.tipo === 'INGRESO').reduce((s, m) => s + m.monto, 0);
+  const totalNeto = totalIngresos - totalEgresos;
+
+  // Imprime el listado en una ventana nueva con estilo tipo ticket 80mm.
+  // Cliente pidió (post-2026-07-08) tener boton imprimir para dejar copia
+  // fisica del cuadre de caja chica del turno.
+  function imprimir() {
+    const empresa = 'HAPPY SAC';
+    const fecha = new Date().toLocaleString('es-PE');
+    const filas = movs
+      .map((m) => {
+        const hora = new Date(m.fecha).toLocaleTimeString('es-PE', { hour: '2-digit', minute: '2-digit' });
+        const signo = m.tipo === 'EGRESO' ? '-' : '+';
+        const cat = m.categoria_nombre ? ` [${m.categoria_nombre}]` : '';
+        const comp = m.comprobante_ref ? `<div style="font-size:9px;color:#777;margin-left:4px">Ref: ${m.comprobante_ref}</div>` : '';
+        return `<tr>
+          <td style="padding:2px 4px;font-family:monospace">${hora}</td>
+          <td style="padding:2px 4px">${m.concepto}${cat}${comp}</td>
+          <td style="padding:2px 4px;text-align:right;font-weight:bold;color:${m.tipo === 'EGRESO' ? '#c026d3' : '#059669'};font-family:monospace">${signo}S/ ${m.monto.toFixed(2)}</td>
+        </tr>`;
+      })
+      .join('');
+    const html = `<!doctype html><html><head><meta charset="utf-8"><title>Caja chica ${fecha}</title>
+      <style>
+        body{font-family:Arial,sans-serif;padding:12px;max-width:80mm;margin:0 auto;color:#0f172a}
+        h1{font-size:14px;text-align:center;margin:0 0 4px}
+        .sub{text-align:center;font-size:10px;color:#666;margin-bottom:8px}
+        .box{border:1px solid #ddd;padding:6px;margin:6px 0;border-radius:4px}
+        .row{display:flex;justify-content:space-between;font-size:11px;margin:2px 0}
+        .row .lbl{color:#666}
+        .row .val{font-weight:bold;font-family:monospace}
+        table{width:100%;border-collapse:collapse;font-size:10px;margin-top:8px}
+        thead th{background:#1e3a5f;color:#fff;padding:3px 4px;text-align:left;font-size:10px}
+        .total{border-top:2px solid #1e3a5f;padding-top:6px;margin-top:8px;font-size:13px;font-weight:bold}
+        .neto{color:${totalNeto >= 0 ? '#059669' : '#c026d3'}}
+        .foot{margin-top:16px;font-size:9px;color:#999;text-align:center}
+      </style>
+    </head><body>
+      <h1>${empresa}</h1>
+      <div class="sub">CAJA CHICA — Movimientos del turno<br/>${fecha}</div>
+      <div class="box">
+        <div class="row"><span class="lbl">Ingresos</span><span class="val" style="color:#059669">+S/ ${totalIngresos.toFixed(2)}</span></div>
+        <div class="row"><span class="lbl">Egresos</span><span class="val" style="color:#c026d3">-S/ ${totalEgresos.toFixed(2)}</span></div>
+        <div class="row"><span class="lbl">N° movimientos</span><span class="val">${movs.length}</span></div>
+      </div>
+      <table>
+        <thead><tr><th>Hora</th><th>Concepto</th><th style="text-align:right">Monto</th></tr></thead>
+        <tbody>${filas || '<tr><td colspan="3" style="text-align:center;padding:10px;color:#999">Sin movimientos</td></tr>'}</tbody>
+      </table>
+      <div class="total row"><span>TOTAL NETO</span><span class="neto">${totalNeto >= 0 ? '+' : ''}S/ ${totalNeto.toFixed(2)}</span></div>
+      <div class="foot">Impreso desde HAPPY SAC POS</div>
+    </body></html>`;
+
+    const w = window.open('', '_blank');
+    if (!w) { toast.error('El navegador bloqueó la ventana. Permitá popups y probá de nuevo.'); return; }
+    w.document.write(html);
+    w.document.close();
+    // Auto-print + focus (comportamiento igual al comprobante-pdf del POS)
+    const tryPrint = () => { try { w.focus(); w.print(); } catch { /* ignore */ } };
+    w.addEventListener('load', tryPrint);
+    setTimeout(tryPrint, 700);
+  }
 
   return (
     <div className="fixed inset-0 z-40 flex items-center justify-center bg-corp-900/60 backdrop-blur-sm p-4">
@@ -122,7 +183,7 @@ export function GastosModal({ onClose }: { onClose: () => void }) {
         </div>
 
         {/* Totales rápidos */}
-        <div className="mt-4 grid gap-2 sm:grid-cols-3">
+        <div className="mt-4 grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
           <div className="rounded-lg border border-rose-200 bg-rose-50/50 p-3">
             <div className="flex items-center gap-1 text-[10px] uppercase tracking-wider text-rose-700">
               <ArrowDown className="h-3 w-3" />
@@ -136,6 +197,18 @@ export function GastosModal({ onClose }: { onClose: () => void }) {
               Ingresos del turno
             </div>
             <p className="font-display text-xl font-semibold text-emerald-700">{formatPEN(totalIngresos)}</p>
+          </div>
+          <div
+            className={`rounded-lg border p-3 ${
+              totalNeto >= 0 ? 'border-corp-200 bg-corp-50/50' : 'border-amber-200 bg-amber-50/50'
+            }`}
+          >
+            <div className={`text-[10px] uppercase tracking-wider ${totalNeto >= 0 ? 'text-corp-700' : 'text-amber-700'}`}>
+              Total neto (ing − egr)
+            </div>
+            <p className={`font-display text-xl font-semibold ${totalNeto >= 0 ? 'text-corp-900' : 'text-amber-800'}`}>
+              {totalNeto >= 0 ? '' : '−'}{formatPEN(Math.abs(totalNeto))}
+            </p>
           </div>
           <div className="rounded-lg border border-slate-200 bg-slate-50/50 p-3">
             <div className="text-[10px] uppercase tracking-wider text-slate-500">Movimientos</div>
@@ -299,7 +372,17 @@ export function GastosModal({ onClose }: { onClose: () => void }) {
           )}
         </div>
 
-        <div className="mt-5 flex justify-end">
+        <div className="mt-5 flex flex-wrap items-center justify-end gap-2">
+          {movs.length > 0 && (
+            <Button
+              variant="outline"
+              onClick={imprimir}
+              disabled={pending}
+              className="border-corp-300 text-corp-700 hover:bg-corp-50"
+            >
+              <Printer className="h-4 w-4" /> Imprimir cuadre
+            </Button>
+          )}
           <Button variant="outline" onClick={onClose} disabled={pending}>
             Cerrar
           </Button>
