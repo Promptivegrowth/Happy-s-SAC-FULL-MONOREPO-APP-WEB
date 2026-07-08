@@ -815,25 +815,14 @@ export function PosTerminal({
           )}
         </div>
 
-        {/* Mini carrito flotante (visible solo en vista catálogo cuando hay items) */}
-        {vista === 'catalogo' && carrito.length > 0 && (
-          <div className="border-t bg-happy-50/60 p-3" data-pos-no-focus>
-            <div className="flex items-center gap-3">
-              <ShoppingBag className="h-5 w-5 text-happy-600" />
-              <span className="text-sm font-medium">
-                {carrito.length} ítem{carrito.length === 1 ? '' : 's'} · {formatPEN(total)}
-              </span>
-              <Button variant="outline" size="sm" onClick={() => setVista('busqueda')} className="ml-auto">
-                Ver carrito
-              </Button>
-            </div>
-          </div>
-        )}
+        {/* Mini flotante "Ver carrito" removido: el carrito ahora está SIEMPRE
+            visible en el panel derecho (arriba de los medios de pago). Ya no
+            hace falta cambiar de vista para verlo. */}
       </section>
 
-      {/* DERECHA — Cliente + Pago */}
+      {/* DERECHA — Cliente + Carrito visible + Pago */}
       <aside className="flex h-screen flex-col border-l bg-slate-50">
-        <div className="border-b bg-white p-4">
+        <div className="shrink-0 border-b bg-white p-4">
           <div className="mb-3 flex gap-2 text-xs">
             <button onClick={() => setTipoCliente('rapido')} className={`flex-1 rounded-md px-3 py-2 ${tipoCliente === 'rapido' ? 'bg-happy-100 font-medium text-happy-700' : 'text-slate-500'}`}>Cliente rápido</button>
             <button onClick={() => setTipoCliente('completo')} className={`flex-1 rounded-md px-3 py-2 ${tipoCliente === 'completo' ? 'bg-happy-100 font-medium text-happy-700' : 'text-slate-500'}`}>Con DNI/RUC</button>
@@ -848,7 +837,83 @@ export function PosTerminal({
           )}
         </div>
 
-        <div className="flex-1 overflow-auto p-4">
+        {/* CARRITO SIEMPRE VISIBLE — cliente pidió (reunión post-2026-07-08)
+            que al seleccionar productos aparezcan aquí al costado, arriba de
+            los medios de pago, sin tener que abrir "Ver carrito". Así el
+            cajero mantiene siempre la vista de lo que está vendiendo. */}
+        <div className="flex min-h-0 flex-1 flex-col border-b bg-white" data-pos-no-focus>
+          <div className="flex items-center justify-between border-b bg-slate-50 px-3 py-2">
+            <span className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-slate-600">
+              <ShoppingBag className="h-3.5 w-3.5 text-happy-600" />
+              Venta actual
+            </span>
+            {carrito.length > 0 && (
+              <span className="rounded-full bg-happy-100 px-2 py-0.5 text-[10px] font-bold text-happy-700">
+                {carrito.length} {carrito.length === 1 ? 'ítem' : 'ítems'} · {formatPEN(total)}
+              </span>
+            )}
+          </div>
+          {carrito.length === 0 ? (
+            <div className="flex flex-1 flex-col items-center justify-center gap-1 p-4 text-center">
+              <ShoppingBag className="h-8 w-8 text-slate-300" />
+              <p className="text-xs text-slate-400">Selecciona productos del catálogo</p>
+            </div>
+          ) : (
+            <ul className="flex-1 overflow-auto p-2">
+              {lineasConPrecio.map((l) => {
+                const precioPublico = Number(l.variante.precio_publico ?? 0);
+                const enOferta = l.escalon !== 'PUBLICO' && precioPublico > 0 && l.precio_unitario < precioPublico;
+                return (
+                  <li key={l.variante.id} className="mb-1.5 rounded-md border bg-white p-2 last:mb-0">
+                    <div className="flex items-start gap-2">
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate text-xs font-medium text-corp-900">{l.variante.productos.nombre}</p>
+                        <p className="text-[10px] text-slate-500">
+                          T{formatTalla(l.variante.talla)} · {l.variante.sku}
+                        </p>
+                        <div className="mt-0.5 flex items-baseline gap-1">
+                          <span className="text-[11px] font-semibold text-happy-600">{formatPEN(l.precio_unitario)}</span>
+                          {enOferta && (
+                            <span className="text-[9px] text-slate-400 line-through">{formatPEN(precioPublico)}</span>
+                          )}
+                        </div>
+                      </div>
+                      <div className="flex flex-col items-end gap-1">
+                        <span className="font-display text-sm font-semibold text-corp-900">{formatPEN(l.subtotal)}</span>
+                        <div className="flex items-center rounded border">
+                          <button
+                            onClick={() => setQty(l.variante.id, l.cantidad - 1)}
+                            className="px-1.5 py-0.5 text-slate-600 hover:bg-slate-50"
+                            aria-label="Restar"
+                          >
+                            <Minus className="h-3 w-3" />
+                          </button>
+                          <span className="min-w-6 text-center text-xs font-semibold">{l.cantidad}</span>
+                          <button
+                            onClick={() => setQty(l.variante.id, l.cantidad + 1)}
+                            className="px-1.5 py-0.5 text-slate-600 hover:bg-slate-50"
+                            aria-label="Sumar"
+                          >
+                            <Plus className="h-3 w-3" />
+                          </button>
+                          <button
+                            onClick={() => eliminar(l.variante.id)}
+                            className="border-l px-1.5 py-0.5 text-red-500 hover:bg-red-50"
+                            aria-label="Eliminar"
+                          >
+                            <Trash2 className="h-3 w-3" />
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </div>
+
+        <div className="shrink-0 overflow-auto p-4">
           <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-slate-400">Métodos de pago</p>
 
           {/* EFECTIVO con input — para registrar monto real recibido y calcular vuelto */}
