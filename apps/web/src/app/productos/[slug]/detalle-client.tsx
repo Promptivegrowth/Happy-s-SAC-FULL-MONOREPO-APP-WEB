@@ -7,6 +7,13 @@ import { Badge } from '@happy/ui/badge';
 import { ShoppingBag, MessageCircle, Plus, Minus, Zap, AlertTriangle } from 'lucide-react';
 import { useCart, type CartItem } from '@/store/cart';
 import { toast } from 'sonner';
+import { WHATSAPP_NUMERO } from '@/lib/contacto';
+
+// Umbrales para escalón de precio en la WEB pública (post-2026-07-08):
+//  - Desde 6 unidades → precio mayorista
+//  - Desde 100 unidades → precio de fábrica (aún más bajo)
+const UMBRAL_MAYORISTA = 6;
+const UMBRAL_FABRICA = 100;
 
 type Variante = {
   id: string;
@@ -19,6 +26,8 @@ type Variante = {
   /** True si esta talla recibe el descuento %. */
   aplicaDescuento: boolean;
   precioMayorista: number;
+  /** Precio de fábrica (>= 100 unidades). Puede ser 0 si no está cargado. */
+  precioFabrica: number;
   stock: number;
 };
 
@@ -50,20 +59,35 @@ export function ProductoDetalleClient({
   const [seleccionada, setSeleccionada] = useState<Variante | null>(primeraConStock);
   const [cantidad, setCantidad] = useState(1);
 
+  // Cliente pidió (post-2026-07-08) que al cambiar de talla la cantidad
+  // vuelva a 1 (se reseteaba antes en el useEffect). Wrapper que setea
+  // ambos estados a la vez para evitar mostrar cantidad vieja con talla nueva.
+  function cambiarTalla(v: Variante) {
+    setSeleccionada(v);
+    setCantidad(1);
+  }
+
   // Tallas únicas (por orden de aparición)
   const tallasUnicas = Array.from(new Set(variantes.map((v) => v.talla)));
 
   const stockSeleccionada = seleccionada?.stock ?? 0;
   const sinStockSeleccionada = stockSeleccionada <= 0;
 
-  // Prioridad 1: descuento % aplicado a la talla (si aplica).
-  // Prioridad 2: precio_oferta absoluto.
-  // Prioridad 3: precio normal.
+  // Precio base según ESCALÓN por cantidad. Precio de fábrica (>=100), luego
+  // mayorista (>=6), luego público. Descuentos % o precio_oferta absoluto
+  // se aplican sobre público (no se combinan con mayorista/fábrica).
   let precioFinal = seleccionada?.precio ?? 0;
   let tieneOferta = false;
   let descuento = 0;
+  let escalonActivo: 'PUBLICO' | 'MAYORISTA' | 'FABRICA' = 'PUBLICO';
   if (seleccionada) {
-    if (seleccionada.aplicaDescuento && seleccionada.precioConDescuento < seleccionada.precio) {
+    if (cantidad >= UMBRAL_FABRICA && seleccionada.precioFabrica > 0) {
+      precioFinal = seleccionada.precioFabrica;
+      escalonActivo = 'FABRICA';
+    } else if (cantidad >= UMBRAL_MAYORISTA && seleccionada.precioMayorista > 0) {
+      precioFinal = seleccionada.precioMayorista;
+      escalonActivo = 'MAYORISTA';
+    } else if (seleccionada.aplicaDescuento && seleccionada.precioConDescuento < seleccionada.precio) {
       precioFinal = seleccionada.precioConDescuento;
       tieneOferta = true;
       descuento = descuentoPorcentaje;
@@ -92,6 +116,9 @@ export function ProductoDetalleClient({
     };
     add(item);
     toast.success(`${cantidad} × ${nombre} (${seleccionada.talla.replace('T', '')}) agregado`);
+    // Reset cantidad a 1 tras agregar — cliente pidió que se limpie para
+    // que el siguiente click no repita la misma cantidad.
+    setCantidad(1);
   }
 
   function comprarPorWhatsapp() {
@@ -110,7 +137,7 @@ Precio: S/ ${precioFinal.toFixed(2)}
 Total: *S/ ${total.toFixed(2)}*${mensajeStock}
 
 ¿Cómo procedo con la compra?`;
-    window.open(`https://wa.me/51916856842?text=${encodeURIComponent(msg)}`, '_blank');
+    window.open(`https://wa.me/${WHATSAPP_NUMERO}?text=${encodeURIComponent(msg)}`, '_blank');
   }
 
   function irAlCheckout() {
@@ -134,11 +161,33 @@ Total: *S/ ${total.toFixed(2)}*${mensajeStock}
               </>
             )}
           </div>
-          {seleccionada.precioMayorista > 0 && (
-            <p className="mt-1 text-sm text-slate-500">
-              Mayorista (desde 6 unid.):{' '}
-              <span className="font-medium text-slate-900">S/ {seleccionada.precioMayorista.toFixed(2)}</span>
-            </p>
+          {/* Escalones de precio: mayorista (≥6) y fábrica (≥100).
+              Se muestran ambos si existen. El activo se pinta con badge. */}
+          {(seleccionada.precioMayorista > 0 || seleccionada.precioFabrica > 0) && (
+            <div className="mt-1 space-y-0.5">
+              {seleccionada.precioMayorista > 0 && (
+                <p className="flex items-center gap-2 text-sm text-slate-500">
+                  <span>
+                    Mayorista (desde {UMBRAL_MAYORISTA} unid.):{' '}
+                    <span className="font-medium text-slate-900">S/ {seleccionada.precioMayorista.toFixed(2)}</span>
+                  </span>
+                  {escalonActivo === 'MAYORISTA' && (
+                    <Badge className="bg-emerald-500 text-[10px]">Aplicado</Badge>
+                  )}
+                </p>
+              )}
+              {seleccionada.precioFabrica > 0 && (
+                <p className="flex items-center gap-2 text-sm text-slate-500">
+                  <span>
+                    Fábrica (desde {UMBRAL_FABRICA} unid.):{' '}
+                    <span className="font-medium text-slate-900">S/ {seleccionada.precioFabrica.toFixed(2)}</span>
+                  </span>
+                  {escalonActivo === 'FABRICA' && (
+                    <Badge className="bg-blue-600 text-[10px]">Aplicado</Badge>
+                  )}
+                </p>
+              )}
+            </div>
           )}
 
           {/* Estado de stock */}
@@ -182,7 +231,7 @@ Total: *S/ ${total.toFixed(2)}*${mensajeStock}
             return (
               <button
                 key={t}
-                onClick={() => setSeleccionada(v)}
+                onClick={() => cambiarTalla(v)}
                 disabled={sinStock}
                 title={
                   sinStock
@@ -214,7 +263,7 @@ Total: *S/ ${total.toFixed(2)}*${mensajeStock}
         </div>
       </div>
 
-      <div className="flex items-center gap-3">
+      <div className="flex flex-wrap items-center gap-3">
         <p className="text-sm font-medium text-corp-900">Cantidad</p>
         <div className="flex items-center rounded-md border border-slate-300">
           <button
@@ -225,7 +274,25 @@ Total: *S/ ${total.toFixed(2)}*${mensajeStock}
           >
             <Minus className="h-3 w-3" />
           </button>
-          <span className="min-w-10 text-center text-sm font-medium">{cantidad}</span>
+          {/* Input editable — cliente pidió (post-2026-07-08) poder tipear
+              directo en vez de solo +/-. El valor se clamp a stock disponible. */}
+          <input
+            type="number"
+            min={1}
+            max={stockSeleccionada || 1}
+            value={cantidad}
+            onChange={(e) => {
+              const raw = Number(e.target.value.replace(/[^\d]/g, ''));
+              if (!Number.isFinite(raw) || raw < 1) { setCantidad(1); return; }
+              setCantidad(Math.min(stockSeleccionada || 1, Math.max(1, raw)));
+            }}
+            onBlur={(e) => {
+              const raw = Number(e.target.value);
+              if (!Number.isFinite(raw) || raw < 1) setCantidad(1);
+            }}
+            disabled={sinStockSeleccionada}
+            className="w-14 border-x border-slate-200 bg-transparent px-2 py-2 text-center text-sm font-medium focus:outline-none focus:ring-1 focus:ring-happy-400 disabled:cursor-not-allowed disabled:opacity-50 [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+          />
           <button
             onClick={() => setCantidad(Math.min(stockSeleccionada || 1, cantidad + 1))}
             disabled={sinStockSeleccionada || cantidad >= stockSeleccionada}
@@ -235,8 +302,11 @@ Total: *S/ ${total.toFixed(2)}*${mensajeStock}
             <Plus className="h-3 w-3" />
           </button>
         </div>
-        {cantidad >= 6 && !sinStockSeleccionada && (
+        {escalonActivo === 'MAYORISTA' && (
           <Badge variant="success" className="text-[10px]">¡Precio mayorista!</Badge>
+        )}
+        {escalonActivo === 'FABRICA' && (
+          <Badge className="bg-blue-600 text-[10px] hover:bg-blue-600">¡Precio de fábrica!</Badge>
         )}
       </div>
 
@@ -262,12 +332,15 @@ Total: *S/ ${total.toFixed(2)}*${mensajeStock}
 
       <button
         onClick={comprarPorWhatsapp}
-        className="flex w-full items-center justify-center gap-2 rounded-md border border-emerald-300 bg-emerald-50 py-3 text-sm font-medium text-emerald-700 transition hover:bg-emerald-100"
+        className="flex w-full flex-col items-center justify-center gap-0.5 rounded-md border border-emerald-300 bg-emerald-50 py-2.5 text-sm font-medium text-emerald-700 transition hover:bg-emerald-100"
       >
-        <MessageCircle className="h-4 w-4" />
-        {agotado || sinStockSeleccionada
-          ? 'Consultar reposición por WhatsApp'
-          : 'Pedir por WhatsApp · +51 916 856 842'}
+        <span className="flex items-center gap-2">
+          <MessageCircle className="h-4 w-4" />
+          {agotado || sinStockSeleccionada
+            ? 'Consultar reposición por WhatsApp'
+            : 'Pedidos para el mismo día o urgentes consultar al WhatsApp'}
+        </span>
+        <span className="text-[11px] font-normal text-emerald-800/80">Escribinos aquí</span>
       </button>
 
       {!agotado && stockTotal > 0 && stockTotal <= 10 && (

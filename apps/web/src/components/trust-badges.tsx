@@ -1,12 +1,13 @@
 import { ShieldCheck } from 'lucide-react';
 
+// Cliente pidió (post-2026-07-08) simplificar a solo 4 medios reales:
+// Yape, Plin, Transferencia, Tarjeta. Se quitaron VISA/MC/AMEX/PE que
+// duplicaban visualmente lo que "Tarjeta" ya cubre.
 const PAGOS = [
-  { name: 'Visa', label: 'VISA', bg: 'bg-white', text: 'text-blue-700' },
-  { name: 'Mastercard', label: 'MC', bg: 'bg-white', text: 'text-red-600' },
-  { name: 'American Express', label: 'AMEX', bg: 'bg-white', text: 'text-blue-900' },
   { name: 'Yape', label: 'Yape', bg: 'bg-purple-600', text: 'text-white' },
   { name: 'Plin', label: 'Plin', bg: 'bg-blue-600', text: 'text-white' },
-  { name: 'Pago Efectivo', label: 'PE', bg: 'bg-yellow-400', text: 'text-corp-900' },
+  { name: 'Transferencia', label: 'Transferencia', bg: 'bg-emerald-600', text: 'text-white' },
+  { name: 'Tarjeta', label: 'Tarjeta', bg: 'bg-slate-800', text: 'text-white' },
 ];
 
 export function TrustBadges() {
@@ -15,7 +16,7 @@ export function TrustBadges() {
       <div className="mb-3 flex items-center justify-center gap-2 text-sm font-semibold text-corp-900">
         <ShieldCheck className="h-4 w-4 text-corp-700" /> Pago 100% Seguro
       </div>
-      <div className="grid grid-cols-3 gap-2 sm:grid-cols-6">
+      <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
         {PAGOS.map((p) => (
           <div
             key={p.name}

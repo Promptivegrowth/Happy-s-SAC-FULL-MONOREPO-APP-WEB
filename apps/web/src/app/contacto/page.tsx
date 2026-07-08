@@ -8,8 +8,8 @@ export default function Page() {
         Estamos para ayudarte. Escríbenos por WhatsApp o correo.
       </p>
       <ul className="mt-8 space-y-3 text-sm">
-        <li>📱 WhatsApp: <a href="https://wa.me/51916856842" className="text-happy-600 hover:underline">+51 916 856 842</a></li>
-        <li>📧 Email: <a href="mailto:ventas@disfraceshappys.com" className="text-happy-600 hover:underline">ventas@disfraceshappys.com</a></li>
+        <li>📱 WhatsApp: <a href="https://wa.me/51903064120" className="text-happy-600 hover:underline">+51 903 064 120</a></li>
+        <li>📧 Email: <a href="mailto:ventas@disfraceshappys.com.pe" className="text-happy-600 hover:underline">ventas@disfraceshappys.com.pe</a></li>
         <li>🏬 Tienda Huallaga · 🏬 Tienda La Quinta — Lima, Perú</li>
       </ul>
     </article>

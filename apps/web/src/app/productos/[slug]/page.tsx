@@ -1,16 +1,16 @@
 import { notFound } from 'next/navigation';
-import Image from 'next/image';
 import Link from 'next/link';
 import { createClient } from '@happy/db/server';
 import { Badge } from '@happy/ui/badge';
-import { Card } from '@happy/ui/card';
-import { Star, Truck, ShieldCheck, RefreshCcw, Award, MessageCircle } from 'lucide-react';
+import { Star, MessageCircle } from 'lucide-react';
 import { ProductoDetalleClient } from './detalle-client';
 import { TrustBadges } from '@/components/trust-badges';
 import { EnvioTimeline } from '@/components/envio-timeline';
 import { ResenasSection, type ResenaItem } from '@/components/resenas-section';
 import { ProductCard, type ProductCardData } from '@/components/product-card';
-import { BLUR_DATA_URL } from '@/lib/image';
+import { WHATSAPP_NUMERO, WHATSAPP_NUMERO_HUMAN, CORREO_CONTACTO } from '@/lib/contacto';
+import { TablaMedidas, type MedidaFila } from '@/components/tabla-medidas';
+import { GaleriaProducto } from '@/components/galeria-producto';
 
 export const dynamic = 'force-dynamic';
 
@@ -130,17 +130,66 @@ export default async function ProductoDetallePage({ params }: { params: Promise<
           .neq('producto_id', prod.id)
           .limit(8)
       : Promise.resolve({ data: [] as never[] }),
+    // Cliente pidió (post-2026-07-08) que el stock mostrado en la web sea
+    // el del ALMACÉN LA QUINTA (código TDA-LQ) — no la suma global de
+    // todos los almacenes. Si un producto está en Santa Bárbara pero no
+    // en La Quinta, la web debe mostrarlo agotado.
     varianteIds.length > 0
       ? sb
-          .from('v_stock_variante_total')
-          .select('variante_id, stock_total')
+          .from('stock_actual')
+          .select('variante_id, cantidad, almacen:almacen_id!inner(codigo)')
           .in('variante_id', varianteIds)
-      : Promise.resolve({ data: [] as { variante_id: string; stock_total: number }[] }),
+          .eq('almacen.codigo', 'TDA-LQ')
+      : Promise.resolve({ data: [] as { variante_id: string; cantidad: number }[] }),
   ]);
 
   const stockMap = new Map<string, number>();
   for (const s of stocksData ?? []) {
-    stockMap.set(s.variante_id as string, Number(s.stock_total ?? 0));
+    // Normalizar: query nueva devuelve `cantidad`, la vieja `stock_total`.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const cant = Number((s as any).cantidad ?? (s as any).stock_total ?? 0);
+    stockMap.set((s as { variante_id: string }).variante_id, Math.max(0, cant));
+  }
+
+  // Cargar medidas de la ficha técnica vigente para la tabla desplegable
+  // Cliente pidió (post-2026-07-08): botón "Tabla de medidas" con datos
+  // por talla. Si no hay ficha vigente, el botón no se muestra (queda [] ).
+  let medidasFilas: MedidaFila[] = [];
+  try {
+    const { data: fichaVigente } = await sb
+      .from('productos_fichas_tecnicas')
+      .select('id')
+      .eq('producto_id', prod.id)
+      .eq('vigente', true)
+      .order('revision', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (fichaVigente?.id) {
+      const { data: meds } = await sb
+        .from('fichas_medidas')
+        .select('id, codigo, descripcion, tolerancia_cm, orden, valores:fichas_medidas_valores(talla, valor)')
+        .eq('ficha_id', fichaVigente.id)
+        .order('orden');
+      type M = {
+        id: string; codigo: string | null; descripcion: string;
+        tolerancia_cm: number | null;
+        valores: { talla: string; valor: string | number | null }[] | null;
+      };
+      medidasFilas = ((meds ?? []) as unknown as M[]).map((m) => {
+        const map: Record<string, string> = {};
+        for (const v of m.valores ?? []) {
+          if (v.valor != null && v.valor !== '') map[v.talla] = String(v.valor);
+        }
+        return {
+          descripcion: m.descripcion,
+          codigo: m.codigo,
+          tolerancia_cm: m.tolerancia_cm != null ? Number(m.tolerancia_cm) : null,
+          valoresPorTalla: map,
+        };
+      });
+    }
+  } catch {
+    /* si falla, medidasFilas queda vacío y el botón no aparece */
   }
   const stockTotal = Array.from(stockMap.values()).reduce((a, b) => a + b, 0);
   const agotado = stockTotal <= 0;
@@ -211,47 +260,16 @@ export default async function ProductoDetallePage({ params }: { params: Promise<
       </nav>
 
       <div className="grid gap-10 lg:grid-cols-2">
-        {/* Galería */}
-        <div className="space-y-3">
-          <div className="relative aspect-square overflow-hidden rounded-2xl border bg-slate-50">
-            {galeria[0] ? (
-              <Image
-                src={galeria[0]}
-                alt={prod.nombre}
-                fill
-                className="object-cover"
-                sizes="(max-width:1024px) 100vw, 50vw"
-                placeholder="blur"
-                blurDataURL={BLUR_DATA_URL}
-                priority
-              />
-            ) : (
-              <div className="flex h-full items-center justify-center text-7xl">🎭</div>
-            )}
-            {precioOferta && precioBase > 0 && (
-              <Badge className="absolute right-3 top-3 bg-danger px-3 py-1.5 text-sm font-bold hover:bg-danger">
-                -{Math.round((1 - precioOferta / precioBase) * 100)}%
-              </Badge>
-            )}
-          </div>
-          {galeria.length > 1 && (
-            <div className="grid grid-cols-4 gap-2">
-              {galeria.slice(1, 5).map((g, i) => (
-                <div key={i} className="relative aspect-square overflow-hidden rounded-lg border bg-slate-50">
-                  <Image
-                    src={g}
-                    alt={`${prod.nombre} foto ${i + 2}`}
-                    fill
-                    className="object-cover"
-                    sizes="(max-width:1024px) 25vw, 12vw"
-                    placeholder="blur"
-                    blurDataURL={BLUR_DATA_URL}
-                  />
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
+        {/* Galería con zoom (cliente pidió lightbox al hacer click) */}
+        <GaleriaProducto
+          imagenes={galeria}
+          nombre={pub.titulo_web ?? prod.nombre}
+          descuentoBadge={
+            precioOferta && precioBase > 0
+              ? `-${Math.round((1 - precioOferta / precioBase) * 100)}%`
+              : null
+          }
+        />
 
         {/* Info + cliente */}
         <div className="space-y-5">
@@ -311,7 +329,11 @@ export default async function ProductoDetallePage({ params }: { params: Promise<
                   ? Math.round(precio * (1 - descuentoPct / 100) * 100) / 100
                   : precio,
                 aplicaDescuento,
-                precioMayorista: Number(v.precio_mayorista_a ?? v.precio_mayorista_b ?? 0),
+                precioMayorista: Number(v.precio_mayorista_a ?? 0),
+                // precio_mayorista_b se usa como precio de fábrica (>= 100 unid.)
+                // porque es el segundo escalón cargado. Si no hay valor, queda 0
+                // y el escalón no se muestra.
+                precioFabrica: Number(v.precio_mayorista_b ?? 0),
                 stock: stockMap.get(v.id) ?? 0,
               };
             })}
@@ -319,16 +341,20 @@ export default async function ProductoDetallePage({ params }: { params: Promise<
             agotado={agotado}
           />
 
+          {medidasFilas.length > 0 && (
+            <TablaMedidas
+              medidas={medidasFilas}
+              tallas={Array.from(new Set(prod.productos_variantes.map((v) => v.talla)))}
+            />
+          )}
+
           <TrustBadges />
 
           <EnvioTimeline />
 
-          <div className="grid grid-cols-2 gap-3 border-t pt-4 text-xs text-slate-600 sm:grid-cols-4">
-            <Garantia icon={<Truck className="h-5 w-5" />} label="Envío rápido" sub="2-4 días" />
-            <Garantia icon={<ShieldCheck className="h-5 w-5" />} label="Pago seguro" sub="Encriptado SSL" />
-            <Garantia icon={<RefreshCcw className="h-5 w-5" />} label="Cambios fáciles" sub="7 días para cambio" />
-            <Garantia icon={<Award className="h-5 w-5" />} label="Calidad premium" sub="Confección propia" />
-          </div>
+          {/* Bloque "Envío rápido / Pago seguro / Cambios fáciles / Calidad
+              premium" removido por pedido del cliente (post-2026-07-08).
+              Se consideró información redundante con TrustBadges + EnvioTimeline. */}
         </div>
       </div>
 
@@ -369,7 +395,7 @@ export default async function ProductoDetallePage({ params }: { params: Promise<
         <h2 className="font-display text-2xl font-semibold">¿Tienes dudas sobre este disfraz?</h2>
         <p className="mt-2 text-white/90">Te asesoramos por WhatsApp en minutos</p>
         <a
-          href="https://wa.me/51916856842"
+          href="https://wa.me/51903064120"
           target="_blank"
           rel="noopener noreferrer"
           className="mt-5 inline-flex items-center gap-2 rounded-full bg-emerald-500 px-7 py-3 font-semibold shadow-xl transition hover:scale-105 hover:bg-emerald-400"
@@ -382,12 +408,3 @@ export default async function ProductoDetallePage({ params }: { params: Promise<
   );
 }
 
-function Garantia({ icon, label, sub }: { icon: React.ReactNode; label: string; sub: string }) {
-  return (
-    <Card className="flex flex-col items-center gap-1 border-corp-100 p-3 text-center">
-      <span className="text-corp-700">{icon}</span>
-      <p className="font-medium text-corp-900">{label}</p>
-      <p className="text-[10px] text-slate-500">{sub}</p>
-    </Card>
-  );
-}

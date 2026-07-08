@@ -221,7 +221,7 @@ export function CheckoutClient() {
           </div>
           {metodo === 'whatsapp' && (
             <p className="mt-3 rounded-md bg-emerald-50 p-3 text-xs text-emerald-700">
-              Te enviaremos al WhatsApp +51 916 856 842 con todos los detalles del pedido pre-cargados. Coordinaremos el pago contigo.
+              Te enviaremos al WhatsApp +51 903 064 120 con todos los detalles del pedido pre-cargados. Coordinaremos el pago contigo.
             </p>
           )}
         </Card>

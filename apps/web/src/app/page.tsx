@@ -128,11 +128,11 @@ export default async function Home() {
           <h2 className="font-display text-3xl font-semibold drop-shadow-lg md:text-4xl">¿Compra al por mayor o personalizada?</h2>
           <p className="mt-3 text-lg text-white/95 drop-shadow-md">Hablemos por WhatsApp — atención directa con nuestro equipo</p>
           <a
-            href="https://wa.me/51916856842"
+            href="https://wa.me/51903064120"
             className="mt-8 inline-flex items-center gap-2 rounded-full bg-white px-8 py-4 font-semibold text-corp-900 shadow-2xl transition hover:scale-105 hover:text-happy-600"
           >
             <MessageCircle className="h-5 w-5" />
-            Escribir al +51 916 856 842
+            Escribir al +51 903 064 120
           </a>
         </div>
       </section>

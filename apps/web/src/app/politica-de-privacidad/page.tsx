@@ -23,7 +23,7 @@ export default function Page() {
         <li>Cumplir obligaciones legales (libro de reclamaciones, registros tributarios)</li>
       </ul>
       <h2>Tus derechos</h2>
-      <p>Puedes solicitar acceso, rectificación, oposición, cancelación o información sobre el uso de tus datos escribiéndonos a <a href="mailto:ventas@disfraceshappys.com">ventas@disfraceshappys.com</a>.</p>
+      <p>Puedes solicitar acceso, rectificación, oposición, cancelación o información sobre el uso de tus datos escribiéndonos a <a href="mailto:ventas@disfraceshappys.com.pe">ventas@disfraceshappys.com.pe</a>.</p>
     </article>
   );
 }

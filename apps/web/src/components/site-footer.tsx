@@ -20,7 +20,7 @@ export function SiteFooter() {
             <a href="https://instagram.com/disfraceshappys" className="rounded-full bg-white/5 p-2 transition hover:bg-happy-500 hover:text-white" aria-label="Instagram">
               <Instagram className="h-4 w-4" />
             </a>
-            <a href="https://wa.me/51916856842" className="rounded-full bg-white/5 p-2 transition hover:bg-happy-500 hover:text-white" aria-label="WhatsApp">
+            <a href="https://wa.me/51903064120" className="rounded-full bg-white/5 p-2 transition hover:bg-happy-500 hover:text-white" aria-label="WhatsApp">
               <MessageCircle className="h-4 w-4" />
             </a>
           </div>
@@ -57,11 +57,11 @@ export function SiteFooter() {
           <h4 className="mb-3 font-semibold text-white">Atención al cliente</h4>
           <p className="flex items-center gap-2 text-sm">
             <MessageCircle className="h-4 w-4 text-happy-400" />
-            <a href="https://wa.me/51916856842" className="hover:text-happy-400">+51 916 856 842</a>
+            <a href="https://wa.me/51903064120" className="hover:text-happy-400">+51 903 064 120</a>
           </p>
           <p className="mt-2 flex items-center gap-2 text-sm">
             <Mail className="h-4 w-4 text-happy-400" />
-            <a href="mailto:ventas@disfraceshappys.com" className="hover:text-happy-400">ventas@disfraceshappys.com</a>
+            <a href="mailto:ventas@disfraceshappys.com.pe" className="hover:text-happy-400">ventas@disfraceshappys.com.pe</a>
           </p>
           <p className="mt-4 flex items-start gap-2 text-xs">
             <MapPin className="mt-0.5 h-4 w-4 shrink-0 text-happy-400" />

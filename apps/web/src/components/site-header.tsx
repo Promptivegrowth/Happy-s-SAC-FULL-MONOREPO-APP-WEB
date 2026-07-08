@@ -57,11 +57,11 @@ export function SiteHeader({
       <div className="bg-corp-gradient text-white">
         <div className="container flex h-9 items-center justify-between gap-2 px-4 text-xs font-medium">
           <div className="hidden items-center gap-3 sm:flex">
-            <a href="https://wa.me/51916856842" className="flex items-center gap-1 hover:text-happy-300">
-              <MessageCircle className="h-3 w-3" /> 982 110 595
+            <a href="https://wa.me/51903064120" className="flex items-center gap-1 hover:text-happy-300">
+              <MessageCircle className="h-3 w-3" /> 903 064 120
             </a>
-            <a href="mailto:ventas@disfraceshappys.com" className="hidden items-center gap-1 hover:text-happy-300 md:flex">
-              ventas@disfraceshappys.com
+            <a href="mailto:ventas@disfraceshappys.com.pe" className="hidden items-center gap-1 hover:text-happy-300 md:flex">
+              ventas@disfraceshappys.com.pe
             </a>
           </div>
           <div className="flex flex-1 items-center justify-center gap-2 sm:flex-none">
@@ -76,7 +76,7 @@ export function SiteHeader({
             <a href="https://instagram.com" target="_blank" rel="noopener noreferrer" aria-label="Instagram" className="hover:text-happy-300">
               <Instagram className="h-3.5 w-3.5" />
             </a>
-            <a href="https://wa.me/51916856842" target="_blank" rel="noopener noreferrer" aria-label="WhatsApp" className="hover:text-happy-300">
+            <a href="https://wa.me/51903064120" target="_blank" rel="noopener noreferrer" aria-label="WhatsApp" className="hover:text-happy-300">
               <MessageCircle className="h-3.5 w-3.5" />
             </a>
           </div>
