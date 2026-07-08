@@ -163,13 +163,25 @@ export function PosTerminal({
     return () => document.removeEventListener('click', handler);
   }, [vista, productoTallasOpen, sesionActiva, cerrarOpen, cobrarOpen]);
 
-  // Por cada línea, decidir precio según cantidad y escalones
+  // Por cada línea, decidir precio según cantidad TOTAL del carrito y
+  // escalones. Cliente pidió (reunión post-2026-07-08): el precio mayorista
+  // debe aplicarse cuando el carrito total pase de 3 disfraces, no cuando
+  // una LÍNEA individual llegue a 3. O sea:
+  //   · Cart total 2 items (mezclados) → todo precio_publico
+  //   · Cart total 3+ items → todo precio_mayorista
+  // Se sigue usando calcularPrecioPorCantidad pero se le pasa el total en
+  // vez de la cantidad de la línea — así respeta los umbrales (mayorista_desde,
+  // industrial_desde) sin duplicar lógica.
+  const totalItemsCarrito = useMemo(
+    () => carrito.reduce((s, l) => s + l.cantidad, 0),
+    [carrito],
+  );
   const lineasConPrecio = useMemo(
     () => carrito.map((l) => {
-      const r = calcularPrecioPorCantidad(l.variante, l.cantidad, configEscalones);
+      const r = calcularPrecioPorCantidad(l.variante, totalItemsCarrito, configEscalones);
       return { ...l, precio_unitario: r.precio, escalon: r.escalon, subtotal: l.cantidad * r.precio };
     }),
-    [carrito, configEscalones],
+    [carrito, configEscalones, totalItemsCarrito],
   );
 
   const total = useMemo(() => lineasConPrecio.reduce((a, l) => a + l.subtotal, 0), [lineasConPrecio]);
@@ -222,7 +234,9 @@ export function PosTerminal({
       }
       return [...prev, { variante: v, cantidad: 1 }];
     });
-    setProductoTallasOpen(null);
+    // NO cerrar el modal de tallas — cliente pidió que se mantenga abierto
+    // para poder agregar múltiples tallas del mismo producto sin re-clic.
+    // Se cierra manualmente con la X o click fuera.
   }
 
   function setQty(varianteId: string, qty: number) {
@@ -404,11 +418,27 @@ export function PosTerminal({
   const sugerencias = useMemo(() => {
     const q = search.trim().toLowerCase();
     if (!q) return [];
-    return variantes
-      .filter((v) => v.sku.toLowerCase().includes(q)
-        || v.codigo_barras?.toLowerCase().includes(q)
-        || v.productos.nombre.toLowerCase().includes(q))
-      .slice(0, 12);
+    // Buscar y colapsar por PRODUCTO (no por variante) — cliente pidió
+    // (post-2026-07-08) reducir la lista larga de sugerencias mostrando
+    // 1 fila por producto. Al hacer click se abre el selector de tallas
+    // lateral (no tapa el carrito).
+    const matches = variantes.filter((v) =>
+      v.sku.toLowerCase().includes(q) ||
+      v.codigo_barras?.toLowerCase().includes(q) ||
+      v.productos.nombre.toLowerCase().includes(q),
+    );
+    const porProducto = new Map<string, { producto: Variante['productos']; tallasCount: number; precioMin: number }>();
+    for (const v of matches) {
+      const cur = porProducto.get(v.productos.id);
+      const precio = Number(v.precio_publico ?? 0);
+      if (cur) {
+        cur.tallasCount += 1;
+        cur.precioMin = Math.min(cur.precioMin, precio);
+      } else {
+        porProducto.set(v.productos.id, { producto: v.productos, tallasCount: 1, precioMin: precio });
+      }
+    }
+    return Array.from(porProducto.values()).slice(0, 20);
   }, [search, variantes]);
 
   const tallasDelProductoOpen = useMemo(() => {
@@ -535,27 +565,22 @@ export function PosTerminal({
             />
           </div>
           {sugerencias.length > 0 && (
-            <div className="mt-2 max-h-60 overflow-auto rounded-md border bg-white shadow-sm" data-pos-no-focus>
-              {sugerencias.map((v) => {
-                const stock = stockPorVariante[v.id] ?? 0;
-                return (
-                  <button
-                    key={v.id}
-                    onClick={() => agregarPorBarcode(v.sku)}
-                    className="flex w-full items-center gap-3 border-b p-2 text-left text-sm hover:bg-slate-50 last:border-0"
-                  >
-                    <div className="font-mono text-xs text-slate-400">{v.sku}</div>
-                    <div className="flex-1">{v.productos.nombre}</div>
-                    <Badge
-                      variant={stock <= 0 ? 'destructive' : 'outline'}
-                      className={`text-[10px] ${stock <= 0 ? 'line-through' : ''}`}
-                    >
-                      {formatTalla(v.talla)}
-                    </Badge>
-                    <div className="font-semibold text-happy-600">{formatPEN(Number(v.precio_publico ?? 0))}</div>
-                  </button>
-                );
-              })}
+            <div className="mt-2 max-h-96 overflow-auto rounded-md border bg-white shadow-sm" data-pos-no-focus>
+              {sugerencias.map(({ producto, tallasCount, precioMin }) => (
+                <button
+                  key={producto.id}
+                  onClick={() => setProductoTallasOpen(producto.id)}
+                  className="flex w-full items-center gap-2 border-b px-3 py-1.5 text-left text-sm hover:bg-happy-50 last:border-0"
+                >
+                  <div className="flex-1 font-medium text-corp-900 truncate">{producto.nombre}</div>
+                  <Badge variant="outline" className="text-[10px]">
+                    {tallasCount} {tallasCount === 1 ? 'talla' : 'tallas'}
+                  </Badge>
+                  <div className="font-semibold text-happy-600">
+                    desde {formatPEN(precioMin)}
+                  </div>
+                </button>
+              ))}
             </div>
           )}
         </header>
@@ -642,14 +667,21 @@ export function PosTerminal({
                 </div>
               )}
 
-              {/* Modal/popover selector de talla */}
+              {/* Modal selector de talla — LATERAL, no tapa el carrito.
+                  Cliente pidió (post-2026-07-08) que el carrito sea siempre
+                  visible durante la selección de tallas. Antes el modal era
+                  fullscreen centrado con backdrop; ahora es un popover
+                  anclado a la izquierda que ocupa solo el ancho del catálogo,
+                  dejando visible el panel del carrito (720px a la derecha).
+                  También se mantiene abierto tras agregar una talla para
+                  poder agregar más del mismo producto rápido. */}
               {productoTallasOpen && (
                 <div
-                  className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4"
+                  className="fixed left-0 top-0 z-50 flex h-screen w-[calc(100vw-720px)] items-center justify-center bg-black/30 p-4 lg:right-[720px]"
                   onClick={() => setProductoTallasOpen(null)}
                 >
                   <Card
-                    className="w-full max-w-2xl p-6"
+                    className="w-full max-w-2xl p-6 shadow-2xl"
                     onClick={(e) => e.stopPropagation()}
                   >
                     <div className="mb-4 flex items-start justify-between">
@@ -657,7 +689,9 @@ export function PosTerminal({
                         <h3 className="font-display text-xl font-semibold text-corp-900">
                           {tallasDelProductoOpen[0]?.productos.nombre}
                         </h3>
-                        <p className="mt-0.5 text-sm text-slate-500">Selecciona una talla</p>
+                        <p className="mt-0.5 text-sm text-slate-500">
+                          Toca una talla para agregarla. Podés agregar varias sin cerrar este panel.
+                        </p>
                       </div>
                       <button onClick={() => setProductoTallasOpen(null)} className="rounded p-1.5 text-slate-400 hover:bg-slate-100">
                         <X className="h-5 w-5" />
@@ -667,6 +701,9 @@ export function PosTerminal({
                       {tallasDelProductoOpen.map((v) => {
                         const stock = stockPorVariante[v.id] ?? 0;
                         const sinStock = stock <= 0;
+                        // Cantidad ya en carrito para dar feedback visual
+                        // (cliente puede tocar varias veces la misma talla).
+                        const enCarrito = carrito.find((l) => l.variante.id === v.id)?.cantidad ?? 0;
                         return (
                           <div key={v.id} className="relative">
                             <button
@@ -675,9 +712,11 @@ export function PosTerminal({
                               className={`flex w-full flex-col items-center gap-1.5 rounded-xl border-2 p-4 transition ${
                                 sinStock
                                   ? 'border-dashed border-red-200 bg-red-50/40 text-red-400 cursor-not-allowed opacity-60'
-                                  : 'border-slate-200 bg-white text-corp-900 hover:border-happy-400 hover:bg-happy-50'
+                                  : enCarrito > 0
+                                    ? 'border-emerald-400 bg-emerald-50 text-corp-900 hover:border-emerald-500 hover:bg-emerald-100'
+                                    : 'border-slate-200 bg-white text-corp-900 hover:border-happy-400 hover:bg-happy-50'
                               }`}
-                              title={sinStock ? 'Sin stock — no se puede vender' : ''}
+                              title={sinStock ? 'Sin stock — no se puede vender' : enCarrito > 0 ? `${enCarrito} en carrito. Click para agregar 1 más` : ''}
                             >
                               <span className="font-display text-2xl font-bold">{formatTalla(v.talla)}</span>
                               <span className="text-xs font-mono text-slate-500">{v.sku}</span>
@@ -686,6 +725,11 @@ export function PosTerminal({
                                 {sinStock ? 'Sin stock' : `Stock: ${stock}`}
                               </span>
                             </button>
+                            {enCarrito > 0 && (
+                              <span className="absolute -left-2 -top-2 flex h-6 w-6 items-center justify-center rounded-full bg-emerald-500 text-[11px] font-bold text-white shadow-md ring-2 ring-white">
+                                {enCarrito}
+                              </span>
+                            )}
                             <button
                               type="button"
                               onClick={(e) => { e.stopPropagation(); setStockAlmacenesVarianteId(v.id); }}
