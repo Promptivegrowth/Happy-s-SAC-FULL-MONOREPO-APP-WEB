@@ -29,7 +29,7 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
   // Carga adicional para los nuevos features: duplicar receta y procesos.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const sbAny = sb as unknown as { from: (t: string) => any };
-  const [{ data: productosTodos }, { data: areas }, { data: procesos }] = await Promise.all([
+  const [{ data: productosTodos }, { data: areas }, { data: procesos }, { data: catalogoPasos }] = await Promise.all([
     sb.from('productos').select('id, codigo, nombre').eq('activo', true).order('nombre').limit(1000),
     sb.from('areas_produccion').select('id, codigo, nombre, valor_minuto').eq('activa', true).order('nombre'),
     sbAny
@@ -37,6 +37,14 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
       .select('id, proceso, area_id, talla, orden, tiempo_estandar_min, es_tercerizado, observacion, descripcion_operativa, version, areas_produccion(id, codigo, nombre, valor_minuto)')
       .eq('producto_id', prod.id)
       .eq('activo', true) // solo la versión vigente (mig 38)
+      .order('orden'),
+    // Catálogo de pasos operativos por área (mig 61). Solo activos — los
+    // inactivos existen para historial pero no aparecen en el dropdown.
+    sbAny
+      .from('catalogo_pasos_operativos')
+      .select('id, area_id, nombre, orden')
+      .eq('activo', true)
+      .order('area_id')
       .order('orden'),
   ]);
 
@@ -107,6 +115,7 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
         productos={(productosTodos ?? []) as Parameters<typeof RecetaEditor>[0]['productos']}
         areas={(areas ?? []) as Parameters<typeof RecetaEditor>[0]['areas']}
         procesos={(procesos ?? []) as Parameters<typeof RecetaEditor>[0]['procesos']}
+        catalogoPasos={(catalogoPasos ?? []) as Parameters<typeof RecetaEditor>[0]['catalogoPasos']}
         tallasCongeladas={tallasCongeladas}
         esHistorica={esHistorica}
         cantidadOts={cantidadOts ?? 0}

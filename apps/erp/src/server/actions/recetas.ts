@@ -714,7 +714,7 @@ export async function duplicarProcesos(
     // 1) Cargar todos los procesos ACTIVOS del origen (no copiar versiones viejas)
     const { data: origen, error: errO } = await sbAny
       .from('productos_procesos')
-      .select('proceso, area_id, talla, tiempo_estandar_min, es_tercerizado, observacion, descripcion_operativa')
+      .select('proceso, area_id, talla, tiempo_estandar_min, es_tercerizado, observacion, descripcion_operativa, maquina')
       .eq('producto_id', productoOrigenId)
       .eq('activo', true)
       .order('orden');
@@ -735,7 +735,16 @@ export async function duplicarProcesos(
     const ordenBase = ((maxRow?.orden as number | undefined) ?? 0);
 
     // 3) Insertar copias con orden incremental
-    type OrigenRow = { proceso: string; area_id: string | null; talla: string | null; tiempo_estandar_min: number | null; es_tercerizado: boolean; observacion: string | null; descripcion_operativa: string | null };
+    type OrigenRow = {
+      proceso: string;
+      area_id: string | null;
+      talla: string | null;
+      tiempo_estandar_min: number | null;
+      es_tercerizado: boolean;
+      observacion: string | null;
+      descripcion_operativa: string | null;
+      maquina: string | null;
+    };
     const filas = (origen as OrigenRow[]).map((p, i) => ({
       producto_id: productoDestinoId,
       proceso: p.proceso,
@@ -746,6 +755,9 @@ export async function duplicarProcesos(
       es_tercerizado: p.es_tercerizado,
       observacion: p.observacion,
       descripcion_operativa: p.descripcion_operativa,
+      // maquina fue agregado en mig 46 para fichas técnicas. Antes de este fix
+      // no se copiaba al duplicar procesos y se perdía en el destino.
+      maquina: p.maquina,
     }));
     const { error: errIns } = await sbAny.from('productos_procesos').insert(filas);
     if (errIns) throw new Error(errIns.message);

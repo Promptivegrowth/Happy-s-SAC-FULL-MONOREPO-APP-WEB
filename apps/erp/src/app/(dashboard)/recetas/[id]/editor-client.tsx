@@ -28,7 +28,7 @@ import {
   verticalListSortingStrategy,
 } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
-import { pasosDeArea, enumDeArea } from '@/lib/catalogo-procesos-por-area';
+import { enumDeArea } from '@/lib/catalogo-procesos-por-area';
 import {
   upsertReceta,
   upsertRecetaMulti,
@@ -107,6 +107,9 @@ type Proceso = {
   areas_produccion?: { id: string; codigo: string; nombre: string; valor_minuto: number | null } | null;
 };
 
+/** Fila del catálogo maestro de pasos operativos (mig 61). Solo activos. */
+type CatalogoPaso = { id: string; area_id: string; nombre: string; orden: number };
+
 export function RecetaEditor({
   recetaId,
   productoId,
@@ -116,6 +119,7 @@ export function RecetaEditor({
   productos = [],
   areas = [],
   procesos = [],
+  catalogoPasos = [],
   tallasCongeladas = [],
   esHistorica = false,
   cantidadOts = 0,
@@ -130,6 +134,9 @@ export function RecetaEditor({
   productos?: Producto[];
   areas?: Area[];
   procesos?: Proceso[];
+  /** Catálogo de pasos por área que alimenta el dropdown "Paso operativo".
+   *  Se administra en /configuracion/catalogo-procesos. */
+  catalogoPasos?: CatalogoPaso[];
   /** Tallas con OTs posteriores — bloqueadas individualmente. Las demás siguen
    *  editables aunque el producto tenga producción en otras tallas. */
   tallasCongeladas?: string[];
@@ -183,6 +190,7 @@ export function RecetaEditor({
             areas={areas}
             procesos={procesos}
             productos={productos}
+            catalogoPasos={catalogoPasos}
             tallasCongeladas={tallasCongSet}
             esHistorica={esHistorica}
           />
@@ -1222,6 +1230,7 @@ function ProcesosEditor({
   areas,
   procesos,
   productos = [],
+  catalogoPasos = [],
   tallasCongeladas = new Set(),
   esHistorica = false,
 }: {
@@ -1229,10 +1238,29 @@ function ProcesosEditor({
   areas: Area[];
   procesos: Proceso[];
   productos?: Producto[];
+  catalogoPasos?: CatalogoPaso[];
   /** Tallas con OTs posteriores — el server bloquea solo procesos de esas tallas. */
   tallasCongeladas?: Set<string>;
   esHistorica?: boolean;
 }) {
+  // Índice { area_id → pasos activos ordenados por orden }. Se recalcula solo
+  // cuando cambia el catálogo (que llega por prop del server). Reemplaza la
+  // función pasosDeArea() del catálogo hardcodeado — ahora las opciones vienen
+  // de BD (tabla catalogo_pasos_operativos, mig 61) editable desde
+  // /configuracion/catalogo-procesos.
+  const catalogoPorArea = useMemo(() => {
+    const m = new Map<string, string[]>();
+    for (const p of catalogoPasos) {
+      const arr = m.get(p.area_id) ?? [];
+      arr.push(p.nombre);
+      m.set(p.area_id, arr);
+    }
+    return m;
+  }, [catalogoPasos]);
+  const pasosDeAreaId = (areaId: string | null | undefined): string[] | null => {
+    if (!areaId) return null;
+    return catalogoPorArea.get(areaId) ?? null;
+  };
   // Permitir abrir el form si hay AL MENOS UNA talla libre. El server valida
   // la talla específica al guardar. Histórica = todo bloqueado.
   const todasCongeladas = esHistorica || tallasCongeladas.size >= TALLAS.length;
@@ -1284,8 +1312,7 @@ function ProcesosEditor({
     // pre-cargado y el enum se autofija — así que el requisito real es tener
     // el paso descrito. Si el usuario está en modo manual (o el área no tiene
     // catálogo), pedimos ambos: proceso enum + descripción.
-    const areaCod = areasLocal.find((a) => a.id === areaId)?.codigo ?? null;
-    const pasos = pasosDeArea(areaCod);
+    const pasos = pasosDeAreaId(areaId);
     const enCatalogo = pasos && !usarOtroPaso;
     if (enCatalogo && !descripcionOperativa) {
       toast.error('Elegí un paso del catálogo');
@@ -1445,14 +1472,14 @@ function ProcesosEditor({
                 </Button>
               </div>
             </FormRow>
-            {/* Nuevo dropdown "Paso operativo" alimentado por el catálogo del
-                Excel del cliente. Si el área no tiene catálogo (TALLER, o un
-                área nueva creada al vuelo), o el usuario tildó "otro", cae al
-                dropdown enum + input libre de siempre. */}
+            {/* Dropdown "Paso operativo" alimentado por el catálogo de BD
+                (tabla catalogo_pasos_operativos, editable en
+                /configuracion/catalogo-procesos). Si el área no tiene pasos
+                cargados (TALLER, área nueva sin poblar), o el usuario tildó
+                "otro", cae al dropdown enum + input libre. */}
             {(() => {
               const areaCod = areasLocal.find((a) => a.id === areaId)?.codigo ?? null;
-              const pasos = pasosDeArea(areaCod);
-              const mostrarManual = !pasos || usarOtroPaso;
+              const pasos = pasosDeAreaId(areaId);
               return (
                 <FormRow
                   label="Paso operativo"
