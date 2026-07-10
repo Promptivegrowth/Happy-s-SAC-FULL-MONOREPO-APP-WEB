@@ -4,7 +4,10 @@ import { Toaster } from 'sonner';
 import '@happy/ui/styles.css';
 import './globals.css';
 
-const inter = Inter({ subsets: ['latin'], variable: '--font-sans', display: 'swap' });
+// latin-ext incluido para que í, á, é, ó, ú, ñ del español rendericen bien
+// en todos los navegadores (bug reportado por cliente 2026-07-10 en el chip
+// "Avíos" del ERP — mismo font stack en el POS por consistencia).
+const inter = Inter({ subsets: ['latin', 'latin-ext'], variable: '--font-sans', display: 'swap' });
 
 export const metadata: Metadata = {
   title: 'POS HAPPY',

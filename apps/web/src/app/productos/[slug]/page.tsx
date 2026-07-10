@@ -131,17 +131,17 @@ export default async function ProductoDetallePage({ params }: { params: Promise<
           .neq('producto_id', prod.id)
           .limit(8)
       : Promise.resolve({ data: [] as never[] }),
-    // Cliente pidió (post-2026-07-08) que el stock mostrado en la web sea
-    // el del ALMACÉN LA QUINTA (código TDA-LQ) — no la suma global de
-    // todos los almacenes. Si un producto está en Santa Bárbara pero no
-    // en La Quinta, la web debe mostrarlo agotado.
+    // Stock global — cliente reportó (2026-07-10) que productos con stock
+    // en Huallaga/Santa Bárbara aparecían como "agotados" porque la web
+    // solo miraba La Quinta (regla pedida en 07-08 y ahora revertida).
+    // Volvimos a la SUMA de todos los almacenes vía la vista
+    // v_stock_variante_total.
     varianteIds.length > 0
       ? sb
-          .from('stock_actual')
-          .select('variante_id, cantidad, almacen:almacen_id!inner(codigo)')
+          .from('v_stock_variante_total')
+          .select('variante_id, stock_total')
           .in('variante_id', varianteIds)
-          .eq('almacen.codigo', 'TDA-LQ')
-      : Promise.resolve({ data: [] as { variante_id: string; cantidad: number }[] }),
+      : Promise.resolve({ data: [] as { variante_id: string; stock_total: number }[] }),
   ]);
 
   const stockMap = new Map<string, number>();

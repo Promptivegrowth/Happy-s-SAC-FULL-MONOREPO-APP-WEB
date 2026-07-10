@@ -4,8 +4,12 @@ import { Toaster } from 'sonner';
 import '@happy/ui/styles.css';
 import './globals.css';
 
-const inter = Inter({ subsets: ['latin'], variable: '--font-sans', display: 'swap' });
-const fraunces = Fraunces({ subsets: ['latin'], variable: '--font-display', display: 'swap' });
+// Incluimos latin-ext además de latin — cliente reportó (2026-07-10) que
+// caracteres acentuados del español (í, á, é, ó, ú, ñ) se veían como
+// rombos ◇ en algunos chips/badges. El subset 'latin' de Google Fonts
+// omite ese rango; 'latin-ext' lo agrega.
+const inter = Inter({ subsets: ['latin', 'latin-ext'], variable: '--font-sans', display: 'swap' });
+const fraunces = Fraunces({ subsets: ['latin', 'latin-ext'], variable: '--font-display', display: 'swap' });
 
 export const metadata: Metadata = {
   title: { default: 'HAPPY ERP', template: '%s · HAPPY ERP' },

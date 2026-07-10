@@ -8,12 +8,16 @@ import { SiteFooter } from '@/components/site-footer';
 import { WhatsappFab } from '@/components/whatsapp-fab';
 import { cargarDatosHeader } from '@/server/queries/header-data';
 
-const inter = Inter({ subsets: ['latin'], variable: '--font-sans', display: 'swap' });
-const fraunces = Fraunces({ subsets: ['latin'], variable: '--font-display', display: 'swap' });
+// Incluimos latin-ext además de latin — sin él Google Fonts omite el rango
+// de acentos españoles (í, á, é, ó, ú, ñ) y los renderiza como rombos ◇.
+// Bug reportado por cliente 2026-07-10 en un chip del ERP; aplicado en los
+// 3 apps del monorepo por consistencia.
+const inter = Inter({ subsets: ['latin', 'latin-ext'], variable: '--font-sans', display: 'swap' });
+const fraunces = Fraunces({ subsets: ['latin', 'latin-ext'], variable: '--font-display', display: 'swap' });
 // Fredoka — fuente redondeada y juguetona para titulares dirigidos a familias/niños.
 // Usada en el hero slider para darle calidez sin perder profesionalismo.
 const fredoka = Fredoka({
-  subsets: ['latin'],
+  subsets: ['latin', 'latin-ext'],
   variable: '--font-fun',
   weight: ['400', '500', '600', '700'],
   display: 'swap',
