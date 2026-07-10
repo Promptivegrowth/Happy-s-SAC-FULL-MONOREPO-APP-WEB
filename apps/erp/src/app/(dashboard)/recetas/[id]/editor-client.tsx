@@ -28,6 +28,7 @@ import {
   verticalListSortingStrategy,
 } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
+import { pasosDeArea, enumDeArea } from '@/lib/catalogo-procesos-por-area';
 import {
   upsertReceta,
   upsertRecetaMulti,
@@ -1262,6 +1263,11 @@ function ProcesosEditor({
   // tiene solo 15 valores; esta descripción permite diferenciar sub-pasos sin
   // reventar la lista de enums.
   const [descripcionOperativa, setDescripcionOperativa] = useState('');
+  // Cuando el usuario elige un área con catálogo (Excel del cliente), se le
+  // muestra un dropdown de "pasos operativos" pre-cargados. Si el paso que
+  // necesita no está listado, activa este flag y aparece el input libre + el
+  // dropdown de enum para elegir manualmente.
+  const [usarOtroPaso, setUsarOtroPaso] = useState(false);
 
   function reset() {
     setProceso('');
@@ -1270,17 +1276,33 @@ function ProcesosEditor({
     setTiempo('');
     setObs('');
     setDescripcionOperativa('');
+    setUsarOtroPaso(false);
   }
 
   function agregar() {
-    if (!proceso) {
-      toast.error('Elegí un proceso');
+    // Si el área tiene catálogo (Excel del cliente) el usuario elige un paso
+    // pre-cargado y el enum se autofija — así que el requisito real es tener
+    // el paso descrito. Si el usuario está en modo manual (o el área no tiene
+    // catálogo), pedimos ambos: proceso enum + descripción.
+    const areaCod = areasLocal.find((a) => a.id === areaId)?.codigo ?? null;
+    const pasos = pasosDeArea(areaCod);
+    const enCatalogo = pasos && !usarOtroPaso;
+    if (enCatalogo && !descripcionOperativa) {
+      toast.error('Elegí un paso del catálogo');
       return;
     }
+    if (!proceso) {
+      // Modo catálogo con área sin mapping (raro: TALLER o áreas custom) — o
+      // modo manual y el usuario no eligió proceso. Ambos casos requieren el
+      // enum para persistir en BD.
+      toast.error('Elegí un proceso base');
+      return;
+    }
+    const procesoFinal = proceso;
     start(async () => {
       const r = await agregarProceso(productoId, {
         producto_id: productoId,
-        proceso,
+        proceso: procesoFinal,
         area_id: areaId || '',
         talla: (tallaProc || '') as (typeof TALLAS)[number] | '',
         orden: 0,
@@ -1376,18 +1398,30 @@ function ProcesosEditor({
         <Card className="border-happy-300 bg-happy-50/40 p-4">
           <h3 className="mb-3 font-display text-sm font-semibold">Nueva operación</h3>
           <FormGrid cols={3}>
-            <FormRow label="Área" required hint="Define el costo/minuto y filtra los procesos disponibles">
+            <FormRow label="Área" required hint="Define el costo/minuto y el catálogo de pasos disponibles">
               <div className="flex gap-1">
                 <select
                   value={areaId}
                   onChange={(e) => {
-                    setAreaId(e.target.value);
-                    // Si el proceso actual no aplica al área nueva, vaciar para
-                    // que el usuario elija nuevamente (en lugar de forzar uno).
-                    const areaCod = areasLocal.find((a) => a.id === e.target.value)?.codigo ?? null;
-                    const procesosValidos = procesosDeArea(areaCod);
-                    if (proceso && !procesosValidos.includes(proceso as (typeof PROCESOS)[number])) {
-                      setProceso('');
+                    const nuevoAreaId = e.target.value;
+                    setAreaId(nuevoAreaId);
+                    // Reset del paso al cambiar de área: el catálogo cambia y
+                    // el paso viejo puede no aplicar. Autofijamos el enum del
+                    // área si tiene mapping (ej. área ACABADO → enum ACABADO).
+                    const areaCod = areasLocal.find((a) => a.id === nuevoAreaId)?.codigo ?? null;
+                    const enumAuto = enumDeArea(areaCod);
+                    setDescripcionOperativa('');
+                    setUsarOtroPaso(false);
+                    if (enumAuto) {
+                      setProceso(enumAuto as (typeof PROCESOS)[number]);
+                    } else {
+                      // Área sin mapping (TALLER, o un área nueva creada por
+                      // el usuario): dejar el enum sin autofijar y validar en
+                      // el dropdown del fallback manual.
+                      const procesosValidos = procesosDeArea(areaCod);
+                      if (proceso && !procesosValidos.includes(proceso as (typeof PROCESOS)[number])) {
+                        setProceso('');
+                      }
                     }
                   }}
                   className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
@@ -1411,19 +1445,78 @@ function ProcesosEditor({
                 </Button>
               </div>
             </FormRow>
-            <FormRow label="Proceso" required hint={areaId ? 'Filtrado por el área elegida' : 'Mostrando todos'}>
-              <select
-                value={proceso}
-                onChange={(e) => setProceso(e.target.value as (typeof PROCESOS)[number] | '')}
-                className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
-                required
-              >
-                <option value="">— Elegí un proceso —</option>
-                {procesosDeArea(areas.find((a) => a.id === areaId)?.codigo ?? null).map((p) => (
-                  <option key={p} value={p}>{p.replace('_', ' ')}</option>
-                ))}
-              </select>
-            </FormRow>
+            {/* Nuevo dropdown "Paso operativo" alimentado por el catálogo del
+                Excel del cliente. Si el área no tiene catálogo (TALLER, o un
+                área nueva creada al vuelo), o el usuario tildó "otro", cae al
+                dropdown enum + input libre de siempre. */}
+            {(() => {
+              const areaCod = areasLocal.find((a) => a.id === areaId)?.codigo ?? null;
+              const pasos = pasosDeArea(areaCod);
+              const mostrarManual = !pasos || usarOtroPaso;
+              return (
+                <FormRow
+                  label="Paso operativo"
+                  required
+                  hint={
+                    pasos && !usarOtroPaso
+                      ? 'Del catálogo del cliente. Si no ves el paso, elegí "Otro / escribir manual".'
+                      : 'Elegí el proceso base y escribí el nombre específico del paso.'
+                  }
+                >
+                  {pasos && !usarOtroPaso ? (
+                    <select
+                      value={descripcionOperativa}
+                      onChange={(e) => {
+                        const v = e.target.value;
+                        if (v === '__OTRO__') {
+                          setUsarOtroPaso(true);
+                          setDescripcionOperativa('');
+                          return;
+                        }
+                        setDescripcionOperativa(v);
+                      }}
+                      className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
+                      required
+                    >
+                      <option value="">— Elegí un paso —</option>
+                      {pasos.map((p) => (
+                        <option key={p} value={p}>{p}</option>
+                      ))}
+                      <option value="__OTRO__">➕ Otro / escribir manual…</option>
+                    </select>
+                  ) : (
+                    <div className="space-y-2">
+                      <select
+                        value={proceso}
+                        onChange={(e) => setProceso(e.target.value as (typeof PROCESOS)[number] | '')}
+                        className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
+                        required
+                      >
+                        <option value="">— Elegí un proceso base —</option>
+                        {procesosDeArea(areaCod).map((p) => (
+                          <option key={p} value={p}>{p.replace('_', ' ')}</option>
+                        ))}
+                      </select>
+                      <Input
+                        value={descripcionOperativa}
+                        onChange={(e) => setDescripcionOperativa(e.target.value)}
+                        maxLength={200}
+                        placeholder="Ej: DESEMBOLSADO DE PAQUETES"
+                      />
+                      {pasos && (
+                        <button
+                          type="button"
+                          onClick={() => { setUsarOtroPaso(false); setDescripcionOperativa(''); }}
+                          className="text-[11px] text-happy-600 hover:underline"
+                        >
+                          ← Volver al catálogo del área
+                        </button>
+                      )}
+                    </div>
+                  )}
+                </FormRow>
+              );
+            })()}
             <FormRow label="Tiempo estándar (min)">
               <Input
                 type="number"
@@ -1448,17 +1541,6 @@ function ProcesosEditor({
                 de la receta. Si en un futuro se agrega esa decisión, debería
                 vivir en el módulo de planeamiento/OT, no acá. */}
           </FormGrid>
-          <FormRow
-            label="Descripción operativa"
-            hint="Nombre específico del paso (ej: DESEMBOLSADO DE PAQUETES, LIMPIEZA, DOBLADO Y EMBOLSADO). Útil cuando hay varios pasos con el mismo proceso — p.ej. varios ACABADO en el mismo producto."
-          >
-            <Input
-              value={descripcionOperativa}
-              onChange={(e) => setDescripcionOperativa(e.target.value)}
-              maxLength={200}
-              placeholder="Ej: DESEMBOLSADO DE PAQUETES"
-            />
-          </FormRow>
           <FormRow label="Observación">
             <Input value={obs} onChange={(e) => setObs(e.target.value)} />
           </FormRow>
@@ -1532,10 +1614,20 @@ function ProcesosEditor({
             return next.sort((x, y) => x.nombre.localeCompare(y.nombre));
           });
           setAreaId(a.id);
-          // Si había proceso elegido pero no aplica a la nueva área, vaciarlo.
-          const procesosValidos = procesosDeArea(a.codigo);
-          if (proceso && !procesosValidos.includes(proceso as (typeof PROCESOS)[number])) {
-            setProceso('');
+          // Al crear un área nueva, resetear el paso operativo y autofijar el
+          // enum si el código coincide con el mapping del catálogo (ACABADO,
+          // BORDADO, etc). Si no coincide, dejar sin proceso — el usuario cae
+          // al fallback manual.
+          setDescripcionOperativa('');
+          setUsarOtroPaso(false);
+          const enumAuto = enumDeArea(a.codigo);
+          if (enumAuto) {
+            setProceso(enumAuto as (typeof PROCESOS)[number]);
+          } else {
+            const procesosValidos = procesosDeArea(a.codigo);
+            if (proceso && !procesosValidos.includes(proceso as (typeof PROCESOS)[number])) {
+              setProceso('');
+            }
           }
         }}
       />
