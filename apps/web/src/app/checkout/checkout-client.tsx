@@ -38,7 +38,18 @@ const METODOS: { id: Metodo; label: string; descripcion: string; icon: React.Rea
 const ENVIO_GRATIS_DESDE = 249;
 const COSTO_ENVIO_DEFECTO = 15;
 
-export function CheckoutClient() {
+type CuentaWeb = {
+  id: string;
+  nombre_corto: string;
+  banco: string | null;
+  titular: string | null;
+  numero_cuenta: string | null;
+  numero_cci: string | null;
+  numero_telefono: string | null;
+  notas: string | null;
+};
+
+export function CheckoutClient({ cuentasWeb = [] }: { cuentasWeb?: CuentaWeb[] }) {
   const router = useRouter();
   const items = useCart((s) => s.items);
   const total = useCart((s) => s.total());
@@ -301,6 +312,51 @@ export function CheckoutClient() {
               <p className="mt-1">
                 Al finalizar la compra abriremos WhatsApp con un asesor real. Te enviaremos el resumen del pedido pre-cargado
                 y coordinaremos el método de pago que prefieras (Yape / Plin / tarjeta / transferencia / efectivo contra entrega).
+              </p>
+            </div>
+          )}
+
+          {/* Cuentas de pago web (mig 62, tabla cuentas_bancarias con
+              visible_web=true). Cliente pidió mostrar Yape/Plin al 915109463
+              para que el comprador tenga el número antes de contactar. */}
+          {cuentasWeb.length > 0 && (
+            <div className="mt-4 rounded-lg border border-slate-200 bg-white p-4">
+              <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-slate-500">
+                Medios de pago disponibles
+              </p>
+              <ul className="space-y-2 text-sm">
+                {cuentasWeb.map((c) => (
+                  <li key={c.id} className="flex flex-col gap-0.5 rounded-md border border-slate-100 bg-slate-50/60 p-3">
+                    <div className="flex items-center gap-2">
+                      <Smartphone className="h-4 w-4 text-purple-600" />
+                      <span className="font-semibold text-corp-900">{c.nombre_corto}</span>
+                      {c.titular && (
+                        <span className="text-[11px] text-slate-500">· {c.titular}</span>
+                      )}
+                    </div>
+                    {c.numero_telefono && (
+                      <div className="ml-6 font-mono text-sm text-emerald-700">
+                        📱 {c.numero_telefono}
+                      </div>
+                    )}
+                    {c.numero_cuenta && (
+                      <div className="ml-6 font-mono text-[12px] text-slate-700">
+                        Cuenta: {c.numero_cuenta}
+                      </div>
+                    )}
+                    {c.numero_cci && (
+                      <div className="ml-6 font-mono text-[11px] text-slate-500">
+                        CCI: {c.numero_cci}
+                      </div>
+                    )}
+                    {c.notas && (
+                      <p className="ml-6 text-[11px] text-slate-500">{c.notas}</p>
+                    )}
+                  </li>
+                ))}
+              </ul>
+              <p className="mt-2 text-[11px] text-slate-500">
+                Al finalizar por WhatsApp confirmaremos el método elegido y coordinaremos entrega.
               </p>
             </div>
           )}

@@ -93,8 +93,11 @@ export default async function VentaPage() {
   // el cobro le diga "sin stock" porque en su tienda específica hay 0.
   const almacenActivoId = sesionData?.sesion.almacen_id ?? cajaDefault?.almacen_id ?? null;
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const sbAny = sb as unknown as { from: (t: string) => any };
+
   // Catálogo (siempre se carga; el overlay de apertura sólo bloquea visualmente)
-  const [{ data: variantesRaw }, { data: cajas }, { data: categoriasRaw }, stocksRes] =
+  const [{ data: variantesRaw }, { data: cajas }, { data: categoriasRaw }, stocksRes, { data: cuentasRaw }] =
     await Promise.all([
       sb
         .from('productos_variantes')
@@ -113,6 +116,15 @@ export default async function VentaPage() {
             .eq('almacen_id', almacenActivoId)
             .not('variante_id', 'is', null)
         : sb.from('v_stock_variante_total').select('variante_id, stock_total'),
+      // Cuentas bancarias marcadas visible_pos (mig 62). Cliente pasó su
+      // lista: BCP HAPPYS, BCP JAVIER, INTERBANK HAPPYS, INTERBANK JAVIER,
+      // BBVA. Editables en /configuracion/cuentas-bancarias del ERP.
+      sbAny
+        .from('cuentas_bancarias')
+        .select('id, nombre_corto, banco, metodo_default')
+        .eq('activo', true)
+        .eq('visible_pos', true)
+        .order('orden'),
     ]);
   // Normalizar las dos variantes de respuesta a un mismo formato
   type StockRow = { variante_id: string; cantidad?: number | string; stock_total?: number | string };
@@ -133,6 +145,13 @@ export default async function VentaPage() {
     stockMap.set(s.variante_id as string, Number(s.stock_total ?? 0));
   }
 
+  const cuentas = (cuentasRaw ?? []) as {
+    id: string;
+    nombre_corto: string;
+    banco: string | null;
+    metodo_default: string;
+  }[];
+
   return (
     <PosTerminal
       variantes={variantes as unknown as Parameters<typeof PosTerminal>[0]['variantes']}
@@ -144,6 +163,7 @@ export default async function VentaPage() {
       sesionInicial={sesionData}
       empresaNombre={empresaNombre}
       configEscalones={configEscalones}
+      cuentasBancarias={cuentas}
     />
   );
 }

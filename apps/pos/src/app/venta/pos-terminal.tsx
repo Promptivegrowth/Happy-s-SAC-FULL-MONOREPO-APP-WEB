@@ -76,7 +76,10 @@ function calcularPrecioPorCantidad(
     : { precio: publico, escalon: 'PUBLICO' };
 }
 type MetodoCarrito = 'EFECTIVO' | 'YAPE' | 'PLIN' | 'TARJETA_DEBITO' | 'TARJETA_CREDITO' | 'TRANSFERENCIA' | 'WHATSAPP_PENDIENTE';
-type PagoLinea = { metodo: MetodoCarrito; monto: number };
+/** Nueva: incluye referencia a la cuenta bancaria elegida (BCP HAPPYS, etc)
+ *  para que quede registrado a qué cuenta destino se cobró. */
+type PagoLinea = { metodo: MetodoCarrito; monto: number; cuentaNombre?: string };
+type CuentaBancariaDTO = { id: string; nombre_corto: string; banco: string | null; metodo_default: string };
 
 export function PosTerminal({
   variantes,
@@ -88,6 +91,7 @@ export function PosTerminal({
   sesionInicial,
   empresaNombre = 'HAPPY SAC',
   configEscalones = { mayorista_desde: 3, industrial_desde: 100, activos: true },
+  cuentasBancarias = [],
 }: {
   variantes: Variante[];
   cajas: Caja[];
@@ -98,6 +102,9 @@ export function PosTerminal({
   sesionInicial: { sesion: SesionCajaDTO; balance: BalanceCajaDTO } | null;
   empresaNombre?: string;
   configEscalones?: ConfigEscalones;
+  /** Cuentas bancarias visibles en el POS (BCP HAPPYS, BCP JAVIER, etc.).
+   *  Se administran desde ERP → Configuración → Cuentas bancarias. */
+  cuentasBancarias?: CuentaBancariaDTO[];
 }) {
   // --- Sesión de caja ---
   const [sesionActiva, setSesionActiva] = useState<SesionCajaDTO | null>(sesionInicial?.sesion ?? null);
@@ -187,17 +194,28 @@ export function PosTerminal({
   const total = useMemo(() => lineasConPrecio.reduce((a, l) => a + l.subtotal, 0), [lineasConPrecio]);
   const pagado = pagos.reduce((a, p) => a + p.monto, 0);
 
-  // Agrupar variantes por producto para vista de catálogo
+  // Agrupar variantes por producto para vista de catálogo.
+  // El grid del catálogo también filtra por el texto del buscador (search):
+  // cliente reportó (2026-07-10) que al escribir "bombero" no aparecía nada,
+  // ni en el dropdown ni "abajo" — porque el catálogo mostraba TODOS los
+  // productos sin filtrar. Ahora el search también reduce el grid.
   const productosAgrupados = useMemo(() => {
     const map = new Map<string, { producto: Variante['productos']; variantes: Variante[] }>();
+    const qCat = search.trim().toLowerCase();
     for (const v of variantes) {
       if (catFiltro && v.productos.categoria_id !== catFiltro) continue;
+      if (qCat) {
+        const nombre = v.productos.nombre.toLowerCase();
+        const sku = v.sku.toLowerCase();
+        const cb = v.codigo_barras?.toLowerCase() ?? '';
+        if (!nombre.includes(qCat) && !sku.includes(qCat) && !cb.includes(qCat)) continue;
+      }
       const cur = map.get(v.productos.id);
       if (cur) cur.variantes.push(v);
       else map.set(v.productos.id, { producto: v.productos, variantes: [v] });
     }
     return Array.from(map.values()).sort((a, b) => a.producto.nombre.localeCompare(b.producto.nombre));
-  }, [variantes, catFiltro]);
+  }, [variantes, catFiltro, search]);
 
   function agregarPorBarcode(input: string) {
     const barcode = input.trim();
@@ -274,9 +292,9 @@ export function PosTerminal({
     setCarrito((prev) => prev.filter((l) => l.variante.id !== varianteId));
   }
 
-  function agregarPago(metodo: MetodoCarrito, monto: number) {
+  function agregarPago(metodo: MetodoCarrito, monto: number, cuentaNombre?: string) {
     if (monto <= 0) return;
-    setPagos((p) => [...p, { metodo, monto }]);
+    setPagos((p) => [...p, { metodo, monto, cuentaNombre }]);
   }
 
   function quitarPago(idx: number) {
@@ -319,7 +337,7 @@ export function PosTerminal({
           precio_unitario: l.precio_unitario,
           descuento_monto: 0,
         })),
-        pagos: pagos.map((p) => ({ metodo: p.metodo, monto: p.monto })),
+        pagos: pagos.map((p) => ({ metodo: p.metodo, monto: p.monto, referencia: p.cuentaNombre })),
       });
       if (!r.ok) {
         toast.error(r.error);
@@ -693,7 +711,7 @@ export function PosTerminal({
                   poder agregar más del mismo producto rápido. */}
               {productoTallasOpen && (
                 <div
-                  className="fixed left-0 top-0 z-50 flex h-screen w-[calc(100vw-720px)] items-center justify-center bg-black/30 p-4 lg:right-[720px]"
+                  className="fixed inset-0 z-50 flex h-screen items-center justify-center bg-black/30 p-4 lg:left-0 lg:right-[720px] lg:w-auto"
                   onClick={() => setProductoTallasOpen(null)}
                 >
                   <Card
@@ -1000,12 +1018,45 @@ export function PosTerminal({
             )}
           </div>
 
+          {/* Cuentas bancarias dinámicas — vienen de BD (mig 62, editables
+              en ERP → Configuración → Cuentas bancarias). Cliente pasó su
+              lista real 2026-07-10: BCP HAPPYS, BCP JAVIER, INTERBANK HAPPYS,
+              INTERBANK JAVIER, BBVA. Cada botón cobra el saldo restante
+              guardando metodo (enum) + cuentaNombre (referencia). */}
+          {cuentasBancarias.length > 0 && (
+            <div className="mb-2 grid grid-cols-2 gap-2">
+              {cuentasBancarias.map((c) => {
+                // Color por banco para reconocimiento rápido.
+                const banco = (c.banco ?? '').toUpperCase();
+                const color =
+                  banco === 'BCP' ? 'bg-blue-50 text-blue-800 border border-blue-200' :
+                  banco === 'INTERBANK' ? 'bg-emerald-50 text-emerald-800 border border-emerald-200' :
+                  banco === 'BBVA' ? 'bg-indigo-50 text-indigo-800 border border-indigo-200' :
+                  banco === 'YAPE/PLIN' ? 'bg-purple-50 text-purple-800 border border-purple-200' :
+                  'bg-slate-50 text-slate-800 border border-slate-200';
+                return (
+                  <button
+                    key={c.id}
+                    onClick={() => agregarPago(c.metodo_default as MetodoCarrito, Math.max(0, total - pagado), c.nombre_corto)}
+                    className={`flex items-center gap-2 rounded-md p-3 text-xs font-semibold ${color} hover:brightness-95`}
+                    title={`Cobrar por ${c.nombre_corto} — método ${c.metodo_default}`}
+                  >
+                    <Building2 className="h-4 w-4 shrink-0" />
+                    <span className="text-left leading-tight">{c.nombre_corto}</span>
+                  </button>
+                );
+              })}
+            </div>
+          )}
+
+          {/* Métodos genéricos (fallback y para casos que no encajan con las
+              cuentas del catálogo: Yape/Plin directo, Tarjeta con datáfono). */}
           <div className="grid grid-cols-2 gap-2">
             {([
               { m: 'YAPE', label: 'Yape', icon: <Smartphone className="h-4 w-4" />, color: 'bg-purple-50 text-purple-700' },
               { m: 'PLIN', label: 'Plin', icon: <Smartphone className="h-4 w-4" />, color: 'bg-blue-50 text-blue-700' },
               { m: 'TARJETA_CREDITO', label: 'Tarjeta', icon: <CreditCard className="h-4 w-4" />, color: 'bg-slate-100 text-slate-700' },
-              { m: 'TRANSFERENCIA', label: 'Transfer.', icon: <Building2 className="h-4 w-4" />, color: 'bg-slate-100 text-slate-700' },
+              { m: 'TRANSFERENCIA', label: 'Transfer. genérica', icon: <Building2 className="h-4 w-4" />, color: 'bg-slate-100 text-slate-700' },
             ] as const).map((p) => (
               <button
                 key={p.m}
@@ -1022,6 +1073,9 @@ export function PosTerminal({
               {pagos.map((p, i) => (
                 <li key={i} className="flex items-center gap-2 rounded-md bg-white p-2 text-sm shadow-sm">
                   <Badge variant="secondary" className="text-[10px]">{p.metodo.replace('_', ' ')}</Badge>
+                  {p.cuentaNombre && (
+                    <span className="text-[11px] font-medium text-slate-600">{p.cuentaNombre}</span>
+                  )}
                   <span className="ml-auto font-semibold">{formatPEN(p.monto)}</span>
                   <button onClick={() => quitarPago(i)} className="rounded p-1 text-slate-400 hover:bg-slate-100"><X className="h-3 w-3" /></button>
                 </li>
