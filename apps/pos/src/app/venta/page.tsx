@@ -2,6 +2,7 @@ import { redirect } from 'next/navigation';
 import { PosTerminal } from './pos-terminal';
 import { createClient } from '@happy/db/server';
 import { obtenerSesionActiva } from '@/server/actions/caja';
+import { listarVendedoresPOS } from '@/server/actions/vendedores';
 
 export const metadata = { title: 'Venta — POS' };
 export const dynamic = 'force-dynamic';
@@ -152,6 +153,11 @@ export default async function VentaPage() {
     metodo_default: string;
   }[];
 
+  // Vendedores para el dropdown del header (cliente pidió 2026-07-10 que
+  // esté en el layout principal, no dentro de modal wizard). Se persiste
+  // por localStorage entre ventas — el cajero elige una vez por sesión.
+  const vendedores = await listarVendedoresPOS();
+
   return (
     <PosTerminal
       variantes={variantes as unknown as Parameters<typeof PosTerminal>[0]['variantes']}
@@ -164,6 +170,7 @@ export default async function VentaPage() {
       empresaNombre={empresaNombre}
       configEscalones={configEscalones}
       cuentasBancarias={cuentas}
+      vendedores={vendedores}
     />
   );
 }

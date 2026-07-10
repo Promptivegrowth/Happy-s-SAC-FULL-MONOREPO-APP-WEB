@@ -80,6 +80,9 @@ type MetodoCarrito = 'EFECTIVO' | 'YAPE' | 'PLIN' | 'TARJETA_DEBITO' | 'TARJETA_
  *  para que quede registrado a qué cuenta destino se cobró. */
 type PagoLinea = { metodo: MetodoCarrito; monto: number; cuentaNombre?: string };
 type CuentaBancariaDTO = { id: string; nombre_corto: string; banco: string | null; metodo_default: string };
+type VendedorDTO = { id: string; nombre: string };
+type TipoDoc = 'BOLETA' | 'FACTURA' | 'NOTA_VENTA';
+type FormatoDoc = 'TICKET_80MM' | 'A4';
 
 export function PosTerminal({
   variantes,
@@ -92,6 +95,7 @@ export function PosTerminal({
   empresaNombre = 'HAPPY SAC',
   configEscalones = { mayorista_desde: 3, industrial_desde: 100, activos: true },
   cuentasBancarias = [],
+  vendedores = [],
 }: {
   variantes: Variante[];
   cajas: Caja[];
@@ -105,6 +109,8 @@ export function PosTerminal({
   /** Cuentas bancarias visibles en el POS (BCP HAPPYS, BCP JAVIER, etc.).
    *  Se administran desde ERP → Configuración → Cuentas bancarias. */
   cuentasBancarias?: CuentaBancariaDTO[];
+  /** Vendedores activos para el dropdown del header del panel derecho. */
+  vendedores?: VendedorDTO[];
 }) {
   // --- Sesión de caja ---
   const [sesionActiva, setSesionActiva] = useState<SesionCajaDTO | null>(sesionInicial?.sesion ?? null);
@@ -129,12 +135,68 @@ export function PosTerminal({
   const [search, setSearch] = useState('');
   const [carrito, setCarrito] = useState<LineaCarrito[]>([]);
   const [pagos, setPagos] = useState<PagoLinea[]>([]);
-  const [tipoCliente, setTipoCliente] = useState<'rapido' | 'completo'>('rapido');
   const [nombreCliente, setNombreCliente] = useState('');
   const [docCliente, setDocCliente] = useState('');
+  const [direccionCliente, setDireccionCliente] = useState('');
+  const [telefonoCliente, setTelefonoCliente] = useState('');
+  const [clienteIdSeleccionado, setClienteIdSeleccionado] = useState<string | null>(null);
+  const [buscandoSunat, setBuscandoSunat] = useState(false);
+  // Overrides y descuentos por línea del carrito (indexado por variante_id).
+  // Cliente pidió (2026-07-10) poder editar el precio unitario y aplicar
+  // descuento sin salir del carrito, como en su sistema anterior.
+  const [overridesPrecio, setOverridesPrecio] = useState<Record<string, number>>({});
+  const [descuentosLinea, setDescuentosLinea] = useState<Record<string, number>>({});
   const [vista, setVista] = useState<'busqueda' | 'catalogo'>('busqueda');
   const [catFiltro, setCatFiltro] = useState<string>('');
   const [productoTallasOpen, setProductoTallasOpen] = useState<string | null>(null);
+  // Header del panel derecho: tipo comprobante, vendedor, formato PDF.
+  // Persistidos en localStorage por sesión — el cajero no elige c/venta.
+  const [tipoDoc, setTipoDoc] = useState<TipoDoc>('NOTA_VENTA');
+  const [vendedorId, setVendedorId] = useState<string>('');
+  const [formato, setFormato] = useState<FormatoDoc>('TICKET_80MM');
+  useEffect(() => {
+    // Hidratar desde localStorage al montar (solo cliente-side).
+    try {
+      const tv = localStorage.getItem('pos-tipo-doc') as TipoDoc | null;
+      if (tv === 'BOLETA' || tv === 'FACTURA' || tv === 'NOTA_VENTA') setTipoDoc(tv);
+      const vv = localStorage.getItem('pos-vendedor-id');
+      if (vv) setVendedorId(vv);
+      const fv = localStorage.getItem('pos-formato') as FormatoDoc | null;
+      if (fv === 'TICKET_80MM' || fv === 'A4') setFormato(fv);
+    } catch { /* ignore */ }
+  }, []);
+  useEffect(() => { try { localStorage.setItem('pos-tipo-doc', tipoDoc); } catch { /* ignore */ } }, [tipoDoc]);
+  useEffect(() => { try { localStorage.setItem('pos-vendedor-id', vendedorId); } catch { /* ignore */ } }, [vendedorId]);
+  useEffect(() => { try { localStorage.setItem('pos-formato', formato); } catch { /* ignore */ } }, [formato]);
+
+  // Autolookup SUNAT/RENIEC al terminar de tipear DNI (8 díg) o RUC (11 díg).
+  // Debounce 500ms. Endpoint /api/sunat/{dni|ruc}/{n} devuelve razón social /
+  // nombre completo + dirección (para RUC). Sin botón — se dispara solo cuando
+  // el largo llega al esperado y hay 500ms sin nuevos cambios.
+  useEffect(() => {
+    const n = docCliente.trim();
+    if (n.length !== 8 && n.length !== 11) return;
+    if (clienteIdSeleccionado) return; // ya está cargado
+    const timer = setTimeout(async () => {
+      const tipo = n.length === 8 ? 'dni' : 'ruc';
+      setBuscandoSunat(true);
+      try {
+        const r = await fetch(`/api/sunat/${tipo}/${n}`);
+        if (!r.ok) return;
+        const data = await r.json();
+        if (tipo === 'dni') {
+          if (data.nombreCompleto) setNombreCliente(data.nombreCompleto);
+        } else {
+          if (data.razonSocial) setNombreCliente(data.razonSocial);
+          if (data.direccion) setDireccionCliente(data.direccion);
+        }
+      } catch { /* silent */ } finally {
+        setBuscandoSunat(false);
+      }
+    }, 500);
+    return () => clearTimeout(timer);
+  }, [docCliente, clienteIdSeleccionado]);
+
   const inputRef = useRef<HTMLInputElement>(null);
 
   // Cuando hay sesión activa, fijamos la caja del terminal a la sesión actual.
@@ -186,9 +248,23 @@ export function PosTerminal({
   const lineasConPrecio = useMemo(
     () => carrito.map((l) => {
       const r = calcularPrecioPorCantidad(l.variante, totalItemsCarrito, configEscalones);
-      return { ...l, precio_unitario: r.precio, escalon: r.escalon, subtotal: l.cantidad * r.precio };
+      // Prioridad: override manual del cajero > precio calculado por escalón.
+      const overrideKey = l.variante.id;
+      const precioBase = overridesPrecio[overrideKey] ?? r.precio;
+      const descuento = descuentosLinea[overrideKey] ?? 0;
+      const precioFinal = Math.max(0, precioBase - descuento);
+      const isOverride = overridesPrecio[overrideKey] != null;
+      return {
+        ...l,
+        precio_unitario: precioFinal,
+        precio_base_calculado: r.precio,
+        precio_override: isOverride ? precioBase : null,
+        descuento_unitario: descuento,
+        escalon: r.escalon,
+        subtotal: l.cantidad * precioFinal,
+      };
     }),
-    [carrito, configEscalones, totalItemsCarrito],
+    [carrito, configEscalones, totalItemsCarrito, overridesPrecio, descuentosLinea],
   );
 
   const total = useMemo(() => lineasConPrecio.reduce((a, l) => a + l.subtotal, 0), [lineasConPrecio]);
@@ -343,6 +419,52 @@ export function PosTerminal({
     setCobrarOpen(true);
   }
 
+  /**
+   * Flujo DIRECTO de cobro sin modal wizard. Cliente pidió (2026-07-10):
+   * click PAGAR → registra venta + emite comprobante + genera PDF + abre
+   * print + reset. Sin steps intermedios. Toda la data ya está en el panel
+   * derecho (tipo doc, cliente, vendedor, formato).
+   *
+   * Fallback: si validación falla (ej. FACTURA sin RUC), muestra toast
+   * bloqueante en vez de abrir modal.
+   */
+  async function pagarEImprimir() {
+    if (!sesionActiva || !cajaActual) return toast.error('Abre la caja primero');
+    if (carrito.length === 0) return toast.error('Carrito vacío');
+    if (pagado < total) return toast.error(`Falta cobrar ${formatPEN(total - pagado)}`);
+    // Validación por tipo de comprobante
+    if (tipoDoc === 'FACTURA') {
+      if (docCliente.length !== 11) return toast.error('FACTURA requiere RUC de 11 dígitos');
+      if (!nombreCliente.trim()) return toast.error('FACTURA requiere razón social');
+      if (!direccionCliente.trim()) return toast.error('FACTURA requiere dirección fiscal');
+    }
+    if (tipoDoc === 'BOLETA' && docCliente && docCliente.length !== 8 && docCliente.length !== 11) {
+      return toast.error('DNI debe tener 8 dígitos (o dejalo vacío para cliente anónimo)');
+    }
+
+    // Armar payload compatible con ejecutarCobro (mismo pipeline). El "cliente"
+    // se compone inline con los datos que hay en el panel — no hay lookup en
+    // BD acá (el server usa el nombre libre si no hay cliente_id).
+    const tipoDocumentoCliente: 'DNI' | 'RUC' | null =
+      docCliente.length === 8 ? 'DNI' : docCliente.length === 11 ? 'RUC' : null;
+    await ejecutarCobro({
+      tipo: tipoDoc,
+      formato,
+      cliente: {
+        cliente_id: clienteIdSeleccionado,
+        numero_documento: docCliente || null,
+        tipo_documento: tipoDocumentoCliente,
+        razon_social: tipoDocumentoCliente === 'RUC' ? (nombreCliente || null) : null,
+        nombres: tipoDocumentoCliente === 'DNI' ? (nombreCliente || null) : (tipoDocumentoCliente === null ? (nombreCliente || null) : null),
+        apellidos: null,
+        direccion: direccionCliente || null,
+        telefono: telefonoCliente || null,
+        email: null,
+      },
+      vendedor_usuario_id: vendedorId || null,
+    });
+  }
+
   async function ejecutarCobro(payload: CobrarPayload) {
     if (!sesionActiva || !cajaActual) {
       toast.error('No hay sesión de caja activa');
@@ -370,6 +492,7 @@ export function PosTerminal({
           descuento_monto: 0,
         })),
         pagos: pagos.map((p) => ({ metodo: p.metodo, monto: p.monto, referencia: p.cuentaNombre })),
+        vendedor_usuario_id: payload.vendedor_usuario_id ?? null,
       });
       if (!r.ok) {
         toast.error(r.error);
@@ -451,16 +574,21 @@ export function PosTerminal({
       toast.success(
         `✅ ${r.numero}${numeroComprobante ? ` · ${numeroComprobante}` : ''} · ${formatPEN(total)}`,
       );
-      // Reset COMPLETO — el contador cobrarKey fuerza un remount fresco
-      // del CobrarModal en la próxima apertura, así NO queda info del cliente anterior.
+      // Reset COMPLETO — deja la caja lista para la siguiente venta.
+      // Incluye overrides de precio, descuentos y campos nuevos del cliente.
       setCarrito([]);
       setPagos([]);
       setNombreCliente('');
       setDocCliente('');
-      setTipoCliente('rapido');
+      setDireccionCliente('');
+      setTelefonoCliente('');
+      setClienteIdSeleccionado(null);
+      setOverridesPrecio({});
+      setDescuentosLinea({});
       setEfectivoInput('');
       setCobrarOpen(false);
       setCobrarKey((k) => k + 1);
+      // NO reseteamos vendedorId / tipoDoc / formato — persisten por sesión.
       // Refrescar balance para que el cierre vea la venta
       void refrescarSesion();
     } finally {
@@ -815,20 +943,106 @@ export function PosTerminal({
             hace falta cambiar de vista para verlo. */}
       </section>
 
-      {/* DERECHA — Cliente + Carrito visible + Pago */}
-      <aside className="flex h-screen flex-col border-l bg-slate-50">
-        <div className="shrink-0 border-b bg-white p-4">
-          <div className="mb-3 flex gap-2 text-xs">
-            <button onClick={() => setTipoCliente('rapido')} className={`flex-1 rounded-md px-3 py-2 ${tipoCliente === 'rapido' ? 'bg-happy-100 font-medium text-happy-700' : 'text-slate-500'}`}>Cliente rápido</button>
-            <button onClick={() => setTipoCliente('completo')} className={`flex-1 rounded-md px-3 py-2 ${tipoCliente === 'completo' ? 'bg-happy-100 font-medium text-happy-700' : 'text-slate-500'}`}>Con DNI/RUC</button>
+      {/* DERECHA — Header (tipo doc + vendedor) + Cliente + Carrito + Pago.
+          Cliente pidió (2026-07-10, referencia de su POS anterior): todo el
+          flujo de venta en ESTE panel, sin modal wizard. Tipo comprobante y
+          vendedor persisten en localStorage — se eligen 1 vez por sesión, no
+          cada venta. */}
+      <aside className="flex h-screen flex-col border-l bg-slate-50" data-pos-no-focus>
+        {/* HEADER: Tipo comprobante · Vendedor · Formato */}
+        <div className="shrink-0 border-b bg-white px-3 py-2">
+          <div className="mb-2 grid grid-cols-3 gap-1">
+            {(['BOLETA', 'FACTURA', 'NOTA_VENTA'] as TipoDoc[]).map((t) => {
+              const activo = tipoDoc === t;
+              const label = t === 'NOTA_VENTA' ? 'NOTA' : t;
+              return (
+                <button
+                  key={t}
+                  onClick={() => setTipoDoc(t)}
+                  className={`rounded-md border px-2 py-1.5 text-[11px] font-semibold transition ${
+                    activo
+                      ? 'border-happy-500 bg-happy-500 text-white shadow-sm'
+                      : 'border-slate-200 bg-white text-slate-500 hover:border-happy-300 hover:text-happy-700'
+                  }`}
+                >
+                  {label}
+                </button>
+              );
+            })}
           </div>
-          {tipoCliente === 'rapido' ? (
-            <Input value={nombreCliente} onChange={(e) => setNombreCliente(e.target.value)} placeholder="Nombre (opcional)" />
-          ) : (
-            <div className="grid grid-cols-2 gap-2">
-              <Input value={docCliente} onChange={(e) => setDocCliente(e.target.value)} placeholder="DNI/RUC" />
-              <Input value={nombreCliente} onChange={(e) => setNombreCliente(e.target.value)} placeholder="Razón social/Nombre" />
+          <div className="grid grid-cols-[1fr_auto] gap-1.5">
+            <select
+              value={vendedorId}
+              onChange={(e) => setVendedorId(e.target.value)}
+              className="h-8 rounded-md border border-slate-200 bg-white px-2 text-[11px] font-medium"
+              title="Vendedor de esta venta (se persiste por sesión)"
+            >
+              <option value="">— sin vendedor —</option>
+              {vendedores.map((v) => (
+                <option key={v.id} value={v.id}>{v.nombre}</option>
+              ))}
+            </select>
+            <div className="flex rounded-md border border-slate-200 bg-white p-0.5 text-[10px]">
+              {(['TICKET_80MM', 'A4'] as FormatoDoc[]).map((f) => (
+                <button
+                  key={f}
+                  onClick={() => setFormato(f)}
+                  className={`rounded px-1.5 py-1 font-semibold transition ${
+                    formato === f ? 'bg-slate-800 text-white' : 'text-slate-500 hover:bg-slate-100'
+                  }`}
+                  title={f === 'TICKET_80MM' ? 'Ticket térmico 80mm' : 'PDF A4'}
+                >
+                  {f === 'TICKET_80MM' ? '80mm' : 'A4'}
+                </button>
+              ))}
             </div>
+          </div>
+        </div>
+
+        {/* CLIENTE INLINE: DNI/RUC con autolookup SUNAT/RENIEC + razón social + dirección (si FACTURA) */}
+        <div className="shrink-0 border-b bg-white px-3 py-2">
+          <div className="mb-1 flex items-center justify-between text-[10px] font-semibold uppercase tracking-wider text-slate-500">
+            <span>Cliente</span>
+            {buscandoSunat && (
+              <span className="flex items-center gap-1 text-happy-600">
+                <Loader2 className="h-3 w-3 animate-spin" /> Consultando…
+              </span>
+            )}
+            {clienteIdSeleccionado && !buscandoSunat && (
+              <span className="text-emerald-600">✓ Guardado en BD</span>
+            )}
+          </div>
+          <div className="grid grid-cols-[110px_1fr] gap-1.5">
+            <Input
+              value={docCliente}
+              onChange={(e) => {
+                const v = e.target.value.replace(/\D/g, '').slice(0, 11);
+                setDocCliente(v);
+                // Reset cliente seleccionado al editar DNI/RUC
+                if (clienteIdSeleccionado) setClienteIdSeleccionado(null);
+              }}
+              placeholder="DNI/RUC"
+              className="h-8 font-mono text-xs"
+              inputMode="numeric"
+              maxLength={11}
+              data-pos-no-focus
+            />
+            <Input
+              value={nombreCliente}
+              onChange={(e) => setNombreCliente(e.target.value)}
+              placeholder={tipoDoc === 'FACTURA' ? 'Razón social *' : 'Nombre (opcional)'}
+              className="h-8 text-xs"
+              data-pos-no-focus
+            />
+          </div>
+          {(tipoDoc === 'FACTURA' || direccionCliente) && (
+            <Input
+              value={direccionCliente}
+              onChange={(e) => setDireccionCliente(e.target.value)}
+              placeholder={tipoDoc === 'FACTURA' ? 'Dirección fiscal *' : 'Dirección'}
+              className="mt-1 h-8 text-xs"
+              data-pos-no-focus
+            />
           )}
         </div>
 
@@ -897,11 +1111,34 @@ export function PosTerminal({
                         <p className="text-[10px] text-slate-500">
                           T{formatTalla(l.variante.talla)} · {l.variante.sku}
                         </p>
-                        <div className="mt-0.5 flex items-baseline gap-1">
-                          <span className="text-[11px] font-semibold text-happy-600">{formatPEN(l.precio_unitario)}</span>
-                          {enOferta && (
+                        <div className="mt-0.5 flex items-center gap-1">
+                          <PrecioEditable
+                            valor={l.precio_override ?? l.precio_base_calculado}
+                            onChange={(v) => {
+                              setOverridesPrecio((prev) => {
+                                const next = { ...prev };
+                                if (v === l.precio_base_calculado) delete next[l.variante.id];
+                                else next[l.variante.id] = v;
+                                return next;
+                              });
+                            }}
+                            isOverride={l.precio_override != null}
+                          />
+                          {enOferta && !l.precio_override && (
                             <span className="text-[9px] text-slate-400 line-through">{formatPEN(precioPublico)}</span>
                           )}
+                          <DescuentoLineaChip
+                            valor={l.descuento_unitario ?? 0}
+                            precioBase={l.precio_override ?? l.precio_base_calculado}
+                            onChange={(v) => {
+                              setDescuentosLinea((prev) => {
+                                const next = { ...prev };
+                                if (v <= 0) delete next[l.variante.id];
+                                else next[l.variante.id] = v;
+                                return next;
+                              });
+                            }}
+                          />
                         </div>
                       </div>
                       <div className="flex flex-col items-end gap-1">
@@ -1104,36 +1341,43 @@ export function PosTerminal({
           )}
         </div>
 
-        <div className="border-t bg-white p-4">
-          <div className="mb-3 flex items-baseline justify-between">
-            <span className="text-xs uppercase tracking-wider text-slate-500">Total</span>
-            <span className="font-display text-3xl font-bold text-corp-900">{formatPEN(total)}</span>
+        <div className="border-t bg-white p-3">
+          <div className="mb-2 flex items-baseline justify-between">
+            <span className="text-[10px] uppercase tracking-wider text-slate-500">Total</span>
+            <span className="font-display text-2xl font-bold text-corp-900">{formatPEN(total)}</span>
           </div>
           {pagado !== total && (
-            <div className="mb-3 flex items-baseline justify-between text-sm">
+            <div className="mb-2 flex items-baseline justify-between text-xs">
               <span className="text-slate-500">{pagado < total ? 'Falta' : 'Vuelto'}</span>
               <span className={`font-mono font-semibold ${pagado < total ? 'text-danger' : 'text-emerald-600'}`}>
                 {formatPEN(Math.abs(total - pagado))}
               </span>
             </div>
           )}
-          <div className="flex gap-2">
-            <Button onClick={pedirPorWhatsapp} variant="outline" disabled={carrito.length === 0} className="flex-1">
+          <div className="flex gap-1.5">
+            <Button
+              onClick={pedirPorWhatsapp}
+              variant="outline"
+              disabled={carrito.length === 0}
+              className="flex-1 gap-1 px-2"
+              title="Enviar cotización por WhatsApp (no cobra ni imprime)"
+            >
               <MessageCircle className="h-4 w-4" /> WA
             </Button>
             <Button
-              onClick={abrirModalCobrar}
+              onClick={pagarEImprimir}
               variant="premium"
               size="lg"
               disabled={cobrando || carrito.length === 0 || pagado < total || !sesionActiva}
-              className="flex-[2]"
+              className="flex-[3] gap-1 whitespace-nowrap"
+              title="Registra venta + emite comprobante + imprime automático"
             >
               {cobrando ? <Loader2 className="h-4 w-4 animate-spin" /> : <Receipt className="h-4 w-4" />}
-              Cobrar {formatPEN(total)}
+              PAGAR E IMPRIMIR
             </Button>
           </div>
-          <p className="mt-2 text-center text-[11px] text-slate-400">
-            Eliges tipo de comprobante (boleta/factura/interno) y formato (ticket/A4) en el siguiente paso.
+          <p className="mt-1.5 text-center text-[10px] text-slate-400">
+            Al pagar se emite {tipoDoc === 'NOTA_VENTA' ? 'nota interna' : tipoDoc.toLowerCase()} en {formato === 'TICKET_80MM' ? 'ticket 80mm' : 'A4'} y se imprime automático.
           </p>
         </div>
       </aside>
@@ -1333,6 +1577,144 @@ export function PosTerminal({
             void refrescarSesion();
           }}
         />
+      )}
+    </div>
+  );
+}
+
+/**
+ * Precio unitario editable inline. Click sobre el número → input. Enter/blur
+ * guarda. Si el nuevo valor coincide con el precio calculado por escalón, se
+ * limpia el override (vuelve al automático).
+ */
+function PrecioEditable({
+  valor,
+  onChange,
+  isOverride,
+}: {
+  valor: number;
+  onChange: (v: number) => void;
+  isOverride: boolean;
+}) {
+  const [editando, setEditando] = useState(false);
+  const [temp, setTemp] = useState(valor.toFixed(2));
+  useEffect(() => { setTemp(valor.toFixed(2)); }, [valor]);
+  if (editando) {
+    return (
+      <input
+        type="number"
+        step="0.01"
+        min={0}
+        value={temp}
+        autoFocus
+        onChange={(e) => setTemp(e.target.value)}
+        onBlur={() => {
+          const n = Number(temp);
+          if (Number.isFinite(n) && n >= 0) onChange(n);
+          setEditando(false);
+        }}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
+          if (e.key === 'Escape') { setTemp(valor.toFixed(2)); setEditando(false); }
+        }}
+        className="h-5 w-16 rounded border border-happy-400 bg-white px-1 text-right font-mono text-[11px] focus:outline-none focus:ring-1 focus:ring-happy-200"
+        data-pos-no-focus
+      />
+    );
+  }
+  return (
+    <button
+      type="button"
+      onClick={() => setEditando(true)}
+      className={`rounded px-1 text-[11px] font-semibold hover:bg-slate-100 ${
+        isOverride ? 'text-amber-600 underline decoration-dotted' : 'text-happy-600'
+      }`}
+      title={isOverride ? 'Precio editado manualmente (click para cambiar)' : 'Click para editar precio'}
+      data-pos-no-focus
+    >
+      S/ {valor.toFixed(2)}
+    </button>
+  );
+}
+
+/**
+ * Chip de descuento por línea. Estado colapsado: si no hay descuento muestra
+ * un botón "%" pequeño; si hay, muestra el monto restado. Click → popover con
+ * input S/ (monto fijo) y % (calcula sobre precio base).
+ */
+function DescuentoLineaChip({
+  valor,
+  precioBase,
+  onChange,
+}: {
+  valor: number;
+  precioBase: number;
+  onChange: (v: number) => void;
+}) {
+  const [abierto, setAbierto] = useState(false);
+  const [modo, setModo] = useState<'monto' | 'porcentaje'>('monto');
+  const [temp, setTemp] = useState(valor > 0 ? valor.toFixed(2) : '');
+
+  function aplicar() {
+    const n = Number(temp);
+    if (!Number.isFinite(n) || n < 0) return;
+    const descFinal = modo === 'porcentaje' ? +(precioBase * n / 100).toFixed(2) : n;
+    onChange(Math.min(descFinal, precioBase));
+    setAbierto(false);
+  }
+
+  return (
+    <div className="relative" data-pos-no-focus>
+      <button
+        type="button"
+        onClick={() => setAbierto((v) => !v)}
+        className={`rounded px-1 text-[10px] font-medium ${
+          valor > 0
+            ? 'bg-rose-100 text-rose-700 hover:bg-rose-200'
+            : 'text-slate-400 hover:bg-slate-100'
+        }`}
+        title={valor > 0 ? `Descuento −S/ ${valor.toFixed(2)}` : 'Aplicar descuento'}
+      >
+        {valor > 0 ? `− ${valor.toFixed(2)}` : '%'}
+      </button>
+      {abierto && (
+        <div
+          className="absolute right-0 top-full z-40 mt-1 w-40 rounded-md border bg-white p-2 shadow-lg"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <div className="mb-1 flex gap-1 text-[9px]">
+            <button
+              onClick={() => setModo('monto')}
+              className={`flex-1 rounded px-1 py-0.5 ${modo === 'monto' ? 'bg-happy-500 text-white' : 'bg-slate-100 text-slate-600'}`}
+            >S/</button>
+            <button
+              onClick={() => setModo('porcentaje')}
+              className={`flex-1 rounded px-1 py-0.5 ${modo === 'porcentaje' ? 'bg-happy-500 text-white' : 'bg-slate-100 text-slate-600'}`}
+            >%</button>
+          </div>
+          <input
+            type="number"
+            step="0.01"
+            min={0}
+            max={modo === 'porcentaje' ? 100 : precioBase}
+            value={temp}
+            autoFocus
+            onChange={(e) => setTemp(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Enter') aplicar(); if (e.key === 'Escape') setAbierto(false); }}
+            className="mb-1 h-7 w-full rounded border border-slate-300 px-1.5 text-right font-mono text-xs"
+            placeholder={modo === 'monto' ? 'S/ 5.00' : '10%'}
+          />
+          <div className="flex gap-1">
+            <button
+              onClick={() => { setTemp(''); onChange(0); setAbierto(false); }}
+              className="flex-1 rounded bg-slate-100 py-0.5 text-[10px] font-medium text-slate-600 hover:bg-slate-200"
+            >Quitar</button>
+            <button
+              onClick={aplicar}
+              className="flex-1 rounded bg-happy-500 py-0.5 text-[10px] font-semibold text-white hover:bg-happy-600"
+            >Aplicar</button>
+          </div>
+        </div>
       )}
     </div>
   );
