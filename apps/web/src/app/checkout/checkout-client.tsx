@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import {
   useCart,
@@ -76,21 +76,19 @@ export function CheckoutClient({ cuentasWeb = [] }: { cuentasWeb?: CuentaWeb[] }
   );
   const totalFinal = total + envio;
 
-  async function consultarDoc() {
-    if (!doc) return toast.error('Ingresá el número de documento');
-    // Validar formato mínimo antes de pegarle al backend
+  const [buscandoDoc, setBuscandoDoc] = useState(false);
+  async function consultarDoc(silent = false) {
+    if (!doc) return silent ? undefined : toast.error('Ingresá el número de documento');
     const digitosSolo = doc.replace(/\D/g, '');
     if (tipoDoc === 'DNI' && digitosSolo.length !== 8) {
-      return toast.error('El DNI debe tener 8 dígitos');
+      return silent ? undefined : toast.error('El DNI debe tener 8 dígitos');
     }
     if (tipoDoc === 'RUC' && digitosSolo.length !== 11) {
-      return toast.error('El RUC debe tener 11 dígitos');
+      return silent ? undefined : toast.error('El RUC debe tener 11 dígitos');
     }
     const tipo = tipoDoc.toLowerCase();
+    setBuscandoDoc(true);
     try {
-      // Antes: fetch al ERP → requería sesión autenticada → siempre daba 401.
-      // Ahora: endpoint público interno de la WEB que consulta Decolecta
-      // sin exponer el token al cliente (el token queda en el server).
       const res = await fetch(`/api/sunat/${tipo}/${digitosSolo}`);
       const data = await res.json();
       if (!res.ok) {
@@ -98,12 +96,29 @@ export function CheckoutClient({ cuentasWeb = [] }: { cuentasWeb?: CuentaWeb[] }
       }
       setNombre(data.nombreCompleto ?? data.razonSocial ?? '');
       if (data.direccion) setDireccion(data.direccion);
-      toast.success('Datos cargados');
+      if (!silent) toast.success('Datos cargados');
     } catch (e) {
       const msg = (e as Error).message;
-      toast.error(msg.includes('no encontrado') ? 'No se encontró el documento' : msg);
+      if (!silent) toast.error(msg.includes('no encontrado') ? 'No se encontró el documento' : msg);
+    } finally {
+      setBuscandoDoc(false);
     }
   }
+
+  // Autolookup RENIEC/SUNAT al terminar de tipear (2026-07-10). Debounce 500ms.
+  // Se dispara SOLO si el largo del documento matchea el tipo (8 para DNI, 11
+  // para RUC) y si el usuario no ya escribió un nombre a mano. El botón
+  // "Consultar" queda como fallback manual (por si el debounce falla o
+  // quiere re-consultar).
+  useEffect(() => {
+    const n = doc.replace(/\D/g, '');
+    const largoOk = (tipoDoc === 'DNI' && n.length === 8) || (tipoDoc === 'RUC' && n.length === 11);
+    if (!largoOk) return;
+    if (nombre.trim().length > 0) return; // usuario ya tipeó — no sobreescribir
+    const t = setTimeout(() => { void consultarDoc(true); }, 500);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [doc, tipoDoc]);
 
   async function enviarPedido() {
     if (items.length === 0) return toast.error('Carrito vacío');
@@ -186,11 +201,29 @@ export function CheckoutClient({ cuentasWeb = [] }: { cuentasWeb?: CuentaWeb[] }
               </select>
             </div>
             <div className="sm:col-span-2">
-              <Label>Número {tipoDoc}</Label>
+              <Label>
+                Número {tipoDoc}
+                {buscandoDoc && (
+                  <span className="ml-2 inline-flex items-center gap-1 text-[11px] font-normal text-happy-600">
+                    <Loader2 className="h-3 w-3 animate-spin" /> Consultando…
+                  </span>
+                )}
+              </Label>
               <div className="mt-1 flex gap-2">
-                <Input value={doc} onChange={(e) => setDoc(e.target.value)} maxLength={tipoDoc === 'DNI' ? 8 : 11} />
-                <Button type="button" variant="outline" onClick={consultarDoc}>Consultar</Button>
+                <Input
+                  value={doc}
+                  onChange={(e) => setDoc(e.target.value.replace(/\D/g, ''))}
+                  maxLength={tipoDoc === 'DNI' ? 8 : 11}
+                  inputMode="numeric"
+                  placeholder={tipoDoc === 'DNI' ? '8 dígitos' : '11 dígitos'}
+                />
+                <Button type="button" variant="outline" onClick={() => consultarDoc(false)} disabled={buscandoDoc}>
+                  {buscandoDoc ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Consultar'}
+                </Button>
               </div>
+              <p className="mt-1 text-[10px] text-slate-500">
+                Se completa automático al terminar de tipear el número.
+              </p>
             </div>
           </div>
           <div className="mt-3 grid gap-3 sm:grid-cols-2">

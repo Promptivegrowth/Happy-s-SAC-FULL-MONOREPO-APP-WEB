@@ -131,17 +131,19 @@ export default async function ProductoDetallePage({ params }: { params: Promise<
           .neq('producto_id', prod.id)
           .limit(8)
       : Promise.resolve({ data: [] as never[] }),
-    // Stock global — cliente reportó (2026-07-10) que productos con stock
-    // en Huallaga/Santa Bárbara aparecían como "agotados" porque la web
-    // solo miraba La Quinta (regla pedida en 07-08 y ahora revertida).
-    // Volvimos a la SUMA de todos los almacenes vía la vista
-    // v_stock_variante_total.
+    // Cliente confirmó (2026-07-10): la web debe mostrar SOLO el stock del
+    // almacén LA QUINTA (código TDA-LQ). Motivo de negocio: La Quinta es
+    // la tienda física principal de retail y evita vender online lo que
+    // en realidad está en el central Santa Bárbara o en otras tiendas.
+    // Si el producto no tiene stock en La Quinta, la web debe mostrarlo
+    // agotado — es el comportamiento intencional.
     varianteIds.length > 0
       ? sb
-          .from('v_stock_variante_total')
-          .select('variante_id, stock_total')
+          .from('stock_actual')
+          .select('variante_id, cantidad, almacen:almacen_id!inner(codigo)')
           .in('variante_id', varianteIds)
-      : Promise.resolve({ data: [] as { variante_id: string; stock_total: number }[] }),
+          .eq('almacen.codigo', 'TDA-LQ')
+      : Promise.resolve({ data: [] as { variante_id: string; cantidad: number }[] }),
   ]);
 
   const stockMap = new Map<string, number>();

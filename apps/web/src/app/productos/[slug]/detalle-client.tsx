@@ -57,14 +57,15 @@ export function ProductoDetalleClient({
   // Seleccionar la primera variante con stock por defecto (o la primera si todo agotado).
   const primeraConStock = variantes.find((v) => v.stock > 0) ?? variantes[0] ?? null;
   const [seleccionada, setSeleccionada] = useState<Variante | null>(primeraConStock);
-  const [cantidad, setCantidad] = useState(1);
+  // Cliente pidió (2026-07-10) que la cantidad arranque en 0 — el usuario
+  // debe teclear/subir la cantidad antes de poder agregar, para evitar
+  // clicks accidentales que suman 1 unidad. Igual comportamiento al cambiar
+  // de talla y tras agregar al carrito.
+  const [cantidad, setCantidad] = useState(0);
 
-  // Cliente pidió (post-2026-07-08) que al cambiar de talla la cantidad
-  // vuelva a 1 (se reseteaba antes en el useEffect). Wrapper que setea
-  // ambos estados a la vez para evitar mostrar cantidad vieja con talla nueva.
   function cambiarTalla(v: Variante) {
     setSeleccionada(v);
-    setCantidad(1);
+    setCantidad(0);
   }
 
   // Tallas únicas (por orden de aparición)
@@ -101,6 +102,7 @@ export function ProductoDetalleClient({
   function agregarAlCarrito() {
     if (!seleccionada) return toast.error('Selecciona una talla');
     if (sinStockSeleccionada) return toast.error(`Talla ${seleccionada.talla.replace('T', '')} agotada`);
+    if (cantidad <= 0) return toast.error('Ingresá una cantidad');
     if (cantidad > stockSeleccionada) {
       return toast.error(`Solo quedan ${stockSeleccionada} unidades de talla ${seleccionada.talla.replace('T', '')}`);
     }
@@ -121,9 +123,10 @@ export function ProductoDetalleClient({
     };
     add(item);
     toast.success(`${cantidad} × ${nombre} (${seleccionada.talla.replace('T', '')}) agregado`);
-    // Reset cantidad a 1 tras agregar — cliente pidió que se limpie para
-    // que el siguiente click no repita la misma cantidad.
-    setCantidad(1);
+    // Reset cantidad a 0 (2026-07-10) — cliente pidió que se limpie a cero
+    // para forzar al usuario a re-ingresar la cantidad conscientemente en
+    // la siguiente adición, evitando repeticiones accidentales.
+    setCantidad(0);
   }
 
   function comprarPorWhatsapp() {
@@ -272,34 +275,36 @@ Total: *S/ ${total.toFixed(2)}*${mensajeStock}
         <p className="text-sm font-medium text-corp-900">Cantidad</p>
         <div className="flex items-center rounded-md border border-slate-300">
           <button
-            onClick={() => setCantidad(Math.max(1, cantidad - 1))}
-            disabled={sinStockSeleccionada}
+            onClick={() => setCantidad(Math.max(0, cantidad - 1))}
+            disabled={sinStockSeleccionada || cantidad <= 0}
             className="px-3 py-2 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
             aria-label="Restar"
           >
             <Minus className="h-3 w-3" />
           </button>
-          {/* Input editable — cliente pidió (post-2026-07-08) poder tipear
-              directo en vez de solo +/-. El valor se clamp a stock disponible. */}
+          {/* Input editable — permite tipear directo. Mínimo 0 (2026-07-10):
+              cliente pidió que arranque en 0 para forzar entrada consciente
+              de la cantidad antes de agregar. El botón "Agregar" queda
+              disabled si cantidad ≤ 0. */}
           <input
             type="number"
-            min={1}
-            max={stockSeleccionada || 1}
+            min={0}
+            max={stockSeleccionada || 0}
             value={cantidad}
             onChange={(e) => {
               const raw = Number(e.target.value.replace(/[^\d]/g, ''));
-              if (!Number.isFinite(raw) || raw < 1) { setCantidad(1); return; }
-              setCantidad(Math.min(stockSeleccionada || 1, Math.max(1, raw)));
+              if (!Number.isFinite(raw) || raw < 0) { setCantidad(0); return; }
+              setCantidad(Math.min(stockSeleccionada || 0, Math.max(0, raw)));
             }}
             onBlur={(e) => {
               const raw = Number(e.target.value);
-              if (!Number.isFinite(raw) || raw < 1) setCantidad(1);
+              if (!Number.isFinite(raw) || raw < 0) setCantidad(0);
             }}
             disabled={sinStockSeleccionada}
             className="w-14 border-x border-slate-200 bg-transparent px-2 py-2 text-center text-sm font-medium focus:outline-none focus:ring-1 focus:ring-happy-400 disabled:cursor-not-allowed disabled:opacity-50 [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
           />
           <button
-            onClick={() => setCantidad(Math.min(stockSeleccionada || 1, cantidad + 1))}
+            onClick={() => setCantidad(Math.min(stockSeleccionada || 0, cantidad + 1))}
             disabled={sinStockSeleccionada || cantidad >= stockSeleccionada}
             className="px-3 py-2 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
             aria-label="Sumar"
@@ -320,18 +325,24 @@ Total: *S/ ${total.toFixed(2)}*${mensajeStock}
           onClick={agregarAlCarrito}
           variant="premium"
           size="lg"
-          disabled={sinStockSeleccionada}
+          disabled={sinStockSeleccionada || cantidad <= 0}
+          title={cantidad <= 0 ? 'Ingresá una cantidad primero' : undefined}
         >
           <ShoppingBag className="h-4 w-4" />
-          {sinStockSeleccionada ? 'Talla agotada' : 'Agregar al carrito'}
+          {sinStockSeleccionada
+            ? 'Talla agotada'
+            : cantidad <= 0
+              ? 'Elegí una cantidad'
+              : 'Agregar al carrito'}
         </Button>
         <Button
           onClick={irAlCheckout}
           size="lg"
-          disabled={sinStockSeleccionada}
+          disabled={sinStockSeleccionada || cantidad <= 0}
           className="bg-gradient-to-r from-happy-500 to-danger text-white shadow-lg hover:from-happy-600 hover:to-danger disabled:from-slate-300 disabled:to-slate-300 disabled:shadow-none"
+          title={cantidad <= 0 ? 'Ingresá una cantidad primero' : undefined}
         >
-          {sinStockSeleccionada ? 'Sin stock' : 'Comprar ahora'}
+          {sinStockSeleccionada ? 'Sin stock' : cantidad <= 0 ? 'Elegí una cantidad' : 'Comprar ahora'}
         </Button>
       </div>
 

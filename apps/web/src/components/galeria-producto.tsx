@@ -95,33 +95,45 @@ export function GaleriaProducto({
         </span>
       </button>
 
-      {/* Miniaturas */}
+      {/* Miniaturas — cliente pidió (2026-07-10) poder ampliar directamente
+          las miniaturas sin doble-click. Ahora cada miniatura tiene un
+          botón "lupa" flotante que abre el lightbox de esa imagen. El
+          click en la miniatura misma sigue cambiando la principal. */}
       {imagenes.length > 1 && (
         <div className="grid grid-cols-5 gap-2 sm:grid-cols-6">
           {imagenes.map((url, i) => (
-            <button
-              key={i}
-              type="button"
-              onClick={() => setSelectedIdx(i)}
-              onDoubleClick={() => abrirZoom(i)}
-              className={`relative aspect-square overflow-hidden rounded-lg border-2 bg-slate-50 transition ${
-                selectedIdx === i
-                  ? 'border-happy-500 ring-2 ring-happy-200'
-                  : 'border-slate-200 hover:border-happy-300'
-              }`}
-              aria-label={`Foto ${i + 1} de ${imagenes.length}`}
-              title="Click para ver — doble click para ampliar"
-            >
-              <Image
-                src={url}
-                alt={`${nombre} foto ${i + 1}`}
-                fill
-                className="object-cover"
-                sizes="(max-width:1024px) 20vw, 10vw"
-                placeholder="blur"
-                blurDataURL={BLUR_DATA_URL}
-              />
-            </button>
+            <div key={i} className="relative">
+              <button
+                type="button"
+                onClick={() => setSelectedIdx(i)}
+                className={`relative block aspect-square w-full overflow-hidden rounded-lg border-2 bg-slate-50 transition ${
+                  selectedIdx === i
+                    ? 'border-happy-500 ring-2 ring-happy-200'
+                    : 'border-slate-200 hover:border-happy-300'
+                }`}
+                aria-label={`Foto ${i + 1} de ${imagenes.length}`}
+                title="Mostrar en el visor grande"
+              >
+                <Image
+                  src={url}
+                  alt={`${nombre} foto ${i + 1}`}
+                  fill
+                  className="object-cover"
+                  sizes="(max-width:1024px) 20vw, 10vw"
+                  placeholder="blur"
+                  blurDataURL={BLUR_DATA_URL}
+                />
+              </button>
+              <button
+                type="button"
+                onClick={() => abrirZoom(i)}
+                className="absolute right-1 top-1 flex h-6 w-6 items-center justify-center rounded-full bg-white/90 text-slate-700 shadow-sm ring-1 ring-slate-200 transition hover:bg-happy-50 hover:text-happy-600 hover:ring-happy-300"
+                aria-label={`Ampliar foto ${i + 1}`}
+                title="Ampliar (abre visor)"
+              >
+                <ZoomIn className="h-3 w-3" />
+              </button>
+            </div>
           ))}
         </div>
       )}
