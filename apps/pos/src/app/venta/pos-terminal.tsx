@@ -1398,16 +1398,33 @@ export function PosTerminal({
             className="w-full max-w-2xl p-6 shadow-2xl"
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="mb-4 flex items-start justify-between">
-              <div>
-                <h3 className="font-display text-xl font-semibold text-corp-900">
+            <div className="mb-4 flex items-start gap-3">
+              {/* Imagen del producto — cliente pidió (2026-07-10) que el modal
+                  muestre la foto además del nombre, para reconocer el disfraz
+                  de un vistazo antes de elegir la talla. Fallback emoji si no
+                  hay imagen cargada. */}
+              <div className="relative h-16 w-16 shrink-0 overflow-hidden rounded-lg border bg-slate-100">
+                {tallasDelProductoOpen[0]?.productos.imagen_principal_url ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img
+                    src={tallasDelProductoOpen[0].productos.imagen_principal_url}
+                    alt={tallasDelProductoOpen[0].productos.nombre}
+                    className="h-full w-full object-cover"
+                    loading="lazy"
+                  />
+                ) : (
+                  <div className="flex h-full items-center justify-center text-2xl">🎭</div>
+                )}
+              </div>
+              <div className="min-w-0 flex-1">
+                <h3 className="truncate font-display text-xl font-semibold text-corp-900">
                   {tallasDelProductoOpen[0]?.productos.nombre}
                 </h3>
                 <p className="mt-0.5 text-sm text-slate-500">
                   Toca una talla para agregarla. Podés agregar varias sin cerrar este panel.
                 </p>
               </div>
-              <button onClick={() => setProductoTallasOpen(null)} className="rounded p-1.5 text-slate-400 hover:bg-slate-100">
+              <button onClick={() => setProductoTallasOpen(null)} className="shrink-0 rounded p-1.5 text-slate-400 hover:bg-slate-100">
                 <X className="h-5 w-5" />
               </button>
             </div>
