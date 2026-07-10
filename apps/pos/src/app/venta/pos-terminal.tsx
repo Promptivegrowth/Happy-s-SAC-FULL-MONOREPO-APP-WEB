@@ -297,8 +297,40 @@ export function PosTerminal({
     setPagos((p) => [...p, { metodo, monto, cuentaNombre }]);
   }
 
+  /** Toggle: si ya hay un pago con esa cuenta/método, lo quita; si no, lo
+   *  agrega con el saldo restante. Esto es lo que se dispara al clicar los
+   *  botones de medio de pago — permite deseleccionar sin buscar la X. */
+  function togglePago(metodo: MetodoCarrito, cuentaNombre: string | undefined) {
+    const yaExisteIdx = pagos.findIndex((p) =>
+      cuentaNombre
+        ? p.cuentaNombre === cuentaNombre
+        : p.metodo === metodo && !p.cuentaNombre,
+    );
+    if (yaExisteIdx >= 0) {
+      setPagos((prev) => prev.filter((_, i) => i !== yaExisteIdx));
+      return;
+    }
+    const restante = Math.max(0, total - pagado);
+    if (restante <= 0) return;
+    setPagos((prev) => [...prev, { metodo, monto: restante, cuentaNombre }]);
+  }
+
   function quitarPago(idx: number) {
     setPagos((p) => p.filter((_, i) => i !== idx));
+  }
+
+  /** Suma los pagos que matchean una cuenta específica. Para el badge del
+   *  botón. */
+  function montoPagadoPorCuenta(cuentaNombre: string): number {
+    return pagos
+      .filter((p) => p.cuentaNombre === cuentaNombre)
+      .reduce((s, p) => s + p.monto, 0);
+  }
+
+  function montoPagadoPorMetodoSinCuenta(metodo: MetodoCarrito): number {
+    return pagos
+      .filter((p) => p.metodo === metodo && !p.cuentaNombre)
+      .reduce((s, p) => s + p.monto, 0);
   }
 
   const [cobrando, setCobrando] = useState(false);
@@ -953,51 +985,108 @@ export function PosTerminal({
           </div>
 
           {/* Cuentas bancarias dinámicas — vienen de BD (mig 62, editables
-              en ERP → Configuración → Cuentas bancarias). */}
+              en ERP → Configuración → Cuentas bancarias). Un botón "activo"
+              (con pago registrado) se ve con borde grueso + checkmark + monto.
+              Clickear un botón activo lo deselecciona (toggle). */}
           {cuentasBancarias.length > 0 && (
             <div className="mb-1.5 grid grid-cols-2 gap-1">
               {cuentasBancarias.map((c) => {
                 const banco = (c.banco ?? '').toUpperCase();
-                const color =
-                  banco === 'BCP' ? 'bg-blue-50 text-blue-800 border border-blue-200' :
-                  banco === 'INTERBANK' ? 'bg-emerald-50 text-emerald-800 border border-emerald-200' :
-                  banco === 'BBVA' ? 'bg-indigo-50 text-indigo-800 border border-indigo-200' :
-                  banco === 'YAPE/PLIN' ? 'bg-purple-50 text-purple-800 border border-purple-200' :
-                  'bg-slate-50 text-slate-800 border border-slate-200';
+                const activo = montoPagadoPorCuenta(c.nombre_corto) > 0;
+                const montoActivo = montoPagadoPorCuenta(c.nombre_corto);
+                const base =
+                  banco === 'BCP' ? { off: 'bg-blue-50 text-blue-800 border-blue-200', on: 'bg-blue-100 text-blue-900 border-blue-600 ring-2 ring-blue-200' } :
+                  banco === 'INTERBANK' ? { off: 'bg-emerald-50 text-emerald-800 border-emerald-200', on: 'bg-emerald-100 text-emerald-900 border-emerald-600 ring-2 ring-emerald-200' } :
+                  banco === 'BBVA' ? { off: 'bg-indigo-50 text-indigo-800 border-indigo-200', on: 'bg-indigo-100 text-indigo-900 border-indigo-600 ring-2 ring-indigo-200' } :
+                  banco === 'YAPE/PLIN' ? { off: 'bg-purple-50 text-purple-800 border-purple-200', on: 'bg-purple-100 text-purple-900 border-purple-600 ring-2 ring-purple-200' } :
+                  { off: 'bg-slate-50 text-slate-800 border-slate-200', on: 'bg-slate-100 text-slate-900 border-slate-600 ring-2 ring-slate-200' };
+                const color = activo ? base.on : base.off;
+                const restante = total - pagado;
+                const disabled = !activo && restante <= 0;
                 return (
                   <button
                     key={c.id}
-                    onClick={() => agregarPago(c.metodo_default as MetodoCarrito, Math.max(0, total - pagado), c.nombre_corto)}
-                    className={`flex items-center gap-1.5 rounded-md px-2 py-1.5 text-[11px] font-semibold ${color} hover:brightness-95`}
-                    title={`Cobrar por ${c.nombre_corto} — método ${c.metodo_default}`}
+                    onClick={() => togglePago(c.metodo_default as MetodoCarrito, c.nombre_corto)}
+                    disabled={disabled}
+                    className={`relative flex items-center gap-1.5 rounded-md border px-2 py-1.5 text-[11px] font-semibold ${color} ${disabled ? 'opacity-40 cursor-not-allowed' : 'hover:brightness-95'}`}
+                    title={activo
+                      ? `Click para deseleccionar ${c.nombre_corto} (${formatPEN(montoActivo)})`
+                      : disabled
+                        ? 'Ya se cubrió el total — quitá algún pago para agregar otro'
+                        : `Cobrar ${formatPEN(Math.max(0, restante))} por ${c.nombre_corto}`}
                   >
                     <Building2 className="h-3.5 w-3.5 shrink-0" />
-                    <span className="text-left leading-tight truncate">{c.nombre_corto}</span>
+                    <span className="text-left leading-tight truncate flex-1">{c.nombre_corto}</span>
+                    {activo && (
+                      <span className="flex items-center gap-0.5 rounded-sm bg-white/70 px-1 text-[9px] font-mono font-bold shrink-0">
+                        ✓ {formatPEN(montoActivo).replace('S/', '').trim()}
+                      </span>
+                    )}
                   </button>
                 );
               })}
             </div>
           )}
 
-          {/* Métodos genéricos */}
+          {/* Métodos genéricos (sin cuenta asociada). Toggle idéntico. */}
           <div className="grid grid-cols-4 gap-1">
             {([
-              { m: 'YAPE', label: 'Yape', icon: <Smartphone className="h-3.5 w-3.5" />, color: 'bg-purple-50 text-purple-700' },
-              { m: 'PLIN', label: 'Plin', icon: <Smartphone className="h-3.5 w-3.5" />, color: 'bg-blue-50 text-blue-700' },
-              { m: 'TARJETA_CREDITO', label: 'Tarjeta', icon: <CreditCard className="h-3.5 w-3.5" />, color: 'bg-slate-100 text-slate-700' },
-              { m: 'TRANSFERENCIA', label: 'Otro', icon: <Building2 className="h-3.5 w-3.5" />, color: 'bg-slate-100 text-slate-700' },
-            ] as const).map((p) => (
-              <button
-                key={p.m}
-                onClick={() => agregarPago(p.m as MetodoCarrito, Math.max(0, total - pagado))}
-                className={`flex flex-col items-center justify-center gap-0.5 rounded-md px-1 py-1.5 text-[10px] font-medium ${p.color} hover:brightness-95`}
-                title={p.label}
-              >
-                {p.icon}
-                <span className="leading-tight">{p.label}</span>
-              </button>
-            ))}
+              { m: 'YAPE', label: 'Yape', icon: <Smartphone className="h-3.5 w-3.5" />, off: 'bg-purple-50 text-purple-700 border-purple-100', on: 'bg-purple-100 text-purple-900 border-purple-600 ring-2 ring-purple-200' },
+              { m: 'PLIN', label: 'Plin', icon: <Smartphone className="h-3.5 w-3.5" />, off: 'bg-blue-50 text-blue-700 border-blue-100', on: 'bg-blue-100 text-blue-900 border-blue-600 ring-2 ring-blue-200' },
+              { m: 'TARJETA_CREDITO', label: 'Tarjeta', icon: <CreditCard className="h-3.5 w-3.5" />, off: 'bg-slate-100 text-slate-700 border-slate-200', on: 'bg-slate-200 text-slate-900 border-slate-600 ring-2 ring-slate-300' },
+              { m: 'TRANSFERENCIA', label: 'Otro', icon: <Building2 className="h-3.5 w-3.5" />, off: 'bg-slate-100 text-slate-700 border-slate-200', on: 'bg-slate-200 text-slate-900 border-slate-600 ring-2 ring-slate-300' },
+            ] as const).map((p) => {
+              const activo = montoPagadoPorMetodoSinCuenta(p.m as MetodoCarrito) > 0;
+              const monto = montoPagadoPorMetodoSinCuenta(p.m as MetodoCarrito);
+              const restante = total - pagado;
+              const disabled = !activo && restante <= 0;
+              return (
+                <button
+                  key={p.m}
+                  onClick={() => togglePago(p.m as MetodoCarrito, undefined)}
+                  disabled={disabled}
+                  className={`relative flex flex-col items-center justify-center gap-0.5 rounded-md border px-1 py-1.5 text-[10px] font-medium ${activo ? p.on : p.off} ${disabled ? 'opacity-40 cursor-not-allowed' : 'hover:brightness-95'}`}
+                  title={activo
+                    ? `Click para deseleccionar ${p.label} (${formatPEN(monto)})`
+                    : disabled
+                      ? 'Ya se cubrió el total'
+                      : `Cobrar ${formatPEN(Math.max(0, restante))} por ${p.label}`}
+                >
+                  {p.icon}
+                  <span className="leading-tight">{p.label}</span>
+                  {activo && (
+                    <span className="absolute -right-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-emerald-500 px-1 text-[8px] font-bold text-white shadow-sm">
+                      ✓
+                    </span>
+                  )}
+                </button>
+              );
+            })}
           </div>
+
+          {/* Barra de progreso del total pagado. Cuando pagado >= total,
+              cambia a verde con "COMPLETO" — feedback visual claro de que
+              se puede cobrar. */}
+          {total > 0 && (
+            <div className="mt-2 rounded-md border bg-white px-2 py-1.5">
+              <div className="flex items-center justify-between text-[10px]">
+                <span className="text-slate-500">
+                  Pagado <span className="font-mono font-semibold text-corp-900">{formatPEN(pagado)}</span> de <span className="font-mono">{formatPEN(total)}</span>
+                </span>
+                {pagado >= total ? (
+                  <Badge className="bg-emerald-500 text-[9px]">✓ COMPLETO</Badge>
+                ) : (
+                  <span className="font-mono font-semibold text-amber-600">Faltan {formatPEN(total - pagado)}</span>
+                )}
+              </div>
+              <div className="mt-1 h-1 overflow-hidden rounded-full bg-slate-100">
+                <div
+                  className={`h-full transition-all ${pagado >= total ? 'bg-emerald-500' : 'bg-happy-500'}`}
+                  style={{ width: `${Math.min(100, (pagado / total) * 100)}%` }}
+                />
+              </div>
+            </div>
+          )}
 
           {pagos.length > 0 && (
             <ul className="mt-2 space-y-1">
