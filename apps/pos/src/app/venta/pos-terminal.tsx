@@ -6,7 +6,7 @@ import { Card } from '@happy/ui/card';
 import { Input } from '@happy/ui/input';
 import { Button } from '@happy/ui/button';
 import { Badge } from '@happy/ui/badge';
-import { Trash2, Plus, Minus, ScanBarcode, X, Smartphone, CreditCard, Banknote, Building2, MessageCircle, Loader2, LayoutGrid, ShoppingBag, LogOut, Receipt, History, Send, RotateCcw, Coins, Wallet, MapPin, LogIn, UserX } from 'lucide-react';
+import { Trash2, Plus, Minus, ScanBarcode, X, Smartphone, CreditCard, Banknote, Building2, MessageCircle, Loader2, LayoutGrid, ShoppingBag, LogOut, Receipt, History, Send, RotateCcw, Coins, Wallet, Search, LogIn, UserX } from 'lucide-react';
 import { toast } from 'sonner';
 import { formatPEN, ordenTalla, formatTalla } from '@happy/lib';
 import { buildPedidoWaMessage, buildWhatsappUrl } from '@happy/lib/whatsapp';
@@ -701,84 +701,13 @@ export function PosTerminal({
                 </div>
               )}
 
-              {/* Modal selector de talla — LATERAL, no tapa el carrito.
-                  Cliente pidió (post-2026-07-08) que el carrito sea siempre
-                  visible durante la selección de tallas. Antes el modal era
-                  fullscreen centrado con backdrop; ahora es un popover
-                  anclado a la izquierda que ocupa solo el ancho del catálogo,
-                  dejando visible el panel del carrito (720px a la derecha).
-                  También se mantiene abierto tras agregar una talla para
-                  poder agregar más del mismo producto rápido. */}
-              {productoTallasOpen && (
-                <div
-                  className="fixed inset-0 z-50 flex h-screen items-center justify-center bg-black/30 p-4 lg:left-0 lg:right-[720px] lg:w-auto"
-                  onClick={() => setProductoTallasOpen(null)}
-                >
-                  <Card
-                    className="w-full max-w-2xl p-6 shadow-2xl"
-                    onClick={(e) => e.stopPropagation()}
-                  >
-                    <div className="mb-4 flex items-start justify-between">
-                      <div>
-                        <h3 className="font-display text-xl font-semibold text-corp-900">
-                          {tallasDelProductoOpen[0]?.productos.nombre}
-                        </h3>
-                        <p className="mt-0.5 text-sm text-slate-500">
-                          Toca una talla para agregarla. Podés agregar varias sin cerrar este panel.
-                        </p>
-                      </div>
-                      <button onClick={() => setProductoTallasOpen(null)} className="rounded p-1.5 text-slate-400 hover:bg-slate-100">
-                        <X className="h-5 w-5" />
-                      </button>
-                    </div>
-                    <div className="grid grid-cols-4 gap-3">
-                      {tallasDelProductoOpen.map((v) => {
-                        const stock = stockPorVariante[v.id] ?? 0;
-                        const sinStock = stock <= 0;
-                        // Cantidad ya en carrito para dar feedback visual
-                        // (cliente puede tocar varias veces la misma talla).
-                        const enCarrito = carrito.find((l) => l.variante.id === v.id)?.cantidad ?? 0;
-                        return (
-                          <div key={v.id} className="relative">
-                            <button
-                              onClick={() => agregarVariante(v)}
-                              disabled={sinStock}
-                              className={`flex w-full flex-col items-center gap-1.5 rounded-xl border-2 p-4 transition ${
-                                sinStock
-                                  ? 'border-dashed border-red-200 bg-red-50/40 text-red-400 cursor-not-allowed opacity-60'
-                                  : enCarrito > 0
-                                    ? 'border-emerald-400 bg-emerald-50 text-corp-900 hover:border-emerald-500 hover:bg-emerald-100'
-                                    : 'border-slate-200 bg-white text-corp-900 hover:border-happy-400 hover:bg-happy-50'
-                              }`}
-                              title={sinStock ? 'Sin stock — no se puede vender' : enCarrito > 0 ? `${enCarrito} en carrito. Click para agregar 1 más` : ''}
-                            >
-                              <span className="font-display text-2xl font-bold">{formatTalla(v.talla)}</span>
-                              <span className="text-xs font-mono text-slate-500">{v.sku}</span>
-                              <span className="text-sm font-semibold text-happy-600">{formatPEN(Number(v.precio_publico ?? 0))}</span>
-                              <span className={`text-[11px] ${sinStock ? 'text-red-600 font-medium' : 'text-slate-500'}`}>
-                                {sinStock ? 'Sin stock' : `Stock: ${stock}`}
-                              </span>
-                            </button>
-                            {enCarrito > 0 && (
-                              <span className="absolute -left-2 -top-2 flex h-6 w-6 items-center justify-center rounded-full bg-emerald-500 text-[11px] font-bold text-white shadow-md ring-2 ring-white">
-                                {enCarrito}
-                              </span>
-                            )}
-                            <button
-                              type="button"
-                              onClick={(e) => { e.stopPropagation(); setStockAlmacenesVarianteId(v.id); }}
-                              className="absolute right-1 top-1 rounded-full bg-white p-1 text-slate-500 shadow-sm ring-1 ring-slate-200 hover:bg-happy-50 hover:text-happy-600"
-                              title="Ver stock en todos los almacenes"
-                            >
-                              <MapPin className="h-3 w-3" />
-                            </button>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  </Card>
-                </div>
-              )}
+              {/* Modal de tallas movido FUERA del ternario vista===catálogo
+                  (2026-07-10): el cliente reportó que al buscar "bombero" en
+                  vista Búsqueda el dropdown listaba el producto pero al hacer
+                  click no pasaba nada — porque el modal estaba dentro del
+                  bloque de la vista Catálogo y no se montaba en la de
+                  Búsqueda. Ahora vive al final del render principal, disponible
+                  en ambas vistas. Ver <ModalTallas /> más abajo. */}
             </div>
           ) : carrito.length === 0 ? (
             <div className="flex h-full items-center justify-center text-sm text-slate-400">
@@ -978,14 +907,19 @@ export function PosTerminal({
           )}
         </div>
 
-        <div className="shrink-0 overflow-auto p-4">
-          <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-slate-400">Métodos de pago</p>
+        {/* Bloque medios de pago compactado (2026-07-10) — el cliente pidió
+            reducir el alto para que el carrito de productos tenga más espacio
+            visible. Antes: p-4 + botones p-3 + gap-2 (~340px). Ahora: p-2.5 +
+            botones py-1.5 + gap-1 + max-h-1/2 con scroll interno.
+            Toda la sección se limita a 45% del alto del panel derecho. */}
+        <div className="shrink-0 overflow-auto p-2.5" style={{ maxHeight: '45vh' }}>
+          <p className="mb-1.5 text-[10px] font-semibold uppercase tracking-wider text-slate-400">Métodos de pago</p>
 
           {/* EFECTIVO con input — para registrar monto real recibido y calcular vuelto */}
-          <div className="mb-2 rounded-md border-2 border-emerald-200 bg-emerald-50 p-2">
-            <div className="flex items-center gap-2">
-              <Banknote className="h-4 w-4 text-emerald-700" />
-              <span className="flex-1 text-xs font-semibold text-emerald-700">Efectivo recibido</span>
+          <div className="mb-1.5 rounded-md border-2 border-emerald-200 bg-emerald-50 p-1.5">
+            <div className="flex items-center gap-1.5">
+              <Banknote className="h-3.5 w-3.5 text-emerald-700 shrink-0" />
+              <span className="flex-1 text-[11px] font-semibold text-emerald-700">Efectivo recibido</span>
               <div className="flex gap-1">
                 <input
                   type="number"
@@ -995,7 +929,7 @@ export function PosTerminal({
                   value={efectivoInput}
                   onChange={(e) => setEfectivoInput(e.target.value.replace(/[^\d.]/g, ''))}
                   placeholder={(total - pagado).toFixed(2)}
-                  className="h-9 w-24 rounded-md border border-emerald-300 bg-white px-2 text-right font-mono text-sm"
+                  className="h-8 w-20 rounded-md border border-emerald-300 bg-white px-2 text-right font-mono text-xs"
                   data-pos-no-focus
                 />
                 <button
@@ -1005,28 +939,24 @@ export function PosTerminal({
                     agregarPago('EFECTIVO', n);
                     setEfectivoInput('');
                   }}
-                  className="rounded-md bg-emerald-600 px-3 text-xs font-semibold text-white hover:bg-emerald-700"
+                  className="rounded-md bg-emerald-600 px-2.5 text-[11px] font-semibold text-white hover:bg-emerald-700"
                 >
                   Cobrar
                 </button>
               </div>
             </div>
             {efectivoInput && Number(efectivoInput) > total - pagado && (
-              <p className="mt-1 text-right text-[11px] text-emerald-700">
-                Vuelto a entregar: <strong>{formatPEN(Math.max(0, Number(efectivoInput) - (total - pagado)))}</strong>
+              <p className="mt-1 text-right text-[10px] text-emerald-700">
+                Vuelto: <strong>{formatPEN(Math.max(0, Number(efectivoInput) - (total - pagado)))}</strong>
               </p>
             )}
           </div>
 
           {/* Cuentas bancarias dinámicas — vienen de BD (mig 62, editables
-              en ERP → Configuración → Cuentas bancarias). Cliente pasó su
-              lista real 2026-07-10: BCP HAPPYS, BCP JAVIER, INTERBANK HAPPYS,
-              INTERBANK JAVIER, BBVA. Cada botón cobra el saldo restante
-              guardando metodo (enum) + cuentaNombre (referencia). */}
+              en ERP → Configuración → Cuentas bancarias). */}
           {cuentasBancarias.length > 0 && (
-            <div className="mb-2 grid grid-cols-2 gap-2">
+            <div className="mb-1.5 grid grid-cols-2 gap-1">
               {cuentasBancarias.map((c) => {
-                // Color por banco para reconocimiento rápido.
                 const banco = (c.banco ?? '').toUpperCase();
                 const color =
                   banco === 'BCP' ? 'bg-blue-50 text-blue-800 border border-blue-200' :
@@ -1038,46 +968,47 @@ export function PosTerminal({
                   <button
                     key={c.id}
                     onClick={() => agregarPago(c.metodo_default as MetodoCarrito, Math.max(0, total - pagado), c.nombre_corto)}
-                    className={`flex items-center gap-2 rounded-md p-3 text-xs font-semibold ${color} hover:brightness-95`}
+                    className={`flex items-center gap-1.5 rounded-md px-2 py-1.5 text-[11px] font-semibold ${color} hover:brightness-95`}
                     title={`Cobrar por ${c.nombre_corto} — método ${c.metodo_default}`}
                   >
-                    <Building2 className="h-4 w-4 shrink-0" />
-                    <span className="text-left leading-tight">{c.nombre_corto}</span>
+                    <Building2 className="h-3.5 w-3.5 shrink-0" />
+                    <span className="text-left leading-tight truncate">{c.nombre_corto}</span>
                   </button>
                 );
               })}
             </div>
           )}
 
-          {/* Métodos genéricos (fallback y para casos que no encajan con las
-              cuentas del catálogo: Yape/Plin directo, Tarjeta con datáfono). */}
-          <div className="grid grid-cols-2 gap-2">
+          {/* Métodos genéricos */}
+          <div className="grid grid-cols-4 gap-1">
             {([
-              { m: 'YAPE', label: 'Yape', icon: <Smartphone className="h-4 w-4" />, color: 'bg-purple-50 text-purple-700' },
-              { m: 'PLIN', label: 'Plin', icon: <Smartphone className="h-4 w-4" />, color: 'bg-blue-50 text-blue-700' },
-              { m: 'TARJETA_CREDITO', label: 'Tarjeta', icon: <CreditCard className="h-4 w-4" />, color: 'bg-slate-100 text-slate-700' },
-              { m: 'TRANSFERENCIA', label: 'Transfer. genérica', icon: <Building2 className="h-4 w-4" />, color: 'bg-slate-100 text-slate-700' },
+              { m: 'YAPE', label: 'Yape', icon: <Smartphone className="h-3.5 w-3.5" />, color: 'bg-purple-50 text-purple-700' },
+              { m: 'PLIN', label: 'Plin', icon: <Smartphone className="h-3.5 w-3.5" />, color: 'bg-blue-50 text-blue-700' },
+              { m: 'TARJETA_CREDITO', label: 'Tarjeta', icon: <CreditCard className="h-3.5 w-3.5" />, color: 'bg-slate-100 text-slate-700' },
+              { m: 'TRANSFERENCIA', label: 'Otro', icon: <Building2 className="h-3.5 w-3.5" />, color: 'bg-slate-100 text-slate-700' },
             ] as const).map((p) => (
               <button
                 key={p.m}
                 onClick={() => agregarPago(p.m as MetodoCarrito, Math.max(0, total - pagado))}
-                className={`flex items-center gap-2 rounded-md p-3 text-sm font-medium ${p.color} hover:brightness-95`}
+                className={`flex flex-col items-center justify-center gap-0.5 rounded-md px-1 py-1.5 text-[10px] font-medium ${p.color} hover:brightness-95`}
+                title={p.label}
               >
-                {p.icon} {p.label}
+                {p.icon}
+                <span className="leading-tight">{p.label}</span>
               </button>
             ))}
           </div>
 
           {pagos.length > 0 && (
-            <ul className="mt-4 space-y-1">
+            <ul className="mt-2 space-y-1">
               {pagos.map((p, i) => (
-                <li key={i} className="flex items-center gap-2 rounded-md bg-white p-2 text-sm shadow-sm">
-                  <Badge variant="secondary" className="text-[10px]">{p.metodo.replace('_', ' ')}</Badge>
+                <li key={i} className="flex items-center gap-1.5 rounded-md bg-white px-2 py-1 text-xs shadow-sm">
+                  <Badge variant="secondary" className="text-[9px]">{p.metodo.replace('_', ' ')}</Badge>
                   {p.cuentaNombre && (
-                    <span className="text-[11px] font-medium text-slate-600">{p.cuentaNombre}</span>
+                    <span className="text-[10px] font-medium text-slate-600 truncate">{p.cuentaNombre}</span>
                   )}
                   <span className="ml-auto font-semibold">{formatPEN(p.monto)}</span>
-                  <button onClick={() => quitarPago(i)} className="rounded p-1 text-slate-400 hover:bg-slate-100"><X className="h-3 w-3" /></button>
+                  <button onClick={() => quitarPago(i)} className="rounded p-0.5 text-slate-400 hover:bg-slate-100"><X className="h-3 w-3" /></button>
                 </li>
               ))}
             </ul>
@@ -1117,6 +1048,85 @@ export function PosTerminal({
           </p>
         </div>
       </aside>
+
+      {/* Modal selector de talla — nivel top del componente para que funcione
+          tanto en vista Búsqueda como Catálogo. Antes vivía dentro del bloque
+          catálogo y por eso los clicks desde el dropdown de sugerencias no
+          abrían nada. Popover lateral: fullscreen en < lg, ancla a la izq
+          dejando 720px libre del carrito en lg+. Se mantiene abierto tras
+          agregar tallas para permitir seleccionar varias del mismo producto. */}
+      {productoTallasOpen && (
+        <div
+          className="fixed inset-0 z-50 flex h-screen items-center justify-center bg-black/30 p-4 lg:left-0 lg:right-[720px] lg:w-auto"
+          onClick={() => setProductoTallasOpen(null)}
+          data-pos-no-focus
+        >
+          <Card
+            className="w-full max-w-2xl p-6 shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="mb-4 flex items-start justify-between">
+              <div>
+                <h3 className="font-display text-xl font-semibold text-corp-900">
+                  {tallasDelProductoOpen[0]?.productos.nombre}
+                </h3>
+                <p className="mt-0.5 text-sm text-slate-500">
+                  Toca una talla para agregarla. Podés agregar varias sin cerrar este panel.
+                </p>
+              </div>
+              <button onClick={() => setProductoTallasOpen(null)} className="rounded p-1.5 text-slate-400 hover:bg-slate-100">
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+            <div className="grid grid-cols-4 gap-3">
+              {tallasDelProductoOpen.map((v) => {
+                const stock = stockPorVariante[v.id] ?? 0;
+                const sinStock = stock <= 0;
+                const enCarrito = carrito.find((l) => l.variante.id === v.id)?.cantidad ?? 0;
+                return (
+                  <div key={v.id} className="relative">
+                    <button
+                      onClick={() => agregarVariante(v)}
+                      disabled={sinStock}
+                      className={`flex w-full flex-col items-center gap-1.5 rounded-xl border-2 p-4 transition ${
+                        sinStock
+                          ? 'border-dashed border-red-200 bg-red-50/40 text-red-400 cursor-not-allowed opacity-60'
+                          : enCarrito > 0
+                            ? 'border-emerald-400 bg-emerald-50 text-corp-900 hover:border-emerald-500 hover:bg-emerald-100'
+                            : 'border-slate-200 bg-white text-corp-900 hover:border-happy-400 hover:bg-happy-50'
+                      }`}
+                      title={sinStock ? 'Sin stock — no se puede vender' : enCarrito > 0 ? `${enCarrito} en carrito. Click para agregar 1 más` : ''}
+                    >
+                      <span className="font-display text-2xl font-bold">{formatTalla(v.talla)}</span>
+                      <span className="text-xs font-mono text-slate-500">{v.sku}</span>
+                      <span className="text-sm font-semibold text-happy-600">{formatPEN(Number(v.precio_publico ?? 0))}</span>
+                      <span className={`text-[11px] ${sinStock ? 'text-red-600 font-medium' : 'text-slate-500'}`}>
+                        {sinStock ? 'Sin stock' : `Stock: ${stock}`}
+                      </span>
+                    </button>
+                    {enCarrito > 0 && (
+                      <span className="absolute -left-2 -top-2 flex h-6 w-6 items-center justify-center rounded-full bg-emerald-500 text-[11px] font-bold text-white shadow-md ring-2 ring-white">
+                        {enCarrito}
+                      </span>
+                    )}
+                    {/* Botón "ver stock en otros almacenes" — cliente pidió
+                        (2026-07-10) que sea más grande y con ícono de lupa
+                        (antes MapPin h-3 casi invisible). */}
+                    <button
+                      type="button"
+                      onClick={(e) => { e.stopPropagation(); setStockAlmacenesVarianteId(v.id); }}
+                      className="absolute right-1.5 top-1.5 flex h-7 w-7 items-center justify-center rounded-full bg-white text-slate-500 shadow-sm ring-1 ring-slate-200 hover:bg-happy-50 hover:text-happy-600 hover:ring-happy-300"
+                      title="Ver stock en todos los almacenes"
+                    >
+                      <Search className="h-4 w-4" />
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+          </Card>
+        </div>
+      )}
 
       {/* OVERLAY — Cuando no hay sesión: pantalla gris con botón centrado.
           NO auto-spawnea el modal — el cajero debe clickear "Abrir caja". */}
