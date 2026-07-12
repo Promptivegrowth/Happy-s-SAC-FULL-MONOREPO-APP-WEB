@@ -38,23 +38,45 @@ export default async function RecetasPage({ searchParams }: { searchParams: Prom
       .limit(2000),
     sb.from('recetas').select('id, producto_id').eq('activa', true),
   ]);
-  const indexItems = (indexData ?? [])
+  // Índice del autocomplete: cliente reportó (2026-07-10) que al buscar
+  // "superman" solo aparecía "Superman para niño" y no "Superman especial
+  // para niño" — porque el segundo no tiene receta creada aún. El buscador
+  // solo indexaba productos CON receta. Ahora incluye ambos:
+  //   1. Productos con receta activa → navega directo al editor.
+  //   2. Productos SIN receta → navega a la página del producto (donde el
+  //      cliente puede crear la receta desde el botón dedicado).
+  // El sublabel distingue visualmente cada caso.
+  const recetaPorProducto = new Map<string, string>();
+  for (const r of recetasActivas ?? []) {
+    recetaPorProducto.set(r.producto_id as string, r.id as string);
+  }
+
+  const itemsConReceta = (indexData ?? [])
     .map((r) => {
       const p = (r as unknown as { productos?: { id: string; codigo: string; nombre: string } | null }).productos;
       if (!p) return null;
       return {
         id: r.id,
         label: p.nombre,
-        sublabel: `${p.codigo} · receta`,
+        sublabel: `${p.codigo} · receta v1.0+ · abrir editor`,
         href: `/recetas/${r.id}`,
+        searchKey: p.codigo,
       };
     })
     .filter((x): x is NonNullable<typeof x> => x !== null);
 
-  const recetaPorProducto = new Map<string, string>();
-  for (const r of recetasActivas ?? []) {
-    recetaPorProducto.set(r.producto_id as string, r.id as string);
-  }
+  const itemsSinReceta = (productosAll ?? [])
+    .filter((p) => !recetaPorProducto.has(p.id as string))
+    .map((p) => ({
+      id: `sin-receta-${p.id}`,
+      label: p.nombre as string,
+      sublabel: `${p.codigo} · ⚠ sin receta · click para crear`,
+      href: `/productos/${p.id}`,
+      searchKey: p.codigo as string,
+    }));
+
+  const indexItems = [...itemsConReceta, ...itemsSinReceta];
+
   const productosParaModal = (productosAll ?? []).map((p) => ({
     id: p.id as string,
     codigo: p.codigo as string,

@@ -12,6 +12,7 @@ import { PublicacionSection } from '@/components/forms/publicacion-section';
 import { FichaTecnicaSection } from '@/components/forms/ficha-tecnica-section';
 import { DeleteButton } from '@/components/forms/delete-button';
 import { eliminarProducto } from '@/server/actions/productos';
+import { CrearRecetaInline } from './crear-receta-inline';
 import { obtenerFichaVigente, obtenerPiezasCorte, obtenerAviosProducto, obtenerProcesosProducto } from '@/server/actions/fichas-tecnicas';
 
 export const dynamic = 'force-dynamic';
@@ -74,12 +75,14 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
       description={`Código ${prod.codigo} · ficha ${prod.version_ficha}`}
       actions={
         <div className="flex items-center gap-2">
-          {recetaActiva?.id && (
+          {recetaActiva?.id ? (
             <Link href={`/recetas/${recetaActiva.id}`}>
               <Button variant="outline" className="gap-2">
                 <FileText className="h-4 w-4" /> Ver receta BOM
               </Button>
             </Link>
+          ) : (
+            <CrearRecetaInline productoId={id} />
           )}
           <DeleteButton action={onDelete} itemName="este producto" />
         </div>
