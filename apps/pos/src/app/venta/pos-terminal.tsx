@@ -376,21 +376,50 @@ export function PosTerminal({
   }
 
   /** Toggle: si ya hay un pago con esa cuenta/método, lo quita; si no, lo
-   *  agrega con el saldo restante. Esto es lo que se dispara al clicar los
-   *  botones de medio de pago — permite deseleccionar sin buscar la X. */
+   *  agrega con el saldo restante.
+   *
+   *  Fix pago dividido (2026-07-12): antes, si el cajero escribía "100" en
+   *  el input de efectivo y después clicaba una cuenta (ej. BCP HAPPYS), la
+   *  cuenta tomaba el TOTAL completo (120) y luego había que apretar
+   *  "Cobrar" del efectivo también → se registraban 220 para un total de
+   *  120. Ahora togglePago detecta el efectivoInput pendiente, registra el
+   *  efectivo primero como pago separado, y la cuenta cobra solo la
+   *  diferencia. Todo en un solo setPagos para evitar race conditions con
+   *  React state async. */
   function togglePago(metodo: MetodoCarrito, cuentaNombre: string | undefined) {
-    const yaExisteIdx = pagos.findIndex((p) =>
-      cuentaNombre
-        ? p.cuentaNombre === cuentaNombre
-        : p.metodo === metodo && !p.cuentaNombre,
-    );
-    if (yaExisteIdx >= 0) {
-      setPagos((prev) => prev.filter((_, i) => i !== yaExisteIdx));
-      return;
+    setPagos((prev) => {
+      const yaExisteIdx = prev.findIndex((p) =>
+        cuentaNombre
+          ? p.cuentaNombre === cuentaNombre
+          : p.metodo === metodo && !p.cuentaNombre,
+      );
+      if (yaExisteIdx >= 0) {
+        return prev.filter((_, i) => i !== yaExisteIdx);
+      }
+      const pagadoActual = prev.reduce((s, p) => s + p.monto, 0);
+      // Absorber efectivo pendiente en el input — el cajero puso el monto
+      // pero no apretó "Cobrar". Se registra como pago EFECTIVO primero.
+      const efectivoPendiente = Number(efectivoInput || 0);
+      const esCuentaEfectivo = metodo === 'EFECTIVO' && !cuentaNombre;
+      const acc: PagoLinea[] = [...prev];
+      let pagadoTemp = pagadoActual;
+      if (efectivoPendiente > 0 && !esCuentaEfectivo) {
+        // Cap el efectivo al restante (evita cobrar más del total innecesario)
+        const efectivoReal = Math.min(efectivoPendiente, Math.max(0, total - pagadoTemp));
+        if (efectivoReal > 0) {
+          acc.push({ metodo: 'EFECTIVO', monto: efectivoReal });
+          pagadoTemp += efectivoReal;
+        }
+      }
+      const restante = Math.max(0, total - pagadoTemp);
+      if (restante <= 0) return acc; // ya se cubrió con el efectivo pendiente
+      acc.push({ metodo, monto: restante, cuentaNombre });
+      return acc;
+    });
+    // Limpiar input efectivo si absorbimos su valor
+    if (Number(efectivoInput || 0) > 0 && !(metodo === 'EFECTIVO' && !cuentaNombre)) {
+      setEfectivoInput('');
     }
-    const restante = Math.max(0, total - pagado);
-    if (restante <= 0) return;
-    setPagos((prev) => [...prev, { metodo, monto: restante, cuentaNombre }]);
   }
 
   function quitarPago(idx: number) {
@@ -1221,45 +1250,62 @@ export function PosTerminal({
               en ERP → Configuración → Cuentas bancarias). Un botón "activo"
               (con pago registrado) se ve con borde grueso + checkmark + monto.
               Clickear un botón activo lo deselecciona (toggle). */}
-          {cuentasBancarias.length > 0 && (
-            <div className="mb-1.5 grid grid-cols-2 gap-1">
-              {cuentasBancarias.map((c) => {
-                const banco = (c.banco ?? '').toUpperCase();
-                const activo = montoPagadoPorCuenta(c.nombre_corto) > 0;
-                const montoActivo = montoPagadoPorCuenta(c.nombre_corto);
-                const base =
-                  banco === 'BCP' ? { off: 'bg-blue-50 text-blue-800 border-blue-200', on: 'bg-blue-100 text-blue-900 border-blue-600 ring-2 ring-blue-200' } :
-                  banco === 'INTERBANK' ? { off: 'bg-emerald-50 text-emerald-800 border-emerald-200', on: 'bg-emerald-100 text-emerald-900 border-emerald-600 ring-2 ring-emerald-200' } :
-                  banco === 'BBVA' ? { off: 'bg-indigo-50 text-indigo-800 border-indigo-200', on: 'bg-indigo-100 text-indigo-900 border-indigo-600 ring-2 ring-indigo-200' } :
-                  banco === 'YAPE/PLIN' ? { off: 'bg-purple-50 text-purple-800 border-purple-200', on: 'bg-purple-100 text-purple-900 border-purple-600 ring-2 ring-purple-200' } :
-                  { off: 'bg-slate-50 text-slate-800 border-slate-200', on: 'bg-slate-100 text-slate-900 border-slate-600 ring-2 ring-slate-200' };
-                const color = activo ? base.on : base.off;
-                const restante = total - pagado;
-                const disabled = !activo && restante <= 0;
-                return (
-                  <button
-                    key={c.id}
-                    onClick={() => togglePago(c.metodo_default as MetodoCarrito, c.nombre_corto)}
-                    disabled={disabled}
-                    className={`relative flex items-center gap-1.5 rounded-md border px-2 py-1.5 text-[11px] font-semibold ${color} ${disabled ? 'opacity-40 cursor-not-allowed' : 'hover:brightness-95'}`}
-                    title={activo
-                      ? `Click para deseleccionar ${c.nombre_corto} (${formatPEN(montoActivo)})`
-                      : disabled
-                        ? 'Ya se cubrió el total — quitá algún pago para agregar otro'
-                        : `Cobrar ${formatPEN(Math.max(0, restante))} por ${c.nombre_corto}`}
-                  >
-                    <Building2 className="h-3.5 w-3.5 shrink-0" />
-                    <span className="text-left leading-tight truncate flex-1">{c.nombre_corto}</span>
-                    {activo && (
-                      <span className="flex items-center gap-0.5 rounded-sm bg-white/70 px-1 text-[9px] font-mono font-bold shrink-0">
-                        ✓ {formatPEN(montoActivo).replace('S/', '').trim()}
-                      </span>
-                    )}
-                  </button>
-                );
-              })}
-            </div>
-          )}
+          {cuentasBancarias.length > 0 && (() => {
+            // Cálculo del monto que se cobraría al hacer click ahora — tiene
+            // en cuenta el efectivoInput pendiente (2026-07-12). Antes el
+            // botón siempre mostraba "cobrar restante" pero el restante no
+            // consideraba el efectivo escrito en el input, generando pagos
+            // dobles.
+            const efectivoPendiente = Math.min(
+              Math.max(0, Number(efectivoInput || 0)),
+              Math.max(0, total - pagado),
+            );
+            const cobrariaAhora = Math.max(0, total - pagado - efectivoPendiente);
+            return (
+              <div className="mb-1.5 grid grid-cols-2 gap-1">
+                {cuentasBancarias.map((c) => {
+                  const banco = (c.banco ?? '').toUpperCase();
+                  const activo = montoPagadoPorCuenta(c.nombre_corto) > 0;
+                  const montoActivo = montoPagadoPorCuenta(c.nombre_corto);
+                  const base =
+                    banco === 'BCP' ? { off: 'bg-blue-50 text-blue-800 border-blue-200', on: 'bg-blue-100 text-blue-900 border-blue-600 ring-2 ring-blue-200' } :
+                    banco === 'INTERBANK' ? { off: 'bg-emerald-50 text-emerald-800 border-emerald-200', on: 'bg-emerald-100 text-emerald-900 border-emerald-600 ring-2 ring-emerald-200' } :
+                    banco === 'BBVA' ? { off: 'bg-indigo-50 text-indigo-800 border-indigo-200', on: 'bg-indigo-100 text-indigo-900 border-indigo-600 ring-2 ring-indigo-200' } :
+                    banco === 'YAPE/PLIN' ? { off: 'bg-purple-50 text-purple-800 border-purple-200', on: 'bg-purple-100 text-purple-900 border-purple-600 ring-2 ring-purple-200' } :
+                    { off: 'bg-slate-50 text-slate-800 border-slate-200', on: 'bg-slate-100 text-slate-900 border-slate-600 ring-2 ring-slate-200' };
+                  const color = activo ? base.on : base.off;
+                  const disabled = !activo && cobrariaAhora <= 0;
+                  return (
+                    <button
+                      key={c.id}
+                      onClick={() => togglePago(c.metodo_default as MetodoCarrito, c.nombre_corto)}
+                      disabled={disabled}
+                      className={`relative flex items-center gap-1.5 rounded-md border px-2 py-1.5 text-[11px] font-semibold ${color} ${disabled ? 'opacity-40 cursor-not-allowed' : 'hover:brightness-95'}`}
+                      title={activo
+                        ? `Click para deseleccionar ${c.nombre_corto} (${formatPEN(montoActivo)})`
+                        : disabled
+                          ? 'Ya se cubrió el total — quitá algún pago para agregar otro'
+                          : efectivoPendiente > 0
+                            ? `Cobrará ${formatPEN(efectivoPendiente)} en efectivo + ${formatPEN(cobrariaAhora)} por ${c.nombre_corto}`
+                            : `Cobrar ${formatPEN(cobrariaAhora)} por ${c.nombre_corto}`}
+                    >
+                      <Building2 className="h-3.5 w-3.5 shrink-0" />
+                      <span className="text-left leading-tight truncate flex-1">{c.nombre_corto}</span>
+                      {activo ? (
+                        <span className="flex items-center gap-0.5 rounded-sm bg-white/70 px-1 text-[9px] font-mono font-bold shrink-0">
+                          ✓ {formatPEN(montoActivo).replace('S/', '').trim()}
+                        </span>
+                      ) : !disabled ? (
+                        <span className="rounded-sm bg-white/70 px-1 text-[9px] font-mono font-bold shrink-0">
+                          {formatPEN(cobrariaAhora).replace('S/', '').trim()}
+                        </span>
+                      ) : null}
+                    </button>
+                  );
+                })}
+              </div>
+            );
+          })()}
 
           {/* Botones genéricos (Yape/Plin/Tarjeta/Otro) removidos 2026-07-10 —
               cliente pidió que solo aparezcan las cuentas del catálogo
