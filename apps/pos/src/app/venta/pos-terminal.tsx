@@ -6,7 +6,7 @@ import { Card } from '@happy/ui/card';
 import { Input } from '@happy/ui/input';
 import { Button } from '@happy/ui/button';
 import { Badge } from '@happy/ui/badge';
-import { Trash2, Plus, Minus, ScanBarcode, X, Banknote, Building2, MessageCircle, Loader2, LayoutGrid, ShoppingBag, LogOut, Receipt, History, RotateCcw, Coins, Wallet, Search, LogIn, UserX } from 'lucide-react';
+import { Trash2, Plus, Minus, ScanBarcode, X, Banknote, Building2, MessageCircle, Loader2, LayoutGrid, ShoppingBag, LogOut, Receipt, History, RotateCcw, Coins, Wallet, Search, LogIn, UserX, Pencil, Send } from 'lucide-react';
 import { toast } from 'sonner';
 import { formatPEN, ordenTalla, formatTalla } from '@happy/lib';
 import { buildPedidoWaMessage, buildWhatsappUrl } from '@happy/lib/whatsapp';
@@ -14,6 +14,7 @@ import { registrarVenta } from '@/server/actions/venta';
 import { emitirComprobante, obtenerSesionActiva } from '@/server/actions/caja';
 import { aplicarAdelantoAVenta } from '@/server/actions/adelantos';
 import { cerrarSesionUsuario } from '@/server/actions/auth';
+import { buscarClientesPOS, type ClienteRow } from '@/server/actions/clientes';
 import type { SesionCajaDTO, BalanceCajaDTO } from '@/server/actions/caja-helpers';
 import { AbrirCajaModal } from './abrir-caja-modal';
 import { CerrarCajaModal } from './cerrar-caja-modal';
@@ -141,6 +142,21 @@ export function PosTerminal({
   const [telefonoCliente, setTelefonoCliente] = useState('');
   const [clienteIdSeleccionado, setClienteIdSeleccionado] = useState<string | null>(null);
   const [buscandoSunat, setBuscandoSunat] = useState(false);
+  // Buscador de clientes frecuentes (2026-07-12) — dropdown que aparece al
+  // tipear en el input "Nombre" con 2+ caracteres, busca en la BD por
+  // razón social / nombres / apellidos vía buscarClientesPOS.
+  const [busquedaCliente, setBusquedaCliente] = useState('');
+  const [resultadosCliente, setResultadosCliente] = useState<ClienteRow[]>([]);
+  const [buscandoCliente, setBuscandoCliente] = useState(false);
+  const [dropdownClienteAbierto, setDropdownClienteAbierto] = useState(false);
+  // Modal post-pago para enviar comprobante por WhatsApp. Se abre al terminar
+  // exitosamente el flujo pagarEImprimir con el mensaje pre-armado.
+  const [modalWhatsappPost, setModalWhatsappPost] = useState<{
+    abierto: boolean;
+    telefono: string;
+    mensaje: string;
+    numeroComprobante: string;
+  }>({ abierto: false, telefono: '', mensaje: '', numeroComprobante: '' });
   // Overrides y descuentos por línea del carrito (indexado por variante_id).
   // Cliente pidió (2026-07-10) poder editar el precio unitario y aplicar
   // descuento sin salir del carrito, como en su sistema anterior.
@@ -196,6 +212,37 @@ export function PosTerminal({
     }, 500);
     return () => clearTimeout(timer);
   }, [docCliente, clienteIdSeleccionado]);
+
+  // Debounce 350ms del buscador de clientes frecuentes. Se dispara al tipear
+  // en el input de nombre — no bloquea si el usuario está tipeando un cliente
+  // nuevo (basta con clickear fuera del dropdown o Escape para cerrarlo).
+  useEffect(() => {
+    const q = busquedaCliente.trim();
+    if (q.length < 2) { setResultadosCliente([]); return; }
+    const timer = setTimeout(async () => {
+      setBuscandoCliente(true);
+      try {
+        const rows = await buscarClientesPOS(q);
+        setResultadosCliente(rows);
+        if (rows.length > 0) setDropdownClienteAbierto(true);
+      } finally {
+        setBuscandoCliente(false);
+      }
+    }, 350);
+    return () => clearTimeout(timer);
+  }, [busquedaCliente]);
+
+  function seleccionarCliente(c: ClienteRow) {
+    setClienteIdSeleccionado(c.id);
+    setDocCliente(c.numero_documento ?? '');
+    setNombreCliente(c.razon_social ?? [c.nombres, c.apellido_paterno, c.apellido_materno].filter(Boolean).join(' ').trim());
+    setDireccionCliente(c.direccion ?? '');
+    setTelefonoCliente(c.telefono ?? '');
+    setBusquedaCliente('');
+    setDropdownClienteAbierto(false);
+    setResultadosCliente([]);
+    toast.success(`Cliente cargado · ${c.nombre_para_mostrar}`);
+  }
 
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -567,29 +614,36 @@ export function PosTerminal({
         const filename = `${payload.tipo.toLowerCase()}_${numeroComprobante.replace(/[^A-Za-z0-9_-]/g, '_')}.pdf`;
         abrirPDF(blob, filename);
 
-        // 4) Si el cliente tiene teléfono, ofrecer envío por WhatsApp
-        if (payload.cliente.telefono && payload.tipo !== 'NOTA_VENTA') {
-          const telefono = payload.cliente.telefono;
+        // 4) Modal WhatsApp post-pago (2026-07-12) — cliente pidió que al
+        //    dar clic PAGAR se muestre una ventana para ingresar el número
+        //    de WhatsApp del comprador y enviarle el comprobante con el
+        //    mensaje formateado (incluye items + total + link comprobante).
+        //    Antes esto era solo un toast si el cliente ya tenía teléfono
+        //    guardado; ahora aparece siempre — el cajero puede skipear.
+        {
           const nombreCli =
             payload.cliente.razon_social ??
             [payload.cliente.nombres, payload.cliente.apellidos].filter(Boolean).join(' ').trim() ??
             'cliente';
-          toast(`📲 Enviar comprobante a ${telefono} por WhatsApp?`, {
-            duration: 12_000,
-            action: {
-              label: 'Enviar',
-              onClick: () => {
-                const msg = construirMensajeWhatsApp({
-                  nombre_cliente: nombreCli,
-                  numero_comprobante: numeroComprobante,
-                  tipo_comprobante: payload.tipo,
-                  total,
-                  fecha: new Date(),
-                  empresa_nombre: empresaNombre,
-                });
-                abrirWhatsApp(telefono, msg);
-              },
-            },
+          const mensaje = construirMensajeWhatsAppExtendido({
+            nombre_cliente: nombreCli,
+            numero_comprobante: numeroComprobante,
+            tipo_comprobante: payload.tipo,
+            total,
+            items: lineasConPrecio.map((l) => ({
+              nombre: l.variante.productos.nombre,
+              talla: l.variante.talla,
+              cantidad: l.cantidad,
+              precioUnit: l.precio_unitario,
+            })),
+            fecha: new Date(),
+            empresa_nombre: empresaNombre,
+          });
+          setModalWhatsappPost({
+            abierto: true,
+            telefono: payload.cliente.telefono ?? '',
+            mensaje,
+            numeroComprobante,
           });
         }
       } catch (e) {
@@ -1052,13 +1106,64 @@ export function PosTerminal({
               maxLength={11}
               data-pos-no-focus
             />
-            <Input
-              value={nombreCliente}
-              onChange={(e) => setNombreCliente(e.target.value)}
-              placeholder={tipoDoc === 'FACTURA' ? 'Razón social *' : 'Nombre (opcional)'}
-              className="h-8 text-xs"
-              data-pos-no-focus
-            />
+            <div className="relative">
+              <Input
+                value={nombreCliente}
+                onChange={(e) => {
+                  const v = e.target.value;
+                  setNombreCliente(v);
+                  // Buscar cliente frecuente en BD mientras se tipea.
+                  setBusquedaCliente(v);
+                  if (clienteIdSeleccionado) setClienteIdSeleccionado(null);
+                }}
+                onFocus={() => { if (resultadosCliente.length > 0) setDropdownClienteAbierto(true); }}
+                onKeyDown={(e) => { if (e.key === 'Escape') setDropdownClienteAbierto(false); }}
+                placeholder={tipoDoc === 'FACTURA' ? 'Razón social *' : 'Nombre (opcional)'}
+                className="h-8 text-xs"
+                data-pos-no-focus
+              />
+              {buscandoCliente && (
+                <Loader2 className="absolute right-2 top-1/2 h-3 w-3 -translate-y-1/2 animate-spin text-happy-500" />
+              )}
+              {/* Dropdown de coincidencias — cliente frecuente por nombre.
+                  Click en fila → autocompleta todo (DNI, nombre, dirección,
+                  teléfono) desde el registro de BD y marca clienteIdSeleccionado
+                  para que el server use el id en vez de crear un cliente nuevo. */}
+              {dropdownClienteAbierto && resultadosCliente.length > 0 && (
+                <div
+                  className="absolute left-0 right-0 top-full z-40 mt-1 max-h-56 overflow-auto rounded-md border bg-white shadow-lg"
+                  data-pos-no-focus
+                  onMouseDown={(e) => e.preventDefault()}
+                >
+                  <div className="border-b bg-slate-50 px-2 py-1 text-[9px] font-semibold uppercase tracking-wider text-slate-500">
+                    Clientes frecuentes ({resultadosCliente.length})
+                  </div>
+                  {resultadosCliente.map((c) => (
+                    <button
+                      key={c.id}
+                      type="button"
+                      onClick={() => seleccionarCliente(c)}
+                      className="flex w-full items-start gap-2 border-b px-2 py-1.5 text-left text-[11px] transition hover:bg-happy-50 last:border-b-0"
+                    >
+                      <div className="min-w-0 flex-1">
+                        <div className="truncate font-semibold text-corp-900">{c.nombre_para_mostrar}</div>
+                        <div className="flex items-center gap-1.5 text-[9px] text-slate-500">
+                          <span className="font-mono">{c.tipo_documento} {c.numero_documento}</span>
+                          {c.telefono && <span>· 📱 {c.telefono}</span>}
+                        </div>
+                      </div>
+                    </button>
+                  ))}
+                  <button
+                    type="button"
+                    onClick={() => setDropdownClienteAbierto(false)}
+                    className="w-full bg-slate-50 py-1 text-[9px] text-slate-500 hover:bg-slate-100"
+                  >
+                    Cerrar · seguir tipeando cliente nuevo
+                  </button>
+                </div>
+              )}
+            </div>
           </div>
           {(tipoDoc === 'FACTURA' || direccionCliente) && (
             <Input
@@ -1588,6 +1693,18 @@ export function PosTerminal({
         />
       )}
 
+      {/* MODAL — Enviar comprobante por WhatsApp (post-pago).
+          Se abre al terminar exitosamente pagarEImprimir. Cajero puede
+          skipear o ingresar el número y abrir el chat directo. */}
+      {modalWhatsappPost.abierto && (
+        <ModalWhatsappPost
+          telefonoInicial={modalWhatsappPost.telefono}
+          mensaje={modalWhatsappPost.mensaje}
+          numeroComprobante={modalWhatsappPost.numeroComprobante}
+          onClose={() => setModalWhatsappPost((prev) => ({ ...prev, abierto: false }))}
+        />
+      )}
+
       {/* MODAL — Devolución / Cambio de mercadería */}
       {devolucionOpen && sesionActiva && cajaActual && (
         <DevolucionModal
@@ -1609,6 +1726,142 @@ export function PosTerminal({
           }}
         />
       )}
+    </div>
+  );
+}
+
+/**
+ * Mensaje WhatsApp EXTENDIDO — versión larga con desglose de items para el
+ * modal post-pago (2026-07-12). Reemplaza al construirMensajeWhatsApp corto
+ * cuando el cajero envía el comprobante desde el modal. Formato similar a
+ * la web (`buildPedidoWaMessage`) pero orientado a comprobante ya emitido.
+ */
+type ItemWa = { nombre: string; talla: string; cantidad: number; precioUnit: number };
+const TIPO_LABEL_WA: Record<string, string> = {
+  BOLETA: 'Boleta de Venta',
+  FACTURA: 'Factura',
+  NOTA_VENTA: 'Nota de Venta',
+};
+function construirMensajeWhatsAppExtendido(opts: {
+  nombre_cliente: string;
+  numero_comprobante: string;
+  tipo_comprobante: string;
+  total: number;
+  items: ItemWa[];
+  fecha: Date;
+  empresa_nombre: string;
+}): string {
+  const fechaTxt = opts.fecha.toLocaleDateString('es-PE', { day: '2-digit', month: 'long', year: 'numeric' });
+  const tipoTxt = TIPO_LABEL_WA[opts.tipo_comprobante] ?? opts.tipo_comprobante;
+  const totalTxt = `S/ ${opts.total.toLocaleString('es-PE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  const primerNombre = opts.nombre_cliente.split(' ')[0] || opts.nombre_cliente;
+  const lineas: string[] = [];
+  lineas.push(`¡Hola ${primerNombre}! 👋`);
+  lineas.push('');
+  lineas.push(`Gracias por tu compra en *${opts.empresa_nombre}*.`);
+  lineas.push('');
+  lineas.push(`📄 ${tipoTxt}: *${opts.numero_comprobante}*`);
+  lineas.push(`📅 ${fechaTxt}`);
+  lineas.push('');
+  lineas.push('*🛍️ Productos:*');
+  for (const it of opts.items) {
+    const talla = it.talla.replace('T', '');
+    const sub = it.cantidad * it.precioUnit;
+    lineas.push(`• ${it.cantidad}× ${it.nombre} (T${talla}) — S/ ${sub.toFixed(2)}`);
+  }
+  lineas.push('');
+  lineas.push(`💰 *Total: ${totalTxt}*`);
+  lineas.push('');
+  lineas.push('Adjuntamos el comprobante en PDF. Cualquier consulta estamos a tu disposición.');
+  return lineas.join('\n');
+}
+
+/**
+ * Modal post-pago que aparece al terminar exitosamente una venta. Pide el
+ * teléfono del cliente (autocompletado si el registro ya lo tenía) y envía
+ * el mensaje formateado por WhatsApp. Cajero puede skipear.
+ */
+function ModalWhatsappPost({
+  telefonoInicial,
+  mensaje,
+  numeroComprobante,
+  onClose,
+}: {
+  telefonoInicial: string;
+  mensaje: string;
+  numeroComprobante: string;
+  onClose: () => void;
+}) {
+  const [tel, setTel] = useState(telefonoInicial);
+  const [enviando, setEnviando] = useState(false);
+
+  function enviar() {
+    const limpio = tel.replace(/\D/g, '');
+    if (limpio.length < 8) {
+      toast.error('Ingresá un número válido (mínimo 8 dígitos)');
+      return;
+    }
+    setEnviando(true);
+    try {
+      abrirWhatsApp(tel, mensaje);
+      toast.success('Chat de WhatsApp abierto — arrastrá el PDF descargado al chat');
+      onClose();
+    } finally {
+      setEnviando(false);
+    }
+  }
+
+  return (
+    <div
+      className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 p-4"
+      onClick={onClose}
+    >
+      <Card className="w-full max-w-md p-5 shadow-2xl" onClick={(e) => e.stopPropagation()}>
+        <div className="mb-3 flex items-start justify-between">
+          <div>
+            <h3 className="font-display text-lg font-semibold text-corp-900">Enviar comprobante por WhatsApp</h3>
+            <p className="mt-0.5 text-xs text-slate-500">
+              Comprobante <span className="font-mono font-semibold">{numeroComprobante}</span>.
+              El PDF ya se descargó en tu equipo — arrastralo al chat después.
+            </p>
+          </div>
+          <button onClick={onClose} className="rounded p-1 text-slate-400 hover:bg-slate-100">
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+        <div className="space-y-2">
+          <label className="text-[11px] font-semibold uppercase tracking-wider text-slate-500">Teléfono del cliente</label>
+          <input
+            type="tel"
+            value={tel}
+            onChange={(e) => setTel(e.target.value.replace(/[^\d+]/g, ''))}
+            placeholder="Ej: 987654321"
+            className="h-10 w-full rounded-md border border-slate-300 bg-white px-3 font-mono text-sm focus:border-emerald-400 focus:outline-none focus:ring-2 focus:ring-emerald-100"
+            autoFocus
+            inputMode="tel"
+          />
+          <p className="text-[10px] text-slate-500">
+            Si no incluye código, agregamos +51 automáticamente.
+          </p>
+        </div>
+        <details className="mt-3 text-xs">
+          <summary className="cursor-pointer text-slate-600 hover:text-slate-900">Ver mensaje que se enviará</summary>
+          <pre className="mt-2 max-h-40 overflow-auto whitespace-pre-wrap rounded border bg-slate-50 p-2 text-[10px] leading-tight">{mensaje}</pre>
+        </details>
+        <div className="mt-4 flex gap-2">
+          <Button variant="outline" onClick={onClose} disabled={enviando} className="flex-1">
+            No enviar
+          </Button>
+          <Button
+            onClick={enviar}
+            disabled={enviando || tel.replace(/\D/g, '').length < 8}
+            className="flex-[2] gap-2 bg-emerald-600 hover:bg-emerald-700"
+          >
+            {enviando ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+            Abrir WhatsApp
+          </Button>
+        </div>
+      </Card>
     </div>
   );
 }
@@ -1657,13 +1910,16 @@ function PrecioEditable({
     <button
       type="button"
       onClick={() => setEditando(true)}
-      className={`rounded px-1 text-[11px] font-semibold hover:bg-slate-100 ${
-        isOverride ? 'text-amber-600 underline decoration-dotted' : 'text-happy-600'
+      className={`inline-flex items-center gap-0.5 rounded border border-dashed px-1 text-[11px] font-semibold transition ${
+        isOverride
+          ? 'border-amber-400 bg-amber-50 text-amber-700 hover:bg-amber-100'
+          : 'border-happy-300 text-happy-700 hover:border-happy-500 hover:bg-happy-50'
       }`}
-      title={isOverride ? 'Precio editado manualmente (click para cambiar)' : 'Click para editar precio'}
+      title={isOverride ? 'Precio editado manualmente — click para cambiar' : 'Click para editar el precio de esta línea'}
       data-pos-no-focus
     >
       S/ {valor.toFixed(2)}
+      <Pencil className="h-2.5 w-2.5 opacity-70" />
     </button>
   );
 }
