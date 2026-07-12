@@ -6,7 +6,7 @@ import { Card } from '@happy/ui/card';
 import { Input } from '@happy/ui/input';
 import { Button } from '@happy/ui/button';
 import { Badge } from '@happy/ui/badge';
-import { Trash2, Plus, Minus, ScanBarcode, X, Smartphone, CreditCard, Banknote, Building2, MessageCircle, Loader2, LayoutGrid, ShoppingBag, LogOut, Receipt, History, Send, RotateCcw, Coins, Wallet, Search, LogIn, UserX } from 'lucide-react';
+import { Trash2, Plus, Minus, ScanBarcode, X, Banknote, Building2, MessageCircle, Loader2, LayoutGrid, ShoppingBag, LogOut, Receipt, History, RotateCcw, Coins, Wallet, Search, LogIn, UserX } from 'lucide-react';
 import { toast } from 'sonner';
 import { formatPEN, ordenTalla, formatTalla } from '@happy/lib';
 import { buildPedidoWaMessage, buildWhatsappUrl } from '@happy/lib/whatsapp';
@@ -315,7 +315,9 @@ export function PosTerminal({
     );
     if (productoMatch) {
       setProductoTallasOpen(productoMatch.producto.id);
-      // No limpiamos el search — el usuario puede querer refinar
+      // Cliente pidió (2026-07-10) que el buscador quede libre al elegir
+      // un producto, para poder tipear el siguiente sin borrar antes.
+      setSearch('');
       return;
     }
     toast.error(`Producto no encontrado: ${barcode}`);
@@ -400,12 +402,6 @@ export function PosTerminal({
   function montoPagadoPorCuenta(cuentaNombre: string): number {
     return pagos
       .filter((p) => p.cuentaNombre === cuentaNombre)
-      .reduce((s, p) => s + p.monto, 0);
-  }
-
-  function montoPagadoPorMetodoSinCuenta(metodo: MetodoCarrito): number {
-    return pagos
-      .filter((p) => p.metodo === metodo && !p.cuentaNombre)
       .reduce((s, p) => s + p.monto, 0);
   }
 
@@ -763,7 +759,7 @@ export function PosTerminal({
               {sugerencias.map(({ producto, tallasCount, precioMin }) => (
                 <button
                   key={producto.id}
-                  onClick={() => setProductoTallasOpen(producto.id)}
+                  onClick={() => { setProductoTallasOpen(producto.id); setSearch(''); }}
                   className="flex w-full items-center gap-2 border-b px-3 py-1.5 text-left text-sm hover:bg-happy-50 last:border-0"
                 >
                   <div className="flex-1 font-medium text-corp-900 truncate">{producto.nombre}</div>
@@ -825,7 +821,7 @@ export function PosTerminal({
                     return (
                       <button
                         key={producto.id}
-                        onClick={() => setProductoTallasOpen(producto.id)}
+                        onClick={() => { setProductoTallasOpen(producto.id); setSearch(''); }}
                         className="group flex flex-col overflow-hidden rounded-lg border bg-white text-left transition hover:-translate-y-0.5 hover:border-happy-400 hover:shadow-md"
                       >
                         <div className="relative aspect-square bg-slate-50">
@@ -1265,41 +1261,13 @@ export function PosTerminal({
             </div>
           )}
 
-          {/* Métodos genéricos (sin cuenta asociada). Toggle idéntico. */}
-          <div className="grid grid-cols-4 gap-1">
-            {([
-              { m: 'YAPE', label: 'Yape', icon: <Smartphone className="h-3.5 w-3.5" />, off: 'bg-purple-50 text-purple-700 border-purple-100', on: 'bg-purple-100 text-purple-900 border-purple-600 ring-2 ring-purple-200' },
-              { m: 'PLIN', label: 'Plin', icon: <Smartphone className="h-3.5 w-3.5" />, off: 'bg-blue-50 text-blue-700 border-blue-100', on: 'bg-blue-100 text-blue-900 border-blue-600 ring-2 ring-blue-200' },
-              { m: 'TARJETA_CREDITO', label: 'Tarjeta', icon: <CreditCard className="h-3.5 w-3.5" />, off: 'bg-slate-100 text-slate-700 border-slate-200', on: 'bg-slate-200 text-slate-900 border-slate-600 ring-2 ring-slate-300' },
-              { m: 'TRANSFERENCIA', label: 'Otro', icon: <Building2 className="h-3.5 w-3.5" />, off: 'bg-slate-100 text-slate-700 border-slate-200', on: 'bg-slate-200 text-slate-900 border-slate-600 ring-2 ring-slate-300' },
-            ] as const).map((p) => {
-              const activo = montoPagadoPorMetodoSinCuenta(p.m as MetodoCarrito) > 0;
-              const monto = montoPagadoPorMetodoSinCuenta(p.m as MetodoCarrito);
-              const restante = total - pagado;
-              const disabled = !activo && restante <= 0;
-              return (
-                <button
-                  key={p.m}
-                  onClick={() => togglePago(p.m as MetodoCarrito, undefined)}
-                  disabled={disabled}
-                  className={`relative flex flex-col items-center justify-center gap-0.5 rounded-md border px-1 py-1.5 text-[10px] font-medium ${activo ? p.on : p.off} ${disabled ? 'opacity-40 cursor-not-allowed' : 'hover:brightness-95'}`}
-                  title={activo
-                    ? `Click para deseleccionar ${p.label} (${formatPEN(monto)})`
-                    : disabled
-                      ? 'Ya se cubrió el total'
-                      : `Cobrar ${formatPEN(Math.max(0, restante))} por ${p.label}`}
-                >
-                  {p.icon}
-                  <span className="leading-tight">{p.label}</span>
-                  {activo && (
-                    <span className="absolute -right-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-emerald-500 px-1 text-[8px] font-bold text-white shadow-sm">
-                      ✓
-                    </span>
-                  )}
-                </button>
-              );
-            })}
-          </div>
+          {/* Botones genéricos (Yape/Plin/Tarjeta/Otro) removidos 2026-07-10 —
+              cliente pidió que solo aparezcan las cuentas del catálogo
+              (BCP HAPPYS, BCP JAVIER, INTERBANK, BBVA, YAPE/PLIN). Si necesita
+              agregar un método nuevo, se hace desde ERP → Configuración →
+              Cuentas bancarias, no más botones fijos hardcodeados. La cuenta
+              YAPE/PLIN se marcó visible_pos=true para que aparezca en el
+              grid de cuentas de arriba. */}
 
           {/* Barra de progreso del total pagado. Cuando pagado >= total,
               cambia a verde con "COMPLETO" — feedback visual claro de que
