@@ -194,9 +194,12 @@ const devolucionSchema = z.object({
   tipo: z.enum(['DEVOLUCION', 'CAMBIO']),
   motivo: z.string().min(1).max(500),
   observacion: z.string().nullable().optional().or(z.literal('')),
+  // Incluye WHATSAPP_PENDIENTE porque el catálogo de cuentas bancarias
+  // permite configurarlo como metodo_default (fix 2026-07-12 — antes daba
+  // ZodError al confirmar con esa cuenta).
   metodo_devolucion: z.enum([
     'EFECTIVO', 'YAPE', 'PLIN', 'TARJETA_DEBITO', 'TARJETA_CREDITO',
-    'TRANSFERENCIA', 'DEPOSITO', 'CREDITO',
+    'TRANSFERENCIA', 'DEPOSITO', 'CREDITO', 'WHATSAPP_PENDIENTE',
   ]).nullable().optional(),
   monto_devuelto: z.number().min(0).default(0),
   lineas: z.array(lineaInputSchema).min(1),
@@ -394,7 +397,7 @@ const cambioSchema = z.object({
   /** Si el monto nuevo supera al devuelto, método para cobrar la diferencia */
   metodo_diferencia_cobro: z.enum([
     'EFECTIVO', 'YAPE', 'PLIN', 'TARJETA_DEBITO', 'TARJETA_CREDITO',
-    'TRANSFERENCIA', 'DEPOSITO',
+    'TRANSFERENCIA', 'DEPOSITO', 'WHATSAPP_PENDIENTE',
   ]).nullable().optional(),
   /** Nombre corto de la cuenta bancaria destino (BCP HAPPYS, BBVA…) para
    *  cobrar la diferencia. Se persiste en ventas_pagos.referencia — permite
@@ -403,7 +406,7 @@ const cambioSchema = z.object({
   /** Si el monto nuevo es menor al devuelto, método para reembolsar la diferencia */
   metodo_diferencia_devuelta: z.enum([
     'EFECTIVO', 'YAPE', 'PLIN', 'TARJETA_DEBITO', 'TARJETA_CREDITO',
-    'TRANSFERENCIA', 'DEPOSITO', 'CREDITO',
+    'TRANSFERENCIA', 'DEPOSITO', 'CREDITO', 'WHATSAPP_PENDIENTE',
   ]).nullable().optional(),
 });
 

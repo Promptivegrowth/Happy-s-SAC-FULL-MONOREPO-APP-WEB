@@ -74,14 +74,13 @@ export function NuevoTrasladoForm({
   const [stockLoading, setStockLoading] = useState(false);
 
   // Carga de stock cuando cambia el origen o las líneas (entidades únicas).
-  const varianteIds = useMemo(
-    () => Array.from(new Set(lineas.filter((l) => l.variante_id).map((l) => l.variante_id))),
-    [lineas],
-  );
-  const materialIds = useMemo(
-    () => Array.from(new Set(lineas.filter((l) => l.material_id).map((l) => l.material_id))),
-    [lineas],
-  );
+  // Los ids se derivan de una KEY string estable (ordenada) — sin esto, cada
+  // keystroke en cantidad/observación creaba arrays nuevos y el useEffect
+  // refetcheaba el stock en cada tecla (fix 2026-07-12).
+  const varKey = Array.from(new Set(lineas.filter((l) => l.variante_id).map((l) => l.variante_id))).sort().join(',');
+  const matKey = Array.from(new Set(lineas.filter((l) => l.material_id).map((l) => l.material_id))).sort().join(',');
+  const varianteIds = useMemo(() => (varKey ? varKey.split(',') : []), [varKey]);
+  const materialIds = useMemo(() => (matKey ? matKey.split(',') : []), [matKey]);
 
   useEffect(() => {
     if (!origenId || (varianteIds.length === 0 && materialIds.length === 0)) {
@@ -936,8 +935,9 @@ function MultiTallaModal({
     if (!productoNombre) return [];
     const arr = [...(productos.get(productoNombre) ?? [])];
     const ordenTallaLocal = (t: string) => {
-      const n = Number(t.replace(/\D/g, ''));
-      if (Number.isFinite(n) && n > 0) return n;
+      // /\d/ y no n > 0: la talla T0 (bebé) vale 0 y debe ordenar PRIMERA,
+      // no caer al bucket 99 del final (fix 2026-07-12).
+      if (/\d/.test(t)) return Number(t.replace(/\D/g, ''));
       if (t === 'TS') return 90;   // S adulto
       if (t === 'TAD') return 95;  // adulto
       return 99;

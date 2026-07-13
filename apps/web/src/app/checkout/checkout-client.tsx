@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import {
   useCart,
@@ -77,6 +77,11 @@ export function CheckoutClient({ cuentasWeb = [] }: { cuentasWeb?: CuentaWeb[] }
   const totalFinal = total + envio;
 
   const [buscandoDoc, setBuscandoDoc] = useState(false);
+  // Trackea el último valor que ESCRIBIÓ el autolookup. Regla anti datos
+  // cruzados (fix 2026-07-12): si el usuario corrige el DNI de la persona A
+  // a la B, el nombre de A (autocompletado) debe reemplazarse por el de B;
+  // pero si el usuario editó el nombre a mano, NUNCA se pisa.
+  const autoFillRef = useRef<{ nombre: string; direccion: string }>({ nombre: '', direccion: '' });
   async function consultarDoc(silent = false) {
     if (!doc) return silent ? undefined : toast.error('Ingresá el número de documento');
     const digitosSolo = doc.replace(/\D/g, '');
@@ -94,8 +99,25 @@ export function CheckoutClient({ cuentasWeb = [] }: { cuentasWeb?: CuentaWeb[] }
       if (!res.ok) {
         throw new Error(data?.error ?? 'No se pudo consultar');
       }
-      setNombre(data.nombreCompleto ?? data.razonSocial ?? '');
-      if (data.direccion) setDireccion(data.direccion);
+      const nombreNuevo = data.nombreCompleto ?? data.razonSocial ?? '';
+      if (nombreNuevo) {
+        setNombre((prev) => {
+          const esEdicionManual = prev.trim() !== '' && prev.trim() !== autoFillRef.current.nombre;
+          // El autolookup (silent) nunca pisa una edición manual; el botón
+          // "Consultar" (no silent) siempre reemplaza — el usuario lo pidió.
+          if (esEdicionManual && silent) return prev;
+          autoFillRef.current.nombre = nombreNuevo;
+          return nombreNuevo;
+        });
+      }
+      if (data.direccion) {
+        setDireccion((prev) => {
+          const esEdicionManual = prev.trim() !== '' && prev.trim() !== autoFillRef.current.direccion;
+          if (esEdicionManual && silent) return prev;
+          autoFillRef.current.direccion = data.direccion;
+          return data.direccion;
+        });
+      }
       if (!silent) toast.success('Datos cargados');
     } catch (e) {
       const msg = (e as Error).message;
@@ -106,15 +128,13 @@ export function CheckoutClient({ cuentasWeb = [] }: { cuentasWeb?: CuentaWeb[] }
   }
 
   // Autolookup RENIEC/SUNAT al terminar de tipear (2026-07-10). Debounce 500ms.
-  // Se dispara SOLO si el largo del documento matchea el tipo (8 para DNI, 11
-  // para RUC) y si el usuario no ya escribió un nombre a mano. El botón
-  // "Consultar" queda como fallback manual (por si el debounce falla o
-  // quiere re-consultar).
+  // Corre siempre que el largo del doc matchee — la protección contra pisar
+  // el nombre manual vive DENTRO de consultarDoc (autoFillRef). El botón
+  // "Consultar" queda como fallback manual (fuerza reemplazo).
   useEffect(() => {
     const n = doc.replace(/\D/g, '');
     const largoOk = (tipoDoc === 'DNI' && n.length === 8) || (tipoDoc === 'RUC' && n.length === 11);
     if (!largoOk) return;
-    if (nombre.trim().length > 0) return; // usuario ya tipeó — no sobreescribir
     const t = setTimeout(() => { void consultarDoc(true); }, 500);
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps

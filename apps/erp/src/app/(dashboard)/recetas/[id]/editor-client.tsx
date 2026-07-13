@@ -1329,7 +1329,12 @@ function ProcesosEditor({
     // el paso descrito. Si el usuario está en modo manual (o el área no tiene
     // catálogo), pedimos ambos: proceso enum + descripción.
     const pasos = pasosDeAreaId(areaId);
-    const enCatalogo = pasos && !usarOtroPaso;
+    // Modo catálogo REQUIERE que el área tenga mapping a enum — si no lo
+    // tiene (TALLER, áreas custom), el flujo cae al modo manual donde el
+    // usuario elige el enum a mano. Sin este check, un área con pasos pero
+    // sin enum quedaba sin forma de completar el alta (fix 2026-07-12).
+    const areaCodAdd = areasLocal.find((a) => a.id === areaId)?.codigo ?? null;
+    const enCatalogo = pasos && enumDeArea(areaCodAdd) != null && !usarOtroPaso;
     if (enCatalogo && !descripcionOperativa) {
       toast.error('Elegí un paso del catálogo');
       return;
@@ -1495,7 +1500,11 @@ function ProcesosEditor({
                 "otro", cae al dropdown enum + input libre. */}
             {(() => {
               const areaCod = areasLocal.find((a) => a.id === areaId)?.codigo ?? null;
-              const pasos = pasosDeAreaId(areaId);
+              const pasosBD = pasosDeAreaId(areaId);
+              // Modo catálogo SOLO si además el área mapea a un enum — sin
+              // eso el alta quedaba bloqueada sin selector visible (fix
+              // 2026-07-12). Áreas sin mapping caen al modo manual.
+              const pasos = enumDeArea(areaCod) != null ? pasosBD : null;
               return (
                 <FormRow
                   label="Paso operativo"

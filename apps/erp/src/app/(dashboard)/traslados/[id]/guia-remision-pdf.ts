@@ -123,8 +123,12 @@ export async function generarGuiaRemisionPdf(
     doc.setFont('helvetica', 'normal');
     doc.setTextColor(0, 0, 0);
     const val = doc.splitTextToSize(valor, maxW - lw) as string[];
-    doc.text(val[0] ?? '—', x + lw, yy);
-    return val.length; // por si el valor se corta, el caller puede reservar más
+    // Si el valor no entra en una línea, marcar el corte con "…" en vez de
+    // truncar en silencio — es un documento de sustento, el lector debe ver
+    // que hay más texto (fix 2026-07-12).
+    const linea = val.length > 1 ? `${val[0]}…` : (val[0] ?? '—');
+    doc.text(linea, x + lw, yy);
+    return val.length;
   };
 
   const dirOrigen = [
@@ -250,7 +254,15 @@ export async function generarGuiaRemisionPdf(
   const finalY = (doc as any).lastAutoTable.finalY + 8;
 
   // ─── Firmas ────────────────────────────────────────────────────────────
-  const yFirmas = Math.max(finalY, doc.internal.pageSize.getHeight() - 50);
+  // Si la tabla terminó demasiado abajo, las firmas (que necesitan ~22mm)
+  // se saldrían del A4 (297mm). En ese caso van a una página nueva
+  // (fix 2026-07-12 — antes se dibujaban fuera del papel).
+  const pageH = doc.internal.pageSize.getHeight();
+  let yFirmas = Math.max(finalY, pageH - 50);
+  if (yFirmas + 22 > pageH - 10) {
+    doc.addPage();
+    yFirmas = pageH - 50;
+  }
 
   doc.setDrawColor(...GRIS);
   doc.setLineWidth(0.2);

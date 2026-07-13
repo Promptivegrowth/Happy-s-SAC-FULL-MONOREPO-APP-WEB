@@ -197,6 +197,14 @@ export function PosTerminal({
   // Debounce 500ms. Endpoint /api/sunat/{dni|ruc}/{n} devuelve razón social /
   // nombre completo + dirección (para RUC). Sin botón — se dispara solo cuando
   // el largo llega al esperado y hay 500ms sin nuevos cambios.
+  //
+  // Regla anti-pisado (fix 2026-07-12): el lookup solo escribe el campo si
+  // está vacío O si su valor actual vino de un autocompletado anterior (lo
+  // trackeamos en un ref). Así:
+  //  - El cajero edita el nombre a mano ("Juan Perez - delivery") → NO se pisa.
+  //  - El cajero corrige el DNI de la persona A a la B → el nombre de A (que
+  //    era autocompletado) SÍ se reemplaza por el de B — sin datos cruzados.
+  const ultimoAutocompletadoRef = useRef<{ nombre: string; direccion: string }>({ nombre: '', direccion: '' });
   useEffect(() => {
     const n = docCliente.trim();
     if (n.length !== 8 && n.length !== 11) return;
@@ -208,11 +216,22 @@ export function PosTerminal({
         const r = await fetch(`/api/sunat/${tipo}/${n}`);
         if (!r.ok) return;
         const data = await r.json();
-        if (tipo === 'dni') {
-          if (data.nombreCompleto) setNombreCliente(data.nombreCompleto);
-        } else {
-          if (data.razonSocial) setNombreCliente(data.razonSocial);
-          if (data.direccion) setDireccionCliente(data.direccion);
+        const nombreNuevo: string | undefined = tipo === 'dni' ? data.nombreCompleto : data.razonSocial;
+        if (nombreNuevo) {
+          setNombreCliente((prev) => {
+            const p = prev.trim();
+            if (p && p !== ultimoAutocompletadoRef.current.nombre) return prev; // edición manual — no pisar
+            ultimoAutocompletadoRef.current.nombre = nombreNuevo;
+            return nombreNuevo;
+          });
+        }
+        if (tipo === 'ruc' && data.direccion) {
+          setDireccionCliente((prev) => {
+            const p = prev.trim();
+            if (p && p !== ultimoAutocompletadoRef.current.direccion) return prev;
+            ultimoAutocompletadoRef.current.direccion = data.direccion;
+            return data.direccion;
+          });
         }
       } catch { /* silent */ } finally {
         setBuscandoSunat(false);
@@ -423,6 +442,21 @@ export function PosTerminal({
 
   function eliminar(varianteId: string) {
     setCarrito((prev) => prev.filter((l) => l.variante.id !== varianteId));
+    // Limpiar también override de precio y descuento de esa variante — sin
+    // esto, si se re-escaneaba la misma variante en la misma venta, el precio
+    // editado viejo se reaplicaba silenciosamente (fix 2026-07-12).
+    setOverridesPrecio((prev) => {
+      if (!(varianteId in prev)) return prev;
+      const next = { ...prev };
+      delete next[varianteId];
+      return next;
+    });
+    setDescuentosLinea((prev) => {
+      if (!(varianteId in prev)) return prev;
+      const next = { ...prev };
+      delete next[varianteId];
+      return next;
+    });
   }
 
   function agregarPago(metodo: MetodoCarrito, monto: number, cuentaNombre?: string) {
@@ -442,6 +476,14 @@ export function PosTerminal({
    *  diferencia. Todo en un solo setPagos para evitar race conditions con
    *  React state async. */
   function togglePago(metodo: MetodoCarrito, cuentaNombre: string | undefined) {
+    // ¿Es deselección? Se decide con el estado del render actual — si el pago
+    // ya existe, el click lo quita y NO debe tocar el efectivoInput (el cajero
+    // puede haber tipeado un monto que todavía no cobró). Fix 2026-07-12.
+    const esDeseleccion = pagos.some((p) =>
+      cuentaNombre
+        ? p.cuentaNombre === cuentaNombre
+        : p.metodo === metodo && !p.cuentaNombre,
+    );
     setPagos((prev) => {
       const yaExisteIdx = prev.findIndex((p) =>
         cuentaNombre
@@ -471,8 +513,8 @@ export function PosTerminal({
       acc.push({ metodo, monto: restante, cuentaNombre });
       return acc;
     });
-    // Limpiar input efectivo si absorbimos su valor
-    if (Number(efectivoInput || 0) > 0 && !(metodo === 'EFECTIVO' && !cuentaNombre)) {
+    // Limpiar input efectivo SOLO si lo absorbimos (agregado, no deselección)
+    if (!esDeseleccion && Number(efectivoInput || 0) > 0 && !(metodo === 'EFECTIVO' && !cuentaNombre)) {
       setEfectivoInput('');
     }
   }
@@ -673,6 +715,12 @@ export function PosTerminal({
       setOverridesPrecio({});
       setDescuentosLinea({});
       setEfectivoInput('');
+      // Limpiar también el buscador de clientes frecuentes — sin esto el
+      // dropdown reabría con los resultados de la venta anterior al enfocar
+      // el input Nombre (fix 2026-07-12).
+      setBusquedaCliente('');
+      setResultadosCliente([]);
+      setDropdownClienteAbierto(false);
       setCobrarOpen(false);
       setCobrarKey((k) => k + 1);
       // NO reseteamos vendedorId / tipoDoc / formato — persisten por sesión.
@@ -1341,7 +1389,14 @@ export function PosTerminal({
                   onClick={() => {
                     const n = Number(efectivoInput || (total - pagado).toFixed(2));
                     if (n <= 0) return;
-                    agregarPago('EFECTIVO', n);
+                    // CAP al restante (fix 2026-07-12): el input registra lo
+                    // RECIBIDO (ej. 150 para un total de 120) pero el pago en
+                    // ventas_pagos debe ser solo lo que cubre la venta (120).
+                    // Antes se insertaba el monto completo y el arqueo de
+                    // cierre quedaba inflado por el vuelto entregado.
+                    const aRegistrar = Math.min(n, Math.max(0, total - pagado));
+                    if (aRegistrar <= 0) return;
+                    agregarPago('EFECTIVO', aRegistrar);
                     setEfectivoInput('');
                   }}
                   className="rounded-md bg-emerald-600 px-2.5 text-[11px] font-semibold text-white hover:bg-emerald-700"

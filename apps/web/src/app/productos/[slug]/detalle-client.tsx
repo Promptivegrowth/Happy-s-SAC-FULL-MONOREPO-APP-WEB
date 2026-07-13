@@ -131,7 +131,15 @@ export function ProductoDetalleClient({
 
   function comprarPorWhatsapp() {
     if (!seleccionada) return toast.error('Selecciona una talla');
+    // Con el default cantidad=0 (2026-07-12), un click directo generaba
+    // "Cantidad: 0 / Total: S/ 0.00". Si hay stock y no puso cantidad, es
+    // una consulta general — omitimos cantidad/total del mensaje en vez de
+    // mandar un pedido roto. Si está agotada, siempre es consulta.
+    const esConsulta = sinStockSeleccionada || cantidad <= 0;
     const total = precioFinal * cantidad;
+    const lineasPedido = esConsulta
+      ? `Precio: S/ ${precioFinal.toFixed(2)}`
+      : `Cantidad: ${cantidad}\nPrecio: S/ ${precioFinal.toFixed(2)}\nTotal: *S/ ${total.toFixed(2)}*`;
     const mensajeStock = sinStockSeleccionada
       ? '\n*⚠️ Talla actualmente agotada — consulto disponibilidad/reposición*'
       : '';
@@ -140,16 +148,21 @@ export function ProductoDetalleClient({
 Producto: *${nombre}*
 SKU: ${seleccionada.sku}
 Talla: ${seleccionada.talla.replace('T', '')}
-Cantidad: ${cantidad}
-Precio: S/ ${precioFinal.toFixed(2)}
-Total: *S/ ${total.toFixed(2)}*${mensajeStock}
+${lineasPedido}${mensajeStock}
 
-¿Cómo procedo con la compra?`;
+${esConsulta ? '¿Me das más información?' : '¿Cómo procedo con la compra?'}`;
     window.open(`https://wa.me/${WHATSAPP_NUMERO}?text=${encodeURIComponent(msg)}`, '_blank');
   }
 
   function irAlCheckout() {
     if (sinStockSeleccionada) return toast.error('Producto sin stock disponible');
+    if (cantidad <= 0) return toast.error('Ingresá una cantidad');
+    if (cantidad > stockSeleccionada) {
+      return toast.error(`Solo quedan ${stockSeleccionada} unidades de esta talla`);
+    }
+    // agregarAlCarrito valida de nuevo — pero acá ya validamos lo mismo, así
+    // que si pasó, el push al checkout es seguro (fix 2026-07-12: antes
+    // navegaba aunque agregarAlCarrito hubiera rechazado).
     agregarAlCarrito();
     router.push('/checkout');
   }
