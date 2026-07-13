@@ -804,7 +804,23 @@ function RecetaTabla({
                   disabled={congelada}
                 />
               </TableCell>
-              <TableCell className="text-right text-sm">S/ {costo.toFixed(2)}</TableCell>
+              <TableCell className="text-right text-sm">
+                {/* Si el material NO tiene precio cargado, "S/ 0.00" engaña —
+                    parece costo cero cuando en realidad falta el dato. Cliente
+                    reportó (2026-07-12) que "no calculaba el costo": eran
+                    materiales duplicados sin precio_unitario. Warning visible
+                    + tooltip apuntando a la ficha del material. */}
+                {precio <= 0 ? (
+                  <span
+                    className="inline-flex items-center gap-1 rounded bg-amber-50 px-1.5 py-0.5 text-[10px] font-semibold text-amber-700"
+                    title={`El material ${l.materiales?.codigo ?? ''} no tiene precio cargado. Cargalo en Materiales para que la receta calcule el costo.`}
+                  >
+                    ⚠ sin precio
+                  </span>
+                ) : (
+                  <>S/ {costo.toFixed(2)}</>
+                )}
+              </TableCell>
               <TableCell>
                 <label className="flex items-center gap-2 text-xs">
                   <Switch

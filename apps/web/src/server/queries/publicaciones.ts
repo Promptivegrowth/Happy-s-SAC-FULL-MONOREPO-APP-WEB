@@ -104,9 +104,18 @@ export async function loadPublicaciones(opts: LoadOpts = {}): Promise<ProductCar
         .from('v_productos_rating')
         .select('producto_id, total_resenas, promedio_rating')
         .in('producto_id', productoIds),
+      // v_stock_variante_web = stock SOLO de La Quinta (mig 63) — misma
+      // fuente que la ficha del producto, para que el catálogo y el detalle
+      // nunca se contradigan (antes el catálogo sumaba todos los almacenes).
       varianteIds.length > 0
-        ? sb
-            .from('v_stock_variante_total')
+        ? (sb as unknown as {
+            from: (t: string) => {
+              select: (s: string) => {
+                in: (c: string, v: string[]) => PromiseLike<{ data: { variante_id: string; stock_total: number }[] | null }>;
+              };
+            };
+          })
+            .from('v_stock_variante_web')
             .select('variante_id, stock_total')
             .in('variante_id', varianteIds)
         : Promise.resolve({ data: [] as { variante_id: string; stock_total: number }[] }),

@@ -131,19 +131,24 @@ export default async function ProductoDetallePage({ params }: { params: Promise<
           .neq('producto_id', prod.id)
           .limit(8)
       : Promise.resolve({ data: [] as never[] }),
-    // Cliente confirmó (2026-07-10): la web debe mostrar SOLO el stock del
-    // almacén LA QUINTA (código TDA-LQ). Motivo de negocio: La Quinta es
-    // la tienda física principal de retail y evita vender online lo que
-    // en realidad está en el central Santa Bárbara o en otras tiendas.
-    // Si el producto no tiene stock en La Quinta, la web debe mostrarlo
-    // agotado — es el comportamiento intencional.
+    // Stock SOLO del almacén La Quinta (regla de negocio confirmada
+    // 2026-07-10/12). OJO: NO consultar stock_actual/almacenes directo —
+    // esas tablas tienen RLS que bloquea al rol anon de la web y la query
+    // devolvía 0 filas (todo aparecía "agotado", bug grave del 07-12).
+    // La vista v_stock_variante_web (mig 63) agrega el stock de TDA-LQ y
+    // tiene GRANT para anon.
     varianteIds.length > 0
-      ? sb
-          .from('stock_actual')
-          .select('variante_id, cantidad, almacen:almacen_id!inner(codigo)')
+      ? (sb as unknown as {
+          from: (t: string) => {
+            select: (s: string) => {
+              in: (c: string, v: string[]) => PromiseLike<{ data: { variante_id: string; stock_total: number }[] | null }>;
+            };
+          };
+        })
+          .from('v_stock_variante_web')
+          .select('variante_id, stock_total')
           .in('variante_id', varianteIds)
-          .eq('almacen.codigo', 'TDA-LQ')
-      : Promise.resolve({ data: [] as { variante_id: string; cantidad: number }[] }),
+      : Promise.resolve({ data: [] as { variante_id: string; stock_total: number }[] }),
   ]);
 
   const stockMap = new Map<string, number>();
