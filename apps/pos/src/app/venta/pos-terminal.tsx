@@ -9,7 +9,9 @@ import { Badge } from '@happy/ui/badge';
 import { Trash2, Plus, Minus, ScanBarcode, X, Banknote, Building2, MessageCircle, Loader2, LayoutGrid, ShoppingBag, LogOut, Receipt, History, RotateCcw, Coins, Wallet, Search, LogIn, UserX, Pencil, Send } from 'lucide-react';
 import { toast } from 'sonner';
 import { formatPEN, ordenTalla, formatTalla } from '@happy/lib';
-import { buildPedidoWaMessage, buildWhatsappUrl } from '@happy/lib/whatsapp';
+// buildPedidoWaMessage/buildWhatsappUrl removidos (2026-07-12) — el botón WA
+// del carrito ahora abre CotizacionModal en vez de wa.me directo. Ver
+// mensaje formateado inline en el modal.
 import { registrarVenta } from '@/server/actions/venta';
 import { emitirComprobante, obtenerSesionActiva } from '@/server/actions/caja';
 import { aplicarAdelantoAVenta } from '@/server/actions/adelantos';
@@ -20,6 +22,7 @@ import { AbrirCajaModal } from './abrir-caja-modal';
 import { CerrarCajaModal } from './cerrar-caja-modal';
 import { CobrarModal, type CobrarPayload } from './cobrar-modal';
 import { generarTicket, generarA4, abrirPDF } from './comprobante-pdf';
+import { generarPdfCotizacion, siguienteNumeroCotizacion } from './cotizacion-pdf';
 import { HistorialModal } from './historial-modal';
 import { GastosModal } from './gastos-modal';
 import { AdelantosModal } from './adelantos-modal';
@@ -157,6 +160,11 @@ export function PosTerminal({
     mensaje: string;
     numeroComprobante: string;
   }>({ abierto: false, telefono: '', mensaje: '', numeroComprobante: '' });
+  // Modal de cotización — reemplaza al envío WA directo (2026-07-12). Antes
+  // el botón WA disparaba wa.me con el número preestablecido de la empresa;
+  // ahora abre modal donde el cajero pone tel/email del comprador y descarga
+  // el PDF de cotización para adjuntarlo al chat.
+  const [modalCotizacion, setModalCotizacion] = useState(false);
   // Overrides y descuentos por línea del carrito (indexado por variante_id).
   // Cliente pidió (2026-07-10) poder editar el precio unitario y aplicar
   // descuento sin salir del carrito, como en su sistema anterior.
@@ -675,17 +683,15 @@ export function PosTerminal({
     }
   }
 
+  /** Abre el modal de cotización. Antes disparaba wa.me directo con el
+   *  número preestablecido de la empresa; ahora deja que el cajero pida
+   *  el número del comprador y genere PDF de cotización. */
   function pedirPorWhatsapp() {
-    if (carrito.length === 0) return;
-    const msg = buildPedidoWaMessage({
-      cliente: { nombre: nombreCliente, documento: docCliente },
-      items: lineasConPrecio.map((l) => ({
-        sku: l.variante.sku, nombre: l.variante.productos.nombre, talla: l.variante.talla,
-        cantidad: l.cantidad, precioUnit: l.precio_unitario,
-      })),
-      canal: 'POS',
-    });
-    window.open(buildWhatsappUrl(msg), '_blank');
+    if (carrito.length === 0) {
+      toast.error('Agregá items al carrito primero');
+      return;
+    }
+    setModalCotizacion(true);
   }
 
   const sugerencias = useMemo(() => {
@@ -1705,6 +1711,27 @@ export function PosTerminal({
         />
       )}
 
+      {/* MODAL — Cotización (botón WA del carrito). Cajero ingresa
+          tel/email del comprador y descarga PDF para enviarlo por
+          WhatsApp o email. NO persiste en BD. */}
+      {modalCotizacion && (
+        <CotizacionModal
+          nombreCliente={nombreCliente}
+          docCliente={docCliente}
+          telefonoCliente={telefonoCliente}
+          empresaNombre={empresaNombre}
+          vendedorNombre={vendedores.find((v) => v.id === vendedorId)?.nombre ?? cajeroNombre}
+          items={lineasConPrecio.map((l) => ({
+            nombre: l.variante.productos.nombre,
+            talla: l.variante.talla,
+            cantidad: l.cantidad,
+            precioUnit: l.precio_unitario,
+          }))}
+          totalCarrito={total}
+          onClose={() => setModalCotizacion(false)}
+        />
+      )}
+
       {/* MODAL — Devolución / Cambio de mercadería */}
       {devolucionOpen && sesionActiva && cajaActual && (
         <DevolucionModal
@@ -1861,6 +1888,249 @@ function ModalWhatsappPost({
             Abrir WhatsApp
           </Button>
         </div>
+      </Card>
+    </div>
+  );
+}
+
+/**
+ * Modal de cotización — se abre al clic en el botón WA del carrito. Reemplaza
+ * al wa.me directo con número preestablecido de la empresa. Cliente pidió
+ * (2026-07-12): pedir tel/email del comprador, enviar mensaje formateado y
+ * generar PDF descargable con formato "COTIZACIÓN" (sin persistir en BD).
+ */
+function CotizacionModal({
+  nombreCliente,
+  docCliente,
+  telefonoCliente,
+  empresaNombre,
+  vendedorNombre,
+  items,
+  totalCarrito,
+  onClose,
+}: {
+  nombreCliente: string;
+  docCliente: string;
+  telefonoCliente: string;
+  empresaNombre: string;
+  vendedorNombre: string;
+  items: { nombre: string; talla: string; cantidad: number; precioUnit: number }[];
+  totalCarrito: number;
+  onClose: () => void;
+}) {
+  const [tel, setTel] = useState(telefonoCliente);
+  const [email, setEmail] = useState('');
+  const [vigenciaDias, setVigenciaDias] = useState(7);
+  const [notas, setNotas] = useState('');
+  const [generando, setGenerando] = useState(false);
+
+  const numero = useMemo(() => siguienteNumeroCotizacion(), []);
+  // Cálculo subtotal / IGV a partir del total (total incluye IGV en el POS).
+  const subtotal = totalCarrito / 1.18;
+  const igv = totalCarrito - subtotal;
+
+  const nombreParaMostrar = nombreCliente.trim() || 'Cliente';
+  const fecha = useMemo(() => new Date(), []);
+  const venc = new Date(fecha.getTime() + vigenciaDias * 86400_000);
+
+  const mensajeWa = useMemo(() => {
+    const primer = nombreParaMostrar.split(' ')[0] || nombreParaMostrar;
+    const totalTxt = `S/ ${totalCarrito.toLocaleString('es-PE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+    const fechaTxt = fecha.toLocaleDateString('es-PE', { day: '2-digit', month: 'long', year: 'numeric' });
+    const vencTxt = venc.toLocaleDateString('es-PE', { day: '2-digit', month: 'long', year: 'numeric' });
+    const lineas: string[] = [];
+    lineas.push(`¡Hola ${primer}! 👋`);
+    lineas.push('');
+    lineas.push(`Te enviamos tu *cotización* de *${empresaNombre}*.`);
+    lineas.push('');
+    lineas.push(`📄 *${numero}*`);
+    lineas.push(`📅 ${fechaTxt}`);
+    lineas.push(`⏳ Válida hasta: *${vencTxt}*`);
+    lineas.push('');
+    lineas.push('*🛍️ Productos:*');
+    for (const it of items) {
+      const talla = it.talla.replace('T', '');
+      const sub = it.cantidad * it.precioUnit;
+      lineas.push(`• ${it.cantidad}× ${it.nombre} (T${talla}) — S/ ${sub.toFixed(2)}`);
+    }
+    lineas.push('');
+    lineas.push(`💰 *Total: ${totalTxt}*`);
+    if (notas.trim()) {
+      lineas.push('');
+      lineas.push(`📝 ${notas.trim()}`);
+    }
+    lineas.push('');
+    lineas.push('Adjuntamos el PDF con el detalle. ¿Confirmás la compra?');
+    return lineas.join('\n');
+  }, [nombreParaMostrar, empresaNombre, numero, fecha, venc, items, totalCarrito, notas]);
+
+  async function generarPdfYDescargar(): Promise<Blob | null> {
+    setGenerando(true);
+    try {
+      const blob = await generarPdfCotizacion({
+        empresa_nombre: empresaNombre,
+        numero,
+        fecha,
+        vigencia_dias: vigenciaDias,
+        cliente_nombre: nombreParaMostrar,
+        cliente_documento: docCliente || undefined,
+        cliente_telefono: tel || undefined,
+        items,
+        subtotal,
+        igv,
+        total: totalCarrito,
+        vendedor: vendedorNombre,
+        notas: notas || undefined,
+      });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${numero}.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      setTimeout(() => URL.revokeObjectURL(url), 5_000);
+      return blob;
+    } finally {
+      setGenerando(false);
+    }
+  }
+
+  async function enviarWhatsApp() {
+    const limpio = tel.replace(/\D/g, '');
+    if (limpio.length < 8) {
+      toast.error('Ingresá el número del cliente (mínimo 8 dígitos)');
+      return;
+    }
+    await generarPdfYDescargar();
+    abrirWhatsApp(tel, mensajeWa);
+    toast.success('PDF descargado + WhatsApp abierto — arrastrá el PDF al chat');
+    onClose();
+  }
+
+  async function enviarEmail() {
+    if (!email.includes('@')) {
+      toast.error('Ingresá un correo válido');
+      return;
+    }
+    await generarPdfYDescargar();
+    const asunto = `Cotización ${numero} — ${empresaNombre}`;
+    window.location.href = `mailto:${email}?subject=${encodeURIComponent(asunto)}&body=${encodeURIComponent(mensajeWa)}`;
+    toast.success('PDF descargado + correo abierto — adjuntá el PDF y envía');
+    onClose();
+  }
+
+  async function soloDescargar() {
+    await generarPdfYDescargar();
+    toast.success(`Cotización ${numero} descargada`);
+    onClose();
+  }
+
+  return (
+    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
+      <Card className="w-full max-w-lg p-5 shadow-2xl" onClick={(e) => e.stopPropagation()}>
+        <div className="mb-3 flex items-start justify-between">
+          <div>
+            <h3 className="font-display text-lg font-semibold text-corp-900">Enviar cotización</h3>
+            <p className="mt-0.5 text-xs text-slate-500">
+              Cotización <span className="font-mono font-semibold">{numero}</span> por{' '}
+              <span className="font-semibold text-happy-600">S/ {totalCarrito.toFixed(2)}</span>{' '}
+              a nombre de <span className="font-semibold">{nombreParaMostrar}</span>.
+            </p>
+          </div>
+          <button onClick={onClose} className="rounded p-1 text-slate-400 hover:bg-slate-100">
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+
+        <div className="space-y-3">
+          <div className="grid grid-cols-2 gap-2">
+            <div>
+              <label className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">WhatsApp del cliente</label>
+              <input
+                type="tel"
+                value={tel}
+                onChange={(e) => setTel(e.target.value.replace(/[^\d+]/g, ''))}
+                placeholder="Ej: 987654321"
+                className="mt-1 h-9 w-full rounded-md border border-slate-300 bg-white px-3 font-mono text-sm focus:border-emerald-400 focus:outline-none focus:ring-2 focus:ring-emerald-100"
+                autoFocus
+                inputMode="tel"
+              />
+            </div>
+            <div>
+              <label className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">Correo (opcional)</label>
+              <input
+                type="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                placeholder="cliente@correo.com"
+                className="mt-1 h-9 w-full rounded-md border border-slate-300 bg-white px-3 text-sm focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-100"
+              />
+            </div>
+          </div>
+          <div>
+            <label className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">Vigencia</label>
+            <div className="mt-1 flex gap-1">
+              {[3, 7, 15, 30].map((d) => (
+                <button
+                  key={d}
+                  type="button"
+                  onClick={() => setVigenciaDias(d)}
+                  className={`h-8 flex-1 rounded-md border text-[11px] font-semibold transition ${
+                    vigenciaDias === d
+                      ? 'border-happy-500 bg-happy-500 text-white'
+                      : 'border-slate-200 bg-white text-slate-500 hover:border-happy-300'
+                  }`}
+                >
+                  {d} días
+                </button>
+              ))}
+            </div>
+          </div>
+          <div>
+            <label className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">Notas (opcional)</label>
+            <textarea
+              value={notas}
+              onChange={(e) => setNotas(e.target.value)}
+              placeholder="Ej: entrega en 3 días, incluye envío, etc."
+              rows={2}
+              className="mt-1 w-full rounded-md border border-slate-300 bg-white px-3 py-1.5 text-xs focus:border-happy-400 focus:outline-none focus:ring-2 focus:ring-happy-100"
+            />
+          </div>
+        </div>
+
+        <details className="mt-3 text-xs">
+          <summary className="cursor-pointer text-slate-600 hover:text-slate-900">Ver mensaje que se enviará</summary>
+          <pre className="mt-2 max-h-40 overflow-auto whitespace-pre-wrap rounded border bg-slate-50 p-2 text-[10px] leading-tight">{mensajeWa}</pre>
+        </details>
+
+        <div className="mt-4 grid grid-cols-3 gap-2">
+          <Button variant="outline" onClick={soloDescargar} disabled={generando} className="gap-1 text-xs">
+            {generando ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Receipt className="h-3.5 w-3.5" />}
+            Solo PDF
+          </Button>
+          <Button
+            onClick={enviarEmail}
+            disabled={generando || !email.includes('@')}
+            className="gap-1 bg-blue-600 text-xs hover:bg-blue-700"
+            title={email.includes('@') ? 'Descargar PDF + abrir correo' : 'Ingresá un correo válido'}
+          >
+            <Send className="h-3.5 w-3.5" /> Email
+          </Button>
+          <Button
+            onClick={enviarWhatsApp}
+            disabled={generando || tel.replace(/\D/g, '').length < 8}
+            className="gap-1 bg-emerald-600 text-xs hover:bg-emerald-700"
+            title={tel.replace(/\D/g, '').length >= 8 ? 'Descargar PDF + abrir WhatsApp' : 'Ingresá el número del cliente'}
+          >
+            {generando ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <MessageCircle className="h-3.5 w-3.5" />}
+            WhatsApp
+          </Button>
+        </div>
+        <p className="mt-2 text-[10px] text-slate-400">
+          El PDF se descarga a tu equipo. WhatsApp/email abre con el mensaje ya escrito —
+          adjuntá el PDF descargado al chat/correo antes de enviar.
+        </p>
       </Card>
     </div>
   );
