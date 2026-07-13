@@ -54,209 +54,162 @@ export async function generarGuiaRemisionPdf(
       })
     : fechaEmision;
 
-  // ─── Cabecera ──────────────────────────────────────────────────────────
+  // ─── Cabecera COMPACTA ─────────────────────────────────────────────────
+  // Rediseño 2026-07-12 pedido por cliente sobre su guía de referencia:
+  //   1. "Subir encabezado" — antes ocupaba 32mm + separador; ahora 22mm.
+  //   2. "Unir en un solo bloque extendido a la derecha, sin repetidos" —
+  //      los bloques REMITENTE / PARTIDA / LLEGADA / DATOS DEL TRASLADO se
+  //      fusionan en UN recuadro full-width con pares label:valor en dos
+  //      columnas (como su guía electrónica antigua). El RUC y el domicilio
+  //      fiscal aparecen UNA sola vez.
   let y = M;
 
-  // Nuevo encabezado inspirado en la referencia del cliente (Hydra):
-  // logo a la izquierda + nombre grande y slogan + recuadro a la derecha
-  // con RUC y número de guía.
-
-  // Logo a la izquierda (más grande)
+  // Logo a la izquierda (compacto)
   if (empresa?.logo_dataurl && empresa?.logo_formato) {
     try {
-      doc.addImage(empresa.logo_dataurl, empresa.logo_formato, M, y, 32, 24);
+      doc.addImage(empresa.logo_dataurl, empresa.logo_formato, M, y, 24, 18);
     } catch { /* ignore */ }
   }
 
-  // Nombre comercial grande + slogan al lado del logo
+  // Nombre + slogan + contacto al lado del logo
   doc.setFont('helvetica', 'bold');
-  doc.setFontSize(15);
+  doc.setFontSize(13);
   doc.setTextColor(...AZUL);
   doc.text(
     (empresa?.nombre_comercial || empresa?.razon_social || 'DISFRACES HAPPY\'S').toUpperCase(),
-    M + 36, y + 7,
+    M + 28, y + 6,
   );
   doc.setFont('helvetica', 'italic');
-  doc.setFontSize(9);
-  doc.setTextColor(...NARANJA);
-  doc.text('Fabricamos felicidad', M + 36, y + 12);
-  doc.setFont('helvetica', 'normal');
   doc.setFontSize(8);
+  doc.setTextColor(...NARANJA);
+  doc.text('Fabricamos felicidad', M + 28, y + 10.5);
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(7);
   doc.setTextColor(...GRIS);
-  if (empresa?.direccion_fiscal) doc.text(empresa.direccion_fiscal, M + 36, y + 16.5);
   const contactos: string[] = [];
   if (empresa?.telefono) contactos.push(`Tel: ${empresa.telefono}`);
   if (empresa?.email) contactos.push(empresa.email);
-  if (contactos.length > 0) doc.text(contactos.join('   ·   '), M + 36, y + 20);
+  if (contactos.length > 0) doc.text(contactos.join('   ·   '), M + 28, y + 14.5);
 
-  // Recuadro a la derecha con RUC + tipo + número (formato Hydra)
-  const recW = 72;
+  // Recuadro derecho: RUC + tipo + número
+  const recW = 68;
   const recX = pageW - M - recW;
-
-  // Franja superior fina con RUC
   doc.setFillColor(...GRIS);
-  doc.rect(recX, y, recW, 6, 'F');
+  doc.rect(recX, y, recW, 5.5, 'F');
   doc.setTextColor(255, 255, 255);
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(8);
-  doc.text(`RUC: ${empresa?.ruc ?? '—'}`, recX + recW / 2, y + 4, { align: 'center' });
-
-  // Recuadro principal azul
+  doc.text(`RUC: ${empresa?.ruc ?? '—'}`, recX + recW / 2, y + 3.8, { align: 'center' });
   doc.setFillColor(...AZUL);
-  doc.rect(recX, y + 6, recW, 22, 'F');
+  doc.rect(recX, y + 5.5, recW, 14.5, 'F');
   doc.setTextColor(255, 255, 255);
-  doc.setFont('helvetica', 'bold');
-  doc.setFontSize(10);
-  doc.text('GUÍA DE REMISIÓN', recX + recW / 2, y + 11, { align: 'center' });
-  doc.setFont('helvetica', 'normal');
-  doc.setFontSize(7);
-  doc.text('REMITENTE — DOC. INTERNO', recX + recW / 2, y + 15, { align: 'center' });
-  doc.setFont('helvetica', 'bold');
-  doc.setFontSize(13);
-  doc.text(traslado.guia_remision || traslado.codigo, recX + recW / 2, y + 22, { align: 'center' });
+  doc.setFontSize(9);
+  doc.text('GUÍA DE REMISIÓN — REMITENTE', recX + recW / 2, y + 10, { align: 'center' });
+  doc.setFontSize(12);
+  doc.text(traslado.guia_remision || traslado.codigo, recX + recW / 2, y + 16.5, { align: 'center' });
 
-  y += 32;
+  y += 22;
 
-  // ─── Línea separadora ──────────────────────────────────────────────────
-  doc.setDrawColor(...NARANJA);
-  doc.setLineWidth(0.5);
-  doc.line(M, y, pageW - M, y);
-  y += 5;
-
-  // ─── Bloque REMITENTE ─────────────────────────────────────────────────
-  doc.setFontSize(8);
-  doc.setTextColor(...AZUL);
-  doc.setFont('helvetica', 'bold');
-  doc.text('REMITENTE', M, y);
-  y += 4;
-  doc.setTextColor(0, 0, 0);
-  doc.setFont('helvetica', 'normal');
-  doc.text(`Razón social: ${empresa?.razon_social ?? '—'}`, M, y);
-  y += 4;
-  doc.text(`RUC: ${empresa?.ruc ?? '—'}`, M, y);
-  y += 4;
-  doc.text(`Domicilio fiscal: ${empresa?.direccion_fiscal ?? '—'}`, M, y);
-  y += 7;
-
-  // ─── Punto de partida / Punto de llegada (en dos columnas) ─────────────
-  const colW = (pageW - M * 2 - 5) / 2;
-
-  doc.setFillColor(245, 247, 250);
-  doc.rect(M, y, colW, 22, 'F');
-  doc.rect(M + colW + 5, y, colW, 22, 'F');
-
-  // PARTIDA
-  doc.setTextColor(...AZUL);
-  doc.setFont('helvetica', 'bold');
-  doc.setFontSize(8);
-  doc.text('PUNTO DE PARTIDA', M + 2, y + 4);
-  doc.setTextColor(0, 0, 0);
-  doc.setFont('helvetica', 'normal');
-  doc.text(`${traslado.almacen_origen_codigo} · ${traslado.almacen_origen_nombre}`, M + 2, y + 9);
-  if (traslado.almacen_origen_direccion) {
-    const lineasDir = doc.splitTextToSize(traslado.almacen_origen_direccion, colW - 4);
-    doc.text(lineasDir, M + 2, y + 13);
-  } else {
-    doc.setTextColor(...GRIS);
-    doc.text('(Sin dirección registrada)', M + 2, y + 13);
-    doc.setTextColor(0, 0, 0);
-  }
-
-  // LLEGADA
-  doc.setTextColor(...AZUL);
-  doc.setFont('helvetica', 'bold');
-  doc.text('PUNTO DE LLEGADA', M + colW + 7, y + 4);
-  doc.setTextColor(0, 0, 0);
-  doc.setFont('helvetica', 'normal');
-  doc.text(`${traslado.almacen_destino_codigo} · ${traslado.almacen_destino_nombre}`, M + colW + 7, y + 9);
-  if (traslado.almacen_destino_direccion) {
-    const lineasDir = doc.splitTextToSize(traslado.almacen_destino_direccion, colW - 4);
-    doc.text(lineasDir, M + colW + 7, y + 13);
-  } else {
-    doc.setTextColor(...GRIS);
-    doc.text('(Sin dirección registrada)', M + colW + 7, y + 13);
-    doc.setTextColor(0, 0, 0);
-  }
-
-  y += 26;
-
-  // ─── Datos del traslado ────────────────────────────────────────────────
-  doc.setTextColor(...AZUL);
-  doc.setFont('helvetica', 'bold');
-  doc.setFontSize(8);
-  doc.text('DATOS DEL TRASLADO', M, y);
-  y += 4;
-
-  doc.setTextColor(0, 0, 0);
-  doc.setFont('helvetica', 'normal');
-  doc.text(`Motivo: TRASLADO ENTRE ESTABLECIMIENTOS DEL MISMO CONTRIBUYENTE`, M, y);
-  y += 4;
-  doc.text(`Fecha de inicio del traslado: ${fechaTraslado}`, M, y);
-  y += 4;
-  const modalidadTxt = traslado.modalidad === 'PUBLICO'
-    ? `PÚBLICO — Transportista: ${traslado.transportista_razon_social ?? '—'} (RUC ${traslado.transportista_ruc ?? '—'})`
-    : 'PRIVADO (vehículo del remitente)';
-  doc.text(`Modalidad: ${modalidadTxt}`, M, y);
-  y += 4;
-  doc.text(`N° interno: ${traslado.codigo}`, M, y);
-  if (traslado.motivo) {
-    y += 4;
-    const motivoLines = doc.splitTextToSize(`Detalle: ${traslado.motivo}`, pageW - M * 2);
-    doc.text(motivoLines, M, y);
-    y += motivoLines.length * 3.5;
-  }
-  y += 5;
-
-  // ─── Datos del vehículo / conductor ────────────────────────────────────
-  // Si el usuario cargó los datos digitalmente, se pre-imprimen.
-  // Si no, la sección queda con líneas para llenar a mano (compat retro).
-  const tieneVehiculo = !!(traslado.vehiculo_placa || traslado.chofer_nombre || traslado.vehiculo_marca);
-  const boxH = tieneVehiculo ? 20 : 18;
-  doc.setFillColor(...(tieneVehiculo ? [239, 246, 255] as [number,number,number] : [254, 249, 195] as [number,number,number]));
-  doc.rect(M, y, pageW - M * 2, boxH, 'F');
-  doc.setTextColor(...AZUL);
-  doc.setFont('helvetica', 'bold');
-  doc.setFontSize(8);
-  doc.text(
-    tieneVehiculo ? 'DATOS DEL VEHÍCULO Y CONDUCTOR' : 'DATOS DEL VEHÍCULO Y CONDUCTOR (completar a mano)',
-    M + 2, y + 4,
-  );
-  doc.setTextColor(0, 0, 0);
-  doc.setFont('helvetica', 'normal');
-  doc.setFontSize(8);
-  if (tieneVehiculo) {
-    const linea1 = [
-      `Placa: ${traslado.vehiculo_placa ?? '—'}`,
-      `Marca: ${traslado.vehiculo_marca ?? '—'}`,
-      `T. Circulación: ${traslado.vehiculo_tarjeta_circulacion ?? '—'}`,
-    ].join('     ');
-    const linea2 = [
-      `Chofer: ${traslado.chofer_nombre ?? '—'}`,
-      `DNI: ${traslado.chofer_dni ?? '—'}`,
-      `Licencia: ${traslado.chofer_licencia ?? '—'}`,
-    ].join('     ');
-    doc.text(linea1, M + 2, y + 10);
-    doc.text(linea2, M + 2, y + 15);
-  } else {
-    doc.text(`Placa: ______________________   Marca: ______________________   N° Tarjeta circulación: __________________`, M + 2, y + 10);
-    doc.text(`Conductor (nombre): ______________________________________   DNI: _____________   Licencia: _____________`, M + 2, y + 15);
-  }
-  y += boxH + 4;
-
-  // Bultos si están cargados
-  if (traslado.cantidad_bultos != null && traslado.cantidad_bultos > 0) {
-    doc.setTextColor(...AZUL);
+  // ─── BLOQUE ÚNICO: datos del traslado (full-width, sin repetidos) ──────
+  const boxW = pageW - M * 2;
+  const filaAlta = 4.2;
+  const colIzqX = M + 2;
+  const colDerX = M + boxW * 0.56;
+  const labelValor = (label: string, valor: string, x: number, yy: number, maxW: number) => {
     doc.setFont('helvetica', 'bold');
-    doc.text(`BULTOS TRANSPORTADOS: `, M, y);
-    doc.setTextColor(0, 0, 0);
+    doc.setTextColor(...AZUL);
+    doc.text(label, x, yy);
+    const lw = doc.getTextWidth(label) + 1.5;
     doc.setFont('helvetica', 'normal');
-    let bultosTxt = `${traslado.cantidad_bultos} ${traslado.tipo_bulto ?? 'BULTOS'}`;
-    if (traslado.peso_total_kg != null && traslado.peso_total_kg > 0) {
-      bultosTxt += `   ·   Peso total: ${traslado.peso_total_kg.toFixed(2)} kg`;
-    }
-    doc.text(bultosTxt, M + 42, y);
-    y += 6;
+    doc.setTextColor(0, 0, 0);
+    const val = doc.splitTextToSize(valor, maxW - lw) as string[];
+    doc.text(val[0] ?? '—', x + lw, yy);
+    return val.length; // por si el valor se corta, el caller puede reservar más
+  };
+
+  const dirOrigen = [
+    `${traslado.almacen_origen_codigo} · ${traslado.almacen_origen_nombre}`,
+    traslado.almacen_origen_direccion,
+  ].filter(Boolean).join(' — ');
+  const dirDestino = [
+    `${traslado.almacen_destino_codigo} · ${traslado.almacen_destino_nombre}`,
+    traslado.almacen_destino_direccion,
+  ].filter(Boolean).join(' — ');
+
+  // Alto del bloque: 5 filas fijas + detalle opcional
+  const tieneDetalle = !!traslado.motivo;
+  const blockH = 6 + filaAlta * (4 + (tieneDetalle ? 1 : 0)) + 2;
+  doc.setDrawColor(...GRIS);
+  doc.setLineWidth(0.3);
+  doc.rect(M, y, boxW, blockH, 'S');
+
+  doc.setFontSize(7.5);
+  let fy = y + 5;
+  // Fila 1: remitente + fecha emisión
+  labelValor('Remitente:', empresa?.razon_social ?? '—', colIzqX, fy, boxW * 0.54);
+  labelValor('Fecha Emisión:', fechaEmision, colDerX, fy, boxW * 0.42);
+  fy += filaAlta;
+  // Fila 2: pto partida + fecha inicio traslado
+  labelValor('Direc. Pto Partida:', dirOrigen, colIzqX, fy, boxW * 0.54);
+  labelValor('Fec. Inicio Traslado:', fechaTraslado, colDerX, fy, boxW * 0.42);
+  fy += filaAlta;
+  // Fila 3: pto llegada + nº interno
+  labelValor('Direc. Pto Llegada:', dirDestino, colIzqX, fy, boxW * 0.54);
+  labelValor('N° Interno:', traslado.codigo, colDerX, fy, boxW * 0.42);
+  fy += filaAlta;
+  // Fila 4: motivo + bultos/peso
+  labelValor('Motivo:', 'TRASLADO ENTRE ESTABLECIMIENTOS DEL MISMO CONTRIBUYENTE', colIzqX, fy, boxW * 0.54);
+  const bultosTxt = traslado.cantidad_bultos != null && traslado.cantidad_bultos > 0
+    ? `${traslado.cantidad_bultos} ${traslado.tipo_bulto ?? 'BULTOS'}${traslado.peso_total_kg != null && traslado.peso_total_kg > 0 ? ` · ${traslado.peso_total_kg.toFixed(2)} kg` : ''}`
+    : '—';
+  labelValor('Bultos / Peso:', bultosTxt, colDerX, fy, boxW * 0.42);
+  fy += filaAlta;
+  // Fila 5 (opcional): detalle libre
+  if (tieneDetalle) {
+    labelValor('Detalle:', traslado.motivo!, colIzqX, fy, boxW - 6);
+    fy += filaAlta;
   }
+
+  y += blockH + 3;
+
+  // ─── BLOQUE TRANSPORTE (full-width, mismo estilo que la guía antigua) ──
+  const tieneVehiculo = !!(traslado.vehiculo_placa || traslado.chofer_nombre || traslado.vehiculo_marca);
+  const transpH = 6 + filaAlta * 2 + 2;
+  doc.setDrawColor(...GRIS);
+  doc.rect(M, y, boxW, transpH, 'S');
+  // Título en franja
+  doc.setFillColor(241, 245, 249);
+  doc.rect(M, y, boxW, 5, 'F');
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(7.5);
+  doc.setTextColor(...AZUL);
+  doc.text('TRANSPORTE', M + boxW / 2, y + 3.6, { align: 'center' });
+
+  doc.setFontSize(7.5);
+  let ty = y + 8.5;
+  if (tieneVehiculo || traslado.modalidad === 'PUBLICO') {
+    const tipoTxt = traslado.modalidad === 'PUBLICO' ? 'PÚBLICO' : 'PRIVADO';
+    labelValor('Tipo de Transporte:', tipoTxt, colIzqX, ty, boxW * 0.3);
+    if (traslado.modalidad === 'PUBLICO') {
+      labelValor('RUC:', traslado.transportista_ruc ?? '—', M + boxW * 0.34, ty, boxW * 0.2);
+      labelValor('Razón Social:', traslado.transportista_razon_social ?? '—', M + boxW * 0.56, ty, boxW * 0.42);
+    } else {
+      labelValor('T. Circulación:', traslado.vehiculo_tarjeta_circulacion ?? '—', M + boxW * 0.56, ty, boxW * 0.42);
+    }
+    ty += filaAlta;
+    labelValor('Marca y Placa:', [traslado.vehiculo_marca, traslado.vehiculo_placa].filter(Boolean).join(' ') || '—', colIzqX, ty, boxW * 0.3);
+    labelValor('Conductor:', traslado.chofer_nombre ?? '—', M + boxW * 0.34, ty, boxW * 0.3);
+    labelValor('DNI:', traslado.chofer_dni ?? '—', M + boxW * 0.68, ty, boxW * 0.12);
+    labelValor('Licencia:', traslado.chofer_licencia ?? '—', M + boxW * 0.82, ty, boxW * 0.16);
+  } else {
+    doc.setFont('helvetica', 'normal');
+    doc.setTextColor(0, 0, 0);
+    doc.text('Placa: ________________  Marca: ________________  T. Circulación: ________________', colIzqX, ty);
+    ty += filaAlta;
+    doc.text('Conductor: ________________________________  DNI: ____________  Licencia: ____________', colIzqX, ty);
+  }
+
+  y += transpH + 4;
 
   // ─── Tabla de bienes ──────────────────────────────────────────────────
   doc.setTextColor(...AZUL);
@@ -268,24 +221,26 @@ export async function generarGuiaRemisionPdf(
   autoTable(doc, {
     startY: y,
     margin: { left: M, right: M },
-    head: [['Código', 'Descripción', 'Detalle', 'Unidad', 'Cantidad']],
-    body: lineas.map((l) => [
+    head: [['Item', 'Código', 'Descripción', 'Detalle', 'U.Med', 'Cantidad']],
+    body: lineas.map((l, i) => [
+      String(i + 1),
       l.codigo ?? '—',
       l.nombre,
       l.detalle ?? '',
-      l.tipo === 'VARIANTE' ? 'unid' : '—',
+      l.tipo === 'VARIANTE' ? 'UND' : '—',
       l.cantidad.toString(),
     ]),
-    foot: [['', '', '', 'TOTAL', lineas.reduce((s, l) => s + l.cantidad, 0).toString()]],
-    headStyles: { fillColor: AZUL, textColor: 255, fontSize: 8, halign: 'center' },
+    foot: [['', '', '', '', 'TOTAL', lineas.reduce((s, l) => s + l.cantidad, 0).toString()]],
+    headStyles: { fillColor: AZUL, textColor: 255, fontSize: 7.5, halign: 'center' },
     footStyles: { fillColor: [241, 245, 249], textColor: [...AZUL], fontStyle: 'bold' },
-    bodyStyles: { fontSize: 8 },
+    bodyStyles: { fontSize: 7.5, cellPadding: 1.2 },
     columnStyles: {
-      0: { cellWidth: 28, fontStyle: 'bold' },
-      1: { cellWidth: 'auto' },
-      2: { cellWidth: 28 },
-      3: { cellWidth: 18, halign: 'center' },
-      4: { cellWidth: 22, halign: 'right' },
+      0: { cellWidth: 12, halign: 'center' },
+      1: { cellWidth: 26, fontStyle: 'bold' },
+      2: { cellWidth: 'auto' },
+      3: { cellWidth: 26 },
+      4: { cellWidth: 14, halign: 'center' },
+      5: { cellWidth: 20, halign: 'right' },
     },
     theme: 'striped',
     alternateRowStyles: { fillColor: [248, 250, 252] },
