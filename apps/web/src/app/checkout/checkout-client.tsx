@@ -83,7 +83,7 @@ export function CheckoutClient({ cuentasWeb = [] }: { cuentasWeb?: CuentaWeb[] }
   // pero si el usuario editó el nombre a mano, NUNCA se pisa.
   const autoFillRef = useRef<{ nombre: string; direccion: string }>({ nombre: '', direccion: '' });
   async function consultarDoc(silent = false) {
-    if (!doc) return silent ? undefined : toast.error('Ingresá el número de documento');
+    if (!doc) return silent ? undefined : toast.error('Ingresa el número de documento');
     const digitosSolo = doc.replace(/\D/g, '');
     if (tipoDoc === 'DNI' && digitosSolo.length !== 8) {
       return silent ? undefined : toast.error('El DNI debe tener 8 dígitos');
@@ -333,7 +333,7 @@ export function CheckoutClient({ cuentasWeb = [] }: { cuentasWeb?: CuentaWeb[] }
                   type="button"
                   onClick={() => {
                     if (bloqueado) {
-                      toast.info(`${m.label} estará disponible próximamente. Por ahora coordiná por WhatsApp.`);
+                      toast.info(`${m.label} estará disponible próximamente. Por ahora coordina por WhatsApp.`);
                       return;
                     }
                     setMetodo(m.id);

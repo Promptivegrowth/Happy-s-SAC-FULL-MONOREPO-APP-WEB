@@ -102,7 +102,7 @@ export function ProductoDetalleClient({
   function agregarAlCarrito() {
     if (!seleccionada) return toast.error('Selecciona una talla');
     if (sinStockSeleccionada) return toast.error(`Talla ${seleccionada.talla.replace('T', '')} agotada`);
-    if (cantidad <= 0) return toast.error('Ingresá una cantidad');
+    if (cantidad <= 0) return toast.error('Ingresa una cantidad');
     if (cantidad > stockSeleccionada) {
       return toast.error(`Solo quedan ${stockSeleccionada} unidades de talla ${seleccionada.talla.replace('T', '')}`);
     }
@@ -156,7 +156,7 @@ ${esConsulta ? '¿Me das más información?' : '¿Cómo procedo con la compra?'}
 
   function irAlCheckout() {
     if (sinStockSeleccionada) return toast.error('Producto sin stock disponible');
-    if (cantidad <= 0) return toast.error('Ingresá una cantidad');
+    if (cantidad <= 0) return toast.error('Ingresa una cantidad');
     if (cantidad > stockSeleccionada) {
       return toast.error(`Solo quedan ${stockSeleccionada} unidades de esta talla`);
     }
@@ -339,13 +339,13 @@ ${esConsulta ? '¿Me das más información?' : '¿Cómo procedo con la compra?'}
           variant="premium"
           size="lg"
           disabled={sinStockSeleccionada || cantidad <= 0}
-          title={cantidad <= 0 ? 'Ingresá una cantidad primero' : undefined}
+          title={cantidad <= 0 ? 'Ingresa una cantidad primero' : undefined}
         >
           <ShoppingBag className="h-4 w-4" />
           {sinStockSeleccionada
             ? 'Talla agotada'
             : cantidad <= 0
-              ? 'Elegí una cantidad'
+              ? 'Elige una cantidad'
               : 'Agregar al carrito'}
         </Button>
         <Button
@@ -353,9 +353,9 @@ ${esConsulta ? '¿Me das más información?' : '¿Cómo procedo con la compra?'}
           size="lg"
           disabled={sinStockSeleccionada || cantidad <= 0}
           className="bg-gradient-to-r from-happy-500 to-danger text-white shadow-lg hover:from-happy-600 hover:to-danger disabled:from-slate-300 disabled:to-slate-300 disabled:shadow-none"
-          title={cantidad <= 0 ? 'Ingresá una cantidad primero' : undefined}
+          title={cantidad <= 0 ? 'Ingresa una cantidad primero' : undefined}
         >
-          {sinStockSeleccionada ? 'Sin stock' : cantidad <= 0 ? 'Elegí una cantidad' : 'Comprar ahora'}
+          {sinStockSeleccionada ? 'Sin stock' : cantidad <= 0 ? 'Elige una cantidad' : 'Comprar ahora'}
         </Button>
       </div>
 
@@ -369,7 +369,7 @@ ${esConsulta ? '¿Me das más información?' : '¿Cómo procedo con la compra?'}
             ? 'Consultar reposición por WhatsApp'
             : 'Pedidos para el mismo día o urgentes consultar al WhatsApp'}
         </span>
-        <span className="text-[11px] font-normal text-emerald-800/80">Escribinos aquí</span>
+        <span className="text-[11px] font-normal text-emerald-800/80">Escríbenos aquí</span>
       </button>
 
       {!agotado && stockTotal > 0 && stockTotal <= 10 && (

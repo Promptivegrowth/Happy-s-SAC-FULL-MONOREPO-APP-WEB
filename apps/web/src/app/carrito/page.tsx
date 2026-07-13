@@ -43,7 +43,7 @@ export default function CarritoPage() {
     if (faltan > 0) {
       mensajeEscalon = (
         <p className="rounded-md bg-emerald-50 p-2 text-center text-xs text-emerald-800">
-          🎯 Agregá <strong>{faltan}</strong> disfraz{faltan === 1 ? '' : 'es'} más y todos los precios cambian a <strong>mayorista</strong>.
+          🎯 Agrega <strong>{faltan}</strong> disfraz{faltan === 1 ? '' : 'es'} más y todos los precios cambian a <strong>mayorista</strong>.
         </p>
       );
     }
@@ -52,7 +52,7 @@ export default function CarritoPage() {
     if (faltan > 0 && faltan <= 30) {
       mensajeEscalon = (
         <p className="rounded-md bg-blue-50 p-2 text-center text-xs text-blue-800">
-          🏭 ¡Sos mayorista! Agregá <strong>{faltan}</strong> más para pasar a <strong>precio de fábrica</strong>.
+          🏭 ¡Sos mayorista! Agrega <strong>{faltan}</strong> más para pasar a <strong>precio de fábrica</strong>.
         </p>
       );
     }

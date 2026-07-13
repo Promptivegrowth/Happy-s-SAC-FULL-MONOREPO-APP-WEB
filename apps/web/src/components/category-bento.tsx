@@ -31,7 +31,7 @@ export function CategoryBento() {
             Categorías
           </h2>
           <p className="mt-2 text-base text-slate-500 sm:text-lg">
-            Elegí dónde empezar la aventura
+            Elige dónde empezar la aventura
           </p>
         </div>
         <Link
