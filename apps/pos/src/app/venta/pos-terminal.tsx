@@ -1746,6 +1746,7 @@ export function PosTerminal({
           }))}
           cajaId={cajaActual.id}
           sesionId={sesionActiva.id}
+          cuentasBancarias={cuentasBancarias}
           onClose={() => setDevolucionOpen(false)}
           onCompleted={() => {
             setDevolucionOpen(false);

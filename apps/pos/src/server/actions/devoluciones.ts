@@ -396,6 +396,10 @@ const cambioSchema = z.object({
     'EFECTIVO', 'YAPE', 'PLIN', 'TARJETA_DEBITO', 'TARJETA_CREDITO',
     'TRANSFERENCIA', 'DEPOSITO',
   ]).nullable().optional(),
+  /** Nombre corto de la cuenta bancaria destino (BCP HAPPYS, BBVA…) para
+   *  cobrar la diferencia. Se persiste en ventas_pagos.referencia — permite
+   *  a los reportes agrupar por cuenta destino (mig 62). */
+  referencia_diferencia_cobro: z.string().max(120).nullable().optional(),
   /** Si el monto nuevo es menor al devuelto, método para reembolsar la diferencia */
   metodo_diferencia_devuelta: z.enum([
     'EFECTIVO', 'YAPE', 'PLIN', 'TARJETA_DEBITO', 'TARJETA_CREDITO',
@@ -585,7 +589,9 @@ export async function registrarCambio(
         venta_id: ventaNuevaId,
         metodo: data.metodo_diferencia_cobro!,
         monto: diferencia,
-        referencia: null,
+        // Referencia = nombre corto de la cuenta bancaria elegida (BCP HAPPYS,
+        // BBVA, etc). Igual que en registrarVenta — permite reportes por cuenta.
+        referencia: data.referencia_diferencia_cobro ?? null,
       });
     }
     if (pagosNueva.length > 0) {

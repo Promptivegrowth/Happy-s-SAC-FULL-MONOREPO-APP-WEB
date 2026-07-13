@@ -53,27 +53,25 @@ type LineaEntrega = {
   precio_unitario: number;
 };
 
-const METODOS: { value: Metodo; label: string }[] = [
-  { value: 'EFECTIVO', label: 'Efectivo' },
-  { value: 'YAPE', label: 'Yape' },
-  { value: 'PLIN', label: 'Plin' },
-  { value: 'TARJETA_DEBITO', label: 'Tarjeta débito' },
-  { value: 'TARJETA_CREDITO', label: 'Tarjeta crédito' },
-  { value: 'TRANSFERENCIA', label: 'Transferencia' },
-  { value: 'DEPOSITO', label: 'Depósito' },
-  { value: 'CREDITO', label: 'Nota de crédito (saldo)' },
-];
+// METODOS hardcodeados removidos (2026-07-12) — reemplazados por selector
+// con las cuentas bancarias del catálogo (mig 62) + EFECTIVO/CRÉDITO.
 
 export function DevolucionModal({
   variantes,
   cajaId,
   sesionId,
+  cuentasBancarias = [],
   onClose,
   onCompleted,
 }: {
   variantes: VarianteDev[];
   cajaId: string;
   sesionId: string;
+  /** Cuentas bancarias visibles en el POS (BCP HAPPYS, BBVA, YAPE/PLIN…).
+   *  Se usan como opciones de cobro/devolución de diferencia — cliente
+   *  reportó (2026-07-12) que el dropdown mostraba métodos hardcodeados
+   *  en vez de las cuentas del catálogo. */
+  cuentasBancarias?: { id: string; nombre_corto: string; banco: string | null; metodo_default: string }[];
   onClose: () => void;
   onCompleted: () => void;
 }) {
@@ -89,6 +87,11 @@ export function DevolucionModal({
   const [tipo, setTipo] = useState<TipoDevolucion>('DEVOLUCION');
   const [motivo, setMotivo] = useState('');
   const [metodo, setMetodo] = useState<Metodo>('EFECTIVO');
+  // Cuenta bancaria elegida (opcional — solo si el método es TRANSFERENCIA/YAPE/etc
+  // que corresponde a alguna cuenta del catálogo). Se persiste como referencia
+  // en ventas_pagos. Cliente pidió (2026-07-12) mostrar las cuentas reales
+  // en vez de métodos genéricos hardcodeados.
+  const [cuentaNombre, setCuentaNombre] = useState<string | null>(null);
   const [observacion, setObservacion] = useState('');
   const [confirmando, startConfirm] = useTransition();
 
@@ -283,6 +286,7 @@ export function DevolucionModal({
           metodo_diferencia_cobro: diferencia > 0.01
             ? (metodo === 'CREDITO' ? 'EFECTIVO' : metodo)
             : null,
+          referencia_diferencia_cobro: diferencia > 0.01 ? cuentaNombre : null,
           metodo_diferencia_devuelta: diferencia < -0.01 ? metodo : null,
         });
         if (!r.ok) { toast.error(r.error ?? 'Error'); return; }
@@ -657,15 +661,62 @@ export function DevolucionModal({
                   <Label className="text-xs">
                     Método {tipo === 'DEVOLUCION' ? 'de reembolso' : diferencia > 0 ? 'para cobrar la diferencia' : 'para devolver la diferencia'} *
                   </Label>
-                  <select
-                    value={metodo}
-                    onChange={(e) => setMetodo(e.target.value as Metodo)}
-                    className="mt-1 h-10 w-full rounded-md border border-input bg-white px-2 text-sm"
-                  >
-                    {METODOS.map((m) => (
-                      <option key={m.value} value={m.value}>{m.label}</option>
-                    ))}
-                  </select>
+                  {/* Selector coherente con el POS principal: primero las
+                      cuentas bancarias del catálogo (BCP HAPPYS, BBVA, etc.)
+                      y después EFECTIVO + CRÉDITO. Click en una cuenta setea
+                      metodo=metodo_default de la cuenta + cuentaNombre.
+                      Click en EFECTIVO/CRÉDITO limpia cuentaNombre. */}
+                  <div className="mt-1 grid grid-cols-2 gap-1.5">
+                    {cuentasBancarias.map((c) => {
+                      const activo = cuentaNombre === c.nombre_corto;
+                      const banco = (c.banco ?? '').toUpperCase();
+                      const color =
+                        banco === 'BCP' ? (activo ? 'bg-blue-500 text-white border-blue-600' : 'bg-blue-50 text-blue-800 border-blue-200') :
+                        banco === 'INTERBANK' ? (activo ? 'bg-emerald-500 text-white border-emerald-600' : 'bg-emerald-50 text-emerald-800 border-emerald-200') :
+                        banco === 'BBVA' ? (activo ? 'bg-indigo-500 text-white border-indigo-600' : 'bg-indigo-50 text-indigo-800 border-indigo-200') :
+                        banco === 'YAPE/PLIN' ? (activo ? 'bg-purple-500 text-white border-purple-600' : 'bg-purple-50 text-purple-800 border-purple-200') :
+                        (activo ? 'bg-slate-500 text-white border-slate-600' : 'bg-slate-50 text-slate-800 border-slate-200');
+                      return (
+                        <button
+                          key={c.id}
+                          type="button"
+                          onClick={() => {
+                            setMetodo(c.metodo_default as Metodo);
+                            setCuentaNombre(c.nombre_corto);
+                          }}
+                          className={`rounded-md border px-2 py-1.5 text-xs font-semibold transition hover:brightness-95 ${color}`}
+                        >
+                          {activo && '✓ '}{c.nombre_corto}
+                        </button>
+                      );
+                    })}
+                    {/* Efectivo + Crédito genéricos (siempre disponibles) */}
+                    <button
+                      type="button"
+                      onClick={() => { setMetodo('EFECTIVO'); setCuentaNombre(null); }}
+                      className={`rounded-md border px-2 py-1.5 text-xs font-semibold transition hover:brightness-95 ${
+                        metodo === 'EFECTIVO' && !cuentaNombre
+                          ? 'bg-emerald-500 text-white border-emerald-600'
+                          : 'bg-emerald-50 text-emerald-800 border-emerald-200'
+                      }`}
+                    >
+                      {metodo === 'EFECTIVO' && !cuentaNombre && '✓ '}Efectivo
+                    </button>
+                    {/* CRÉDITO solo tiene sentido para devolución (saldo a favor) */}
+                    {tipo === 'DEVOLUCION' && (
+                      <button
+                        type="button"
+                        onClick={() => { setMetodo('CREDITO' as Metodo); setCuentaNombre(null); }}
+                        className={`rounded-md border px-2 py-1.5 text-xs font-semibold transition hover:brightness-95 ${
+                          metodo === ('CREDITO' as Metodo)
+                            ? 'bg-amber-500 text-white border-amber-600'
+                            : 'bg-amber-50 text-amber-800 border-amber-200'
+                        }`}
+                      >
+                        {metodo === ('CREDITO' as Metodo) && '✓ '}Saldo a favor (crédito)
+                      </button>
+                    )}
+                  </div>
                 </div>
               )}
 
