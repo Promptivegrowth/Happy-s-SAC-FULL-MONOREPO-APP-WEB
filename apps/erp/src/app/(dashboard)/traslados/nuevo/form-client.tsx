@@ -8,7 +8,7 @@ import { FormRow, FormGrid, FormSection } from '@happy/ui/form-row';
 import { Input } from '@happy/ui/input';
 import { Textarea } from '@happy/ui/textarea';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@happy/ui/table';
-import { Loader2, Save, Plus, Trash2, AlertTriangle, Search, ScanLine, Zap, Upload } from 'lucide-react';
+import { Loader2, Save, Plus, Trash2, AlertTriangle, Search, ScanLine, Zap, Upload, X } from 'lucide-react';
 import { toast } from 'sonner';
 import {
   crearTraslado,
@@ -267,6 +267,24 @@ export function NuevoTrasladoForm({
 
   // Modal post-guardado: ¿imprimir la guía?
   const [saved, setSaved] = useState<{ id: string; codigo: string } | null>(null);
+
+  // Modal multi-talla (2026-07-12) — ver botón "Agregar varios".
+  const [multiTallaOpen, setMultiTallaOpen] = useState(false);
+
+  /** Agrega en lote las variantes elegidas en el modal multi-talla.
+   *  Reusa agregarOSumar para que si la variante ya estaba en una línea,
+   *  se sume la cantidad en vez de duplicar. */
+  function agregarLoteVariantes(seleccion: { variante: VarianteItem; cantidad: number }[]) {
+    let agregadas = 0;
+    for (const s of seleccion) {
+      if (s.cantidad <= 0) continue;
+      agregarOSumar({ tipo: 'VARIANTE', v: s.variante }, s.cantidad);
+      agregadas++;
+    }
+    if (agregadas > 0) {
+      toast.success(`${agregadas} talla(s) agregadas al traslado`);
+    }
+  }
 
   function enviar(ejecutarAhora: boolean) {
     if (!origenId) return toast.error('Selecciona almacén origen');
@@ -758,9 +776,31 @@ export function NuevoTrasladoForm({
             </Card>
           )}
 
-          <Button type="button" variant="outline" size="sm" onClick={addLinea} disabled={pending}>
-            <Plus className="h-4 w-4" /> Agregar línea
-          </Button>
+          <div className="flex flex-wrap gap-2">
+            <Button type="button" variant="outline" size="sm" onClick={addLinea} disabled={pending}>
+              <Plus className="h-4 w-4" /> Agregar línea
+            </Button>
+            {/* Multi-talla (2026-07-12): cliente traslada el mismo producto en
+                varias tallas a diario — buscar el producto una vez, marcar
+                cantidades por talla, y agregar todas las líneas juntas.
+                Réplica del flujo "Agregar varios" de su sistema anterior. */}
+            <Button
+              type="button"
+              variant="premium"
+              size="sm"
+              onClick={() => {
+                if (!origenId) {
+                  toast.error('Elegí primero el almacén origen (para ver stock por talla)');
+                  return;
+                }
+                setMultiTallaOpen(true);
+              }}
+              disabled={pending}
+              title="Buscar un producto y agregar varias tallas de una sola vez"
+            >
+              <Zap className="h-4 w-4" /> Agregar varios (multi-talla)
+            </Button>
+          </div>
         </div>
       </FormSection>
 
@@ -828,6 +868,258 @@ export function NuevoTrasladoForm({
           </div>
         </div>
       )}
+
+      {/* Modal multi-talla: buscar producto una vez → cantidades por talla */}
+      {multiTallaOpen && (
+        <MultiTallaModal
+          variantes={variantes}
+          origenId={origenId}
+          onAgregar={agregarLoteVariantes}
+          onClose={() => setMultiTallaOpen(false)}
+        />
+      )}
+    </div>
+  );
+}
+
+// ---------- Modal multi-talla (2026-07-12) ----------
+// Cliente traslada a diario el mismo producto en varias tallas y el flujo
+// anterior obligaba a buscar el producto una vez POR talla. Réplica del
+// "Agregar varios" de su sistema antiguo:
+//   1. Buscar producto por nombre (una sola vez)
+//   2. Ver TODAS las tallas con su stock en el almacén origen
+//   3. Tipear cantidad por talla (0 = no trasladar)
+//   4. "Agregar" → crea todas las líneas juntas y limpia para repetir
+//      con otro producto sin cerrar el modal.
+
+function MultiTallaModal({
+  variantes,
+  origenId,
+  onAgregar,
+  onClose,
+}: {
+  variantes: VarianteItem[];
+  origenId: string;
+  onAgregar: (seleccion: { variante: VarianteItem; cantidad: number }[]) => void;
+  onClose: () => void;
+}) {
+  const [busqueda, setBusqueda] = useState('');
+  const [productoNombre, setProductoNombre] = useState<string | null>(null);
+  const [cantidades, setCantidades] = useState<Record<string, string>>({});
+  const [stock, setStock] = useState<Record<string, number>>({});
+  const [stockCargando, setStockCargando] = useState(false);
+
+  // Agrupar variantes por producto_nombre — la data ya está en memoria.
+  const productos = useMemo(() => {
+    const m = new Map<string, VarianteItem[]>();
+    for (const v of variantes) {
+      const arr = m.get(v.producto_nombre) ?? [];
+      arr.push(v);
+      m.set(v.producto_nombre, arr);
+    }
+    return m;
+  }, [variantes]);
+
+  const norm = (s: string) =>
+    s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
+
+  const sugerencias = useMemo(() => {
+    const q = norm(busqueda.trim());
+    if (q.length < 2) return [];
+    return Array.from(productos.keys())
+      .filter((nombre) => norm(nombre).includes(q))
+      .slice(0, 12);
+  }, [busqueda, productos]);
+
+  // Tallas del producto elegido, ordenadas numéricamente (T2 < T4 < … < T16).
+  const tallasProducto = useMemo(() => {
+    if (!productoNombre) return [];
+    const arr = [...(productos.get(productoNombre) ?? [])];
+    const ordenTallaLocal = (t: string) => {
+      const n = Number(t.replace(/\D/g, ''));
+      if (Number.isFinite(n) && n > 0) return n;
+      if (t === 'TS') return 90;   // S adulto
+      if (t === 'TAD') return 95;  // adulto
+      return 99;
+    };
+    return arr.sort((a, b) => ordenTallaLocal(a.talla) - ordenTallaLocal(b.talla));
+  }, [productoNombre, productos]);
+
+  // Cargar stock del almacén origen para las tallas del producto elegido.
+  useEffect(() => {
+    if (!productoNombre || tallasProducto.length === 0) { setStock({}); return; }
+    let cancelled = false;
+    setStockCargando(true);
+    consultarStockEnAlmacen(origenId, tallasProducto.map((v) => v.id), [])
+      .then((r) => {
+        if (cancelled) return;
+        if (r.ok && r.data) setStock(r.data.variantes);
+      })
+      .finally(() => { if (!cancelled) setStockCargando(false); });
+    return () => { cancelled = true; };
+  }, [productoNombre, tallasProducto, origenId]);
+
+  function elegirProducto(nombre: string) {
+    setProductoNombre(nombre);
+    setBusqueda('');
+    setCantidades({});
+  }
+
+  function agregarYRepetir() {
+    const seleccion = tallasProducto
+      .map((v) => ({ variante: v, cantidad: Number(cantidades[v.id] || 0) }))
+      .filter((s) => s.cantidad > 0);
+    if (seleccion.length === 0) {
+      toast.error('Ingresá al menos una cantidad');
+      return;
+    }
+    // Aviso (no bloqueo) si alguna cantidad excede el stock — igual que las
+    // líneas normales, la validación dura la hace el server al ejecutar.
+    const excedidas = seleccion.filter((s) => s.cantidad > (stock[s.variante.id] ?? 0));
+    if (excedidas.length > 0) {
+      toast.warning(`${excedidas.length} talla(s) exceden el stock del origen — revisá antes de ejecutar`);
+    }
+    onAgregar(seleccion);
+    // Limpiar para el siguiente producto SIN cerrar el modal.
+    setProductoNombre(null);
+    setCantidades({});
+    setStock({});
+  }
+
+  const totalSeleccionado = tallasProducto.reduce(
+    (s, v) => s + (Number(cantidades[v.id] || 0) || 0),
+    0,
+  );
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={onClose}>
+      <div className="flex max-h-[85vh] w-full max-w-lg flex-col rounded-xl bg-white shadow-2xl" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-start justify-between border-b p-4">
+          <div>
+            <h3 className="font-display text-lg font-semibold text-corp-900">Agregar varios — multi-talla</h3>
+            <p className="text-xs text-slate-500">
+              Buscá el producto una vez, poné las cantidades por talla y agregá todo junto. Repetí con otro producto sin cerrar.
+            </p>
+          </div>
+          <button onClick={onClose} className="rounded p-1 text-slate-400 hover:bg-slate-100">
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+
+        <div className="flex-1 overflow-auto p-4">
+          {!productoNombre ? (
+            <div>
+              <div className="relative">
+                <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                <Input
+                  value={busqueda}
+                  onChange={(e) => setBusqueda(e.target.value)}
+                  placeholder="Escribí las primeras letras del producto… (ej: bomb)"
+                  className="pl-9"
+                  autoFocus
+                />
+              </div>
+              {sugerencias.length > 0 && (
+                <div className="mt-2 overflow-hidden rounded-md border">
+                  {sugerencias.map((nombre) => {
+                    const tallas = productos.get(nombre) ?? [];
+                    return (
+                      <button
+                        key={nombre}
+                        type="button"
+                        onClick={() => elegirProducto(nombre)}
+                        className="flex w-full items-center justify-between border-b px-3 py-2 text-left text-sm transition hover:bg-happy-50 last:border-b-0"
+                      >
+                        <span className="font-medium text-corp-900">{nombre}</span>
+                        <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-semibold text-slate-600">
+                          {tallas.length} talla{tallas.length === 1 ? '' : 's'}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+              {busqueda.trim().length >= 2 && sugerencias.length === 0 && (
+                <p className="mt-2 text-xs text-slate-500">Sin coincidencias.</p>
+              )}
+            </div>
+          ) : (
+            <div>
+              <div className="mb-3 flex items-center justify-between rounded-md border border-happy-200 bg-happy-50/60 px-3 py-2">
+                <span className="text-sm font-semibold text-corp-900">{productoNombre}</span>
+                <Button variant="ghost" size="sm" onClick={() => { setProductoNombre(null); setCantidades({}); }}>
+                  Cambiar producto
+                </Button>
+              </div>
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b text-left text-[10px] uppercase tracking-wider text-slate-500">
+                    <th className="py-1.5">Talla</th>
+                    <th className="py-1.5">SKU</th>
+                    <th className="py-1.5 text-right">
+                      Stock origen{stockCargando && <Loader2 className="ml-1 inline h-3 w-3 animate-spin" />}
+                    </th>
+                    <th className="py-1.5 text-right">Cantidad</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {tallasProducto.map((v) => {
+                    const st = stock[v.id] ?? 0;
+                    const cant = Number(cantidades[v.id] || 0);
+                    const excede = cant > st;
+                    return (
+                      <tr key={v.id} className="border-b last:border-b-0">
+                        <td className="py-1.5 font-display font-semibold">{v.talla.replace('T', '')}</td>
+                        <td className="py-1.5 font-mono text-xs text-slate-500">{v.sku}</td>
+                        <td className={`py-1.5 text-right font-mono text-xs ${st <= 0 ? 'text-rose-500' : 'text-slate-600'}`}>
+                          {stockCargando ? '…' : st}
+                        </td>
+                        <td className="py-1.5 text-right">
+                          <input
+                            type="number"
+                            min={0}
+                            step={1}
+                            inputMode="numeric"
+                            value={cantidades[v.id] ?? ''}
+                            onChange={(e) => {
+                              const raw = e.target.value.replace(/[^\d]/g, '');
+                              setCantidades((prev) => ({ ...prev, [v.id]: raw }));
+                            }}
+                            placeholder="0"
+                            className={`h-8 w-20 rounded border px-2 text-right font-mono text-xs focus:outline-none focus:ring-2 ${
+                              excede
+                                ? 'border-rose-400 bg-rose-50 focus:ring-rose-100'
+                                : 'border-slate-300 bg-white focus:border-happy-400 focus:ring-happy-100'
+                            }`}
+                          />
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+
+        <div className="flex items-center justify-between gap-2 border-t bg-slate-50 p-4">
+          <span className="text-xs text-slate-500">
+            {productoNombre
+              ? `${totalSeleccionado} unidad(es) seleccionadas`
+              : 'Elegí un producto para ver sus tallas'}
+          </span>
+          <div className="flex gap-2">
+            <Button variant="outline" onClick={onClose}>Terminar</Button>
+            <Button
+              variant="premium"
+              onClick={agregarYRepetir}
+              disabled={!productoNombre || totalSeleccionado <= 0}
+            >
+              <Plus className="h-4 w-4" /> Agregar y seguir
+            </Button>
+          </div>
+        </div>
+      </div>
     </div>
   );
 }
