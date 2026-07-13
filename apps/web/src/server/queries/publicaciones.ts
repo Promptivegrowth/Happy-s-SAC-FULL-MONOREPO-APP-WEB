@@ -42,12 +42,29 @@ export async function loadPublicaciones(opts: LoadOpts = {}): Promise<ProductCar
       .order('orden_web')
       .limit(opts.limit ?? 60);
 
-    // Búsqueda: matchea titulo_web O palabras_clave (sinónimos SEO). Así si el
-    // usuario escribe "spiderman" encuentra el producto "araña económico" que
-    // tenga "spiderman" cargado como palabra clave.
+    // Búsqueda: matchea titulo_web O palabras_clave (sinónimos SEO) O el
+    // NOMBRE del producto en el ERP. El tercer término se agregó el
+    // 2026-07-12: el cliente publicó "Guardapolvo" con título web "MANDIL"
+    // y al buscar "guardapolvo" no salía nada — el nombre interno del ERP
+    // debe encontrar el producto siempre, aunque el título web sea otro.
+    // Como PostgREST no permite mezclar columnas de la tabla padre y de la
+    // embebida en un mismo or(), primero resolvemos los producto_id que
+    // matchean por nombre y los sumamos como producto_id.in.(...).
     if (opts.q) {
       const q = opts.q.replace(/[%,]/g, '');  // sanitizar para .or()
-      query = query.or(`titulo_web.ilike.%${q}%,palabras_clave.ilike.%${q}%`);
+      let idsPorNombre: string[] = [];
+      try {
+        const { data: porNombre } = await sb
+          .from('productos')
+          .select('id')
+          .ilike('nombre', `%${q}%`)
+          .eq('activo', true)
+          .limit(100);
+        idsPorNombre = (porNombre ?? []).map((r) => r.id as string);
+      } catch { /* si falla, la búsqueda sigue por título/keywords */ }
+      query = idsPorNombre.length > 0
+        ? query.or(`titulo_web.ilike.%${q}%,palabras_clave.ilike.%${q}%,producto_id.in.(${idsPorNombre.join(',')})`)
+        : query.or(`titulo_web.ilike.%${q}%,palabras_clave.ilike.%${q}%`);
     }
     if (opts.categoriaId) {
       // El producto puede aparecer en una categoría como principal O como
