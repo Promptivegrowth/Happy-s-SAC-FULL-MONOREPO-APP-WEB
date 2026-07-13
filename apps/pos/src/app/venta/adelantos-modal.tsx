@@ -30,7 +30,7 @@ import {
   registrarDevolucionAdelanto,
   type AdelantoMovimiento,
 } from '@/server/actions/adelantos';
-import { buscarClientesPOS, type ClienteRow } from '@/server/actions/clientes';
+import { buscarClientesPOS, crearClienteRapidoPOS, type ClienteRow } from '@/server/actions/clientes';
 
 type ClienteResult = ClienteRow;
 
@@ -48,6 +48,16 @@ export function AdelantosModal({ onClose }: { onClose: () => void }) {
   const [monto, setMonto] = useState('');
   const [metodo, setMetodo] = useState<'EFECTIVO' | 'YAPE' | 'PLIN' | 'TARJETA_DEBITO' | 'TARJETA_CREDITO' | 'TRANSFERENCIA'>('EFECTIVO');
   const [obs, setObs] = useState('');
+
+  // Form de "crear cliente nuevo" — se abre inline cuando no hay coincidencias
+  // (2026-07-12) el cliente reporto que no habia como registrar un cliente
+  // que no existia todavia.
+  const [crearOpen, setCrearOpen] = useState(false);
+  const [nuevoTipoDoc, setNuevoTipoDoc] = useState<'DNI' | 'RUC' | 'CE' | 'PASAPORTE'>('DNI');
+  const [nuevoDoc, setNuevoDoc] = useState('');
+  const [nuevoNombre, setNuevoNombre] = useState('');
+  const [nuevoTel, setNuevoTel] = useState('');
+  const [creandoCliente, setCreandoCliente] = useState(false);
 
   // Búsqueda con debounce
   useEffect(() => {
@@ -128,7 +138,7 @@ export function AdelantosModal({ onClose }: { onClose: () => void }) {
               El cliente deja dinero sin definir productos. El saldo se aplica automáticamente en su próxima venta.
             </p>
           </div>
-          <button onClick={onClose} disabled={pending} className="rounded p-1 text-slate-400 hover:bg-slate-100">
+          <button onClick={onClose} className="rounded p-1 text-slate-400 hover:bg-slate-100">
             <X className="h-4 w-4" />
           </button>
         </div>
@@ -167,8 +177,115 @@ export function AdelantosModal({ onClose }: { onClose: () => void }) {
                 ))}
               </div>
             )}
-            {q.length >= 2 && !searching && results.length === 0 && (
-              <p className="mt-2 text-xs text-slate-500">Sin coincidencias.</p>
+            {q.length >= 2 && !searching && results.length === 0 && !crearOpen && (
+              <div className="mt-2 flex items-center justify-between rounded-md border border-dashed border-slate-300 bg-slate-50 p-3">
+                <p className="text-xs text-slate-600">
+                  Sin coincidencias con &quot;<span className="font-mono">{q}</span>&quot;.
+                </p>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => {
+                    // Pre-cargar el input: si son solo dígitos usar como DNI/RUC,
+                    // si tiene letras usar como nombre. Longitud 11 = RUC, 8 = DNI.
+                    const soloDigitos = q.trim().replace(/\D/g, '');
+                    const esNumeroPuro = /^\d+$/.test(q.trim());
+                    if (esNumeroPuro) {
+                      setNuevoDoc(soloDigitos);
+                      setNuevoTipoDoc(soloDigitos.length === 11 ? 'RUC' : 'DNI');
+                      setNuevoNombre('');
+                    } else {
+                      setNuevoDoc('');
+                      setNuevoNombre(q.trim());
+                    }
+                    setCrearOpen(true);
+                  }}
+                >
+                  + Registrar cliente nuevo
+                </Button>
+              </div>
+            )}
+            {crearOpen && (
+              <div className="mt-3 space-y-2 rounded-md border border-violet-300 bg-violet-50/40 p-3">
+                <p className="text-xs font-semibold text-violet-800">Nuevo cliente</p>
+                <div className="grid grid-cols-[80px_1fr] gap-2">
+                  <select
+                    value={nuevoTipoDoc}
+                    onChange={(e) => setNuevoTipoDoc(e.target.value as 'DNI' | 'RUC' | 'CE' | 'PASAPORTE')}
+                    className="h-9 rounded-md border border-slate-300 bg-white px-2 text-xs"
+                    disabled={creandoCliente}
+                  >
+                    <option value="DNI">DNI</option>
+                    <option value="RUC">RUC</option>
+                    <option value="CE">CE</option>
+                    <option value="PASAPORTE">Pasaporte</option>
+                  </select>
+                  <Input
+                    value={nuevoDoc}
+                    onChange={(e) => setNuevoDoc(e.target.value.trim())}
+                    placeholder="Número de documento"
+                    disabled={creandoCliente}
+                    className="font-mono text-xs"
+                  />
+                </div>
+                <Input
+                  value={nuevoNombre}
+                  onChange={(e) => setNuevoNombre(e.target.value)}
+                  placeholder={nuevoTipoDoc === 'RUC' ? 'Razón social' : 'Nombre completo'}
+                  disabled={creandoCliente}
+                  className="text-xs"
+                />
+                <Input
+                  value={nuevoTel}
+                  onChange={(e) => setNuevoTel(e.target.value.replace(/[^\d+]/g, ''))}
+                  placeholder="Teléfono (opcional)"
+                  disabled={creandoCliente}
+                  className="font-mono text-xs"
+                />
+                <div className="flex justify-end gap-2 pt-1">
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    onClick={() => { setCrearOpen(false); setNuevoDoc(''); setNuevoNombre(''); setNuevoTel(''); }}
+                    disabled={creandoCliente}
+                  >
+                    Cancelar
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="premium"
+                    disabled={
+                      creandoCliente
+                      || nuevoDoc.trim().length < 4
+                      || nuevoNombre.trim().length < 2
+                    }
+                    onClick={async () => {
+                      setCreandoCliente(true);
+                      try {
+                        const r = await crearClienteRapidoPOS({
+                          tipo_documento: nuevoTipoDoc,
+                          numero_documento: nuevoDoc.trim(),
+                          nombre_completo: nuevoNombre.trim(),
+                          telefono: nuevoTel.trim(),
+                        });
+                        if (r.ok) {
+                          toast.success(`Cliente creado · ${r.cliente.nombre_para_mostrar}`);
+                          setCrearOpen(false);
+                          setNuevoDoc(''); setNuevoNombre(''); setNuevoTel('');
+                          setQ('');
+                          await seleccionar(r.cliente as ClienteResult);
+                        } else {
+                          toast.error(r.error);
+                        }
+                      } finally {
+                        setCreandoCliente(false);
+                      }
+                    }}
+                  >
+                    {creandoCliente ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : 'Crear y seleccionar'}
+                  </Button>
+                </div>
+              </div>
             )}
           </div>
         ) : (
@@ -336,7 +453,7 @@ export function AdelantosModal({ onClose }: { onClose: () => void }) {
         )}
 
         <div className="mt-5 flex justify-end">
-          <Button variant="outline" onClick={onClose} disabled={pending}>
+          <Button variant="outline" onClick={onClose}>
             Cerrar
           </Button>
         </div>

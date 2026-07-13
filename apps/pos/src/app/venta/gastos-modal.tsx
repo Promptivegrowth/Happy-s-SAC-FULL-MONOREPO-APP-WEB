@@ -60,7 +60,9 @@ export function GastosModal({ onClose }: { onClose: () => void }) {
 
   function registrar() {
     const m = Number(monto);
-    if (!m || m <= 0) return toast.error('Monto inválido');
+    if (!Number.isFinite(m) || m <= 0) {
+      return toast.error('El monto debe ser mayor a 0');
+    }
     if (!concepto.trim()) return toast.error('Describí el motivo');
 
     start(async () => {
@@ -177,7 +179,11 @@ export function GastosModal({ onClose }: { onClose: () => void }) {
               Registrá los egresos del turno (en efectivo). Se descuentan del cuadre al cerrar la caja.
             </p>
           </div>
-          <button onClick={onClose} disabled={pending} className="rounded p-1 text-slate-400 hover:bg-slate-100">
+          {/* Cliente reporto (2026-07-12) que despues de imprimir cuadre los
+              botones de cerrar quedaban disabled (pending stuck) y no habia
+              como salir. Cerrar debe funcionar SIEMPRE — solo los botones
+              de operacion (Registrar/Eliminar) chequean pending. */}
+          <button onClick={onClose} className="rounded p-1 text-slate-400 hover:bg-slate-100">
             <X className="h-4 w-4" />
           </button>
         </div>
@@ -280,9 +286,15 @@ export function GastosModal({ onClose }: { onClose: () => void }) {
               <Input
                 type="number"
                 step="0.01"
-                min={0}
+                min={0.01}
+                inputMode="decimal"
                 value={monto}
-                onChange={(e) => setMonto(e.target.value)}
+                onChange={(e) => {
+                  // Bloquear caracteres inválidos y valores negativos —
+                  // cliente reportó (2026-07-12) que dejaba entrar negativos.
+                  const raw = e.target.value.replace(/[^\d.]/g, '');
+                  setMonto(raw);
+                }}
                 placeholder="0.00"
                 className="mt-1"
               />
@@ -377,13 +389,12 @@ export function GastosModal({ onClose }: { onClose: () => void }) {
             <Button
               variant="outline"
               onClick={imprimir}
-              disabled={pending}
               className="border-corp-300 text-corp-700 hover:bg-corp-50"
             >
               <Printer className="h-4 w-4" /> Imprimir cuadre
             </Button>
           )}
-          <Button variant="outline" onClick={onClose} disabled={pending}>
+          <Button variant="outline" onClick={onClose}>
             Cerrar
           </Button>
         </div>
