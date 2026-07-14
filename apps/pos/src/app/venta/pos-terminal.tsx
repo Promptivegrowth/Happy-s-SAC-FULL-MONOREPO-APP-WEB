@@ -16,7 +16,7 @@ import { registrarVenta } from '@/server/actions/venta';
 import { emitirComprobante, obtenerSesionActiva } from '@/server/actions/caja';
 import { aplicarAdelantoAVenta } from '@/server/actions/adelantos';
 import { cerrarSesionUsuario } from '@/server/actions/auth';
-import { buscarClientesPOS, type ClienteRow } from '@/server/actions/clientes';
+import { buscarClientesPOS, crearClienteRapidoPOS, type ClienteRow } from '@/server/actions/clientes';
 import type { SesionCajaDTO, BalanceCajaDTO } from '@/server/actions/caja-helpers';
 import { AbrirCajaModal } from './abrir-caja-modal';
 import { CerrarCajaModal } from './cerrar-caja-modal';
@@ -564,16 +564,36 @@ export function PosTerminal({
       return toast.error('DNI debe tener 8 dígitos (o dejalo vacío para cliente anónimo)');
     }
 
-    // Armar payload compatible con ejecutarCobro (mismo pipeline). El "cliente"
-    // se compone inline con los datos que hay en el panel — no hay lookup en
-    // BD acá (el server usa el nombre libre si no hay cliente_id).
+    // Armar payload compatible con ejecutarCobro (mismo pipeline).
     const tipoDocumentoCliente: 'DNI' | 'RUC' | null =
       docCliente.length === 8 ? 'DNI' : docCliente.length === 11 ? 'RUC' : null;
+
+    // AUTO-REGISTRO del cliente (fix 2026-07-13): con el flujo directo, el
+    // cliente tipeado con DNI + nombre nunca se guardaba en la tabla
+    // `clientes` — solo quedaba el nombre suelto en la venta. Resultado: el
+    // buscador de "clientes frecuentes" no encontraba a nadie. Ahora, si hay
+    // documento + nombre y no se eligió un cliente existente, lo registramos
+    // (crearClienteRapidoPOS es idempotente: si el documento ya existe,
+    // devuelve el registro previo). Si falla, la venta continúa sin id.
+    let clienteIdFinal = clienteIdSeleccionado;
+    if (!clienteIdFinal && tipoDocumentoCliente && nombreCliente.trim()) {
+      try {
+        const rc = await crearClienteRapidoPOS({
+          tipo_documento: tipoDocumentoCliente,
+          numero_documento: docCliente,
+          nombre_completo: nombreCliente.trim(),
+          telefono: telefonoCliente.trim(),
+          direccion: direccionCliente.trim(),
+        });
+        if (rc.ok) clienteIdFinal = rc.cliente.id;
+      } catch { /* la venta no se bloquea por esto */ }
+    }
+
     await ejecutarCobro({
       tipo: tipoDoc,
       formato,
       cliente: {
-        cliente_id: clienteIdSeleccionado,
+        cliente_id: clienteIdFinal,
         numero_documento: docCliente || null,
         tipo_documento: tipoDocumentoCliente,
         razon_social: tipoDocumentoCliente === 'RUC' ? (nombreCliente || null) : null,

@@ -231,28 +231,26 @@ export async function generarTicket(data: ComprobantePDFData): Promise<Blob> {
   y += 11;
 
   // ---- Items ----
+  // Columna P.UNIT propia (2026-07-13): antes el precio unitario salía como
+  // sublínea gris "4 × S/ 35.00" debajo de la descripción; el cliente pidió
+  // verlo como columna: CANT | DESCRIPCIÓN | P.UNIT | TOTAL.
+  const X_PUNIT = WIDTH - PAD_X - 52; // borde derecho de la columna P.UNIT
   doc.setFontSize(8);
   doc.setFont('helvetica', 'bold');
   doc.text('CANT', PAD_X, y);
-  doc.text('DESCRIPCIÓN', PAD_X + 26, y);
+  doc.text('DESCRIPCIÓN', PAD_X + 24, y);
+  doc.text('P.UNIT', X_PUNIT, y, { align: 'right' });
   doc.text('TOTAL', WIDTH - PAD_X, y, { align: 'right' });
   y += 10;
   doc.setFont('helvetica', 'normal');
 
   data.items.forEach((it) => {
     doc.text(String(it.cantidad), PAD_X, y);
-    const descLines = doc.splitTextToSize(it.descripcion, WIDTH - PAD_X - 26 - 50);
-    doc.text(descLines, PAD_X + 26, y);
+    const descLines = doc.splitTextToSize(it.descripcion, X_PUNIT - PAD_X - 24 - 42);
+    doc.text(descLines, PAD_X + 24, y);
+    doc.text(fmt(it.precio_unitario), X_PUNIT, y, { align: 'right' });
     doc.text(`S/ ${fmt(it.sub_total)}`, WIDTH - PAD_X, y, { align: 'right' });
     y += Math.max(descLines.length * 9, 10);
-    if (it.cantidad > 1) {
-      doc.setTextColor(...COLOR.gris);
-      doc.setFontSize(7);
-      doc.text(`${it.cantidad} × S/ ${fmt(it.precio_unitario)}`, PAD_X + 26, y);
-      y += 9;
-      doc.setFontSize(8);
-      doc.setTextColor(...COLOR.negro);
-    }
   });
 
   y += 2;
