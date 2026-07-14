@@ -1257,102 +1257,87 @@ export function PosTerminal({
                   seleccionado aparezca ARRIBA de la lista — cuando cargan 20
                   ítems y sigue apareciendo abajo el último, no lo ven y
                   cometen errores de conteo. reverse() para invertir el orden. */}
+              {/* Fila COMPACTA de una sola línea (2026-07-13) — cliente pidió
+                  ver ~10 ítems a la vez: se quitó la foto y todo va en una
+                  fila: nombre+talla · precio editable · % desc · cantidad ·
+                  subtotal · eliminar. El último agregado se resalta con
+                  borde naranja + punto. */}
               {[...lineasConPrecio].reverse().map((l, idx) => {
                 const precioPublico = Number(l.variante.precio_publico ?? 0);
                 const enOferta = l.escalon !== 'PUBLICO' && precioPublico > 0 && l.precio_unitario < precioPublico;
                 const esUltimo = idx === 0;
-                const imagen = l.variante.productos.imagen_principal_url;
                 return (
                   <li
                     key={l.variante.id}
-                    className={`mb-1.5 rounded-md border p-2 last:mb-0 ${
-                      esUltimo ? 'border-happy-300 bg-happy-50/40' : 'bg-white'
+                    className={`mb-1 flex items-center gap-1.5 rounded-md border px-2 py-1 last:mb-0 ${
+                      esUltimo ? 'border-happy-400 bg-happy-50/40' : 'border-slate-200 bg-white'
                     }`}
                   >
-                    <div className="flex items-start gap-2">
-                      {/* Foto miniatura — cliente pidió que se vea la imagen del
-                          producto en el carrito para reconocimiento visual rápido. */}
-                      <div className="relative h-12 w-12 shrink-0 overflow-hidden rounded-md border bg-slate-100">
-                        {imagen ? (
-                          // eslint-disable-next-line @next/next/no-img-element
-                          <img
-                            src={imagen}
-                            alt={l.variante.productos.nombre}
-                            className="h-full w-full object-cover"
-                            loading="lazy"
-                          />
-                        ) : (
-                          <div className="flex h-full items-center justify-center text-lg">🎭</div>
-                        )}
-                        {esUltimo && (
-                          <span className="absolute -right-1 -top-1 rounded-full bg-happy-500 px-1 text-[8px] font-bold text-white shadow">
-                            NUEVO
-                          </span>
-                        )}
-                      </div>
-                      <div className="min-w-0 flex-1">
-                        <p className="truncate text-xs font-medium text-corp-900">{l.variante.productos.nombre}</p>
-                        <p className="text-[10px] text-slate-500">
+                    {esUltimo && (
+                      <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-happy-500" title="Último agregado" />
+                    )}
+                    <div className="min-w-0 flex-1 leading-tight">
+                      <span className="block truncate text-[11px] font-medium text-corp-900">
+                        {l.variante.productos.nombre}
+                        <span className="ml-1 font-normal text-[9px] text-slate-400">
                           T{formatTalla(l.variante.talla)} · {l.variante.sku}
-                        </p>
-                        <div className="mt-0.5 flex items-center gap-1">
-                          <PrecioEditable
-                            valor={l.precio_override ?? l.precio_base_calculado}
-                            onChange={(v) => {
-                              setOverridesPrecio((prev) => {
-                                const next = { ...prev };
-                                if (v === l.precio_base_calculado) delete next[l.variante.id];
-                                else next[l.variante.id] = v;
-                                return next;
-                              });
-                            }}
-                            isOverride={l.precio_override != null}
-                          />
-                          {enOferta && !l.precio_override && (
-                            <span className="text-[9px] text-slate-400 line-through">{formatPEN(precioPublico)}</span>
-                          )}
-                          <DescuentoLineaChip
-                            valor={l.descuento_unitario ?? 0}
-                            precioBase={l.precio_override ?? l.precio_base_calculado}
-                            onChange={(v) => {
-                              setDescuentosLinea((prev) => {
-                                const next = { ...prev };
-                                if (v <= 0) delete next[l.variante.id];
-                                else next[l.variante.id] = v;
-                                return next;
-                              });
-                            }}
-                          />
-                        </div>
-                      </div>
-                      <div className="flex flex-col items-end gap-1">
-                        <span className="font-display text-sm font-semibold text-corp-900">{formatPEN(l.subtotal)}</span>
-                        <div className="flex items-center rounded border bg-white">
-                          <button
-                            onClick={() => setQty(l.variante.id, l.cantidad - 1)}
-                            className="px-1.5 py-0.5 text-slate-600 hover:bg-slate-50"
-                            aria-label="Restar"
-                          >
-                            <Minus className="h-3 w-3" />
-                          </button>
-                          <span className="min-w-6 text-center text-xs font-semibold">{l.cantidad}</span>
-                          <button
-                            onClick={() => setQty(l.variante.id, l.cantidad + 1)}
-                            className="px-1.5 py-0.5 text-slate-600 hover:bg-slate-50"
-                            aria-label="Sumar"
-                          >
-                            <Plus className="h-3 w-3" />
-                          </button>
-                          <button
-                            onClick={() => eliminar(l.variante.id)}
-                            className="border-l px-1.5 py-0.5 text-red-500 hover:bg-red-50"
-                            aria-label="Eliminar"
-                          >
-                            <Trash2 className="h-3 w-3" />
-                          </button>
-                        </div>
-                      </div>
+                        </span>
+                      </span>
                     </div>
+                    <PrecioEditable
+                      valor={l.precio_override ?? l.precio_base_calculado}
+                      onChange={(v) => {
+                        setOverridesPrecio((prev) => {
+                          const next = { ...prev };
+                          if (v === l.precio_base_calculado) delete next[l.variante.id];
+                          else next[l.variante.id] = v;
+                          return next;
+                        });
+                      }}
+                      isOverride={l.precio_override != null}
+                    />
+                    {enOferta && !l.precio_override && (
+                      <span className="shrink-0 text-[9px] text-slate-400 line-through">{formatPEN(precioPublico)}</span>
+                    )}
+                    <DescuentoLineaChip
+                      valor={l.descuento_unitario ?? 0}
+                      precioBase={l.precio_override ?? l.precio_base_calculado}
+                      onChange={(v) => {
+                        setDescuentosLinea((prev) => {
+                          const next = { ...prev };
+                          if (v <= 0) delete next[l.variante.id];
+                          else next[l.variante.id] = v;
+                          return next;
+                        });
+                      }}
+                    />
+                    <div className="flex shrink-0 items-center rounded border bg-white">
+                      <button
+                        onClick={() => setQty(l.variante.id, l.cantidad - 1)}
+                        className="px-1 py-0.5 text-slate-600 hover:bg-slate-50"
+                        aria-label="Restar"
+                      >
+                        <Minus className="h-3 w-3" />
+                      </button>
+                      <span className="min-w-5 text-center text-[11px] font-semibold">{l.cantidad}</span>
+                      <button
+                        onClick={() => setQty(l.variante.id, l.cantidad + 1)}
+                        className="px-1 py-0.5 text-slate-600 hover:bg-slate-50"
+                        aria-label="Sumar"
+                      >
+                        <Plus className="h-3 w-3" />
+                      </button>
+                    </div>
+                    <span className="w-[62px] shrink-0 text-right font-display text-xs font-semibold text-corp-900">
+                      {formatPEN(l.subtotal)}
+                    </span>
+                    <button
+                      onClick={() => eliminar(l.variante.id)}
+                      className="shrink-0 rounded p-0.5 text-red-400 hover:bg-red-50 hover:text-red-600"
+                      aria-label="Eliminar"
+                    >
+                      <Trash2 className="h-3 w-3" />
+                    </button>
                   </li>
                 );
               })}
@@ -1365,8 +1350,8 @@ export function PosTerminal({
             visible. Antes: p-4 + botones p-3 + gap-2 (~340px). Ahora: p-2.5 +
             botones py-1.5 + gap-1 + max-h-1/2 con scroll interno.
             Toda la sección se limita a 45% del alto del panel derecho. */}
-        <div className="shrink-0 overflow-auto p-2.5" style={{ maxHeight: '45vh' }}>
-          <p className="mb-1.5 text-[10px] font-semibold uppercase tracking-wider text-slate-400">Métodos de pago</p>
+        <div className="shrink-0 overflow-auto p-2" style={{ maxHeight: '38vh' }}>
+          <p className="mb-1 text-[9px] font-semibold uppercase tracking-wider text-slate-400">Métodos de pago</p>
 
           {/* EFECTIVO con input — para registrar monto real recibido y calcular vuelto */}
           <div className="mb-1.5 rounded-md border-2 border-emerald-200 bg-emerald-50 p-1.5">
@@ -1481,43 +1466,48 @@ export function PosTerminal({
               YAPE/PLIN se marcó visible_pos=true para que aparezca en el
               grid de cuentas de arriba. */}
 
-          {/* Barra de progreso del total pagado. Cuando pagado >= total,
-              cambia a verde con "COMPLETO" — feedback visual claro de que
-              se puede cobrar. */}
+          {/* Progreso + pagos aplicados COMPACTOS en una zona (2026-07-13):
+              el cliente pidió recuperar alto para la lista de productos.
+              - Progreso: una sola línea con barra fina integrada.
+              - Pagos aplicados: chips inline (antes filas apiladas). */}
           {total > 0 && (
-            <div className="mt-2 rounded-md border bg-white px-2 py-1.5">
-              <div className="flex items-center justify-between text-[10px]">
-                <span className="text-slate-500">
-                  Pagado <span className="font-mono font-semibold text-corp-900">{formatPEN(pagado)}</span> de <span className="font-mono">{formatPEN(total)}</span>
+            <div className="mt-1.5 rounded-md border bg-white px-2 py-1">
+              <div className="flex items-center gap-2 text-[10px]">
+                <div className="h-1 flex-1 overflow-hidden rounded-full bg-slate-100">
+                  <div
+                    className={`h-full transition-all ${pagado >= total ? 'bg-emerald-500' : 'bg-happy-500'}`}
+                    style={{ width: `${Math.min(100, (pagado / total) * 100)}%` }}
+                  />
+                </div>
+                <span className="shrink-0 text-slate-500">
+                  <span className="font-mono font-semibold text-corp-900">{formatPEN(pagado)}</span> / <span className="font-mono">{formatPEN(total)}</span>
                 </span>
                 {pagado >= total ? (
-                  <Badge className="bg-emerald-500 text-[9px]">✓ COMPLETO</Badge>
+                  <span className="shrink-0 font-semibold text-emerald-600">✓ COMPLETO</span>
                 ) : (
-                  <span className="font-mono font-semibold text-amber-600">Faltan {formatPEN(total - pagado)}</span>
+                  <span className="shrink-0 font-mono font-semibold text-amber-600">faltan {formatPEN(total - pagado)}</span>
                 )}
               </div>
-              <div className="mt-1 h-1 overflow-hidden rounded-full bg-slate-100">
-                <div
-                  className={`h-full transition-all ${pagado >= total ? 'bg-emerald-500' : 'bg-happy-500'}`}
-                  style={{ width: `${Math.min(100, (pagado / total) * 100)}%` }}
-                />
-              </div>
+              {pagos.length > 0 && (
+                <div className="mt-1 flex flex-wrap gap-1">
+                  {pagos.map((p, i) => (
+                    <span
+                      key={i}
+                      className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-slate-50 py-0.5 pl-2 pr-1 text-[10px] font-medium text-slate-700"
+                    >
+                      {p.cuentaNombre ?? p.metodo.replace('_', ' ')} · {formatPEN(p.monto)}
+                      <button
+                        onClick={() => quitarPago(i)}
+                        className="rounded-full p-0.5 text-slate-400 hover:bg-slate-200 hover:text-slate-700"
+                        aria-label="Quitar pago"
+                      >
+                        <X className="h-2.5 w-2.5" />
+                      </button>
+                    </span>
+                  ))}
+                </div>
+              )}
             </div>
-          )}
-
-          {pagos.length > 0 && (
-            <ul className="mt-2 space-y-1">
-              {pagos.map((p, i) => (
-                <li key={i} className="flex items-center gap-1.5 rounded-md bg-white px-2 py-1 text-xs shadow-sm">
-                  <Badge variant="secondary" className="text-[9px]">{p.metodo.replace('_', ' ')}</Badge>
-                  {p.cuentaNombre && (
-                    <span className="text-[10px] font-medium text-slate-600 truncate">{p.cuentaNombre}</span>
-                  )}
-                  <span className="ml-auto font-semibold">{formatPEN(p.monto)}</span>
-                  <button onClick={() => quitarPago(i)} className="rounded p-0.5 text-slate-400 hover:bg-slate-100"><X className="h-3 w-3" /></button>
-                </li>
-              ))}
-            </ul>
           )}
         </div>
 
