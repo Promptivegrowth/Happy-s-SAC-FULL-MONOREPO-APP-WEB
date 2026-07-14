@@ -234,7 +234,13 @@ export async function generarGuiaRemisionPdf(
       l.tipo === 'VARIANTE' ? 'UND' : '—',
       l.cantidad.toString(),
     ]),
-    foot: [['', '', '', '', 'TOTAL', lineas.reduce((s, l) => s + l.cantidad, 0).toString()]],
+    // colSpan 5 para que "TOTAL" tenga todo el ancho hasta la columna de
+    // cantidad — antes caía en la columna U.Med (14mm) y se partía en
+    // "TOTA/L" (observación cliente 2026-07-13).
+    foot: [[
+      { content: 'TOTAL', colSpan: 5, styles: { halign: 'right' } },
+      lineas.reduce((s, l) => s + l.cantidad, 0).toString(),
+    ]],
     headStyles: { fillColor: AZUL, textColor: 255, fontSize: 7.5, halign: 'center' },
     footStyles: { fillColor: [241, 245, 249], textColor: [...AZUL], fontStyle: 'bold' },
     bodyStyles: { fontSize: 7.5, cellPadding: 1.2 },

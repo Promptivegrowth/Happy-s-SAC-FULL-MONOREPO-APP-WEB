@@ -203,7 +203,7 @@ export function NuevoTrasladoForm({
       .map((s) => s.trim())
       .filter(Boolean);
     if (codigos.length === 0) {
-      toast.error('Pegá al menos un código');
+      toast.error('Pegue al menos un código');
       return;
     }
     let ok = 0;
@@ -529,7 +529,7 @@ export function NuevoTrasladoForm({
               Escanear con lector USB
             </div>
             <p className="text-[11px] text-slate-600">
-              Apuntá el cursor al campo de abajo y disparen el lector. Cada escaneo agrega 1 unidad (o suma a la línea existente).
+              Apunte el cursor al campo de abajo y dispare el lector. Cada escaneo agrega 1 unidad (o suma a la línea existente).
             </p>
             <div className="relative">
               <ScanLine className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-sky-400" />
@@ -789,7 +789,7 @@ export function NuevoTrasladoForm({
               size="sm"
               onClick={() => {
                 if (!origenId) {
-                  toast.error('Elegí primero el almacén origen (para ver stock por talla)');
+                  toast.error('Elija primero el almacén origen (para ver stock por talla)');
                   return;
                 }
                 setMultiTallaOpen(true);
@@ -843,7 +843,7 @@ export function NuevoTrasladoForm({
               Traslado {saved.codigo} guardado
             </h3>
             <p className="mb-6 text-sm text-slate-600">
-              ¿Querés imprimir la guía de remisión ahora? Ya quedó guardada en el sistema — podés imprimirla más tarde desde el detalle.
+              ¿Desea imprimir la guía de remisión ahora? Ya quedó guardada en el sistema — puede imprimirla más tarde desde el detalle.
             </p>
             <div className="flex flex-wrap justify-end gap-2">
               <Button
@@ -966,18 +966,28 @@ function MultiTallaModal({
   }
 
   function agregarYRepetir() {
+    // Tallas con stock 0 en el origen NO se agregan (observación cliente
+    // 2026-07-13). El input ya está deshabilitado para esas filas — este
+    // filtro es la defensa extra por si quedó una cantidad tipeada antes
+    // de que cargara el stock.
     const seleccion = tallasProducto
       .map((v) => ({ variante: v, cantidad: Number(cantidades[v.id] || 0) }))
-      .filter((s) => s.cantidad > 0);
+      .filter((s) => s.cantidad > 0 && (stock[s.variante.id] ?? 0) > 0);
+    const descartadasSinStock = tallasProducto.filter(
+      (v) => Number(cantidades[v.id] || 0) > 0 && (stock[v.id] ?? 0) <= 0,
+    );
+    if (descartadasSinStock.length > 0) {
+      toast.warning(`${descartadasSinStock.length} talla(s) sin stock en el origen — no se agregaron`);
+    }
     if (seleccion.length === 0) {
-      toast.error('Ingresá al menos una cantidad');
+      toast.error('Ingrese al menos una cantidad (en tallas con stock)');
       return;
     }
     // Aviso (no bloqueo) si alguna cantidad excede el stock — igual que las
     // líneas normales, la validación dura la hace el server al ejecutar.
     const excedidas = seleccion.filter((s) => s.cantidad > (stock[s.variante.id] ?? 0));
     if (excedidas.length > 0) {
-      toast.warning(`${excedidas.length} talla(s) exceden el stock del origen — revisá antes de ejecutar`);
+      toast.warning(`${excedidas.length} talla(s) exceden el stock del origen — revise antes de ejecutar`);
     }
     onAgregar(seleccion);
     // Limpiar para el siguiente producto SIN cerrar el modal.
@@ -998,7 +1008,7 @@ function MultiTallaModal({
           <div>
             <h3 className="font-display text-lg font-semibold text-corp-900">Agregar varios — multi-talla</h3>
             <p className="text-xs text-slate-500">
-              Buscá el producto una vez, poné las cantidades por talla y agregá todo junto. Repetí con otro producto sin cerrar.
+              Busque el producto una vez, escriba las cantidades por talla y agregue todo junto. Repita con otro producto sin cerrar.
             </p>
           </div>
           <button onClick={onClose} className="rounded p-1 text-slate-400 hover:bg-slate-100">
@@ -1014,7 +1024,7 @@ function MultiTallaModal({
                 <Input
                   value={busqueda}
                   onChange={(e) => setBusqueda(e.target.value)}
-                  placeholder="Escribí las primeras letras del producto… (ej: bomb)"
+                  placeholder="Escriba las primeras letras del producto… (ej: bomb)"
                   className="pl-9"
                   autoFocus
                 />
@@ -1067,31 +1077,43 @@ function MultiTallaModal({
                     const st = stock[v.id] ?? 0;
                     const cant = Number(cantidades[v.id] || 0);
                     const excede = cant > st;
+                    // Sin stock en el origen → NO se puede seleccionar
+                    // (observación del cliente 2026-07-13). El input queda
+                    // deshabilitado; también mientras carga el stock, para
+                    // no dejar tipear antes de conocer el disponible.
+                    const sinStock = !stockCargando && st <= 0;
                     return (
-                      <tr key={v.id} className="border-b last:border-b-0">
+                      <tr key={v.id} className={`border-b last:border-b-0 ${sinStock ? 'opacity-60' : ''}`}>
                         <td className="py-1.5 font-display font-semibold">{v.talla.replace('T', '')}</td>
                         <td className="py-1.5 font-mono text-xs text-slate-500">{v.sku}</td>
                         <td className={`py-1.5 text-right font-mono text-xs ${st <= 0 ? 'text-rose-500' : 'text-slate-600'}`}>
                           {stockCargando ? '…' : st}
                         </td>
                         <td className="py-1.5 text-right">
-                          <input
-                            type="number"
-                            min={0}
-                            step={1}
-                            inputMode="numeric"
-                            value={cantidades[v.id] ?? ''}
-                            onChange={(e) => {
-                              const raw = e.target.value.replace(/[^\d]/g, '');
-                              setCantidades((prev) => ({ ...prev, [v.id]: raw }));
-                            }}
-                            placeholder="0"
-                            className={`h-8 w-20 rounded border px-2 text-right font-mono text-xs focus:outline-none focus:ring-2 ${
-                              excede
-                                ? 'border-rose-400 bg-rose-50 focus:ring-rose-100'
-                                : 'border-slate-300 bg-white focus:border-happy-400 focus:ring-happy-100'
-                            }`}
-                          />
+                          {sinStock ? (
+                            <span className="inline-block w-20 rounded border border-dashed border-rose-200 bg-rose-50/50 px-2 py-1.5 text-center text-[10px] font-semibold text-rose-500">
+                              Sin stock
+                            </span>
+                          ) : (
+                            <input
+                              type="number"
+                              min={0}
+                              step={1}
+                              inputMode="numeric"
+                              value={cantidades[v.id] ?? ''}
+                              disabled={stockCargando}
+                              onChange={(e) => {
+                                const raw = e.target.value.replace(/[^\d]/g, '');
+                                setCantidades((prev) => ({ ...prev, [v.id]: raw }));
+                              }}
+                              placeholder="0"
+                              className={`h-8 w-20 rounded border px-2 text-right font-mono text-xs focus:outline-none focus:ring-2 disabled:cursor-wait disabled:bg-slate-50 ${
+                                excede
+                                  ? 'border-rose-400 bg-rose-50 focus:ring-rose-100'
+                                  : 'border-slate-300 bg-white focus:border-happy-400 focus:ring-happy-100'
+                              }`}
+                            />
+                          )}
                         </td>
                       </tr>
                     );
@@ -1106,7 +1128,7 @@ function MultiTallaModal({
           <span className="text-xs text-slate-500">
             {productoNombre
               ? `${totalSeleccionado} unidad(es) seleccionadas`
-              : 'Elegí un producto para ver sus tallas'}
+              : 'Elija un producto para ver sus tallas'}
           </span>
           <div className="flex gap-2">
             <Button variant="outline" onClick={onClose}>Terminar</Button>
