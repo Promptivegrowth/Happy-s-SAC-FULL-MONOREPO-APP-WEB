@@ -109,6 +109,14 @@ const REPORTES: ReporteCard[] = [
     categoria: 'Finanzas',
   },
   {
+    href: '/reportes/pagos-por-cuenta',
+    titulo: 'Pagos por cuenta / método',
+    descripcion: 'Cuánto entró a cada cuenta bancaria (BCP, INTERBANK…) y por qué método (Yape, Plin, transferencia, depósito). Para conciliación mensual.',
+    icono: Banknote,
+    categoria: 'Finanzas',
+    badge: 'Nuevo',
+  },
+  {
     href: '/reportes/inventario/stock-valorizado',
     titulo: 'Stock valorizado',
     descripcion: 'Snapshot del stock con valuación monetaria por almacén y tipo (variantes + materiales).',
