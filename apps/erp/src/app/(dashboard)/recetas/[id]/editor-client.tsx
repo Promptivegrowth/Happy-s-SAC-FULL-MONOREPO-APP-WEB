@@ -1633,10 +1633,11 @@ function ProcesosEditor({
             onActualizarDescripcion={(id, v) => {
               start(async () => {
                 const r = await actualizarProceso(id, { descripcion_operativa: v || null });
-                if (r.ok) toast.success('Descripción actualizada');
+                if (r.ok) toast.success('Paso actualizado');
                 else toast.error(r.error ?? 'Error');
               });
             }}
+            pasosPorArea={catalogoPorArea}
             pending={pending}
           />
           <div className="border-t bg-slate-50 px-4 py-3 text-sm">
@@ -1812,6 +1813,7 @@ function ProcesosTabla({
   onEliminar,
   onActualizarTiempo,
   onActualizarDescripcion,
+  pasosPorArea,
   pending,
 }: {
   procesos: Proceso[];
@@ -1820,6 +1822,10 @@ function ProcesosTabla({
   onEliminar: (id: string) => void;
   onActualizarTiempo: (id: string, v: number) => void;
   onActualizarDescripcion: (id: string, v: string) => void;
+  /** Catálogo de pasos por area_id — el editor inline del paso se vuelve un
+   *  SELECT con estas opciones (cliente pidió 2026-07-12: no permitir texto
+   *  libre, solo elegir pasos establecidos para evitar errores de tipeo). */
+  pasosPorArea: Map<string, string[]>;
   pending: boolean;
 }) {
   // Estado local para reflejar el orden visualmente al instante (optimistic).
@@ -1875,6 +1881,7 @@ function ProcesosTabla({
                 onEliminar={onEliminar}
                 onActualizarTiempo={onActualizarTiempo}
                 onActualizarDescripcion={onActualizarDescripcion}
+                opcionesPaso={p.area_id ? (pasosPorArea.get(p.area_id) ?? null) : null}
                 pending={pending}
                 dndDisabled={dndDisabled}
               />
@@ -1884,7 +1891,7 @@ function ProcesosTabla({
       </SortableContext>
       {dndDisabled && (
         <p className="border-t bg-amber-50/40 px-4 py-2 text-[10px] text-amber-700">
-          💡 Para reordenar arrastrando, cambiá el orden a &quot;Orden / secuencia&quot; arriba.
+          💡 Para reordenar arrastrando, cambie el orden a &quot;Orden / secuencia&quot; arriba.
         </p>
       )}
     </DndContext>
@@ -1896,6 +1903,7 @@ function ProcesoFila({
   onEliminar,
   onActualizarTiempo,
   onActualizarDescripcion,
+  opcionesPaso,
   pending,
   dndDisabled,
 }: {
@@ -1903,6 +1911,9 @@ function ProcesoFila({
   onEliminar: (id: string) => void;
   onActualizarTiempo: (id: string, v: number) => void;
   onActualizarDescripcion: (id: string, v: string) => void;
+  /** Pasos del catálogo del área de esta fila. Con opciones → SELECT;
+   *  sin opciones (área sin catálogo) → input libre como antes. */
+  opcionesPaso: string[] | null;
   pending: boolean;
   dndDisabled: boolean;
 }) {
@@ -1946,10 +1957,19 @@ function ProcesoFila({
       <TableCell className="font-medium">
         <div className="flex flex-col gap-0.5">
           <span>{p.proceso.replace('_', ' ')}</span>
-          <InlineDescripcion
-            valor={p.descripcion_operativa ?? ''}
-            onChange={(v) => onActualizarDescripcion(p.id, v)}
-          />
+          {opcionesPaso && opcionesPaso.length > 0 ? (
+            <SelectPasoInline
+              valor={p.descripcion_operativa ?? ''}
+              opciones={opcionesPaso}
+              disabled={pending}
+              onChange={(v) => onActualizarDescripcion(p.id, v)}
+            />
+          ) : (
+            <InlineDescripcion
+              valor={p.descripcion_operativa ?? ''}
+              onChange={(v) => onActualizarDescripcion(p.id, v)}
+            />
+          )}
         </div>
       </TableCell>
       <TableCell>
@@ -1972,6 +1992,47 @@ function ProcesoFila({
         </Button>
       </TableCell>
     </TableRow>
+  );
+}
+
+/** Selector inline del paso operativo — reemplaza al input de texto libre
+ *  cuando el área tiene catálogo (cliente pidió 2026-07-12: escribir a mano
+ *  permite errores; debe ELEGIR de los pasos establecidos). Si el valor
+ *  actual es legado y no está en el catálogo, se muestra como opción extra
+ *  para no perderlo. */
+function SelectPasoInline({
+  valor,
+  opciones,
+  disabled,
+  onChange,
+}: {
+  valor: string;
+  opciones: string[];
+  disabled: boolean;
+  onChange: (v: string) => void;
+}) {
+  const valorLegado = valor && !opciones.includes(valor);
+  return (
+    <select
+      value={valor}
+      disabled={disabled}
+      onChange={(e) => {
+        const v = e.target.value;
+        if (v !== valor) onChange(v);
+      }}
+      className={`w-full max-w-[240px] cursor-pointer rounded border px-1 py-0.5 text-[11px] font-normal focus:border-happy-400 focus:outline-none focus:ring-2 focus:ring-happy-100 ${
+        valor
+          ? 'border-transparent bg-transparent text-slate-600 hover:border-slate-200'
+          : 'border-dashed border-amber-300 bg-amber-50/50 text-amber-700'
+      }`}
+      title="Elegir el paso específico del catálogo del área"
+    >
+      <option value="">— elegir paso —</option>
+      {valorLegado && <option value={valor}>{valor} (fuera de catálogo)</option>}
+      {opciones.map((o) => (
+        <option key={o} value={o}>{o}</option>
+      ))}
+    </select>
   );
 }
 
