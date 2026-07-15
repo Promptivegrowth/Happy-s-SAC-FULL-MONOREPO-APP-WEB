@@ -14,7 +14,7 @@ import { formatPEN, ordenTalla, formatTalla } from '@happy/lib';
 // mensaje formateado inline en el modal.
 import { registrarVenta } from '@/server/actions/venta';
 import { emitirComprobante, obtenerSesionActiva } from '@/server/actions/caja';
-import { aplicarAdelantoAVenta } from '@/server/actions/adelantos';
+import { aplicarAdelantoAVenta, obtenerSaldoCliente } from '@/server/actions/adelantos';
 import { cerrarSesionUsuario } from '@/server/actions/auth';
 import { buscarClientesPOS, crearClienteRapidoPOS, type ClienteRow } from '@/server/actions/clientes';
 import type { SesionCajaDTO, BalanceCajaDTO } from '@/server/actions/caja-helpers';
@@ -79,7 +79,7 @@ function calcularPrecioPorCantidad(
     ? { precio: mayorista, escalon: 'MAYORISTA' }
     : { precio: publico, escalon: 'PUBLICO' };
 }
-type MetodoCarrito = 'EFECTIVO' | 'YAPE' | 'PLIN' | 'TARJETA_DEBITO' | 'TARJETA_CREDITO' | 'TRANSFERENCIA' | 'WHATSAPP_PENDIENTE';
+type MetodoCarrito = 'EFECTIVO' | 'YAPE' | 'PLIN' | 'TARJETA_DEBITO' | 'TARJETA_CREDITO' | 'TRANSFERENCIA' | 'DEPOSITO' | 'CREDITO' | 'WHATSAPP_PENDIENTE';
 /** Nueva: incluye referencia a la cuenta bancaria elegida (BCP HAPPYS, etc)
  *  para que quede registrado a qué cuenta destino se cobró. */
 type PagoLinea = { metodo: MetodoCarrito; monto: number; cuentaNombre?: string };
@@ -165,6 +165,18 @@ export function PosTerminal({
   // ahora abre modal donde el cajero pone tel/email del comprador y descarga
   // el PDF de cotización para adjuntarlo al chat.
   const [modalCotizacion, setModalCotizacion] = useState(false);
+  // Saldo a favor (adelantos) del cliente seleccionado — se consulta al
+  // elegir un cliente frecuente. Permite usar el adelanto como método de
+  // pago y cobrar solo la diferencia (pedido cliente 2026-07-13).
+  const [saldoAdelanto, setSaldoAdelanto] = useState(0);
+  useEffect(() => {
+    if (!clienteIdSeleccionado) { setSaldoAdelanto(0); return; }
+    let cancel = false;
+    obtenerSaldoCliente(clienteIdSeleccionado)
+      .then((s) => { if (!cancel) setSaldoAdelanto(s); })
+      .catch(() => { if (!cancel) setSaldoAdelanto(0); });
+    return () => { cancel = true; };
+  }, [clienteIdSeleccionado]);
   // Overrides y descuentos por línea del carrito (indexado por variante_id).
   // Cliente pidió (2026-07-10) poder editar el precio unitario y aplicar
   // descuento sin salir del carrito, como en su sistema anterior.
@@ -589,6 +601,15 @@ export function PosTerminal({
       } catch { /* la venta no se bloquea por esto */ }
     }
 
+    // Adelanto aplicado como pago (botón morado): al confirmar hay que
+    // registrar la APLICACION que consume el saldo del cliente.
+    const montoAdelanto = pagos
+      .filter((p) => p.cuentaNombre === 'ADELANTO')
+      .reduce((s, p) => s + p.monto, 0);
+    if (montoAdelanto > 0 && !clienteIdFinal) {
+      return toast.error('Para usar el adelanto, seleccione al cliente registrado (buscador de frecuentes)');
+    }
+
     await ejecutarCobro({
       tipo: tipoDoc,
       formato,
@@ -603,6 +624,7 @@ export function PosTerminal({
         telefono: telefonoCliente || null,
         email: null,
       },
+      adelanto_aplicado: montoAdelanto > 0 ? { monto: montoAdelanto } : null,
       vendedor_usuario_id: vendedorId || null,
     });
   }
@@ -741,6 +763,7 @@ export function PosTerminal({
       setBusquedaCliente('');
       setResultadosCliente([]);
       setDropdownClienteAbierto(false);
+      setSaldoAdelanto(0);
       setCobrarOpen(false);
       setCobrarKey((k) => k + 1);
       // NO reseteamos vendedorId / tipoDoc / formato — persisten por sesión.
@@ -1417,6 +1440,55 @@ export function PosTerminal({
             )}
           </div>
 
+          {/* ADELANTO como método de pago (2026-07-13): si el cliente
+              seleccionado tiene saldo a favor, aparece este botón morado.
+              Un click aplica el adelanto (capeado al saldo y al restante)
+              y el resto se cobra con otro método. Al confirmar la venta,
+              ejecutarCobro registra la APLICACION que consume el saldo. */}
+          {saldoAdelanto > 0.009 && clienteIdSeleccionado && (() => {
+            const pagoAdelanto = pagos.find((p) => p.cuentaNombre === 'ADELANTO');
+            const activo = !!pagoAdelanto;
+            const restante = Math.max(0, total - pagado);
+            const usaria = Math.min(saldoAdelanto, restante);
+            return (
+              <button
+                onClick={() => {
+                  if (activo) {
+                    setPagos((prev) => prev.filter((p) => p.cuentaNombre !== 'ADELANTO'));
+                    return;
+                  }
+                  if (usaria <= 0) return;
+                  setPagos((prev) => [...prev, { metodo: 'CREDITO', monto: usaria, cuentaNombre: 'ADELANTO' }]);
+                }}
+                disabled={!activo && usaria <= 0}
+                className={`mb-1.5 flex w-full items-center gap-1.5 rounded-md border px-2 py-1.5 text-[11px] font-semibold transition hover:brightness-95 ${
+                  activo
+                    ? 'border-violet-600 bg-violet-100 text-violet-900 ring-2 ring-violet-200'
+                    : usaria <= 0
+                      ? 'cursor-not-allowed border-violet-200 bg-violet-50 text-violet-400 opacity-50'
+                      : 'border-violet-300 bg-violet-50 text-violet-800'
+                }`}
+                title={activo
+                  ? `Click para quitar el adelanto aplicado (${formatPEN(pagoAdelanto!.monto)})`
+                  : `Aplicar ${formatPEN(usaria)} del saldo a favor (disponible ${formatPEN(saldoAdelanto)})`}
+              >
+                <Wallet className="h-3.5 w-3.5 shrink-0" />
+                <span className="flex-1 text-left">
+                  ADELANTO — saldo a favor {formatPEN(saldoAdelanto)}
+                </span>
+                {activo ? (
+                  <span className="rounded-sm bg-white/70 px-1 font-mono text-[9px] font-bold">
+                    ✓ {formatPEN(pagoAdelanto!.monto).replace('S/', '').trim()}
+                  </span>
+                ) : usaria > 0 ? (
+                  <span className="rounded-sm bg-white/70 px-1 font-mono text-[9px] font-bold">
+                    usar {formatPEN(usaria).replace('S/', '').trim()}
+                  </span>
+                ) : null}
+              </button>
+            );
+          })()}
+
           {/* Cuentas bancarias dinámicas — vienen de BD (mig 62, editables
               en ERP → Configuración → Cuentas bancarias). Un botón "activo"
               (con pago registrado) se ve con borde grueso + checkmark + monto.
@@ -1753,7 +1825,10 @@ export function PosTerminal({
 
       {/* MODAL — Adelantos de cliente */}
       {adelantosOpen && sesionActiva && (
-        <AdelantosModal onClose={() => setAdelantosOpen(false)} />
+        <AdelantosModal
+          onClose={() => setAdelantosOpen(false)}
+          cuentasBancarias={cuentasBancarias}
+        />
       )}
 
       {/* MODAL — Stock por almacén (lupita) */}
@@ -1849,21 +1924,21 @@ function construirMensajeWhatsAppExtendido(opts: {
   const totalTxt = `S/ ${opts.total.toLocaleString('es-PE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
   const primerNombre = opts.nombre_cliente.split(' ')[0] || opts.nombre_cliente;
   const lineas: string[] = [];
-  lineas.push(`¡Hola ${primerNombre}! 👋`);
+  lineas.push(`¡Hola ${primerNombre}!`);
   lineas.push('');
   lineas.push(`Gracias por tu compra en *${opts.empresa_nombre}*.`);
   lineas.push('');
-  lineas.push(`📄 ${tipoTxt}: *${opts.numero_comprobante}*`);
-  lineas.push(`📅 ${fechaTxt}`);
+  lineas.push(`${tipoTxt}: *${opts.numero_comprobante}*`);
+  lineas.push(`Fecha: ${fechaTxt}`);
   lineas.push('');
-  lineas.push('*🛍️ Productos:*');
+  lineas.push('*Productos:*');
   for (const it of opts.items) {
     const talla = it.talla.replace('T', '');
     const sub = it.cantidad * it.precioUnit;
     lineas.push(`• ${it.cantidad}× ${it.nombre} (T${talla}) — S/ ${sub.toFixed(2)}`);
   }
   lineas.push('');
-  lineas.push(`💰 *Total: ${totalTxt}*`);
+  lineas.push(`*Total: ${totalTxt}*`);
   lineas.push('');
   lineas.push('Adjuntamos el comprobante en PDF. Cualquier consulta estamos a tu disposición.');
   return lineas.join('\n');
@@ -2005,25 +2080,25 @@ function CotizacionModal({
     const fechaTxt = fecha.toLocaleDateString('es-PE', { day: '2-digit', month: 'long', year: 'numeric' });
     const vencTxt = venc.toLocaleDateString('es-PE', { day: '2-digit', month: 'long', year: 'numeric' });
     const lineas: string[] = [];
-    lineas.push(`¡Hola ${primer}! 👋`);
+    lineas.push(`¡Hola ${primer}!`);
     lineas.push('');
     lineas.push(`Te enviamos tu *cotización* de *${empresaNombre}*.`);
     lineas.push('');
-    lineas.push(`📄 *${numero}*`);
-    lineas.push(`📅 ${fechaTxt}`);
-    lineas.push(`⏳ Válida hasta: *${vencTxt}*`);
+    lineas.push(`N°: *${numero}*`);
+    lineas.push(`Fecha: ${fechaTxt}`);
+    lineas.push(`Válida hasta: *${vencTxt}*`);
     lineas.push('');
-    lineas.push('*🛍️ Productos:*');
+    lineas.push('*Productos:*');
     for (const it of items) {
       const talla = it.talla.replace('T', '');
       const sub = it.cantidad * it.precioUnit;
       lineas.push(`• ${it.cantidad}× ${it.nombre} (T${talla}) — S/ ${sub.toFixed(2)}`);
     }
     lineas.push('');
-    lineas.push(`💰 *Total: ${totalTxt}*`);
+    lineas.push(`*Total: ${totalTxt}*`);
     if (notas.trim()) {
       lineas.push('');
-      lineas.push(`📝 ${notas.trim()}`);
+      lineas.push(`Nota: ${notas.trim()}`);
     }
     lineas.push('');
     lineas.push('Adjuntamos el PDF con el detalle. ¿Confirmás la compra?');

@@ -104,7 +104,9 @@ export async function listarMovimientosCliente(clienteId: string): Promise<Adela
 const entradaSchema = z.object({
   cliente_id: z.string().uuid('Cliente requerido'),
   monto: z.number().positive('Monto debe ser mayor a 0'),
-  metodo_pago: z.enum(['EFECTIVO', 'YAPE', 'PLIN', 'TARJETA_DEBITO', 'TARJETA_CREDITO', 'TRANSFERENCIA']),
+  metodo_pago: z.enum(['EFECTIVO', 'YAPE', 'PLIN', 'TARJETA_DEBITO', 'TARJETA_CREDITO', 'TRANSFERENCIA', 'DEPOSITO']),
+  /** Cuenta bancaria destino (nombre corto del catálogo) — mig 64. */
+  referencia: z.string().max(120).nullable().optional(),
   observacion: z.string().max(300).nullable().optional(),
 });
 
@@ -143,6 +145,7 @@ export async function registrarEntradaAdelanto(input: z.input<typeof entradaSche
         tipo: 'ENTRADA',
         monto: parsed.monto,
         metodo_pago: parsed.metodo_pago,
+        referencia: parsed.referencia ?? null,
         caja_sesion_id: sesion?.id ?? null,
         registrado_por: user.id,
         observacion: parsed.observacion ?? null,
@@ -163,7 +166,8 @@ export async function registrarEntradaAdelanto(input: z.input<typeof entradaSche
 const devolucionSchema = z.object({
   cliente_id: z.string().uuid(),
   monto: z.number().positive(),
-  metodo_pago: z.enum(['EFECTIVO', 'YAPE', 'PLIN', 'TARJETA_DEBITO', 'TARJETA_CREDITO', 'TRANSFERENCIA']),
+  metodo_pago: z.enum(['EFECTIVO', 'YAPE', 'PLIN', 'TARJETA_DEBITO', 'TARJETA_CREDITO', 'TRANSFERENCIA', 'DEPOSITO']),
+  referencia: z.string().max(120).nullable().optional(),
   observacion: z.string().max(300).nullable().optional(),
 });
 
@@ -206,6 +210,7 @@ export async function registrarDevolucionAdelanto(input: z.input<typeof devoluci
         tipo: 'DEVOLUCION',
         monto: parsed.monto,
         metodo_pago: parsed.metodo_pago,
+        referencia: parsed.referencia ?? null,
         caja_sesion_id: sesion?.id ?? null,
         registrado_por: user.id,
         observacion: parsed.observacion ?? null,

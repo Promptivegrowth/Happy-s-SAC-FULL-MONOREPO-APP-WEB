@@ -34,7 +34,14 @@ import { buscarClientesPOS, crearClienteRapidoPOS, type ClienteRow } from '@/ser
 
 type ClienteResult = ClienteRow;
 
-export function AdelantosModal({ onClose }: { onClose: () => void }) {
+export function AdelantosModal({
+  onClose,
+  cuentasBancarias = [],
+}: {
+  onClose: () => void;
+  /** Cuentas del catálogo (mig 62) — mismas opciones que el cobro de ventas. */
+  cuentasBancarias?: { id: string; nombre_corto: string; banco: string | null; metodo_default: string }[];
+}) {
   const [pending, start] = useTransition();
   const [q, setQ] = useState('');
   const [results, setResults] = useState<ClienteResult[]>([]);
@@ -46,7 +53,10 @@ export function AdelantosModal({ onClose }: { onClose: () => void }) {
   // Form de nuevo movimiento
   const [tipo, setTipo] = useState<'ENTRADA' | 'DEVOLUCION'>('ENTRADA');
   const [monto, setMonto] = useState('');
-  const [metodo, setMetodo] = useState<'EFECTIVO' | 'YAPE' | 'PLIN' | 'TARJETA_DEBITO' | 'TARJETA_CREDITO' | 'TRANSFERENCIA'>('EFECTIVO');
+  const [metodo, setMetodo] = useState<'EFECTIVO' | 'YAPE' | 'PLIN' | 'TARJETA_DEBITO' | 'TARJETA_CREDITO' | 'TRANSFERENCIA' | 'DEPOSITO'>('EFECTIVO');
+  // Cuenta bancaria destino elegida (nombre corto) — se persiste como
+  // referencia en clientes_adelantos (mig 64).
+  const [cuentaNombre, setCuentaNombre] = useState<string | null>(null);
   const [obs, setObs] = useState('');
 
   // Form de "crear cliente nuevo" — se abre inline cuando no hay coincidencias
@@ -88,9 +98,9 @@ export function AdelantosModal({ onClose }: { onClose: () => void }) {
   }
 
   function registrar() {
-    if (!cliente) return toast.error('Seleccioná cliente primero');
+    if (!cliente) return toast.error('Seleccione el cliente primero');
     const m = Number(monto);
-    if (!m || m <= 0) return toast.error('Monto inválido');
+    if (!m || m <= 0) return toast.error('El monto debe ser mayor a 0');
     if (tipo === 'DEVOLUCION' && m > saldo + 0.01) {
       return toast.error(`Saldo insuficiente (S/ ${saldo.toFixed(2)})`);
     }
@@ -101,6 +111,7 @@ export function AdelantosModal({ onClose }: { onClose: () => void }) {
         cliente_id: cliente.id,
         monto: m,
         metodo_pago: metodo,
+        referencia: cuentaNombre,
         observacion: obs.trim() || null,
       });
       if (!r.ok) {
@@ -366,19 +377,46 @@ export function AdelantosModal({ onClose }: { onClose: () => void }) {
                   />
                 </div>
                 <div>
-                  <Label className="text-xs">Método *</Label>
-                  <select
-                    value={metodo}
-                    onChange={(e) => setMetodo(e.target.value as typeof metodo)}
-                    className="mt-1 h-10 w-full rounded-md border border-input bg-white px-3 text-sm"
-                  >
-                    <option value="EFECTIVO">Efectivo</option>
-                    <option value="YAPE">Yape</option>
-                    <option value="PLIN">Plin</option>
-                    <option value="TARJETA_DEBITO">Tarjeta débito</option>
-                    <option value="TARJETA_CREDITO">Tarjeta crédito</option>
-                    <option value="TRANSFERENCIA">Transferencia</option>
-                  </select>
+                  <Label className="text-xs">Cuenta / método *</Label>
+                  {/* Cuentas del catálogo (mig 62/64) — mismas que el cobro de
+                      ventas. Cliente pidió (2026-07-13) actualizar los métodos
+                      del adelanto. Elegir una cuenta setea método + referencia. */}
+                  <div className="mt-1 grid grid-cols-2 gap-1">
+                    <button
+                      type="button"
+                      onClick={() => { setMetodo('EFECTIVO'); setCuentaNombre(null); }}
+                      className={`rounded-md border px-2 py-1.5 text-[11px] font-semibold transition hover:brightness-95 ${
+                        metodo === 'EFECTIVO' && !cuentaNombre
+                          ? 'border-emerald-600 bg-emerald-500 text-white'
+                          : 'border-emerald-200 bg-emerald-50 text-emerald-800'
+                      }`}
+                    >
+                      {metodo === 'EFECTIVO' && !cuentaNombre && '✓ '}Efectivo
+                    </button>
+                    {cuentasBancarias.map((c) => {
+                      const activo = cuentaNombre === c.nombre_corto;
+                      const banco = (c.banco ?? '').toUpperCase();
+                      const color =
+                        banco === 'BCP' ? (activo ? 'border-blue-600 bg-blue-500 text-white' : 'border-blue-200 bg-blue-50 text-blue-800') :
+                        banco === 'INTERBANK' ? (activo ? 'border-emerald-600 bg-emerald-600 text-white' : 'border-emerald-200 bg-emerald-50 text-emerald-800') :
+                        banco === 'BBVA' ? (activo ? 'border-indigo-600 bg-indigo-500 text-white' : 'border-indigo-200 bg-indigo-50 text-indigo-800') :
+                        (activo ? 'border-slate-600 bg-slate-500 text-white' : 'border-slate-200 bg-slate-50 text-slate-800');
+                      return (
+                        <button
+                          key={c.id}
+                          type="button"
+                          onClick={() => {
+                            setMetodo(c.metodo_default as typeof metodo);
+                            setCuentaNombre(c.nombre_corto);
+                          }}
+                          className={`truncate rounded-md border px-2 py-1.5 text-[11px] font-semibold transition hover:brightness-95 ${color}`}
+                          title={c.nombre_corto}
+                        >
+                          {activo && '✓ '}{c.nombre_corto}
+                        </button>
+                      );
+                    })}
+                  </div>
                 </div>
               </div>
 
