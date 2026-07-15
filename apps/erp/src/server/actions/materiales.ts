@@ -95,24 +95,36 @@ export async function crearMaterial(_prev: unknown, fd: FormData): Promise<Actio
     const cleaned = clean(data);
 
     // Si el código vino vacío, autogenerar como <PREFIJO_CAT><NNNN>.
-    if (!cleaned.codigo) {
-      const prefix = PREFIJO_CAT[cleaned.categoria];
+    // Con reintento (2026-07-13): los imports masivos crearon códigos sin
+    // pasar por el contador `correlativos`, y el autogenerado podía chocar
+    // con uno existente ("Código INSN0003 ya existe" aunque el campo estaba
+    // vacío). Si choca, se pide el siguiente correlativo hasta encontrar
+    // uno libre (máx. 25 intentos). El contador además fue sincronizado
+    // con el máximo real por prefijo.
+    const autogenerado = !cleaned.codigo;
+    const prefix = PREFIJO_CAT[cleaned.categoria];
+    const generarCodigo = async () => {
       const { data: nro, error: errNro } = await sb.rpc('next_correlativo', {
         p_clave: `MAT_${prefix}`,
         p_padding: 4,
       });
       if (errNro) throw new Error(errNro.message);
-      cleaned.codigo = `${prefix}${nro}`;
-    }
+      return `${prefix}${nro}`;
+    };
+    if (autogenerado) cleaned.codigo = await generarCodigo();
 
-    const { data: row, error } = await sb.from('materiales').insert(cleaned).select('id').single();
-    if (error) {
+    for (let intento = 0; ; intento++) {
+      const { data: row, error } = await sb.from('materiales').insert(cleaned).select('id').single();
+      if (!error) return { id: row!.id };
+      if (error.code === '23505' && autogenerado && intento < 25) {
+        cleaned.codigo = await generarCodigo();
+        continue;
+      }
       if (error.code === '23505') {
         throw new Error(`Código "${cleaned.codigo}" ya existe — déjalo vacío para autogenerar`);
       }
       throw new Error(error.message);
     }
-    return { id: row.id };
   });
   if (r.ok) {
     await bumpPaths('/materiales');
