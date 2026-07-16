@@ -667,7 +667,10 @@ export function DevolucionModal({
                       metodo=metodo_default de la cuenta + cuentaNombre.
                       Click en EFECTIVO/CRÉDITO limpia cuentaNombre. */}
                   <div className="mt-1 grid grid-cols-2 gap-1.5">
-                    {cuentasBancarias.map((c) => {
+                    {/* Se excluyen cuentas tipo EFECTIVO del catálogo — este
+                        modal ya tiene su botón Efectivo fijo abajo y salían
+                        DOS opciones "Efectivo" (observación cliente 2026-07-14). */}
+                    {cuentasBancarias.filter((c) => c.metodo_default !== 'EFECTIVO').map((c) => {
                       const activo = cuentaNombre === c.nombre_corto;
                       const banco = (c.banco ?? '').toUpperCase();
                       const color =

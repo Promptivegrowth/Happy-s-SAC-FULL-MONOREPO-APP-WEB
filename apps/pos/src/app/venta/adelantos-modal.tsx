@@ -393,7 +393,10 @@ export function AdelantosModal({
                     >
                       {metodo === 'EFECTIVO' && !cuentaNombre && '✓ '}Efectivo
                     </button>
-                    {cuentasBancarias.map((c) => {
+                    {/* Cuentas EFECTIVO del catálogo excluidas — el botón
+                        Efectivo fijo de arriba ya cubre ese caso (evita
+                        duplicado, observación cliente 2026-07-14). */}
+                    {cuentasBancarias.filter((c) => c.metodo_default !== 'EFECTIVO').map((c) => {
                       const activo = cuentaNombre === c.nombre_corto;
                       const banco = (c.banco ?? '').toUpperCase();
                       const color =
