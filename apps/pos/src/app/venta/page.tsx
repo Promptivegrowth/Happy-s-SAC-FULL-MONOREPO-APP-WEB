@@ -21,7 +21,10 @@ type VarianteRow = {
     codigo: string;
     imagen_principal_url: string | null;
     categoria_id: string | null;
+    familia_id: string | null;
+    color_variante: string | null;
     categorias: { id: string; nombre: string; activo: boolean } | null;
+    productos_familias: { id: string; nombre: string } | null;
   } | null;
 };
 
@@ -103,7 +106,7 @@ export default async function VentaPage() {
       sb
         .from('productos_variantes')
         .select(
-          'id, sku, codigo_barras, talla, precio_publico, precio_mayorista_a, precio_industrial, productos!inner(id, nombre, codigo, imagen_principal_url, categoria_id, activo, categorias!productos_categoria_id_fkey(id, nombre, activo))',
+          'id, sku, codigo_barras, talla, precio_publico, precio_mayorista_a, precio_industrial, productos!inner(id, nombre, codigo, imagen_principal_url, categoria_id, familia_id, color_variante, activo, categorias!productos_categoria_id_fkey(id, nombre, activo), productos_familias(id, nombre))',
         )
         .eq('activo', true)
         .eq('productos.activo', true)

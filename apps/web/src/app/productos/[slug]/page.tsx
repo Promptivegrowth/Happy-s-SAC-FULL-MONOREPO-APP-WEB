@@ -66,6 +66,8 @@ type ProductoDetalle = {
   piezas_descripcion: string | null;
   genero: string | null;
   categoria_id: string | null;
+  familia_id: string | null;
+  color_variante: string | null;
   categoria?: { nombre: string; slug: string };
   productos_variantes: {
     id: string;
@@ -91,7 +93,7 @@ export default async function ProductoDetallePage({ params }: { params: Promise<
       `
       *,
       productos!inner(
-        id, codigo, nombre, descripcion, imagen_principal_url, piezas_descripcion, genero, categoria_id,
+        id, codigo, nombre, descripcion, imagen_principal_url, piezas_descripcion, genero, categoria_id, familia_id, color_variante,
         categoria:categorias!productos_categoria_id_fkey(nombre, slug),
         productos_variantes(id, sku, talla, precio_publico, precio_mayorista_a, precio_mayorista_b, imagen_url),
         productos_imagenes(id, url, orden, alt_texto)
@@ -105,9 +107,9 @@ export default async function ProductoDetallePage({ params }: { params: Promise<
   if (!pub) notFound();
   const prod = (pub as unknown as { productos: ProductoDetalle }).productos;
 
-  // Disparar las queries dependientes EN PARALELO (rating, reseñas, relacionados, stock).
+  // Disparar las queries dependientes EN PARALELO (rating, reseñas, relacionados, stock, colores de familia).
   const varianteIds = prod.productos_variantes.map((v) => v.id);
-  const [{ data: rating }, { data: resenasData }, { data: relData }, { data: stocksData }] = await Promise.all([
+  const [{ data: rating }, { data: resenasData }, { data: relData }, { data: stocksData }, { data: familiaData }] = await Promise.all([
     sb
       .from('v_productos_rating')
       .select('total_resenas, promedio_rating')
@@ -149,7 +151,36 @@ export default async function ProductoDetallePage({ params }: { params: Promise<
           .select('variante_id, stock_total')
           .in('variante_id', varianteIds)
       : Promise.resolve({ data: [] as { variante_id: string; stock_total: number }[] }),
+    // Colores hermanos de la familia (mig 65): otros productos publicados
+    // con el mismo familia_id. Cada color es SU propio producto/publicación;
+    // acá solo armamos el selector de color que navega entre ellos.
+    prod.familia_id
+      ? // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        (sb as unknown as { from: (t: string) => any })
+          .from('productos_publicacion')
+          .select('producto_id, slug, publicado, productos!inner(id, nombre, color_variante, imagen_principal_url, familia_id)')
+          .eq('publicado', true)
+          .eq('productos.familia_id', prod.familia_id)
+          .limit(30)
+      : Promise.resolve({ data: [] as never[] }),
   ]);
+
+  // Selector de color: solo tiene sentido si hay 2+ colores publicados.
+  type FamiliaRow = {
+    producto_id: string;
+    slug: string | null;
+    productos: { nombre: string; color_variante: string | null; imagen_principal_url: string | null } | null;
+  };
+  const coloresFamilia = ((familiaData ?? []) as FamiliaRow[])
+    .filter((f) => f.slug && f.productos)
+    .map((f) => ({
+      productoId: f.producto_id,
+      slug: f.slug as string,
+      etiqueta: f.productos!.color_variante?.trim() || f.productos!.nombre,
+      imagen: f.productos!.imagen_principal_url,
+      actual: f.producto_id === prod.id,
+    }))
+    .sort((a, b) => a.etiqueta.localeCompare(b.etiqueta, 'es'));
 
   const stockMap = new Map<string, number>();
   for (const s of stocksData ?? []) {
@@ -316,6 +347,46 @@ export default async function ProductoDetallePage({ params }: { params: Promise<
             <div className="rounded-lg border bg-corp-50/40 p-3 text-sm">
               <strong className="text-corp-900">Incluye: </strong>
               <span className="text-slate-700">{prod.piezas_descripcion}</span>
+            </div>
+          )}
+
+          {/* Selector de color (familia de producto, mig 65). Cada chip
+              navega a la publicación del color hermano. */}
+          {coloresFamilia.length > 1 && (
+            <div>
+              <p className="mb-2 text-sm font-medium text-corp-900">
+                Color:{' '}
+                <span className="font-semibold text-happy-600">
+                  {coloresFamilia.find((c) => c.actual)?.etiqueta ?? prod.color_variante ?? ''}
+                </span>
+              </p>
+              <div className="flex flex-wrap gap-2">
+                {coloresFamilia.map((c) => (
+                  <Link
+                    key={c.productoId}
+                    href={`/productos/${c.slug}`}
+                    className={`flex items-center gap-2 rounded-full border py-1 pl-1 pr-3 text-sm transition ${
+                      c.actual
+                        ? 'border-happy-500 bg-happy-50 font-semibold text-happy-700 ring-1 ring-happy-500'
+                        : 'border-slate-300 bg-white text-slate-700 hover:border-happy-400 hover:bg-happy-50'
+                    }`}
+                    aria-current={c.actual ? 'page' : undefined}
+                  >
+                    {c.imagen ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img
+                        src={c.imagen}
+                        alt={c.etiqueta}
+                        className="h-7 w-7 rounded-full border object-cover"
+                        loading="lazy"
+                      />
+                    ) : (
+                      <span className="flex h-7 w-7 items-center justify-center rounded-full bg-slate-100 text-xs">🎭</span>
+                    )}
+                    {c.etiqueta}
+                  </Link>
+                ))}
+              </div>
             </div>
           )}
 

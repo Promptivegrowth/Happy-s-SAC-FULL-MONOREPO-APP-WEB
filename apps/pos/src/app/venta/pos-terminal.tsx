@@ -44,8 +44,24 @@ type Variante = {
     codigo: string;
     imagen_principal_url: string | null;
     categoria_id: string | null;
+    familia_id?: string | null;
+    color_variante?: string | null;
     categorias?: { id: string; nombre: string; activo: boolean } | null;
+    productos_familias?: { id: string; nombre: string } | null;
   };
+};
+
+/** Grupo de venta: una familia (Polca para niña ⊃ rojo/fucsia/oro) o un
+ *  producto suelto sin familia. El POS muestra UNA tarjeta por grupo con
+ *  stock consolidado; el color se elige dentro del modal de tallas. */
+type GrupoVenta = {
+  key: string;                 // familia_id o producto_id
+  nombre: string;              // nombre de familia o del producto
+  imagen: string | null;
+  categoriaIds: Set<string>;
+  /** Un "color" = un producto miembro. Para productos sin familia hay 1. */
+  colores: { productoId: string; etiqueta: string; imagen: string | null; variantes: Variante[] }[];
+  variantesTodas: Variante[];
 };
 type Caja = { id: string; codigo: string; nombre: string; almacen_id: string };
 type Categoria = { id: string; nombre: string; activo: boolean };
@@ -185,6 +201,9 @@ export function PosTerminal({
   const [vista, setVista] = useState<'busqueda' | 'catalogo'>('busqueda');
   const [catFiltro, setCatFiltro] = useState<string>('');
   const [productoTallasOpen, setProductoTallasOpen] = useState<string | null>(null);
+  // Color (producto miembro) activo dentro del modal de tallas — familias
+  // multi-color (mig 65). Para grupos de 1 color se autoselecciona.
+  const [colorSelId, setColorSelId] = useState<string | null>(null);
   // Header del panel derecho: tipo comprobante, vendedor, formato PDF.
   // Persistidos en localStorage por sesión — el cajero no elige c/venta.
   const [tipoDoc, setTipoDoc] = useState<TipoDoc>('NOTA_VENTA');
@@ -361,23 +380,62 @@ export function PosTerminal({
   // cliente reportó (2026-07-10) que al escribir "bombero" no aparecía nada,
   // ni en el dropdown ni "abajo" — porque el catálogo mostraba TODOS los
   // productos sin filtrar. Ahora el search también reduce el grid.
-  const productosAgrupados = useMemo(() => {
-    const map = new Map<string, { producto: Variante['productos']; variantes: Variante[] }>();
-    const qCat = search.trim().toLowerCase();
+  // Agrupado por FAMILIA (mig 65): los productos-color de una misma familia
+  // (Polca rojo/fucsia/oro) se consolidan en UN grupo "Polca para niña" con
+  // stock total; el color se elige dentro del modal de tallas. Los productos
+  // sin familia son su propio grupo de 1 color.
+  const gruposBase = useMemo(() => {
+    const map = new Map<string, GrupoVenta>();
     for (const v of variantes) {
-      if (catFiltro && v.productos.categoria_id !== catFiltro) continue;
-      if (qCat) {
-        const nombre = v.productos.nombre.toLowerCase();
-        const sku = v.sku.toLowerCase();
-        const cb = v.codigo_barras?.toLowerCase() ?? '';
-        if (!nombre.includes(qCat) && !sku.includes(qCat) && !cb.includes(qCat)) continue;
+      const famId = v.productos.familia_id ?? null;
+      const key = famId ?? v.productos.id;
+      let grupo = map.get(key);
+      if (!grupo) {
+        grupo = {
+          key,
+          nombre: famId ? (v.productos.productos_familias?.nombre ?? v.productos.nombre) : v.productos.nombre,
+          imagen: v.productos.imagen_principal_url,
+          categoriaIds: new Set(),
+          colores: [],
+          variantesTodas: [],
+        };
+        map.set(key, grupo);
       }
-      const cur = map.get(v.productos.id);
-      if (cur) cur.variantes.push(v);
-      else map.set(v.productos.id, { producto: v.productos, variantes: [v] });
+      if (v.productos.categoria_id) grupo.categoriaIds.add(v.productos.categoria_id);
+      grupo.variantesTodas.push(v);
+      let color = grupo.colores.find((c) => c.productoId === v.productos.id);
+      if (!color) {
+        color = {
+          productoId: v.productos.id,
+          etiqueta: v.productos.color_variante?.trim() || v.productos.nombre,
+          imagen: v.productos.imagen_principal_url,
+          variantes: [],
+        };
+        grupo.colores.push(color);
+        if (!grupo.imagen && v.productos.imagen_principal_url) grupo.imagen = v.productos.imagen_principal_url;
+      }
+      color.variantes.push(v);
     }
-    return Array.from(map.values()).sort((a, b) => a.producto.nombre.localeCompare(b.producto.nombre));
-  }, [variantes, catFiltro, search]);
+    const grupos = Array.from(map.values());
+    for (const g of grupos) g.colores.sort((a, b) => a.etiqueta.localeCompare(b.etiqueta));
+    return grupos.sort((a, b) => a.nombre.localeCompare(b.nombre));
+  }, [variantes]);
+
+  // Vista filtrada del catálogo (categoría + texto del buscador).
+  const productosAgrupados = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    return gruposBase.filter((g) => {
+      if (catFiltro && !g.categoriaIds.has(catFiltro)) return false;
+      if (!q) return true;
+      return (
+        g.nombre.toLowerCase().includes(q) ||
+        g.colores.some((c) => c.etiqueta.toLowerCase().includes(q)) ||
+        g.variantesTodas.some(
+          (v) => v.sku.toLowerCase().includes(q) || (v.codigo_barras ?? '').toLowerCase().includes(q),
+        )
+      );
+    });
+  }, [gruposBase, catFiltro, search]);
 
   function agregarPorBarcode(input: string) {
     const barcode = input.trim();
@@ -396,11 +454,11 @@ export function PosTerminal({
     //    el cajero elija talla. Si hay varios, tambien abrimos el primero
     //    (el dropdown de sugerencias ya listaba todos abajo del input).
     const q = barcode.toLowerCase();
-    const productoMatch = productosAgrupados.find(({ producto }) =>
-      producto.nombre.toLowerCase().includes(q),
+    const grupoMatch = gruposBase.find(
+      (g) => g.nombre.toLowerCase().includes(q) || g.colores.some((c) => c.etiqueta.toLowerCase().includes(q)),
     );
-    if (productoMatch) {
-      setProductoTallasOpen(productoMatch.producto.id);
+    if (grupoMatch) {
+      abrirModalTallas(grupoMatch.key);
       // Cliente pidió (2026-07-10) que el buscador quede libre al elegir
       // un producto, para poder tipear el siguiente sin borrar antes.
       setSearch('');
@@ -785,38 +843,50 @@ export function PosTerminal({
     setModalCotizacion(true);
   }
 
+  // Sugerencias del buscador — 1 fila por GRUPO (familia o producto suelto).
   const sugerencias = useMemo(() => {
     const q = search.trim().toLowerCase();
     if (!q) return [];
-    // Buscar y colapsar por PRODUCTO (no por variante) — cliente pidió
-    // (post-2026-07-08) reducir la lista larga de sugerencias mostrando
-    // 1 fila por producto. Al hacer click se abre el selector de tallas
-    // lateral (no tapa el carrito).
-    const matches = variantes.filter((v) =>
-      v.sku.toLowerCase().includes(q) ||
-      v.codigo_barras?.toLowerCase().includes(q) ||
-      v.productos.nombre.toLowerCase().includes(q),
-    );
-    const porProducto = new Map<string, { producto: Variante['productos']; tallasCount: number; precioMin: number }>();
-    for (const v of matches) {
-      const cur = porProducto.get(v.productos.id);
-      const precio = Number(v.precio_publico ?? 0);
-      if (cur) {
-        cur.tallasCount += 1;
-        cur.precioMin = Math.min(cur.precioMin, precio);
-      } else {
-        porProducto.set(v.productos.id, { producto: v.productos, tallasCount: 1, precioMin: precio });
-      }
-    }
-    return Array.from(porProducto.values()).slice(0, 20);
-  }, [search, variantes]);
+    return gruposBase
+      .filter(
+        (g) =>
+          g.nombre.toLowerCase().includes(q) ||
+          g.colores.some((c) => c.etiqueta.toLowerCase().includes(q)) ||
+          g.variantesTodas.some(
+            (v) => v.sku.toLowerCase().includes(q) || (v.codigo_barras ?? '').toLowerCase().includes(q),
+          ),
+      )
+      .map((g) => ({
+        grupo: g,
+        tallasCount: g.variantesTodas.length,
+        coloresCount: g.colores.length,
+        precioMin: Math.min(...g.variantesTodas.map((v) => Number(v.precio_publico ?? 0)).filter((x) => x > 0), Infinity),
+      }))
+      .slice(0, 20);
+  }, [search, gruposBase]);
+
+  /** Grupo abierto en el modal de tallas + color activo. */
+  const grupoOpen = useMemo(
+    () => (productoTallasOpen ? gruposBase.find((g) => g.key === productoTallasOpen) ?? null : null),
+    [productoTallasOpen, gruposBase],
+  );
+
+  /** Abre el modal de tallas para un grupo, autoseleccionando el primer
+   *  color con stock (o el primero a secas). */
+  function abrirModalTallas(groupKey: string) {
+    const g = gruposBase.find((x) => x.key === groupKey);
+    if (!g) return;
+    const conStock = g.colores.find((c) => c.variantes.some((v) => (stockPorVariante[v.id] ?? 0) > 0));
+    setColorSelId((conStock ?? g.colores[0])?.productoId ?? null);
+    setProductoTallasOpen(groupKey);
+  }
 
   const tallasDelProductoOpen = useMemo(() => {
-    if (!productoTallasOpen) return [];
-    return [...variantes.filter((v) => v.productos.id === productoTallasOpen)].sort(
-      (a, b) => ordenTalla(a.talla) - ordenTalla(b.talla),
-    );
-  }, [productoTallasOpen, variantes]);
+    if (!grupoOpen) return [];
+    const color = grupoOpen.colores.find((c) => c.productoId === colorSelId) ?? grupoOpen.colores[0];
+    if (!color) return [];
+    return [...color.variantes].sort((a, b) => ordenTalla(a.talla) - ordenTalla(b.talla));
+  }, [grupoOpen, colorSelId]);
 
   return (
     <div className="grid h-screen grid-cols-1 lg:grid-cols-[1fr_720px]">
@@ -936,18 +1006,23 @@ export function PosTerminal({
           </div>
           {sugerencias.length > 0 && (
             <div className="mt-2 max-h-96 overflow-auto rounded-md border bg-white shadow-sm" data-pos-no-focus>
-              {sugerencias.map(({ producto, tallasCount, precioMin }) => (
+              {sugerencias.map(({ grupo, tallasCount, coloresCount, precioMin }) => (
                 <button
-                  key={producto.id}
-                  onClick={() => { setProductoTallasOpen(producto.id); setSearch(''); }}
+                  key={grupo.key}
+                  onClick={() => { abrirModalTallas(grupo.key); setSearch(''); }}
                   className="flex w-full items-center gap-2 border-b px-3 py-1.5 text-left text-sm hover:bg-happy-50 last:border-0"
                 >
-                  <div className="flex-1 font-medium text-corp-900 truncate">{producto.nombre}</div>
+                  <div className="flex-1 font-medium text-corp-900 truncate">{grupo.nombre}</div>
+                  {coloresCount > 1 && (
+                    <Badge variant="secondary" className="text-[10px]">
+                      {coloresCount} colores
+                    </Badge>
+                  )}
                   <Badge variant="outline" className="text-[10px]">
                     {tallasCount} {tallasCount === 1 ? 'talla' : 'tallas'}
                   </Badge>
                   <div className="font-semibold text-happy-600">
-                    desde {formatPEN(precioMin)}
+                    desde {Number.isFinite(precioMin) ? formatPEN(precioMin) : 'S/—'}
                   </div>
                 </button>
               ))}
@@ -989,26 +1064,23 @@ export function PosTerminal({
                 </div>
               ) : (
                 <div className="grid gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
-                  {productosAgrupados.map(({ producto, variantes: vars }) => {
+                  {productosAgrupados.map((g) => {
                     const precioMin = Math.min(
-                      ...vars.map((v) => Number(v.precio_publico ?? 0)).filter((x) => x > 0),
+                      ...g.variantesTodas.map((v) => Number(v.precio_publico ?? 0)).filter((x) => x > 0),
                     );
-                    // Si alguna variante tiene stock > 0 hay stock disponible.
-                    // (NO usar suma porque variantes con stock negativo —dato
-                    // corrupto de pruebas— harían que stockTotal sea -1 y la
-                    // comparación stockTotal === 0 fallaba.)
-                    const stockTotal = vars.reduce((a, v) => a + Math.max(0, stockPorVariante[v.id] ?? 0), 0);
+                    // Stock CONSOLIDADO de todos los colores de la familia.
+                    const stockTotal = g.variantesTodas.reduce((a, v) => a + Math.max(0, stockPorVariante[v.id] ?? 0), 0);
                     return (
                       <button
-                        key={producto.id}
-                        onClick={() => { setProductoTallasOpen(producto.id); setSearch(''); }}
+                        key={g.key}
+                        onClick={() => { abrirModalTallas(g.key); setSearch(''); }}
                         className="group flex flex-col overflow-hidden rounded-lg border bg-white text-left transition hover:-translate-y-0.5 hover:border-happy-400 hover:shadow-md"
                       >
                         <div className="relative aspect-square bg-slate-50">
-                          {producto.imagen_principal_url ? (
+                          {g.imagen ? (
                             <Image
-                              src={producto.imagen_principal_url}
-                              alt={producto.nombre}
+                              src={g.imagen}
+                              alt={g.nombre}
                               fill
                               className="object-cover transition group-hover:scale-105"
                               sizes="200px"
@@ -1016,6 +1088,11 @@ export function PosTerminal({
                             />
                           ) : (
                             <div className="flex h-full items-center justify-center text-3xl">🎭</div>
+                          )}
+                          {g.colores.length > 1 && (
+                            <span className="absolute left-1.5 top-1.5 rounded-full bg-white/90 px-2 py-0.5 text-[9px] font-bold text-corp-900 shadow-sm ring-1 ring-slate-200">
+                              {g.colores.length} colores
+                            </span>
                           )}
                           {stockTotal === 0 && (
                             <div className="absolute inset-0 flex items-center justify-center bg-slate-900/40">
@@ -1026,10 +1103,15 @@ export function PosTerminal({
                           )}
                         </div>
                         <div className="p-2">
-                          <p className="line-clamp-2 text-xs font-medium leading-tight text-corp-900">{producto.nombre}</p>
-                          <p className="mt-1 font-display text-sm font-semibold text-happy-600">
-                            {Number.isFinite(precioMin) ? formatPEN(precioMin) : 'S/—'}
-                          </p>
+                          <p className="line-clamp-2 text-xs font-medium leading-tight text-corp-900">{g.nombre}</p>
+                          <div className="mt-1 flex items-center justify-between">
+                            <p className="font-display text-sm font-semibold text-happy-600">
+                              {Number.isFinite(precioMin) ? formatPEN(precioMin) : 'S/—'}
+                            </p>
+                            {stockTotal > 0 && (
+                              <span className="text-[9px] font-semibold text-slate-400">{stockTotal} und</span>
+                            )}
+                          </div>
                         </div>
                       </button>
                     );
@@ -1653,7 +1735,7 @@ export function PosTerminal({
       {productoTallasOpen && (
         <div
           className="fixed inset-0 z-50 flex h-screen items-center justify-center bg-black/30 p-4 lg:left-0 lg:right-[720px] lg:w-auto"
-          onClick={() => setProductoTallasOpen(null)}
+          onClick={() => { setProductoTallasOpen(null); setColorSelId(null); }}
           data-pos-no-focus
         >
           <Card
@@ -1663,14 +1745,14 @@ export function PosTerminal({
             <div className="mb-4 flex items-start gap-3">
               {/* Imagen del producto — cliente pidió (2026-07-10) que el modal
                   muestre la foto además del nombre, para reconocer el disfraz
-                  de un vistazo antes de elegir la talla. Fallback emoji si no
-                  hay imagen cargada. */}
+                  de un vistazo antes de elegir la talla. Con familias (mig 65)
+                  la foto es la del COLOR seleccionado. Fallback emoji. */}
               <div className="relative h-16 w-16 shrink-0 overflow-hidden rounded-lg border bg-slate-100">
-                {tallasDelProductoOpen[0]?.productos.imagen_principal_url ? (
+                {(tallasDelProductoOpen[0]?.productos.imagen_principal_url ?? grupoOpen?.imagen) ? (
                   // eslint-disable-next-line @next/next/no-img-element
                   <img
-                    src={tallasDelProductoOpen[0].productos.imagen_principal_url}
-                    alt={tallasDelProductoOpen[0].productos.nombre}
+                    src={(tallasDelProductoOpen[0]?.productos.imagen_principal_url ?? grupoOpen?.imagen) as string}
+                    alt={grupoOpen?.nombre ?? ''}
                     className="h-full w-full object-cover"
                     loading="lazy"
                   />
@@ -1680,16 +1762,49 @@ export function PosTerminal({
               </div>
               <div className="min-w-0 flex-1">
                 <h3 className="truncate font-display text-xl font-semibold text-corp-900">
-                  {tallasDelProductoOpen[0]?.productos.nombre}
+                  {grupoOpen?.nombre ?? tallasDelProductoOpen[0]?.productos.nombre}
                 </h3>
                 <p className="mt-0.5 text-sm text-slate-500">
-                  Toca una talla para agregarla. Podés agregar varias sin cerrar este panel.
+                  Toque una talla para agregarla. Puede agregar varias sin cerrar este panel.
                 </p>
               </div>
-              <button onClick={() => setProductoTallasOpen(null)} className="shrink-0 rounded p-1.5 text-slate-400 hover:bg-slate-100">
+              <button onClick={() => { setProductoTallasOpen(null); setColorSelId(null); }} className="shrink-0 rounded p-1.5 text-slate-400 hover:bg-slate-100">
                 <X className="h-5 w-5" />
               </button>
             </div>
+            {/* Selector de color (familias, mig 65): un chip por producto-color
+                de la familia. Cambiar de color cambia las tallas/stock de abajo.
+                Solo aparece si la familia tiene más de un color. */}
+            {grupoOpen && grupoOpen.colores.length > 1 && (
+              <div className="mb-4 flex flex-wrap gap-2">
+                {grupoOpen.colores.map((c) => {
+                  const stockColor = c.variantes.reduce(
+                    (a, v) => a + Math.max(0, stockPorVariante[v.id] ?? 0),
+                    0,
+                  );
+                  const sel = c.productoId === colorSelId;
+                  return (
+                    <button
+                      key={c.productoId}
+                      onClick={() => setColorSelId(c.productoId)}
+                      className={`flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-semibold transition ${
+                        sel
+                          ? 'border-happy-500 bg-happy-500 text-white shadow-sm'
+                          : stockColor === 0
+                            ? 'border-dashed border-slate-300 bg-slate-50 text-slate-400'
+                            : 'border-slate-300 bg-white text-slate-700 hover:border-happy-400 hover:bg-happy-50'
+                      }`}
+                      title={stockColor === 0 ? 'Sin stock en este color' : `${stockColor} und disponibles`}
+                    >
+                      {c.etiqueta}
+                      <span className={`text-[10px] font-normal ${sel ? 'text-white/80' : 'text-slate-400'}`}>
+                        {stockColor}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
             <div className="grid grid-cols-4 gap-3">
               {tallasDelProductoOpen.map((v) => {
                 const stock = stockPorVariante[v.id] ?? 0;

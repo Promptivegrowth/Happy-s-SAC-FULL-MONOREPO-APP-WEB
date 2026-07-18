@@ -21,6 +21,12 @@ const productoSchema = z.object({
   imagen_principal_url: z.string().url().optional().or(z.literal('')),
   version_ficha: z.string().default('v1.0'),
   activo: z.boolean().default(true),
+  // Familias por color (mig 65): familia existente y/o nombre de familia
+  // nueva a crear al vuelo. color_variante = etiqueta del color de ESTE
+  // producto dentro de la familia (ej. "Rojo").
+  familia_id: z.string().uuid().optional().or(z.literal('')),
+  familia_nueva: z.string().max(120).optional().or(z.literal('')),
+  color_variante: z.string().max(60).optional().or(z.literal('')),
 });
 
 function parseForm(fd: FormData) {
@@ -37,7 +43,36 @@ function parseForm(fd: FormData) {
     imagen_principal_url: fd.get('imagen_principal_url') || '',
     version_ficha: fd.get('version_ficha') || 'v1.0',
     activo: fd.get('activo') === 'on',
+    familia_id: fd.get('familia_id') || '',
+    familia_nueva: fd.get('familia_nueva') || '',
+    color_variante: fd.get('color_variante') || '',
   });
+}
+
+/**
+ * Resuelve la familia final: si vino `familia_nueva` (texto), la crea (o
+ * reutiliza si el nombre ya existe) y devuelve su id; sino devuelve
+ * familia_id tal cual (o null). Ver mig 65.
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function resolverFamilia(sb: any, familiaId: string, familiaNueva: string): Promise<string | null> {
+  const nueva = (familiaNueva ?? '').trim();
+  if (nueva) {
+    const { data: ex } = await sb
+      .from('productos_familias')
+      .select('id')
+      .ilike('nombre', nueva)
+      .maybeSingle();
+    if (ex?.id) return ex.id as string;
+    const { data: row, error } = await sb
+      .from('productos_familias')
+      .insert({ nombre: nueva })
+      .select('id')
+      .single();
+    if (error) throw new Error(`No se pudo crear la familia: ${error.message}`);
+    return row.id as string;
+  }
+  return familiaId || null;
 }
 
 function clean(data: ReturnType<typeof parseForm>) {
@@ -54,6 +89,8 @@ function clean(data: ReturnType<typeof parseForm>) {
     imagen_principal_url: data.imagen_principal_url || null,
     version_ficha: data.version_ficha,
     activo: data.activo,
+    color_variante: (data.color_variante ?? '').trim() || null,
+    // familia_id se resuelve aparte (puede requerir crear la familia)
   };
 }
 
@@ -167,8 +204,15 @@ export async function crearProducto(_prev: unknown, fd: FormData): Promise<Actio
     if (!cleaned.codigo) {
       cleaned.codigo = await autogenerarCodigoProducto(sb, cleaned.categoria_id);
     }
+    const familia_id = await resolverFamilia(sb, data.familia_id ?? '', data.familia_nueva ?? '');
 
-    const { data: row, error } = await sb.from('productos').insert(cleaned).select('id').single();
+    // Cast: familia_id/color_variante son de mig 65 (aún no en types autogen).
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data: row, error } = await (sb as unknown as { from: (t: string) => any })
+      .from('productos')
+      .insert({ ...cleaned, familia_id })
+      .select('id')
+      .single();
     if (error) throw new Error(error.message);
 
     // Crear receta v1.0 vacía y la entrada de publicación
@@ -206,8 +250,14 @@ export async function actualizarProducto(id: string, _prev: unknown, fd: FormDat
     // UNIQUE en cuanto otro producto también quedara con código vacío.
     const { codigo: _omitCodigo, ...patch } = cleaned;
     void _omitCodigo;
+    const familia_id = await resolverFamilia(sb, data.familia_id ?? '', data.familia_nueva ?? '');
 
-    const { error } = await sb.from('productos').update(patch).eq('id', id);
+    // Cast: familia_id/color_variante son de mig 65 (aún no en types autogen).
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { error } = await (sb as unknown as { from: (t: string) => any })
+      .from('productos')
+      .update({ ...patch, familia_id })
+      .eq('id', id);
     if (error) throw new Error(error.message);
 
     // Sincronizar extras (puede ser lista vacía → borra todas)

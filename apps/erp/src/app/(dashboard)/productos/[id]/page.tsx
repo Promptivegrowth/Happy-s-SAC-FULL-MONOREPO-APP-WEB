@@ -36,6 +36,14 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
     sb.from('recetas').select('id').eq('producto_id', id).eq('activa', true).maybeSingle(),
   ]);
   if (!prod) notFound();
+
+  // Familias por color (mig 65) — lookup para el selector del formulario.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data: fams } = await (sb as unknown as { from: (t: string) => any })
+    .from('productos_familias')
+    .select('id, nombre')
+    .eq('activo', true)
+    .order('nombre');
   const categoriasExtraIniciales = ((extras ?? []) as { categoria_id: string }[]).map((e) => e.categoria_id);
 
   // Costo de última producción por talla.
@@ -101,6 +109,7 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
             initial={prod}
             categorias={cats ?? []}
             campanas={camps ?? []}
+            familias={(fams ?? []) as { id: string; nombre: string }[]}
             categoriasExtraIniciales={categoriasExtraIniciales}
           />
         </TabsContent>

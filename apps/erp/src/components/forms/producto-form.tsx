@@ -26,6 +26,8 @@ type Producto = {
   imagen_principal_url?: string | null;
   version_ficha?: string;
   activo?: boolean;
+  familia_id?: string | null;
+  color_variante?: string | null;
 };
 
 type Lookup = { id: string; nombre: string; codigo?: string | null };
@@ -34,11 +36,14 @@ export function ProductoForm({
   initial,
   categorias,
   campanas,
+  familias = [],
   categoriasExtraIniciales = [],
 }: {
   initial?: Producto;
   categorias: Lookup[];
   campanas: Lookup[];
+  /** Familias de producto (agrupación por color, mig 65) */
+  familias?: Lookup[];
   /** IDs de categorías que ya están como extras del producto (al editar) */
   categoriasExtraIniciales?: string[];
 }) {
@@ -121,6 +126,33 @@ export function ProductoForm({
               <option value="MUJER">Mujer</option>
               <option value="HOMBRE">Hombre</option>
             </select>
+          </FormRow>
+        </FormGrid>
+
+        {/* Familia por color (mig 65): agrupa Polca rojo/fucsia/oro en una
+            tarjeta consolidada del POS y un selector de color en la web.
+            Cada color sigue siendo SU producto (receta/stock intactos). */}
+        <FormGrid cols={3}>
+          <FormRow label="Familia (variantes de color)" hint="Agrupa este producto con sus otros colores">
+            <select
+              name="familia_id"
+              defaultValue={initial?.familia_id ?? ''}
+              className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
+            >
+              <option value="">— Sin familia —</option>
+              {familias.map((f) => <option key={f.id} value={f.id}>{f.nombre}</option>)}
+            </select>
+          </FormRow>
+          <FormRow label="…o crear familia nueva" hint="Se crea y asigna al guardar">
+            <Input name="familia_nueva" placeholder="Ej: Polca para niña" maxLength={120} />
+          </FormRow>
+          <FormRow label="Color de este producto" hint="Etiqueta del selector (ej: Rojo)">
+            <Input
+              name="color_variante"
+              defaultValue={initial?.color_variante ?? ''}
+              placeholder="Ej: Rojo, Fucsia, Amarillo oro"
+              maxLength={60}
+            />
           </FormRow>
         </FormGrid>
 
