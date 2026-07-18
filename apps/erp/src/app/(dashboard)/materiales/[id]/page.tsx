@@ -23,7 +23,13 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
     <PageShell
       title={`Editar: ${data.nombre}`}
       description={`Código ${data.codigo} · ${data.categoria}`}
-      actions={<DeleteButton action={onDelete} itemName="este material" />}
+      actions={
+        <DeleteButton
+          action={onDelete}
+          itemName="este material"
+          notaExtra="Si el material está en uso (recetas, kardex, compras), no se eliminará: se desactivará y dejará de aparecer en búsquedas."
+        />
+      }
     >
       <MaterialForm initial={data} unidades={unidades ?? []} proveedores={proveedores ?? []} />
     </PageShell>

@@ -196,11 +196,41 @@ export async function eliminarMaterial(id: string): Promise<ActionResult> {
   const r = await runAction(async () => {
     const { sb } = await requireUser();
     const { error } = await sb.from('materiales').delete().eq('id', id);
-    if (error) throw new Error(error.message);
-    return null;
+    if (!error) return { desactivado: false };
+
+    // 23503 = viola foreign key: el material está referenciado (recetas,
+    // kardex, compras, traslados…). Eliminarlo rompería ese historial, así
+    // que lo DESACTIVAMOS en su lugar — desaparece de búsquedas y de nuevas
+    // recetas — y se lo explicamos al usuario en claro, en vez de mostrar
+    // el error crudo de Postgres (reporte del cliente 18/07/2026).
+    const esFk = error.code === '23503' || /foreign key/i.test(error.message);
+    if (!esFk) throw new Error(error.message);
+
+    const { count } = await sb
+      .from('recetas_lineas')
+      .select('id', { count: 'exact', head: true })
+      .eq('material_id', id);
+    const { data: mat } = await sb.from('materiales').select('notas, activo').eq('id', id).single();
+    const fecha = new Date().toLocaleDateString('es-PE', { day: '2-digit', month: '2-digit', year: 'numeric' });
+    const nota = `[Desactivado el ${fecha}: no se pudo eliminar porque está en uso${count ? ` en ${count} línea(s) de receta` : ''}]`;
+    const { error: e2 } = await sb
+      .from('materiales')
+      .update({ activo: false, notas: mat?.notas ? `${mat.notas} | ${nota}` : nota })
+      .eq('id', id);
+    if (e2) throw new Error(e2.message);
+    return { desactivado: true, enRecetas: count ?? 0 };
   });
   if (r.ok) {
     await bumpPaths('/materiales');
+    const info = r.data as { desactivado: boolean; enRecetas?: number } | undefined;
+    if (info?.desactivado) {
+      // Sin redirect: el usuario se queda en la página y el toast le explica
+      // qué pasó. El material ya no aparecerá en búsquedas ni recetas nuevas.
+      return {
+        ...r,
+        message: `Este material está en uso${info.enRecetas ? ` en ${info.enRecetas} receta(s)` : ''}, por eso no se puede eliminar. Se DESACTIVÓ en su lugar: ya no aparecerá en búsquedas ni podrá agregarse a recetas nuevas.`,
+      };
+    }
     redirect('/materiales');
   }
   return r;

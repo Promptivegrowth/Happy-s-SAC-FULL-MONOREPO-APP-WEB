@@ -8,14 +8,16 @@ import { Loader2, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
 
 type Props = {
-  action: () => Promise<{ ok: boolean; error?: string }>;
+  action: () => Promise<{ ok: boolean; error?: string; message?: string }>;
   label?: string;
   itemName?: string;
   /** Si se pasa, navega ahí después de eliminar exitosamente. */
   redirectTo?: string;
+  /** Nota extra en el modal de confirmación (ej: qué pasa si está en uso). */
+  notaExtra?: string;
 };
 
-export function DeleteButton({ action, label = 'Eliminar', itemName = 'este registro', redirectTo }: Props) {
+export function DeleteButton({ action, label = 'Eliminar', itemName = 'este registro', redirectTo, notaExtra }: Props) {
   const [open, setOpen] = useState(false);
   const [pending, start] = useTransition();
   const router = useRouter();
@@ -25,7 +27,13 @@ export function DeleteButton({ action, label = 'Eliminar', itemName = 'este regi
       try {
         const r = await action();
         if (r.ok) {
-          toast.success('Eliminado');
+          // Si el server manda un mensaje (ej: "estaba en uso, se desactivó"),
+          // lo mostramos tal cual y con más duración para que se lea completo.
+          if (r.message) {
+            toast.info(r.message, { duration: 9000 });
+          } else {
+            toast.success('Eliminado');
+          }
           setOpen(false);
           if (redirectTo) {
             router.push(redirectTo);
@@ -60,7 +68,8 @@ export function DeleteButton({ action, label = 'Eliminar', itemName = 'este regi
         <DialogHeader>
           <DialogTitle>¿Eliminar?</DialogTitle>
           <DialogDescription>
-            Vas a eliminar {itemName}. Esta acción no se puede deshacer.
+            Se eliminará {itemName}. Esta acción no se puede deshacer.
+            {notaExtra ? <span className="mt-1.5 block text-xs">{notaExtra}</span> : null}
           </DialogDescription>
         </DialogHeader>
         <DialogFooter className="gap-2">
