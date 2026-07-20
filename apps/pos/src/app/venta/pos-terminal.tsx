@@ -8,7 +8,16 @@ import { Button } from '@happy/ui/button';
 import { Badge } from '@happy/ui/badge';
 import { Trash2, Plus, Minus, ScanBarcode, X, Banknote, Building2, MessageCircle, Loader2, LayoutGrid, ShoppingBag, LogOut, Receipt, History, RotateCcw, Coins, Wallet, Search, LogIn, UserX, Pencil, Send } from 'lucide-react';
 import { toast } from 'sonner';
-import { formatPEN, ordenTalla, formatTalla } from '@happy/lib';
+import { formatPEN, ordenTalla, formatTalla, normalizarTexto } from '@happy/lib';
+
+/** Búsqueda por palabras y sin tildes: "super ch" encuentra "Superchica",
+ *  "falda mar" encuentra "Falda de marinera" (reporte del cliente 20/07/2026). */
+function coincideBusqueda(q: string, hay: string): boolean {
+  const tokens = normalizarTexto(q).split(/\s+/).filter(Boolean);
+  if (tokens.length === 0) return true;
+  const h = normalizarTexto(hay);
+  return tokens.every((t) => h.includes(t));
+}
 // buildPedidoWaMessage/buildWhatsappUrl removidos (2026-07-12) — el botón WA
 // del carrito ahora abre CotizacionModal en vez de wa.me directo. Ver
 // mensaje formateado inline en el modal.
@@ -423,17 +432,16 @@ export function PosTerminal({
 
   // Vista filtrada del catálogo (categoría + texto del buscador).
   const productosAgrupados = useMemo(() => {
-    const q = search.trim().toLowerCase();
+    const q = search.trim();
     return gruposBase.filter((g) => {
       if (catFiltro && !g.categoriaIds.has(catFiltro)) return false;
       if (!q) return true;
-      return (
-        g.nombre.toLowerCase().includes(q) ||
-        g.colores.some((c) => c.etiqueta.toLowerCase().includes(q)) ||
-        g.variantesTodas.some(
-          (v) => v.sku.toLowerCase().includes(q) || (v.codigo_barras ?? '').toLowerCase().includes(q),
-        )
-      );
+      const hay = [
+        g.nombre,
+        ...g.colores.map((c) => c.etiqueta),
+        ...g.variantesTodas.map((v) => `${v.sku} ${v.codigo_barras ?? ''}`),
+      ].join(' ');
+      return coincideBusqueda(q, hay);
     });
   }, [gruposBase, catFiltro, search]);
 
@@ -453,9 +461,8 @@ export function PosTerminal({
     //    matchea el nombre, abrir el modal de tallas del primero para que
     //    el cajero elija talla. Si hay varios, tambien abrimos el primero
     //    (el dropdown de sugerencias ya listaba todos abajo del input).
-    const q = barcode.toLowerCase();
-    const grupoMatch = gruposBase.find(
-      (g) => g.nombre.toLowerCase().includes(q) || g.colores.some((c) => c.etiqueta.toLowerCase().includes(q)),
+    const grupoMatch = gruposBase.find((g) =>
+      coincideBusqueda(barcode, [g.nombre, ...g.colores.map((c) => c.etiqueta)].join(' ')),
     );
     if (grupoMatch) {
       abrirModalTallas(grupoMatch.key);
@@ -845,16 +852,18 @@ export function PosTerminal({
 
   // Sugerencias del buscador — 1 fila por GRUPO (familia o producto suelto).
   const sugerencias = useMemo(() => {
-    const q = search.trim().toLowerCase();
+    const q = search.trim();
     if (!q) return [];
     return gruposBase
-      .filter(
-        (g) =>
-          g.nombre.toLowerCase().includes(q) ||
-          g.colores.some((c) => c.etiqueta.toLowerCase().includes(q)) ||
-          g.variantesTodas.some(
-            (v) => v.sku.toLowerCase().includes(q) || (v.codigo_barras ?? '').toLowerCase().includes(q),
-          ),
+      .filter((g) =>
+        coincideBusqueda(
+          q,
+          [
+            g.nombre,
+            ...g.colores.map((c) => c.etiqueta),
+            ...g.variantesTodas.map((v) => `${v.sku} ${v.codigo_barras ?? ''}`),
+          ].join(' '),
+        ),
       )
       .map((g) => ({
         grupo: g,

@@ -110,7 +110,9 @@ export default async function VentaPage() {
         )
         .eq('activo', true)
         .eq('productos.activo', true)
-        .limit(2000),
+        // db-max-rows de Supabase estaba en 1000 y capaba el catálogo (el POS
+        // solo veía 1000 de 1758 variantes) — subido a 5000 el 20/07/2026.
+        .limit(3000),
       sb.from('cajas').select('id, codigo, nombre, almacen_id').eq('activo', true),
       sb.from('categorias').select('id, nombre, activo').eq('activo', true).order('orden_web'),
       // Stock del almacén activo (si hay caja); si no, total global como fallback.

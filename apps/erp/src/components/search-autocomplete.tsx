@@ -35,6 +35,10 @@ export function SearchAutocomplete({
   const [highlight, setHighlight] = useState(-1);
   const [pending, start] = useTransition();
   const wrapRef = useRef<HTMLDivElement>(null);
+  // Debounce del auto-aplicar: la tabla se filtra sola mientras se escribe,
+  // sin esperar Enter. Antes el usuario escribía algo nuevo y la tabla seguía
+  // mostrando los resultados de la búsqueda anterior (reporte 20/07/2026).
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     function onClick(e: MouseEvent) {
@@ -49,22 +53,26 @@ export function SearchAutocomplete({
     if (q.length < 1) return [];
     const norm = (s: string) =>
       s.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
-    const qn = norm(q);
+    // Búsqueda por PALABRAS: cada palabra escrita debe aparecer en alguna
+    // parte del texto (label + código). Así "super ch" encuentra "Superchica"
+    // y "falda mar" encuentra "falda de marinera" (reporte 20/07/2026).
+    const tokens = norm(q).split(/\s+/).filter(Boolean);
     return items
       .filter((it) => {
-        if (norm(it.label).includes(qn)) return true;
-        if (it.searchKey !== undefined) return norm(it.searchKey).includes(qn);
-        return it.sublabel ? norm(it.sublabel).includes(qn) : false;
+        const extra = it.searchKey !== undefined ? it.searchKey : (it.sublabel ?? '');
+        const hay = `${norm(it.label)} ${norm(extra)}`;
+        return tokens.every((t) => hay.includes(t));
       })
       .slice(0, 10);
   }, [items, text]);
 
-  function aplicar(qStr: string) {
+  function aplicar(qStr: string, opts?: { mantenerAbierto?: boolean }) {
+    if (debounceRef.current) clearTimeout(debounceRef.current);
     const params = new URLSearchParams(sp.toString());
     if (qStr.trim()) params.set(paramName, qStr.trim());
     else params.delete(paramName);
     start(() => router.push(`?${params.toString()}`, { scroll: false }));
-    setOpen(false);
+    if (!opts?.mantenerAbierto) setOpen(false);
   }
 
   function elegir(it: AutocompleteItem) {
@@ -93,9 +101,13 @@ export function SearchAutocomplete({
         type="search"
         value={text}
         onChange={(e) => {
-          setText(e.target.value);
+          const val = e.target.value;
+          setText(val);
           setOpen(true);
           setHighlight(-1);
+          // Auto-aplicar a la tabla mientras escribe (sin cerrar el dropdown)
+          if (debounceRef.current) clearTimeout(debounceRef.current);
+          debounceRef.current = setTimeout(() => aplicar(val, { mantenerAbierto: true }), 450);
         }}
         onFocus={() => text && setOpen(true)}
         onKeyDown={(e) => {

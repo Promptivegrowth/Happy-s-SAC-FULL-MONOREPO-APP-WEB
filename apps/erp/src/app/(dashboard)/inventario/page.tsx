@@ -10,7 +10,7 @@ import { PageShell } from '@/components/page-shell';
 import { SearchAutocomplete } from '@/components/search-autocomplete';
 import { FilterChip } from '@/components/filter-chip';
 import { TableSkeleton } from '@/components/skeletons';
-import { formatNumber } from '@happy/lib';
+import { formatNumber, normalizarTexto } from '@happy/lib';
 import { Boxes, AlertTriangle, History } from 'lucide-react';
 import { AjustarStockButton } from './ajustar-stock-client';
 import { NuevoMovimientoButton } from './nuevo-movimiento-client';
@@ -49,7 +49,10 @@ export default async function InventarioPage({ searchParams }: { searchParams: P
       .select('id, sku, talla, productos(nombre)')
       .eq('activo', true)
       .order('sku')
-      .limit(1500),
+      // OJO: además del limit, Supabase capa las filas por request con
+      // db-max-rows (estaba en 1000 y por eso "Superchica" no aparecía en
+      // el buscador — se subió a 5000 el 20/07/2026 vía Management API).
+      .limit(3000),
   ]);
 
   const almacenes = (almacenesData ?? []) as { id: string; codigo: string; nombre: string; tipo: string }[];
@@ -239,17 +242,18 @@ async function InventarioTable({ q, almacen, vista }: SP) {
       .eq('activo', true)
       .eq('productos.activo', true)
       .order('sku')
-      .limit(2000);
+      .limit(3000);
     let variantes = ((varsRaw ?? []) as unknown as {
       id: string; sku: string; talla: string; productos: { nombre: string } | null;
     }[]).filter((v) => v.productos);
     if (qNorm) {
-      const qq = qNorm.toLowerCase();
-      variantes = variantes.filter(
-        (v) =>
-          v.sku.toLowerCase().includes(qq) ||
-          (v.productos?.nombre ?? '').toLowerCase().includes(qq),
-      );
+      // Búsqueda por palabras + sin tildes: "super ch" encuentra "Superchica",
+      // "falda mar" encuentra "falda de marinera" (reporte 20/07/2026).
+      const tokens = normalizarTexto(qNorm).split(/\s+/).filter(Boolean);
+      variantes = variantes.filter((v) => {
+        const hay = normalizarTexto(`${v.sku} ${v.productos?.nombre ?? ''}`);
+        return tokens.every((t) => hay.includes(t));
+      });
     }
 
     // Cast porque oculto_en_selectores es de migración 52 (aún no en types autogen)
@@ -322,10 +326,13 @@ async function InventarioTable({ q, almacen, vista }: SP) {
           umbral: umbralPorAlmacen.get(a.id) ?? 0,
         });
       }
-      // Filtro client-side por texto (usando query normalizada — solo el nombre del producto)
+      // Filtro client-side por texto — por palabras y sin tildes (igual que la vista "todo")
       if (qNorm) {
-        const qq = qNorm.toLowerCase();
-        filas = filas.filter((f) => f.sku.toLowerCase().includes(qq) || f.producto_nombre.toLowerCase().includes(qq));
+        const tokens = normalizarTexto(qNorm).split(/\s+/).filter(Boolean);
+        filas = filas.filter((f) => {
+          const hay = normalizarTexto(`${f.sku} ${f.producto_nombre}`);
+          return tokens.every((t) => hay.includes(t));
+        });
       }
       filas.sort((x, y) => y.cantidad - x.cantidad || x.sku.localeCompare(y.sku));
     }

@@ -25,6 +25,15 @@ const DF_DATETIME = new Intl.DateTimeFormat('es-PE', {
   hour12: false,
 });
 
+/**
+ * Normaliza texto para búsquedas: minúsculas y sin tildes/diacríticos.
+ * "Niña" → "nina", "Fucsia" → "fucsia". Para búsqueda por palabras:
+ * `normalizarTexto(q).split(/\s+/).every(t => normalizarTexto(hay).includes(t))`.
+ */
+export function normalizarTexto(s: string): string {
+  return s.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
+}
+
 export function formatPEN(value: number | string | null | undefined): string {
   if (value === null || value === undefined || value === '') return '—';
   const num = typeof value === 'string' ? Number(value) : value;
