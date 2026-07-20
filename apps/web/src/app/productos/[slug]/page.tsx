@@ -76,6 +76,7 @@ type ProductoDetalle = {
     precio_publico: number | null;
     precio_mayorista_a: number | null;
     precio_mayorista_b: number | null;
+    precio_industrial: number | null;
     imagen_url: string | null;
   }[];
   productos_imagenes: { id: string; url: string; orden: number; alt_texto: string | null }[];
@@ -95,7 +96,7 @@ export default async function ProductoDetallePage({ params }: { params: Promise<
       productos!inner(
         id, codigo, nombre, descripcion, imagen_principal_url, piezas_descripcion, genero, categoria_id, familia_id, color_variante,
         categoria:categorias!productos_categoria_id_fkey(nombre, slug),
-        productos_variantes(id, sku, talla, precio_publico, precio_mayorista_a, precio_mayorista_b, imagen_url),
+        productos_variantes(id, sku, talla, precio_publico, precio_mayorista_a, precio_mayorista_b, precio_industrial, imagen_url),
         productos_imagenes(id, url, orden, alt_texto)
       )
     `,
@@ -409,10 +410,16 @@ export default async function ProductoDetallePage({ params }: { params: Promise<
                   : precio,
                 aplicaDescuento,
                 precioMayorista: Number(v.precio_mayorista_a ?? 0),
-                // precio_mayorista_b se usa como precio de fábrica (>= 100 unid.)
-                // porque es el segundo escalón cargado. Si no hay valor, queda 0
-                // y el escalón no se muestra.
-                precioFabrica: Number(v.precio_mayorista_b ?? 0),
+                // Precio de fábrica (>= 100 unid.): precio_industrial, el MISMO
+                // campo que usa el POS para su escalón industrial — el cliente
+                // carga sus precios ahí. precio_mayorista_b queda de fallback
+                // por si algún producto viejo solo tiene ese. Si ambos están
+                // vacíos queda 0 y el escalón cae a mayorista (reporte 20/07/2026:
+                // el carrito con 116 und seguía cobrando mayorista porque
+                // mayorista_b estaba vacío en todas las faldas).
+                precioFabrica: Number(v.precio_industrial ?? 0) > 0
+                  ? Number(v.precio_industrial)
+                  : Number(v.precio_mayorista_b ?? 0),
                 stock: stockMap.get(v.id) ?? 0,
               };
             })}
