@@ -57,15 +57,26 @@ export default async function InventarioPage({ searchParams }: { searchParams: P
 
   const almacenes = (almacenesData ?? []) as { id: string; codigo: string; nombre: string; tipo: string }[];
 
-  const indexItems = (variantesIndex ?? []).map((v) => {
+  // Sugerencias: UNA por producto (no por talla). Antes cada talla era una
+  // sugerencia y con el tope de 10 un solo producto de 9 tallas se comía
+  // todos los lugares — buscando "falda" solo se veía el primer color
+  // (reporte del cliente 20/07/2026). Al elegir un producto, la tabla
+  // muestra todas sus tallas.
+  const porProducto = new Map<string, { primeraVar: string; skus: string[] }>();
+  for (const v of variantesIndex ?? []) {
     const prodNombre = (v as unknown as { productos?: { nombre: string } }).productos?.nombre ?? '';
-    return {
-      id: v.id,
-      label: `${prodNombre} · Talla ${v.talla.replace('T', '')}`,
-      sublabel: `SKU ${v.sku}`,
-      // No href: el search se aplica al filtro q de la tabla.
-    };
-  });
+    if (!prodNombre) continue;
+    const prev = porProducto.get(prodNombre);
+    if (prev) prev.skus.push(v.sku);
+    else porProducto.set(prodNombre, { primeraVar: v.id, skus: [v.sku] });
+  }
+  const indexItems = Array.from(porProducto.entries()).map(([nombre, info]) => ({
+    id: info.primeraVar,
+    label: nombre,
+    sublabel: `${info.skus.length} talla${info.skus.length === 1 ? '' : 's'} · ${info.skus[0]}${info.skus.length > 1 ? `–${info.skus[info.skus.length - 1]}` : ''}`,
+    searchKey: info.skus.join(' '),
+    // No href: el search se aplica al filtro q de la tabla.
+  }));
 
   // Lista plana de variantes para el modal "Nuevo movimiento"
   const variantesParaModal = (variantesIndex ?? []).map((v) => {
