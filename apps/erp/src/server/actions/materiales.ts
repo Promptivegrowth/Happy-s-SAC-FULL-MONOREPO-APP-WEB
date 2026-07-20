@@ -228,7 +228,7 @@ export async function eliminarMaterial(id: string): Promise<ActionResult> {
       // qué pasó. El material ya no aparecerá en búsquedas ni recetas nuevas.
       return {
         ...r,
-        message: `Este material está en uso${info.enRecetas ? ` en ${info.enRecetas} receta(s)` : ''}, por eso no se puede eliminar. Se DESACTIVÓ en su lugar: ya no aparecerá en búsquedas ni podrá agregarse a recetas nuevas.`,
+        message: `Este material está en uso${info.enRecetas ? ` en ${info.enRecetas} receta(s)` : ''}, por eso no se puede eliminar. Se DESACTIVÓ en su lugar. En la sección "Usado en recetas" (abajo en esta página) puede ver cuáles son y quitarlo de cada una para poder eliminarlo.`,
       };
     }
     redirect('/materiales');
