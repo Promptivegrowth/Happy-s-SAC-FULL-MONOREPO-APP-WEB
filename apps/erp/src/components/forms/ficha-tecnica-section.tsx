@@ -9,7 +9,7 @@
  * "Crear ficha técnica" para arrancar la primera revisión.
  */
 
-import { useState, useTransition, useMemo, useRef } from 'react';
+import { useState, useTransition, useMemo, useRef, useEffect } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { Button } from '@happy/ui/button';
@@ -23,7 +23,7 @@ import {
   Layers, Info, Scissors, Package, Download, Share2, Copy, X, ExternalLink, Sparkles, GitCompare,
 } from 'lucide-react';
 import { toast } from 'sonner';
-import { ordenTalla } from '@happy/lib';
+import { ordenTalla, normalizarTexto } from '@happy/lib';
 import {
   crearFichaTecnica,
   actualizarFichaTecnica,
@@ -37,6 +37,8 @@ import {
   listarLinksPublicos,
   aplicarPlantillaFicha,
   obtenerDiffRevisiones,
+  listarProductosConCuadroMedidas,
+  obtenerMedidasParaCopiar,
   type DiffRevisiones,
 } from '@/server/actions/fichas-tecnicas';
 import {
@@ -556,6 +558,53 @@ function MedidasTab({
   function agregar() {
     setRows([...rows, { codigo: siguienteCodigo(), descripcion: '', tolerancia_cm: 0.5, observaciones: '', valores: {} }]);
   }
+
+  // "Copiar de otro producto" (pedido 20/07/2026): las prendas de una misma
+  // categoría comparten cuadro de medidas casi siempre. Se copian las medidas
+  // de la ficha vigente de otro producto al grid — el usuario revisa/ajusta
+  // y recién persiste con "Guardar medidas".
+  const [copiarOpen, setCopiarOpen] = useState(false);
+
+  function copiarDesde(meds: FichaMedida[], nombreOrigen: string) {
+    const hayContenido = rows.some(
+      (r) => r.descripcion.trim() !== '' || Object.values(r.valores).some((v) => v && v.trim() !== ''),
+    );
+    if (
+      hayContenido &&
+      !confirm(`Se reemplazará el cuadro actual por las ${meds.length} medidas de "${nombreOrigen}". ¿Desea continuar?`)
+    ) {
+      return;
+    }
+    const tallasSet = new Set(tallas);
+    let valoresOmitidos = 0;
+    const nuevos: MedidaRow[] = meds.map((m) => {
+      const valores: Record<string, string> = {};
+      for (const v of m.valores) {
+        if (v.valor === null) continue;
+        if (tallasSet.has(v.talla)) valores[v.talla] = String(v.valor);
+        else valoresOmitidos++;
+      }
+      return {
+        codigo: m.codigo,
+        descripcion: m.descripcion,
+        tolerancia_cm: m.tolerancia_cm,
+        observaciones: m.observaciones ?? '',
+        valores,
+      };
+    });
+    setRows(nuevos);
+    setCopiarOpen(false);
+    toast.success(
+      `${meds.length} medida(s) copiadas de "${nombreOrigen}". Revise los valores y presione "Guardar medidas".`,
+      { duration: 8000 },
+    );
+    if (valoresOmitidos > 0) {
+      toast.info(
+        `${valoresOmitidos} valor(es) no se copiaron porque este producto no tiene esas tallas.`,
+        { duration: 8000 },
+      );
+    }
+  }
   function eliminar(i: number) {
     setRows(rows.filter((_, idx) => idx !== i));
   }
@@ -614,6 +663,14 @@ function MedidasTab({
           </p>
         </div>
         <div className="flex items-center gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setCopiarOpen(true)}
+            title="Copiar el cuadro de medidas de otro producto (misma categoría, por ejemplo)"
+          >
+            <Copy className="h-3.5 w-3.5" /> Copiar de…
+          </Button>
           <Button variant="outline" size="sm" onClick={agregar}>
             <Plus className="h-3.5 w-3.5" /> Medida
           </Button>
@@ -724,7 +781,122 @@ function MedidasTab({
           </TableBody>
         </Table>
       </div>
+
+      {copiarOpen && (
+        <CopiarMedidasModal
+          productoId={ficha.producto_id}
+          onClose={() => setCopiarOpen(false)}
+          onCopiar={copiarDesde}
+        />
+      )}
     </Card>
+  );
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// MODAL — Copiar cuadro de medidas desde otro producto
+// ────────────────────────────────────────────────────────────────────────────
+function CopiarMedidasModal({
+  productoId, onClose, onCopiar,
+}: {
+  productoId: string;
+  onClose: () => void;
+  onCopiar: (medidas: FichaMedida[], nombreOrigen: string) => void;
+}) {
+  const [lista, setLista] = useState<{ producto_id: string; nombre: string; codigo: string; medidas: number }[] | null>(null);
+  const [filtro, setFiltro] = useState('');
+  const [cargandoId, setCargandoId] = useState<string | null>(null);
+
+  useEffect(() => {
+    listarProductosConCuadroMedidas(productoId)
+      .then(setLista)
+      .catch(() => setLista([]));
+  }, [productoId]);
+
+  const filtrados = useMemo(() => {
+    const tokens = normalizarTexto(filtro).split(/\s+/).filter(Boolean);
+    return (lista ?? [])
+      .filter((p) => {
+        const hay = normalizarTexto(`${p.nombre} ${p.codigo}`);
+        return tokens.every((t) => hay.includes(t));
+      })
+      .slice(0, 30);
+  }, [lista, filtro]);
+
+  async function elegir(p: { producto_id: string; nombre: string }) {
+    setCargandoId(p.producto_id);
+    try {
+      const meds = await obtenerMedidasParaCopiar(p.producto_id);
+      if (meds.length === 0) {
+        toast.error('Ese producto no tiene medidas en su ficha vigente.');
+        return;
+      }
+      onCopiar(meds, p.nombre);
+    } catch (e) {
+      toast.error((e as Error).message || 'No se pudieron cargar las medidas');
+    } finally {
+      setCargandoId(null);
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
+      <Card className="w-full max-w-xl p-5 shadow-2xl" onClick={(e) => e.stopPropagation()}>
+        <div className="mb-3 flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <Copy className="h-5 w-5 text-happy-600" />
+            <h3 className="font-display text-lg font-semibold text-corp-900">Copiar medidas de otro producto</h3>
+          </div>
+          <button onClick={onClose} className="rounded-full p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700">
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+        <p className="mb-3 text-xs text-slate-500">
+          Elija el producto del cual copiar el cuadro completo (medidas, valores por talla y tolerancias).
+          Los valores llegan al cuadro para que los revise — nada se guarda hasta presionar <strong>"Guardar medidas"</strong>.
+        </p>
+        <Input
+          autoFocus
+          value={filtro}
+          onChange={(e) => setFiltro(e.target.value)}
+          placeholder="Buscar por nombre o código…"
+          className="mb-3"
+        />
+        <div className="max-h-72 overflow-y-auto rounded-md border">
+          {lista === null ? (
+            <div className="flex items-center justify-center gap-2 py-8 text-sm text-slate-400">
+              <Loader2 className="h-4 w-4 animate-spin" /> Cargando productos…
+            </div>
+          ) : filtrados.length === 0 ? (
+            <p className="py-8 text-center text-sm text-slate-400">
+              {lista.length === 0
+                ? 'Ningún producto tiene cuadro de medidas con valores todavía.'
+                : 'Sin coincidencias.'}
+            </p>
+          ) : (
+            filtrados.map((p) => (
+              <button
+                key={p.producto_id}
+                type="button"
+                onClick={() => elegir(p)}
+                disabled={cargandoId !== null}
+                className="flex w-full items-center justify-between gap-3 border-b px-3 py-2.5 text-left text-sm last:border-0 hover:bg-happy-50 disabled:opacity-60"
+              >
+                <div className="min-w-0 flex-1">
+                  <p className="truncate font-medium text-corp-900">{p.nombre}</p>
+                  <p className="text-[11px] text-slate-500">{p.codigo}</p>
+                </div>
+                {cargandoId === p.producto_id ? (
+                  <Loader2 className="h-4 w-4 animate-spin text-happy-600" />
+                ) : (
+                  <Badge variant="secondary">{p.medidas} medida{p.medidas === 1 ? '' : 's'}</Badge>
+                )}
+              </button>
+            ))
+          )}
+        </div>
+      </Card>
+    </div>
   );
 }
 
@@ -1625,7 +1797,7 @@ function PlantillaModal({ fichaId, onClose, onApplied }: { fichaId: string; onCl
           </button>
         </div>
         <p className="mb-4 text-xs text-slate-500">
-          Elegí el tipo de prenda que más se acerque. Se agregarán las medidas estándar y piezas típicas — <strong>solo si no existen ya</strong> en tu ficha (no destruye nada cargado).
+          Elija el tipo de prenda que más se acerque. Se agregarán las medidas estándar y piezas típicas — <strong>solo si no existen ya</strong> en su ficha (no destruye nada cargado).
         </p>
 
         <div className="grid gap-2 sm:grid-cols-2">

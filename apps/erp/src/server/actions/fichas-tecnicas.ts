@@ -904,3 +904,49 @@ export async function obtenerDiffRevisiones(productoId: string): Promise<DiffRev
     medidas_cambiadas,
   };
 }
+
+// ============================================================================
+// COPIAR CUADRO DE MEDIDAS DESDE OTRO PRODUCTO
+// Pedido del cliente (20/07/2026): las prendas de una misma categoría
+// comparten medidas casi siempre — cargarlas una vez y duplicarlas.
+// ============================================================================
+
+/** Productos (≠ el actual) cuya ficha VIGENTE tiene medidas con valores —
+ *  candidatos para el botón "Copiar de otro producto". */
+export async function listarProductosConCuadroMedidas(
+  excluirProductoId?: string,
+): Promise<{ producto_id: string; nombre: string; codigo: string; medidas: number }[]> {
+  const sb = (await createClient()) as unknown as AnyClient;
+  const { data } = await sb
+    .from('productos_fichas_tecnicas')
+    .select('producto_id, productos!inner(nombre, codigo), fichas_medidas(id, fichas_medidas_valores(id))')
+    .eq('vigente', true)
+    .limit(1000);
+  type Row = {
+    producto_id: string;
+    productos: { nombre: string; codigo: string } | null;
+    fichas_medidas: { id: string; fichas_medidas_valores: { id: string }[] | null }[] | null;
+  };
+  return ((data ?? []) as Row[])
+    .filter(
+      (r) =>
+        r.producto_id !== excluirProductoId &&
+        r.productos &&
+        // Solo fichas con al menos un VALOR cargado (medidas vacías no aportan)
+        (r.fichas_medidas ?? []).some((m) => (m.fichas_medidas_valores ?? []).length > 0),
+    )
+    .map((r) => ({
+      producto_id: r.producto_id,
+      nombre: r.productos!.nombre,
+      codigo: r.productos!.codigo,
+      medidas: (r.fichas_medidas ?? []).length,
+    }))
+    .sort((a, b) => a.nombre.localeCompare(b.nombre, 'es'));
+}
+
+/** Medidas (con valores) de la ficha vigente de un producto, para copiarlas
+ *  al cuadro de otro. Devuelve el mismo shape que obtenerFichaVigente. */
+export async function obtenerMedidasParaCopiar(productoId: string): Promise<FichaMedida[]> {
+  const { medidas } = await obtenerFichaVigente(productoId);
+  return medidas;
+}
