@@ -49,26 +49,45 @@ export async function crearUsuario(
       email_confirm: true,
       user_metadata: { nombre_completo: data.nombre_completo },
     });
-    if (errAuth) throw new Error(`Auth: ${errAuth.message}`);
+    if (errAuth) {
+      // Mensaje claro para el caso más común: el email ya tiene cuenta
+      if (/already|registered|exists/i.test(errAuth.message)) {
+        throw new Error(`Ya existe un usuario con el email ${data.email}. Búsquelo en la lista (borre el filtro de búsqueda) y edítele los roles ahí.`);
+      }
+      throw new Error(`Auth: ${errAuth.message}`);
+    }
     if (!created.user) throw new Error('No se pudo crear el usuario');
     const userId = created.user.id;
 
-    // 2) Insertar perfil
-    const { error: errPerfil } = await admin.from('perfiles').insert({
-      id: userId,
-      nombre_completo: data.nombre_completo,
-      dni: data.dni || null,
-      cargo: data.cargo || null,
-      telefono: data.telefono || null,
-      activo: true,
-    });
+    // 2) Perfil — OJO: el trigger on_auth_user_created (tg_crear_perfil) YA
+    //    creó la fila de perfiles y le asignó rol 'cliente' por defecto.
+    //    Antes acá se hacía INSERT y reventaba con "perfiles_pkey duplicate"
+    //    (reporte del cliente 20/07/2026) — debe ser UPSERT para completar
+    //    los datos (dni, cargo, teléfono) sobre la fila del trigger.
+    const { error: errPerfil } = await admin.from('perfiles').upsert(
+      {
+        id: userId,
+        nombre_completo: data.nombre_completo,
+        dni: data.dni || null,
+        cargo: data.cargo || null,
+        telefono: data.telefono || null,
+        activo: true,
+      },
+      { onConflict: 'id' },
+    );
     if (errPerfil) {
       // Rollback auth si el perfil falla
       await admin.auth.admin.deleteUser(userId);
       throw new Error(`Perfil: ${errPerfil.message}`);
     }
 
-    // 3) Asignar roles
+    // 3) Roles: reemplazar el 'cliente' default del trigger por los elegidos
+    const { error: errDel } = await admin.from('usuarios_roles').delete().eq('usuario_id', userId);
+    if (errDel) {
+      await admin.from('perfiles').delete().eq('id', userId);
+      await admin.auth.admin.deleteUser(userId);
+      throw new Error(`Roles: ${errDel.message}`);
+    }
     const rolesInsert = data.roles.map((r) => ({ usuario_id: userId, rol: r }));
     const { error: errRoles } = await admin.from('usuarios_roles').insert(rolesInsert);
     if (errRoles) {
@@ -128,7 +147,7 @@ export async function actualizarRolesUsuario(
 ): Promise<ActionResult> {
   return runAction(async () => {
     await ensureGerente();
-    if (roles.length === 0) throw new Error('Asigná al menos un rol');
+    if (roles.length === 0) throw new Error('Asigne al menos un rol');
     const valid = roles.every((r) => ROLES_VALIDOS.includes(r));
     if (!valid) throw new Error('Rol inválido');
 
@@ -180,7 +199,7 @@ export async function cambiarEstadoUsuario(
     await ensureGerente();
     const { userId: actor } = await requireUser();
     if (actor === usuarioId && !activo) {
-      throw new Error('No podés desactivar tu propia cuenta');
+      throw new Error('No puede desactivar su propia cuenta');
     }
     const admin = createServiceClient();
     const { error } = await admin.from('perfiles').update({ activo }).eq('id', usuarioId);
