@@ -10,6 +10,7 @@ import { ResenasSection, type ResenaItem } from '@/components/resenas-section';
 import { ProductCard, type ProductCardData } from '@/components/product-card';
 import { WHATSAPP_NUMERO, WHATSAPP_NUMERO_HUMAN, CORREO_CONTACTO } from '@/lib/contacto';
 import { TablaMedidas, type MedidaFila } from '@/components/tabla-medidas';
+import { ordenTalla } from '@happy/lib';
 import { GaleriaProducto } from '@/components/galeria-producto';
 import { DescripcionFormateada } from '@/components/descripcion-formateada';
 
@@ -227,6 +228,11 @@ export default async function ProductoDetallePage({ params }: { params: Promise<
           valoresPorTalla: map,
         };
       });
+      // Solo filas con al menos un valor cargado. Si el cliente definió las
+      // medidas en la ficha pero aún no guardó los números por talla, antes
+      // salía un cuadro lleno de "–" (reporte 20/07/2026). Sin valores no
+      // hay fila; sin filas no hay botón.
+      medidasFilas = medidasFilas.filter((m) => Object.keys(m.valoresPorTalla).length > 0);
     }
   } catch {
     /* si falla, medidasFilas queda vacío y el botón no aparece */
@@ -397,7 +403,7 @@ export default async function ProductoDetallePage({ params }: { params: Promise<
             imagen={prod.imagen_principal_url}
             precioOferta={precioOferta}
             descuentoPorcentaje={descuentoPct}
-            variantes={prod.productos_variantes.map((v) => {
+            variantes={[...prod.productos_variantes].sort((a, b) => ordenTalla(a.talla) - ordenTalla(b.talla)).map((v) => {
               const precio = Number(v.precio_publico ?? 0);
               const aplicaDescuento = descuentoPct > 0 && !tallasExcluidasDescuento.has(v.talla);
               return {
@@ -430,7 +436,11 @@ export default async function ProductoDetallePage({ params }: { params: Promise<
           {medidasFilas.length > 0 && (
             <TablaMedidas
               medidas={medidasFilas}
-              tallas={Array.from(new Set(prod.productos_variantes.map((v) => v.talla)))}
+              // Orden lógico de tallas (2, 4, 6… S, AD) — sin ordenar salían
+              // como vinieran de la BD: "10, 12, 14, 2, 4, 6, 8".
+              tallas={Array.from(new Set(prod.productos_variantes.map((v) => v.talla))).sort(
+                (a, b) => ordenTalla(a) - ordenTalla(b),
+              )}
             />
           )}
 
