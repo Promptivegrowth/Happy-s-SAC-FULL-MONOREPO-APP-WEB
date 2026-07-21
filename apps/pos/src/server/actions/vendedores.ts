@@ -9,7 +9,10 @@
  * a la vendedora que la realizó para cálculo de comisiones.
  *
  * Estrategia: NO crear una tabla nueva — reusar `perfiles` filtrando por
- * usuarios con rol que pueda atender ventas (gerente, cajero, vendedor_b2b).
+ * usuarios con rol que pueda atender ventas (cajero, vendedor_b2b).
+ * El GERENTE no aparece (pedido del cliente 20/07/2026: "javier mauricio es
+ * gerente y no debería aparecer") — si un gerente también vende, basta con
+ * asignarle ADEMÁS el rol cajero en Usuarios & Roles.
  */
 
 import { createClient } from '@happy/db/server';
@@ -24,8 +27,8 @@ export async function listarVendedoresPOS(): Promise<VendedorOpcion[]> {
   const { data: { user } } = await sb.auth.getUser();
   if (!user) return [];
 
-  // Roles que pueden actuar como vendedor en una venta POS
-  const rolesValidos = ['gerente', 'cajero', 'vendedor_b2b'] as const;
+  // Roles que pueden actuar como vendedor en una venta POS (sin gerente)
+  const rolesValidos = ['cajero', 'vendedor_b2b'] as const;
 
   // 1) IDs de usuarios con alguno de esos roles
   const { data: rolesRows } = await sb
