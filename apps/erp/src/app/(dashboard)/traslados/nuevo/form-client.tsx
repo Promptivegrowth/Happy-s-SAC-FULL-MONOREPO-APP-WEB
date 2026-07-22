@@ -364,7 +364,7 @@ export function NuevoTrasladoForm({
   const totalCantidad = lineas.reduce((s, l) => s + (Number(l.cantidad) || 0), 0);
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-4">
       {/* Almacenes + datos del traslado FUSIONADOS en un bloque compacto
           (pedido del cliente 21/07/2026): hace 20+ traslados diarios y quería
           llegar antes al scanner / carga de productos. Origen y destino en una
@@ -373,6 +373,7 @@ export function NuevoTrasladoForm({
       <FormSection
         title="Almacenes y datos del traslado"
         description="Origen = de dónde sale el stock. Destino = a dónde llega. Motivo y observación son opcionales."
+        className="p-5"
       >
         <FormGrid cols={2}>
           <FormRow label="Almacén origen" required>
@@ -441,7 +442,7 @@ export function NuevoTrasladoForm({
         open={vehiculoOpen}
         onToggle={(e) => setVehiculoOpen((e.currentTarget as HTMLDetailsElement).open)}
       >
-        <summary className="flex cursor-pointer select-none items-center gap-2 p-6 hover:bg-slate-50/60">
+        <summary className="flex cursor-pointer select-none items-center gap-2 p-5 hover:bg-slate-50/60">
           <Truck className="h-5 w-5 shrink-0 text-corp-500" />
           <div className="min-w-0 flex-1">
             <h2 className="font-display text-base font-semibold text-corp-900">
@@ -459,7 +460,7 @@ export function NuevoTrasladoForm({
           <span className="shrink-0 text-xs font-medium text-slate-400 group-open:hidden">Mostrar ▾</span>
           <span className="hidden shrink-0 text-xs font-medium text-slate-400 group-open:inline">Ocultar ▴</span>
         </summary>
-        <div className="space-y-4 px-6 pb-6">
+        <div className="space-y-4 px-5 pb-5">
         <FormGrid cols={3}>
           <FormRow label="Modalidad">
             <select
@@ -644,6 +645,7 @@ export function NuevoTrasladoForm({
             ? 'Escanee con la lectora, o agregue líneas a mano. El stock disponible se toma del almacén origen.'
             : 'Seleccione el almacén origen para ver stock disponible al agregar productos.'
         }
+        className="p-5"
       >
         <div className="space-y-3">
           {/* Lectora de código de barras SIEMPRE visible (pedido del cliente
