@@ -31,7 +31,7 @@ import { AbrirCajaModal } from './abrir-caja-modal';
 import { CerrarCajaModal } from './cerrar-caja-modal';
 import { CobrarModal, type CobrarPayload } from './cobrar-modal';
 import { generarTicket, generarA4, abrirPDF } from './comprobante-pdf';
-import { generarPdfCotizacion, siguienteNumeroCotizacion } from './cotizacion-pdf';
+import { generarPdfCotizacion, siguienteNumeroCotizacion, type FormatoCotizacion } from './cotizacion-pdf';
 import { HistorialModal } from './historial-modal';
 import { GastosModal } from './gastos-modal';
 import { AdelantosModal } from './adelantos-modal';
@@ -2188,6 +2188,8 @@ function CotizacionModal({
   const [vigenciaDias, setVigenciaDias] = useState(7);
   const [notas, setNotas] = useState('');
   const [generando, setGenerando] = useState(false);
+  // Formato del PDF (pedido 21/07/2026: cotizaciones también en A4)
+  const [formatoCot, setFormatoCot] = useState<FormatoCotizacion>('TICKET_80MM');
 
   const numero = useMemo(() => siguienteNumeroCotizacion(), []);
   // Cálculo subtotal / IGV a partir del total (total incluye IGV en el POS).
@@ -2225,7 +2227,7 @@ function CotizacionModal({
       lineas.push(`Nota: ${notas.trim()}`);
     }
     lineas.push('');
-    lineas.push('Adjuntamos el PDF con el detalle. ¿Confirmás la compra?');
+    lineas.push('Adjuntamos el PDF con el detalle. ¿Confirma la compra?');
     return lineas.join('\n');
   }, [nombreParaMostrar, empresaNombre, numero, fecha, venc, items, totalCarrito, notas]);
 
@@ -2246,7 +2248,7 @@ function CotizacionModal({
         total: totalCarrito,
         vendedor: vendedorNombre,
         notas: notas || undefined,
-      });
+      }, formatoCot);
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
@@ -2264,24 +2266,24 @@ function CotizacionModal({
   async function enviarWhatsApp() {
     const limpio = tel.replace(/\D/g, '');
     if (limpio.length < 8) {
-      toast.error('Ingresá el número del cliente (mínimo 8 dígitos)');
+      toast.error('Ingrese el número del cliente (mínimo 8 dígitos)');
       return;
     }
     await generarPdfYDescargar();
     abrirWhatsApp(tel, mensajeWa);
-    toast.success('PDF descargado + WhatsApp abierto — arrastrá el PDF al chat');
+    toast.success('PDF descargado + WhatsApp abierto — arrastre el PDF al chat');
     onClose();
   }
 
   async function enviarEmail() {
     if (!email.includes('@')) {
-      toast.error('Ingresá un correo válido');
+      toast.error('Ingrese un correo válido');
       return;
     }
     await generarPdfYDescargar();
     const asunto = `Cotización ${numero} — ${empresaNombre}`;
     window.location.href = `mailto:${email}?subject=${encodeURIComponent(asunto)}&body=${encodeURIComponent(mensajeWa)}`;
-    toast.success('PDF descargado + correo abierto — adjuntá el PDF y envía');
+    toast.success('PDF descargado + correo abierto — adjunte el PDF y envíelo');
     onClose();
   }
 
@@ -2331,6 +2333,28 @@ function CotizacionModal({
                 placeholder="cliente@correo.com"
                 className="mt-1 h-9 w-full rounded-md border border-slate-300 bg-white px-3 text-sm focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-100"
               />
+            </div>
+          </div>
+          <div>
+            <label className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">Formato del PDF</label>
+            <div className="mt-1 flex gap-1">
+              {([
+                { k: 'TICKET_80MM', label: 'Ticket 80mm' },
+                { k: 'A4', label: 'Hoja A4' },
+              ] as { k: FormatoCotizacion; label: string }[]).map(({ k, label }) => (
+                <button
+                  key={k}
+                  type="button"
+                  onClick={() => setFormatoCot(k)}
+                  className={`h-8 flex-1 rounded-md border text-[11px] font-semibold transition ${
+                    formatoCot === k
+                      ? 'border-happy-500 bg-happy-500 text-white'
+                      : 'border-slate-200 bg-white text-slate-500 hover:border-happy-300'
+                  }`}
+                >
+                  {label}
+                </button>
+              ))}
             </div>
           </div>
           <div>
