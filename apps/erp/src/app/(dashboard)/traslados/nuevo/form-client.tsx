@@ -8,7 +8,7 @@ import { FormRow, FormGrid, FormSection } from '@happy/ui/form-row';
 import { Input } from '@happy/ui/input';
 import { Textarea } from '@happy/ui/textarea';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@happy/ui/table';
-import { Loader2, Save, Plus, Trash2, AlertTriangle, Search, ScanLine, Zap, Upload, X } from 'lucide-react';
+import { Loader2, Save, Plus, Trash2, AlertTriangle, Search, ScanLine, Zap, Upload, X, Truck } from 'lucide-react';
 import { toast } from 'sonner';
 import {
   crearTraslado,
@@ -67,6 +67,21 @@ export function NuevoTrasladoForm({
   const [cantidadBultos, setCantidadBultos] = useState('');
   const [tipoBulto, setTipoBulto] = useState('COSTALES');
   const [pesoTotal, setPesoTotal] = useState('');
+
+  // Cuántos campos del bloque "Vehículo y conductor" tienen dato — para el
+  // badge del summary y para abrir el bloque automáticamente si ya se cargó
+  // algo (así el colapso no oculta datos por accidente).
+  const vehiculoCamposLlenos = [
+    vehiculoPlaca, vehiculoMarca, choferNombre, choferDni, choferLicencia,
+    vehiculoTarjeta, transportistaRuc, transportistaRazon, cantidadBultos, pesoTotal,
+  ].filter((v) => v.trim() !== '').length;
+  // Abierto/cerrado con estado propio (no controlado por el prop `open`, que
+  // pelearía con el toggle nativo del <details>). Arranca cerrado; se abre
+  // solo si aparecen datos cargados (ej. modalidad PÚBLICO exige RUC).
+  const [vehiculoOpen, setVehiculoOpen] = useState(false);
+  useEffect(() => {
+    if (vehiculoCamposLlenos > 0) setVehiculoOpen(true);
+  }, [vehiculoCamposLlenos]);
 
   // Stock disponible en el almacén origen (por variante / material id).
   const [stockVar, setStockVar] = useState<Record<string, number>>({});
@@ -350,9 +365,14 @@ export function NuevoTrasladoForm({
 
   return (
     <div className="space-y-6">
+      {/* Almacenes + datos del traslado FUSIONADOS en un bloque compacto
+          (pedido del cliente 21/07/2026): hace 20+ traslados diarios y quería
+          llegar antes al scanner / carga de productos. Origen y destino en una
+          fila; motivo y observación pasan de textarea de 3 líneas a input de
+          una línea (siguen siendo opcionales). */}
       <FormSection
-        title="Almacenes"
-        description="Origen = de dónde sale el stock. Destino = a dónde llega."
+        title="Almacenes y datos del traslado"
+        description="Origen = de dónde sale el stock. Destino = a dónde llega. Motivo y observación son opcionales."
       >
         <FormGrid cols={2}>
           <FormRow label="Almacén origen" required>
@@ -390,27 +410,20 @@ export function NuevoTrasladoForm({
               ))}
             </select>
           </FormRow>
-        </FormGrid>
-      </FormSection>
-
-      <FormSection title="Datos del traslado" description="Información opcional para trazabilidad.">
-        <FormGrid cols={2}>
-          <FormRow label="Motivo">
-            <Textarea
+          <FormRow label="Motivo (opcional)">
+            <Input
               value={motivo}
               onChange={(e) => setMotivo(e.target.value)}
               placeholder="Reabastecimiento tienda, devolución a central, etc."
               disabled={pending}
-              rows={3}
             />
           </FormRow>
-          <FormRow label="Observación">
-            <Textarea
+          <FormRow label="Observación (opcional)">
+            <Input
               value={observacion}
               onChange={(e) => setObservacion(e.target.value)}
               placeholder="Notas adicionales"
               disabled={pending}
-              rows={3}
             />
           </FormRow>
         </FormGrid>
@@ -418,11 +431,35 @@ export function NuevoTrasladoForm({
 
       {/* Vehículo y conductor — se pre-imprimen en la guía de remisión.
           Todos son opcionales — si están vacíos, la guía deja líneas para
-          completar a mano (mismo comportamiento que el sistema anterior). */}
-      <FormSection
-        title="Vehículo y conductor (opcional)"
-        description="Se pre-imprimen en la guía de remisión. Si los dejas vacíos, la guía trae líneas para llenar a mano."
+          completar a mano (mismo comportamiento que el sistema anterior).
+          COLAPSABLE (pedido del cliente 21/07/2026): hace 20+ traslados
+          diarios La Quinta↔Huallaga y casi nunca llena estos datos, así que
+          arranca cerrado para no ocupar pantalla. Se abre solo si ya tiene
+          algún dato cargado, para no ocultar información. */}
+      <details
+        className="group rounded-xl border bg-white shadow-soft"
+        open={vehiculoOpen}
+        onToggle={(e) => setVehiculoOpen((e.currentTarget as HTMLDetailsElement).open)}
       >
+        <summary className="flex cursor-pointer select-none items-center gap-2 p-6 hover:bg-slate-50/60">
+          <Truck className="h-5 w-5 shrink-0 text-corp-500" />
+          <div className="min-w-0 flex-1">
+            <h2 className="font-display text-base font-semibold text-corp-900">
+              Vehículo y conductor (opcional)
+            </h2>
+            <p className="mt-0.5 text-sm text-slate-500">
+              Se pre-imprimen en la guía de remisión. Si los deja vacíos, la guía trae líneas para llenar a mano.
+            </p>
+          </div>
+          {vehiculoCamposLlenos > 0 && (
+            <span className="shrink-0 rounded-full bg-happy-100 px-2.5 py-0.5 text-xs font-semibold text-happy-700">
+              {vehiculoCamposLlenos} dato{vehiculoCamposLlenos === 1 ? '' : 's'}
+            </span>
+          )}
+          <span className="shrink-0 text-xs font-medium text-slate-400 group-open:hidden">Mostrar ▾</span>
+          <span className="hidden shrink-0 text-xs font-medium text-slate-400 group-open:inline">Ocultar ▴</span>
+        </summary>
+        <div className="space-y-4 px-6 pb-6">
         <FormGrid cols={3}>
           <FormRow label="Modalidad">
             <select
@@ -507,18 +544,19 @@ export function NuevoTrasladoForm({
             </FormRow>
           </FormGrid>
         </div>
-      </FormSection>
+        </div>
+      </details>
 
       {/* ─── CARGA RÁPIDA (escaneo / pegado masivo) — COLAPSABLE ─────────────
-          Cliente pidió reducir esta sección porque en el 90% de casos el
-          usuario agrega 2-3 líneas manualmente. La carga rápida solo hace
-          falta en traslados grandes (>10 SKUs), así queda escondida por
-          default y el foco visual va a "Líneas" que es lo que se usa siempre. */}
-      <details className="rounded-xl border border-slate-200 bg-white/50">
+          Abierta por DEFAULT (pedido del cliente 21/07/2026): hace 20+
+          traslados diarios La Quinta↔Huallaga con lectora de código de barras
+          y quería ver la lectora apenas abre la pantalla, junto con la carga
+          manual de abajo. Sigue siendo colapsable si prefiere ocultarla. */}
+      <details open className="rounded-xl border border-slate-200 bg-white/50">
         <summary className="cursor-pointer select-none px-4 py-2 text-sm font-medium text-corp-900 hover:bg-slate-50">
           <ScanLine className="mr-1.5 inline h-4 w-4 text-sky-600" />
-          Carga rápida (opcional) — escanear o pegar lista
-          <span className="ml-2 text-xs font-normal text-slate-500">para traslados grandes</span>
+          Carga rápida — escanear con lectora o pegar lista
+          <span className="ml-2 text-xs font-normal text-slate-500">opcional</span>
         </summary>
         <div className="border-t p-4">
         <div className="grid gap-3 md:grid-cols-2">
