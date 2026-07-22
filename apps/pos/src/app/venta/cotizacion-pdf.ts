@@ -56,7 +56,7 @@ export async function generarPdfCotizacion(
 
 async function generarCotizacionTicket(data: DatosCotizacion): Promise<Blob> {
   // Alto dinámico: base + item * cantidad_items + footer
-  const alto = 134 + data.items.length * 8 + (data.notas ? 20 : 0);
+  const alto = 138 + data.items.length * 8 + (data.notas ? 20 : 0);
   const doc = new jsPDF({ unit: 'mm', format: [WIDTH, alto], orientation: 'portrait' });
 
   let y = 6;
@@ -77,13 +77,15 @@ async function generarCotizacionTicket(data: DatosCotizacion): Promise<Blob> {
   y += 2;
   doc.setLineDashPattern([0.7, 0.7], 0);
   doc.line(4, y, WIDTH - 4, y);
-  y += 4;
+  // 6.5mm de aire: las mayúsculas de 13pt suben ~4.6mm sobre el baseline y
+  // con solo 4mm la línea punteada cortaba el título (reporte 21/07/2026).
+  y += 6.5;
 
   // Título COTIZACIÓN
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(13);
   doc.text('COTIZACIÓN', cx, y, { align: 'center' });
-  y += 5;
+  y += 5.5;
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(10);
   doc.text(data.numero, cx, y, { align: 'center' });
