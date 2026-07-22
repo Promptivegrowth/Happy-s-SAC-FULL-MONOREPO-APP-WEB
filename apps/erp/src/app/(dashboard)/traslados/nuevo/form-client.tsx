@@ -547,16 +547,17 @@ export function NuevoTrasladoForm({
         </div>
       </details>
 
-      {/* ─── CARGA RÁPIDA (escaneo / pegado masivo) — COLAPSABLE ─────────────
-          Abierta por DEFAULT (pedido del cliente 21/07/2026): hace 20+
-          traslados diarios La Quinta↔Huallaga con lectora de código de barras
-          y quería ver la lectora apenas abre la pantalla, junto con la carga
-          manual de abajo. Sigue siendo colapsable si prefiere ocultarla. */}
-      <details open className="rounded-xl border border-slate-200 bg-white/50">
+      {/* ─── CARGA MASIVA (pegar lista) — COLAPSABLE ────────────────────────
+          Colapsada por default para que todo el formulario entre en una sola
+          pantalla sin scroll (pedido del cliente 21/07/2026). La lectora de
+          código de barras ya está SIEMPRE visible arriba de "Líneas" (campo
+          compacto), así que acá solo queda el pegado masivo para listas
+          grandes. */}
+      <details className="rounded-xl border border-slate-200 bg-white/50">
         <summary className="cursor-pointer select-none px-4 py-2 text-sm font-medium text-corp-900 hover:bg-slate-50">
           <ScanLine className="mr-1.5 inline h-4 w-4 text-sky-600" />
-          Carga rápida — escanear con lectora o pegar lista
-          <span className="ml-2 text-xs font-normal text-slate-500">opcional</span>
+          Carga masiva (opcional) — pegar lista completa
+          <span className="ml-2 text-xs font-normal text-slate-500">para traslados grandes</span>
         </summary>
         <div className="border-t p-4">
         <div className="grid gap-3 md:grid-cols-2">
@@ -637,14 +638,30 @@ export function NuevoTrasladoForm({
       </details>
 
       <FormSection
-        title="Líneas"
+        title="Productos a trasladar"
         description={
           origenId
-            ? 'Agrega líneas con producto (variante) o material. El stock disponible se carga del almacén origen.'
-            : 'Selecciona almacén origen para ver stock disponible al agregar líneas.'
+            ? 'Escanee con la lectora, o agregue líneas a mano. El stock disponible se toma del almacén origen.'
+            : 'Seleccione el almacén origen para ver stock disponible al agregar productos.'
         }
       >
         <div className="space-y-3">
+          {/* Lectora de código de barras SIEMPRE visible (pedido del cliente
+              21/07/2026): dispare el lector USB acá y cada escaneo agrega el
+              producto (o suma 1 a la línea existente). Sin ocupar espacio de
+              más — el pegado masivo de listas grandes queda en "Carga masiva"
+              arriba, colapsado. */}
+          <div className="relative">
+            <ScanLine className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-sky-500" />
+            <Input
+              value={scanInput}
+              onChange={(e) => setScanInput(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); procesarScan(); } }}
+              placeholder="Escanee el código de barras aquí (o escriba el código y presione Enter)…"
+              className="pl-9"
+              disabled={pending}
+            />
+          </div>
           {lineas.length === 0 ? (
             <p className="text-sm text-slate-500">
               Aún no hay líneas. Haz clic en &quot;Agregar línea&quot;.
