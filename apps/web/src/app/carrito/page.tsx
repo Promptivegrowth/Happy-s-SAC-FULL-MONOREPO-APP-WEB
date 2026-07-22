@@ -1,5 +1,6 @@
 'use client';
 
+import { useEffect } from 'react';
 import Image from 'next/image';
 import Link from 'next/link';
 import {
@@ -9,6 +10,7 @@ import {
   UMBRAL_MAYORISTA,
   UMBRAL_FABRICA,
 } from '@/store/cart';
+import { obtenerPreciosVariantes } from '@/server/actions/precios';
 import { Button } from '@happy/ui/button';
 import { Card } from '@happy/ui/card';
 import { Badge } from '@happy/ui/badge';
@@ -20,7 +22,23 @@ export default function CarritoPage() {
   const setQty = useCart((s) => s.setQty);
   const total = useCart((s) => s.total());
   const totalDisfraces = useCart((s) => s.totalItems());
+  const refrescarPrecios = useCart((s) => s.refrescarPrecios);
   const escalon = escalonPorTotalItems(totalDisfraces);
+
+  // Refrescar precios guardados con los vigentes de la BD. El carrito
+  // persiste en localStorage los precios del momento en que se agregó cada
+  // item — si después cambian en el ERP, acá se actualizan solos (reporte
+  // 21/07/2026: items agregados antes del fix de precio de fábrica seguían
+  // cobrando mayorista con 136 unidades en el carrito).
+  useEffect(() => {
+    const ids = useCart.getState().items.map((i) => i.varianteId);
+    if (ids.length === 0) return;
+    obtenerPreciosVariantes(ids)
+      .then((precios) => { if (precios.length > 0) refrescarPrecios(precios); })
+      .catch(() => { /* sin conexión: quedan los precios guardados */ });
+    // Solo al montar la página — no en cada cambio de cantidad.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   if (items.length === 0) {
     return (
@@ -52,7 +70,7 @@ export default function CarritoPage() {
     if (faltan > 0 && faltan <= 30) {
       mensajeEscalon = (
         <p className="rounded-md bg-blue-50 p-2 text-center text-xs text-blue-800">
-          🏭 ¡Sos mayorista! Agrega <strong>{faltan}</strong> más para pasar a <strong>precio de fábrica</strong>.
+          🏭 ¡Ya eres mayorista! Agrega <strong>{faltan}</strong> más para pasar a <strong>precio de fábrica</strong>.
         </p>
       );
     }

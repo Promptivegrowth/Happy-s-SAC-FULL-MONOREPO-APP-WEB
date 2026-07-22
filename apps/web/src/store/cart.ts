@@ -67,6 +67,12 @@ type CartState = {
   total: () => number;
   totalItems: () => number;
   escalonActivo: () => EscalonAplicado;
+  /** Pisa los precios guardados con los vigentes de la BD (el carrito
+   *  persiste en localStorage los precios del momento en que se agregó
+   *  cada item — si cambian en el ERP quedaban desactualizados). */
+  refrescarPrecios: (
+    precios: { id: string; precio: number; precioMayorista: number; precioFabrica: number }[],
+  ) => void;
 };
 
 export const useCart = create<CartState>()(
@@ -91,6 +97,16 @@ export const useCart = create<CartState>()(
         items: s.items.map((i) => i.varianteId === varianteId ? { ...i, cantidad: Math.max(1, qty) } : i),
       })),
       clear: () => set({ items: [] }),
+      refrescarPrecios: (precios) => set((s) => {
+        const map = new Map(precios.map((p) => [p.id, p]));
+        return {
+          items: s.items.map((i) => {
+            const p = map.get(i.varianteId);
+            if (!p || p.precio <= 0) return i; // sin datos frescos, no tocar
+            return { ...i, precio: p.precio, precioMayorista: p.precioMayorista, precioFabrica: p.precioFabrica };
+          }),
+        };
+      }),
       total: () => {
         const state = get();
         const totalItems = state.items.reduce((a, i) => a + i.cantidad, 0);
