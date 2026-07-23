@@ -7,7 +7,7 @@ import { Badge } from '@happy/ui/badge';
 import { Card } from '@happy/ui/card';
 import { FormRow } from '@happy/ui/form-row';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@happy/ui/table';
-import { Plus, Trash2, Loader2, Pencil, Save, X } from 'lucide-react';
+import { Plus, Trash2, Loader2, Pencil, Save, X, Copy } from 'lucide-react';
 import { toast } from 'sonner';
 import { formatPEN } from '@happy/lib';
 import { crearVariante, actualizarVariante, eliminarVariante } from '@/server/actions/productos';
@@ -50,6 +50,30 @@ export function VariantesSection({
   const [open, setOpen] = useState(false);
   const [pending, start] = useTransition();
   const [skuPrefix, setSkuPrefix] = useState('');
+  // Precios precargados al DUPLICAR una variante existente (pedido del cliente
+  // 21/07/2026: crea ~30 productos con variantes de color y llenar los precios
+  // de cada talla una por una es lento). `formKey` fuerza el remount del form
+  // para que los defaultValue tomen los nuevos precios.
+  const [prefill, setPrefill] = useState<Variante | null>(null);
+  const [formKey, setFormKey] = useState(0);
+
+  function abrirNueva() {
+    setPrefill(null);
+    setSkuPrefix('');
+    setFormKey((k) => k + 1);
+    setOpen(true);
+  }
+
+  function duplicar(v: Variante) {
+    if (tallasDisponibles.length === 0) {
+      toast.error('Ya están todas las tallas creadas — no hay talla libre para duplicar.');
+      return;
+    }
+    setPrefill(v);
+    setSkuPrefix(''); // SKU nuevo (se autogenera); no se puede repetir el del origen
+    setFormKey((k) => k + 1);
+    setOpen(true);
+  }
 
   function onCreate(fd: FormData) {
     fd.append('producto_id', productoId);
@@ -58,11 +82,14 @@ export function VariantesSection({
       if (r.ok) {
         toast.success('Variante creada');
         setOpen(false);
+        setPrefill(null);
       } else {
         toast.error(r.error);
       }
     });
   }
+
+  const pv = (n: number | null | undefined) => (n != null ? String(n) : '');
 
   function onDelete(id: string) {
     if (!confirm('¿Eliminar esta variante?')) return;
@@ -84,14 +111,20 @@ export function VariantesSection({
           <p className="text-sm text-slate-500">Cada variante es un SKU independiente con stock y precio.</p>
         </div>
         {!open && tallasDisponibles.length > 0 && (
-          <Button variant="premium" size="sm" onClick={() => setOpen(true)}>
+          <Button variant="premium" size="sm" onClick={abrirNueva}>
             <Plus className="h-4 w-4" /> Agregar variante
           </Button>
         )}
       </div>
 
       {open && (
-        <form action={onCreate} className="mb-6 rounded-lg border border-dashed bg-happy-50/40 p-4">
+        <form key={formKey} action={onCreate} className="mb-6 rounded-lg border border-dashed bg-happy-50/40 p-4">
+          {prefill && (
+            <p className="mb-3 flex items-center gap-1.5 text-xs font-medium text-happy-700">
+              <Copy className="h-3.5 w-3.5" />
+              Duplicando precios de la talla {prefill.talla.replace('T', '')}. Elija la nueva talla y guarde.
+            </p>
+          )}
           <div className="grid gap-4 sm:grid-cols-3">
             <FormRow label="Talla" required>
               <select name="talla" required className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm">
@@ -114,26 +147,26 @@ export function VariantesSection({
               <Input name="codigo_barras" placeholder="opcional" />
             </FormRow>
             <FormRow label="Precio público (S/)" required>
-              <Input name="precio_publico" type="number" step="0.01" min="0" required placeholder="Ej. 49.90" />
+              <Input name="precio_publico" type="number" step="0.01" min="0" required placeholder="Ej. 49.90" defaultValue={pv(prefill?.precio_publico)} />
             </FormRow>
             <FormRow label="Precio mayorista A (S/)" hint="6+ unidades">
-              <Input name="precio_mayorista_a" type="number" step="0.01" min="0" />
+              <Input name="precio_mayorista_a" type="number" step="0.01" min="0" defaultValue={pv(prefill?.precio_mayorista_a)} />
             </FormRow>
             <FormRow label="Precio mayorista B (S/)" hint="12+ unidades">
-              <Input name="precio_mayorista_b" type="number" step="0.01" min="0" />
+              <Input name="precio_mayorista_b" type="number" step="0.01" min="0" defaultValue={pv(prefill?.precio_mayorista_b)} />
             </FormRow>
             <FormRow label="Precio mayorista C (S/)" hint="50+ unidades">
-              <Input name="precio_mayorista_c" type="number" step="0.01" min="0" />
+              <Input name="precio_mayorista_c" type="number" step="0.01" min="0" defaultValue={pv(prefill?.precio_mayorista_c)} />
             </FormRow>
             <FormRow label="Precio fábrica (S/)" hint="100+ unidades">
-              <Input name="precio_industrial" type="number" step="0.01" min="0" />
+              <Input name="precio_industrial" type="number" step="0.01" min="0" defaultValue={pv(prefill?.precio_industrial)} />
             </FormRow>
             <FormRow label="Precio costo estándar (S/)">
-              <Input name="precio_costo_estandar" type="number" step="0.01" min="0" />
+              <Input name="precio_costo_estandar" type="number" step="0.01" min="0" defaultValue={pv(prefill?.precio_costo_estandar)} />
             </FormRow>
           </div>
           <div className="mt-4 flex items-center justify-end gap-2">
-            <Button type="button" variant="outline" onClick={() => setOpen(false)} disabled={pending}>Cancelar</Button>
+            <Button type="button" variant="outline" onClick={() => { setOpen(false); setPrefill(null); }} disabled={pending}>Cancelar</Button>
             <Button type="submit" variant="premium" disabled={pending}>
               {pending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
               Agregar
@@ -168,6 +201,7 @@ export function VariantesSection({
                 variante={v}
                 ultimoCosto={ultimosCostos[v.talla]}
                 onDelete={onDelete}
+                onDuplicate={duplicar}
               />
             ))}
           </TableBody>
@@ -183,11 +217,13 @@ function VarianteRow({
   variante: v,
   ultimoCosto: u,
   onDelete,
+  onDuplicate,
 }: {
   productoId: string;
   variante: Variante;
   ultimoCosto: UltimoCosto | undefined;
   onDelete: (id: string) => void;
+  onDuplicate: (v: Variante) => void;
 }) {
   const [editing, setEditing] = useState(false);
   const [pending, start] = useTransition();
@@ -276,6 +312,9 @@ function VarianteRow({
         <TableCell>{v.activo ? <Badge variant="success">Activa</Badge> : <Badge variant="secondary">Inactiva</Badge>}</TableCell>
         <TableCell>
           <div className="flex items-center justify-end gap-1">
+            <Button variant="ghost" size="sm" onClick={() => onDuplicate(v)} title="Duplicar esta talla (copia los precios a una talla nueva)">
+              <Copy className="h-3.5 w-3.5 text-happy-600" />
+            </Button>
             <Button variant="ghost" size="sm" onClick={() => setEditing(true)} title="Editar variante">
               <Pencil className="h-3.5 w-3.5" />
             </Button>
