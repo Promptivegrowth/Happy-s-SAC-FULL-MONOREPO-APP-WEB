@@ -6,6 +6,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@happy/ui/card';
 import { Badge } from '@happy/ui/badge';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@happy/ui/table';
 import { PageShell } from '@/components/page-shell';
+import { esGerente } from '@/server/actions/_helpers';
 import { OtAcciones, OtNotaForm, OtLineaProduccion, AgregarLineaOTForm, EliminarLineaOT } from './client';
 import { TiemposCostoTab } from './tiempos-client';
 import { EstadoBanner } from './estado-banner';
@@ -38,6 +39,11 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
   ]);
   if (!ot) notFound();
   const puedeEditarLineas = !['COMPLETADA', 'CANCELADA'].includes(ot.estado);
+
+  // Liquidar corte con cantidades distintas al plan requiere gerencia
+  // (pedido del cliente 21/07/2026). El server revalida igual; esto es solo
+  // para mostrar el aviso correcto antes de intentar guardar.
+  const usuarioEsGerente = await esGerente();
 
   const totalPlan = (lineas ?? []).reduce((a, l) => a + Number(l.cantidad_planificada ?? 0), 0);
   const totalCortado = (lineas ?? []).reduce((a, l) => a + Number(l.cantidad_cortada ?? 0), 0);
@@ -232,6 +238,7 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
                               cortada={Number(l.cantidad_cortada ?? 0)}
                               fallas={Number(l.cantidad_fallas ?? 0)}
                               disabled={!puedeEditarLineas}
+                              usuarioEsGerente={usuarioEsGerente}
                             />
                           </TableCell>
                           <TableCell className="text-right">
@@ -283,7 +290,8 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
                   <div key={e.id} className="flex gap-3 rounded-lg border bg-slate-50 p-3">
                     <div className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-corp-100 text-corp-700">
                       {e.tipo === 'NOTA' ? <User className="h-3.5 w-3.5" /> :
-                       e.tipo === 'ANOMALIA' || e.tipo === 'FALLA' ? <AlertTriangle className="h-3.5 w-3.5 text-amber-600" /> :
+                       e.tipo === 'ANOMALIA' || e.tipo === 'FALLA' || e.tipo === 'AUTORIZACION_CANTIDAD'
+                         ? <AlertTriangle className="h-3.5 w-3.5 text-amber-600" /> :
                        <Calendar className="h-3.5 w-3.5" />}
                     </div>
                     <div className="flex-1">

@@ -51,3 +51,16 @@ export async function requireUser() {
 export async function bumpPaths(...paths: string[]) {
   for (const p of paths) revalidatePath(p);
 }
+
+/**
+ * ¿El usuario actual tiene rol 'gerente'? Se usa para operaciones que
+ * requieren autorización de gerencia (ej. liquidar corte con cantidades
+ * distintas al plan — pedido del cliente 21/07/2026).
+ */
+export async function esGerente(): Promise<boolean> {
+  const sb = await createClient();
+  const { data: { user } } = await sb.auth.getUser();
+  if (!user) return false;
+  const { data } = await sb.from('usuarios_roles').select('rol').eq('usuario_id', user.id);
+  return (data ?? []).some((r) => (r as { rol: string }).rol === 'gerente');
+}

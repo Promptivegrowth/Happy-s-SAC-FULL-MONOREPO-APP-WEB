@@ -166,8 +166,10 @@ export function OtNotaForm({ otId }: { otId: string }) {
   );
 }
 
-export function OtLineaProduccion({ otId, lineaId, planificada, cortada, fallas, disabled }: {
+export function OtLineaProduccion({ otId, lineaId, planificada, cortada, fallas, disabled, usuarioEsGerente = false }: {
   otId: string; lineaId: string; planificada: number; cortada: number; fallas: number; disabled: boolean;
+  /** Solo gerencia puede liquidar cantidades distintas al plan (pedido 21/07/2026). */
+  usuarioEsGerente?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const [pending, start] = useTransition();
@@ -177,21 +179,31 @@ export function OtLineaProduccion({ otId, lineaId, planificada, cortada, fallas,
   const sugerido = Math.max(planificada, cortada);
   const [c, setC] = useState(sugerido);
   const [f, setF] = useState(fallas);
+  const [motivo, setMotivo] = useState('');
+
+  // Lo normal es liquidar exactamente el plan. Cualquier diferencia (extras o
+  // faltantes) necesita autorización de gerencia + motivo, y queda registrada
+  // en la bitácora de la OT.
+  const difiere = c !== planificada;
+  const requiereAutorizacion = difiere && !usuarioEsGerente;
 
   function save() {
-    // Se permite cortar más del plan (extras). Solo validamos que las fallas
-    // no superen lo cortado (no podés tener más fallas que unidades).
     if (f > c) {
       return toast.error('Fallas no pueden superar cortadas');
     }
-    if (c > planificada) {
-      // Aviso suave, no bloqueo.
-      toast.warning(`Cortando ${c} extras (plan ${planificada}). Se guarda igual.`);
+    if (requiereAutorizacion) {
+      return toast.error(
+        `Liquidar ${c} unidades no coincide con el plan (${planificada}). Requiere autorización de gerencia.`,
+      );
+    }
+    if (difiere && !motivo.trim()) {
+      return toast.error('Indique el motivo de la diferencia para registrar la autorización.');
     }
     start(async () => {
-      const r = await declararProduccion(otId, lineaId, c, f);
+      const r = await declararProduccion(otId, lineaId, c, f, motivo.trim() || undefined);
       if (r.ok) {
-        toast.success('Producción declarada');
+        toast.success(difiere ? 'Producción declarada — autorización registrada en la bitácora' : 'Producción declarada');
+        setMotivo('');
         setOpen(false);
       } else toast.error(r.error ?? 'Error');
     });
@@ -205,37 +217,68 @@ export function OtLineaProduccion({ otId, lineaId, planificada, cortada, fallas,
 
   const faltaCortar = Math.max(planificada - cortada, 0);
   return (
-    <div className="flex items-end gap-1">
-      <div className="flex flex-col">
-        <label className="text-[9px] font-semibold uppercase tracking-wide text-slate-500">Cortado</label>
-        <Input
-          type="number"
-          value={c}
-          onChange={(e) => setC(Number(e.target.value))}
-          min={0}
-          className="h-8 w-16 text-xs"
-          placeholder="0"
-          title={`Acumulado. Plan ${planificada}. Falta cortar ${faltaCortar}. Se permiten extras.`}
-          autoFocus
-        />
+    <div className="space-y-1">
+      <div className="flex items-end gap-1">
+        <div className="flex flex-col">
+          <label className="text-[9px] font-semibold uppercase tracking-wide text-slate-500">Cortado</label>
+          <Input
+            type="number"
+            value={c}
+            onChange={(e) => setC(Number(e.target.value))}
+            min={0}
+            className={`h-8 w-16 text-xs ${difiere ? 'border-amber-400 bg-amber-50' : ''}`}
+            placeholder="0"
+            title={`Acumulado. Plan ${planificada}. Falta cortar ${faltaCortar}. Una cantidad distinta al plan requiere autorización de gerencia.`}
+            autoFocus
+          />
+        </div>
+        <div className="flex flex-col">
+          <label className="text-[9px] font-semibold uppercase tracking-wide text-slate-500">Fallas</label>
+          <Input
+            type="number"
+            value={f}
+            onChange={(e) => setF(Number(e.target.value))}
+            min={0}
+            max={c}
+            className="h-8 w-14 text-xs"
+            placeholder="0"
+            title="Unidades descartadas (acumulado)"
+          />
+        </div>
+        <Button
+          variant="premium"
+          size="sm"
+          onClick={save}
+          disabled={pending || requiereAutorizacion}
+          className="h-8 px-2"
+          title={requiereAutorizacion ? 'Requiere autorización de gerencia' : 'Guardar'}
+        >
+          {pending ? <Loader2 className="h-3 w-3 animate-spin" /> : <Save className="h-3 w-3" />}
+        </Button>
+        <Button variant="ghost" size="sm" onClick={() => { setC(cortada); setF(fallas); setMotivo(''); setOpen(false); }} className="h-8 px-1" title="Cancelar"><X className="h-3 w-3" /></Button>
       </div>
-      <div className="flex flex-col">
-        <label className="text-[9px] font-semibold uppercase tracking-wide text-slate-500">Fallas</label>
-        <Input
-          type="number"
-          value={f}
-          onChange={(e) => setF(Number(e.target.value))}
-          min={0}
-          max={c}
-          className="h-8 w-14 text-xs"
-          placeholder="0"
-          title="Unidades descartadas (acumulado)"
-        />
-      </div>
-      <Button variant="premium" size="sm" onClick={save} disabled={pending} className="h-8 px-2" title="Guardar">
-        {pending ? <Loader2 className="h-3 w-3 animate-spin" /> : <Save className="h-3 w-3" />}
-      </Button>
-      <Button variant="ghost" size="sm" onClick={() => { setC(cortada); setF(fallas); setOpen(false); }} className="h-8 px-1" title="Cancelar"><X className="h-3 w-3" /></Button>
+
+      {difiere && (
+        requiereAutorizacion ? (
+          <p className="max-w-[260px] rounded border border-amber-300 bg-amber-50 px-2 py-1 text-[10px] leading-tight text-amber-800">
+            <strong>Requiere autorización de gerencia:</strong> son {c} unidades y el plan es {planificada}.
+            Solicite a gerencia que registre la liquidación.
+          </p>
+        ) : (
+          <div className="max-w-[260px]">
+            <label className="text-[9px] font-semibold uppercase tracking-wide text-amber-700">
+              Motivo de la diferencia (plan {planificada} → {c})
+            </label>
+            <Input
+              value={motivo}
+              onChange={(e) => setMotivo(e.target.value)}
+              placeholder="Ej: se cortaron extras para cubrir mermas"
+              className="h-8 text-xs"
+              maxLength={200}
+            />
+          </div>
+        )
+      )}
     </div>
   );
 }

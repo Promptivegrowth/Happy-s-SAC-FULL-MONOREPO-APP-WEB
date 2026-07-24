@@ -174,9 +174,67 @@ export async function agregarLineasPlanBatch(input: {
   return r;
 }
 
+/**
+ * Verifica que el plan siga en BORRADOR antes de modificar sus líneas.
+ * Una vez APROBADO el plan genera OTs, así que cambiar cantidades después
+ * dejaría el plan y la producción desalineados.
+ */
+async function requerirPlanEditable(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  sb: any,
+  planId: string,
+): Promise<void> {
+  const { data: plan } = await sb
+    .from('plan_maestro')
+    .select('estado')
+    .eq('id', planId)
+    .maybeSingle();
+  if (!plan) throw new Error('Plan no encontrado');
+  if (plan.estado !== 'BORRADOR') {
+    throw new Error(
+      `No se puede modificar: el plan está en estado ${String(plan.estado).replace('_', ' ')}. Solo se editan planes en BORRADOR (antes de aprobar).`,
+    );
+  }
+}
+
+/**
+ * Edita cantidad y prioridad de una línea del plan. Pedido del cliente
+ * (21/07/2026): poder corregir las cantidades antes de aprobar el plan, sin
+ * tener que borrar la línea y volver a cargarla.
+ */
+export async function actualizarLineaPlan(
+  id: string,
+  planId: string,
+  cantidad: number,
+  prioridad: number,
+): Promise<ActionResult> {
+  const r = await runAction(async () => {
+    if (!Number.isFinite(cantidad) || cantidad <= 0) {
+      throw new Error('La cantidad debe ser mayor a 0');
+    }
+    if (!Number.isFinite(prioridad) || prioridad < 0) {
+      throw new Error('Prioridad inválida');
+    }
+    const { sb } = await requireUser();
+    await requerirPlanEditable(sb, planId);
+    const { error } = await sb
+      .from('plan_maestro_lineas')
+      .update({
+        cantidad_planificada: Math.round(cantidad),
+        prioridad: Math.round(prioridad),
+      })
+      .eq('id', id);
+    if (error) throw new Error(error.message);
+    return null;
+  });
+  if (r.ok) await bumpPaths(`/plan-maestro/${planId}`);
+  return r;
+}
+
 export async function eliminarLineaPlan(id: string, planId: string): Promise<ActionResult> {
   const r = await runAction(async () => {
     const { sb } = await requireUser();
+    await requerirPlanEditable(sb, planId);
     const { error } = await sb.from('plan_maestro_lineas').delete().eq('id', id);
     if (error) throw new Error(error.message);
     return null;

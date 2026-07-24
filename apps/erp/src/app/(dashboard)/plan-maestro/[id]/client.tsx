@@ -7,10 +7,11 @@ import { Input } from '@happy/ui/input';
 import { Badge } from '@happy/ui/badge';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@happy/ui/table';
 import { FormGrid, FormRow } from '@happy/ui/form-row';
-import { Plus, Trash2, Loader2, CheckCircle2, Factory, X, Search } from 'lucide-react';
+import { Plus, Trash2, Loader2, CheckCircle2, Factory, X, Search, Pencil, Save } from 'lucide-react';
 import { toast } from 'sonner';
 import {
   agregarLineasPlanBatch,
+  actualizarLineaPlan,
   eliminarLineaPlan,
   aprobarPlan,
   generarOTsDelPlan,
@@ -350,25 +351,140 @@ export function LineasEditor({
           </TableHeader>
           <TableBody>
             {lineas.map((l) => (
-              <TableRow key={l.id}>
-                <TableCell className="font-mono text-xs">{l.productos?.codigo}</TableCell>
-                <TableCell className="font-medium">{l.productos?.nombre}</TableCell>
-                <TableCell><Badge variant="outline">{l.talla.replace('T', '')}</Badge></TableCell>
-                <TableCell className="text-right font-mono">{l.cantidad_planificada}</TableCell>
-                <TableCell>{l.prioridad ?? 100}</TableCell>
-                <TableCell className="text-right">
-                  {isEditable && (
-                    <Button variant="ghost" size="sm" onClick={() => remove(l.id)} disabled={pending}>
-                      <Trash2 className="h-3.5 w-3.5 text-danger" />
-                    </Button>
-                  )}
-                </TableCell>
-              </TableRow>
+              <LineaPlanRow
+                key={l.id}
+                planId={planId}
+                linea={l}
+                isEditable={isEditable}
+                onRemove={remove}
+              />
             ))}
           </TableBody>
         </Table>
       )}
     </Card>
+  );
+}
+
+/**
+ * Fila de línea del plan con edición inline de cantidad y prioridad.
+ * Pedido del cliente (21/07/2026): poder corregir cantidades antes de aprobar
+ * el plan, sin borrar la línea y volver a cargarla. Solo editable mientras el
+ * plan está en BORRADOR (el server revalida el estado igual).
+ */
+function LineaPlanRow({
+  planId,
+  linea: l,
+  isEditable,
+  onRemove,
+}: {
+  planId: string;
+  linea: Linea;
+  isEditable: boolean;
+  onRemove: (id: string) => void;
+}) {
+  const [editando, setEditando] = useState(false);
+  const [pending, start] = useTransition();
+  const [cantidad, setCantidad] = useState(String(l.cantidad_planificada));
+  const [prioridad, setPrioridad] = useState(String(l.prioridad ?? 100));
+
+  function cancelar() {
+    setCantidad(String(l.cantidad_planificada));
+    setPrioridad(String(l.prioridad ?? 100));
+    setEditando(false);
+  }
+
+  function guardar() {
+    const cant = Number(cantidad);
+    const prio = Number(prioridad);
+    if (!Number.isFinite(cant) || cant <= 0) {
+      toast.error('La cantidad debe ser mayor a 0');
+      return;
+    }
+    if (cant === l.cantidad_planificada && prio === (l.prioridad ?? 100)) {
+      setEditando(false);
+      return;
+    }
+    start(async () => {
+      const r = await actualizarLineaPlan(l.id, planId, cant, prio);
+      if (r.ok) {
+        toast.success('Línea actualizada');
+        setEditando(false);
+      } else {
+        toast.error(r.error ?? 'No se pudo actualizar');
+      }
+    });
+  }
+
+  if (!editando) {
+    return (
+      <TableRow>
+        <TableCell className="font-mono text-xs">{l.productos?.codigo}</TableCell>
+        <TableCell className="font-medium">{l.productos?.nombre}</TableCell>
+        <TableCell><Badge variant="outline">{l.talla.replace('T', '')}</Badge></TableCell>
+        <TableCell className="text-right font-mono">{l.cantidad_planificada}</TableCell>
+        <TableCell>{l.prioridad ?? 100}</TableCell>
+        <TableCell className="text-right">
+          {isEditable && (
+            <div className="flex items-center justify-end gap-1">
+              <Button variant="ghost" size="sm" onClick={() => setEditando(true)} title="Editar cantidad / prioridad">
+                <Pencil className="h-3.5 w-3.5" />
+              </Button>
+              <Button variant="ghost" size="sm" onClick={() => onRemove(l.id)} disabled={pending}>
+                <Trash2 className="h-3.5 w-3.5 text-danger" />
+              </Button>
+            </div>
+          )}
+        </TableCell>
+      </TableRow>
+    );
+  }
+
+  return (
+    <TableRow className="bg-happy-50/40">
+      <TableCell className="font-mono text-xs">{l.productos?.codigo}</TableCell>
+      <TableCell className="font-medium">{l.productos?.nombre}</TableCell>
+      <TableCell><Badge variant="outline">{l.talla.replace('T', '')}</Badge></TableCell>
+      <TableCell className="text-right">
+        <Input
+          type="number"
+          min={1}
+          value={cantidad}
+          onChange={(e) => setCantidad(e.target.value.replace(/\D/g, ''))}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') { e.preventDefault(); guardar(); }
+            if (e.key === 'Escape') cancelar();
+          }}
+          className="ml-auto h-8 w-24 text-right font-mono text-xs"
+          disabled={pending}
+          autoFocus
+        />
+      </TableCell>
+      <TableCell>
+        <Input
+          type="number"
+          min={0}
+          value={prioridad}
+          onChange={(e) => setPrioridad(e.target.value.replace(/\D/g, ''))}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') { e.preventDefault(); guardar(); }
+            if (e.key === 'Escape') cancelar();
+          }}
+          className="h-8 w-20 text-xs"
+          disabled={pending}
+        />
+      </TableCell>
+      <TableCell className="text-right">
+        <div className="flex items-center justify-end gap-1">
+          <Button variant="premium" size="sm" onClick={guardar} disabled={pending} className="h-8 px-2" title="Guardar">
+            {pending ? <Loader2 className="h-3 w-3 animate-spin" /> : <Save className="h-3 w-3" />}
+          </Button>
+          <Button variant="ghost" size="sm" onClick={cancelar} disabled={pending} className="h-8 px-1" title="Cancelar">
+            <X className="h-3 w-3" />
+          </Button>
+        </div>
+      </TableCell>
+    </TableRow>
   );
 }
 

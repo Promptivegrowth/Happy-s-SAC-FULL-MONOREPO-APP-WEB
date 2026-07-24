@@ -2,7 +2,7 @@
 
 import { z } from 'zod';
 import { redirect } from 'next/navigation';
-import { runAction, requireUser, bumpPaths, type ActionResult } from './_helpers';
+import { runAction, requireUser, bumpPaths, esGerente, type ActionResult } from './_helpers';
 
 const ESTADOS = ['BORRADOR','PLANIFICADA','EN_CORTE','EN_HABILITADO','EN_SERVICIO','EN_DECORADO','EN_CONTROL_CALIDAD','COMPLETADA','CANCELADA'] as const;
 type EstadoOT = typeof ESTADOS[number];
@@ -258,7 +258,14 @@ export async function actualizarOT(otId: string, fd: FormData): Promise<ActionRe
   return r;
 }
 
-export async function declararProduccion(otId: string, lineaId: string, cantidadCortada: number, cantidadFallas: number): Promise<ActionResult> {
+export async function declararProduccion(
+  otId: string,
+  lineaId: string,
+  cantidadCortada: number,
+  cantidadFallas: number,
+  /** Justificación obligatoria cuando lo cortado difiere del plan (requiere gerencia). */
+  motivo?: string,
+): Promise<ActionResult> {
   const r = await runAction(async () => {
     if (cantidadCortada < 0 || cantidadFallas < 0) {
       throw new Error('Las cantidades no pueden ser negativas');
@@ -266,7 +273,7 @@ export async function declararProduccion(otId: string, lineaId: string, cantidad
     if (cantidadFallas > cantidadCortada) {
       throw new Error('Las fallas no pueden superar la cantidad cortada');
     }
-    const { sb } = await requireUser();
+    const { sb, userId } = await requireUser();
 
     // Validar contra cantidad_planificada de la línea + estado de la OT
     const { data: linea } = await sb
@@ -279,17 +286,50 @@ export async function declararProduccion(otId: string, lineaId: string, cantidad
     if (ot?.estado === 'COMPLETADA' || ot?.estado === 'CANCELADA') {
       throw new Error('No se puede declarar producción en una OT cerrada');
     }
-    // Nota: ANTES rechazábamos cantidadCortada > planificada. El cliente
-    // confirmó que en producción real se cortan unidades extras (cubrir
-    // mermas, pedidos adicionales, etc.). Ahora se permite y el usuario es
-    // responsable de declarar lo real. La columna "Falta cortar" muestra 0
-    // cuando se supera el plan.
+
+    // AUTORIZACIÓN DE GERENCIA (pedido del cliente 21/07/2026): lo normal es
+    // liquidar exactamente lo planificado. Si se declara una cantidad
+    // distinta (de más por extras, o de menos por faltantes), hace falta que
+    // lo autorice un gerente y que quede el motivo registrado en la bitácora.
+    const planificada = Number(linea.cantidad_planificada ?? 0);
+    const difiere = cantidadCortada !== planificada;
+    const motivoLimpio = (motivo ?? '').trim();
+    if (difiere) {
+      if (!(await esGerente())) {
+        throw new Error(
+          `Las unidades cortadas (${cantidadCortada}) no coinciden con el plan (${planificada}). Este cambio requiere autorización de gerencia.`,
+        );
+      }
+      if (!motivoLimpio) {
+        throw new Error('Indique el motivo de la diferencia para dejar registrada la autorización.');
+      }
+    }
 
     const { error } = await sb.from('ot_lineas').update({
       cantidad_cortada: cantidadCortada,
       cantidad_fallas: cantidadFallas,
     }).eq('id', lineaId);
     if (error) throw new Error(error.message);
+
+    // Registrar la autorización en la bitácora de la OT (auditoría)
+    if (difiere) {
+      const signo = cantidadCortada > planificada ? '+' : '';
+      await sb.from('ot_eventos').insert({
+        ot_id: otId,
+        tipo: 'AUTORIZACION_CANTIDAD',
+        usuario_id: userId,
+        detalle:
+          `Liquidación de corte autorizada por gerencia: ${cantidadCortada} unidades ` +
+          `(plan ${planificada}, diferencia ${signo}${cantidadCortada - planificada}). Motivo: ${motivoLimpio}`,
+        contexto: {
+          linea_id: lineaId,
+          cantidad_planificada: planificada,
+          cantidad_cortada: cantidadCortada,
+          diferencia: cantidadCortada - planificada,
+          motivo: motivoLimpio,
+        },
+      });
+    }
     return null;
   });
   if (r.ok) await bumpPaths(`/ot/${otId}`);
