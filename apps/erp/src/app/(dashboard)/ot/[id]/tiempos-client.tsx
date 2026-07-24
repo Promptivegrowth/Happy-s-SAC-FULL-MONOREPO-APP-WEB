@@ -144,6 +144,11 @@ export function TiemposCostoTab({ otId, procesos, lineas, registros, operarios, 
   let totalRealMin = 0;
   let totalCostoEstandarUnit = 0;
   let totalCostoRealUnit = 0;
+  // Cuántas operaciones tienen tiempo declarado. Si no hay ninguna, el
+  // "tiempo real" no existe todavía: antes se caía al estándar y la tarjeta
+  // mostraba el mismo número que el estándar con 0.0% de variación, dando a
+  // entender que ya se había medido (reporte del cliente 21/07/2026).
+  let opsConRegistro = 0;
   for (const p of procesosTalla) {
     const std = Number(p.tiempo_estandar_min ?? 0);
     const vmin = Number(p.area?.valor_minuto ?? 0);
@@ -152,11 +157,18 @@ export function TiemposCostoTab({ otId, procesos, lineas, registros, operarios, 
     const unidadesProcesadasOp = regs.reduce((s, r) => s + Number(r.unidades_procesadas ?? 0), 0);
     const denominador = unidadesProcesadasOp > 0 ? unidadesProcesadasOp : unidades;
     const tiempoRealUnit = denominador > 0 ? tiempoTotal / denominador : 0;
+    if (tiempoRealUnit > 0) opsConRegistro++;
     totalEstandarMin += std;
+    // Para las operaciones aún sin declarar se sigue usando el estándar como
+    // estimación (así el total no queda incompleto), pero la UI aclara que es
+    // parcial mientras falten operaciones.
     totalRealMin += tiempoRealUnit > 0 ? tiempoRealUnit : std;
     totalCostoEstandarUnit += std * vmin;
     totalCostoRealUnit += (tiempoRealUnit > 0 ? tiempoRealUnit : std) * vmin;
   }
+  const totalOps = procesosTalla.length;
+  const hayRegistros = opsConRegistro > 0;
+  const parcial = hayRegistros && opsConRegistro < totalOps;
   const totalCostoEstandar = totalCostoEstandarUnit * unidades;
   const totalCostoReal = totalCostoRealUnit * unidades;
   const variacionPct = totalCostoEstandar > 0 ? ((totalCostoReal - totalCostoEstandar) / totalCostoEstandar) * 100 : 0;
@@ -188,20 +200,38 @@ export function TiemposCostoTab({ otId, procesos, lineas, registros, operarios, 
       <div className="grid gap-3 sm:grid-cols-4">
         <StatBox label="Unidades cortadas" value={`${unidades} / ${unidadesPlan}`} sub="planificadas" />
         <StatBox label="Tiempo estándar" value={`${totalEstandarMin.toFixed(2)} min`} sub="por unidad" />
-        <StatBox label="Tiempo real" value={`${totalRealMin.toFixed(2)} min`} sub={`por unidad${totalRealMin !== totalEstandarMin ? ` · Δ ${(totalRealMin - totalEstandarMin).toFixed(2)}` : ''}`} />
         <StatBox
-          label={unidades > 0 ? 'Costo MO OT' : 'Costo MO por unidad'}
+          label="Tiempo real"
+          value={hayRegistros ? `${totalRealMin.toFixed(2)} min` : '—'}
+          sub={
+            hayRegistros
+              ? `por unidad${parcial ? ` · parcial (${opsConRegistro} de ${totalOps} operaciones)` : ''}${
+                  totalRealMin !== totalEstandarMin ? ` · Δ ${(totalRealMin - totalEstandarMin).toFixed(2)}` : ''
+                }`
+              : 'aún sin operaciones declaradas'
+          }
+        />
+        <StatBox
+          label={
+            unidades > 0
+              ? hayRegistros ? 'Costo MO OT' : 'Costo MO OT (estimado)'
+              : 'Costo MO por unidad'
+          }
           value={PEN(unidades > 0 ? totalCostoReal : totalCostoRealUnit)}
           sub={
             unidades === 0
               ? totalCostoRealUnit > 0
-                ? `× 0 cortadas = S/ 0.00 total · declará avance para ver total real`
+                ? `× 0 cortadas = S/ 0.00 total · declare avance para ver el total real`
                 : 'sin costo configurado'
-              : totalCostoEstandar > 0
-                ? `unitario ${PEN(totalCostoRealUnit)} · vs estándar ${PEN(totalCostoEstandar)} (${variacionPct > 0 ? '+' : ''}${variacionPct.toFixed(1)}%)`
-                : `unitario ${PEN(totalCostoRealUnit)}`
+              : !hayRegistros
+                // Sin registros el costo sale de los tiempos ESTÁNDAR: mostrar
+                // "vs estándar (0.0%)" haría creer que ya se midió y coincidió.
+                ? `unitario ${PEN(totalCostoRealUnit)} · con tiempos estándar (aún sin registros)`
+                : totalCostoEstandar > 0
+                  ? `unitario ${PEN(totalCostoRealUnit)} · vs estándar ${PEN(totalCostoEstandar)} (${variacionPct > 0 ? '+' : ''}${variacionPct.toFixed(1)}%)${parcial ? ' · parcial' : ''}`
+                  : `unitario ${PEN(totalCostoRealUnit)}`
           }
-          highlight={unidades > 0 && Math.abs(variacionPct) > 5}
+          highlight={unidades > 0 && hayRegistros && Math.abs(variacionPct) > 5}
         />
       </div>
 
@@ -212,7 +242,7 @@ export function TiemposCostoTab({ otId, procesos, lineas, registros, operarios, 
             Registro de avance · {productos.find((p) => p.id === productoSel)?.nombre} · Talla {tallaSel.replace('T', '')}
           </CardTitle>
           <p className="text-xs text-slate-500">
-            Por cada operación podés cargar uno o varios registros: fecha/hora inicio + fin (calcula duración) o tiempo total directo en minutos.
+            Por cada operación puede cargar uno o varios registros: fecha/hora inicio + fin (calcula duración) o tiempo total directo en minutos.
           </p>
         </CardHeader>
         <CardContent className="space-y-3 p-3">
