@@ -1190,7 +1190,11 @@ export function PosTerminal({
                       </div>
                       <div className="flex items-center rounded-md border">
                         <button onClick={() => setQty(l.variante.id, l.cantidad - 1)} className="px-3 py-2 hover:bg-slate-50"><Minus className="h-4 w-4" /></button>
-                        <span className="min-w-10 text-center font-semibold">{l.cantidad}</span>
+                        <CantidadInput
+                          cantidad={l.cantidad}
+                          onCommit={(n) => setQty(l.variante.id, n)}
+                          className="w-12 py-1 text-base"
+                        />
                         <button onClick={() => setQty(l.variante.id, l.cantidad + 1)} className="px-3 py-2 hover:bg-slate-50"><Plus className="h-4 w-4" /></button>
                       </div>
                       <div className="w-24 text-right font-display text-base font-semibold">
@@ -1453,7 +1457,11 @@ export function PosTerminal({
                       >
                         <Minus className="h-3 w-3" />
                       </button>
-                      <span className="min-w-5 text-center text-[11px] font-semibold">{l.cantidad}</span>
+                      <CantidadInput
+                        cantidad={l.cantidad}
+                        onCommit={(n) => setQty(l.variante.id, n)}
+                        className="w-8 text-[11px]"
+                      />
                       <button
                         onClick={() => setQty(l.variante.id, l.cantidad + 1)}
                         className="px-1 py-0.5 text-slate-600 hover:bg-slate-50"
@@ -2422,6 +2430,59 @@ function CotizacionModal({
         </p>
       </Card>
     </div>
+  );
+}
+
+/**
+ * Cantidad editable de una línea del carrito. Cliente pidió (21/07/2026)
+ * poder DIGITAR la cantidad — antes solo se podía con los botones + / −, y
+ * cargar 40 unidades era imposible en la práctica.
+ *
+ * Mientras se escribe se guarda un borrador local (para poder tipear "40" sin
+ * que el "4" se aplique de inmediato); se confirma con Enter o al salir del
+ * campo. Escape cancela. La validación real (mínimo 1, tope = stock) la hace
+ * setQty, que ya avisa con un toast si se pasa del stock.
+ */
+function CantidadInput({
+  cantidad,
+  onCommit,
+  className = '',
+}: {
+  cantidad: number;
+  onCommit: (n: number) => void;
+  className?: string;
+}) {
+  const [draft, setDraft] = useState<string | null>(null);
+
+  function confirmar() {
+    if (draft === null) return;
+    const n = parseInt(draft, 10);
+    setDraft(null);
+    if (Number.isFinite(n) && n > 0 && n !== cantidad) onCommit(n);
+  }
+
+  return (
+    <input
+      type="text"
+      inputMode="numeric"
+      value={draft ?? String(cantidad)}
+      onChange={(e) => setDraft(e.target.value.replace(/\D/g, '').slice(0, 4))}
+      onFocus={(e) => e.currentTarget.select()}
+      onBlur={confirmar}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          confirmar();
+          e.currentTarget.blur();
+        } else if (e.key === 'Escape') {
+          setDraft(null);
+          e.currentTarget.blur();
+        }
+      }}
+      className={`rounded border-0 bg-transparent text-center font-semibold outline-none focus:bg-happy-50 focus:ring-1 focus:ring-happy-400 ${className}`}
+      aria-label="Cantidad"
+      title="Escriba la cantidad y presione Enter"
+    />
   );
 }
 
