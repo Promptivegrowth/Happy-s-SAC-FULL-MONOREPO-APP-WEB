@@ -426,6 +426,10 @@ const registroTiempoSchema = z.object({
   fecha_inicio: z.string().optional().or(z.literal('')),
   fecha_fin: z.string().optional().or(z.literal('')),
   tiempo_total_min: z.coerce.number().nonnegative().optional(),
+  /** Fecha en que se REALIZÓ el trabajo (modo "tiempo directo"). Sin esto el
+   *  registro solo tenía created_at, o sea la fecha en que se cargó al
+   *  sistema, no la de producción (reporte del cliente 21/07/2026). */
+  fecha_trabajo: z.string().optional().or(z.literal('')),
   unidades_procesadas: z.coerce.number().int().nonnegative().nullable().optional(),
   operario_id: z.string().uuid().optional().or(z.literal('')),
   notas: z.string().max(500).optional().nullable(),
@@ -454,6 +458,14 @@ export async function crearRegistroTiempoOT(
       fin = data.fecha_fin;
     } else if (typeof data.tiempo_total_min === 'number' && data.tiempo_total_min > 0) {
       tiempoTotal = data.tiempo_total_min;
+      // Tiempo directo: guardamos la fecha de producción en fecha_inicio
+      // (fecha_fin queda null porque no hay intervalo). Así los reportes
+      // usan la fecha real del trabajo y no la de digitación.
+      if (data.fecha_trabajo) {
+        const tt = new Date(data.fecha_trabajo).getTime();
+        if (Number.isNaN(tt)) throw new Error('Fecha de trabajo inválida');
+        inicio = data.fecha_trabajo;
+      }
     } else {
       throw new Error('Ingresá fecha inicio + fin O tiempo directo (> 0)');
     }

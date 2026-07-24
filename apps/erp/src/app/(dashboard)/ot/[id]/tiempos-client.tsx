@@ -537,6 +537,15 @@ function FormRegistro({
   const [fechaInicio, setFechaInicio] = useState('');
   const [fechaFin, setFechaFin] = useState('');
   const [tiempoDirecto, setTiempoDirecto] = useState('');
+  // Fecha en que se REALIZÓ el trabajo (modo directo). Arranca en hoy, pero
+  // se puede cambiar para cargar producción de días anteriores — antes el
+  // registro quedaba con la fecha de digitación (pedido del cliente 21/07/2026).
+  const [fechaDirecta, setFechaDirecta] = useState(() => {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  });
+  // Mediodía para que la fecha no se corra un día por diferencia horaria.
+  const fechaTrabajoISO = fechaDirecta ? `${fechaDirecta}T12:00:00` : '';
   // Cantidades por talla (string para input controlado). Default: la talla
   // actualmente seleccionada arriba se prepopula con su remanente disponible
   // (cortada - ya registrado para este proceso). Las demás arrancan vacías.
@@ -609,6 +618,7 @@ function FormRegistro({
           fecha_inicio: modo === 'intervalo' ? fechaInicio : '',
           fecha_fin: modo === 'intervalo' ? fechaFin : '',
           tiempo_total_min: modo === 'directo' && tiempoDirecto ? Number(tiempoDirecto) : undefined,
+          fecha_trabajo: modo === 'directo' ? fechaTrabajoISO : '',
           unidades_procesadas: t.cantidad,
           operario_id: operarioId || '',
           notas: notas || null,
@@ -637,6 +647,7 @@ function FormRegistro({
         fecha_inicio: modo === 'intervalo' ? fechaInicio : '',
         fecha_fin: modo === 'intervalo' ? fechaFin : '',
         tiempo_total_min: modo === 'directo' && tiempoDirecto ? Number(tiempoDirecto) : undefined,
+        fecha_trabajo: modo === 'directo' ? fechaTrabajoISO : '',
         unidades_procesadas: null,
         operario_id: operarioId || '',
         notas: notas || null,
@@ -677,10 +688,22 @@ function FormRegistro({
           </label>
         </div>
       ) : (
-        <label className="block text-[10px] text-slate-500">
-          Tiempo total (min)
-          <Input type="number" step="0.01" min="0" value={tiempoDirecto} onChange={(e) => setTiempoDirecto(e.target.value)} className="h-8 text-xs" placeholder="Ej. 45" />
-        </label>
+        <div className="grid grid-cols-2 gap-2">
+          <label className="block text-[10px] text-slate-500">
+            Fecha del trabajo
+            <Input
+              type="date"
+              value={fechaDirecta}
+              onChange={(e) => setFechaDirecta(e.target.value)}
+              className="h-8 text-xs"
+              title="Día en que se realizó el trabajo (no el día en que se carga al sistema)"
+            />
+          </label>
+          <label className="block text-[10px] text-slate-500">
+            Tiempo total (min)
+            <Input type="number" step="0.01" min="0" value={tiempoDirecto} onChange={(e) => setTiempoDirecto(e.target.value)} className="h-8 text-xs" placeholder="Ej. 45" />
+          </label>
+        </div>
       )}
 
       {/* Multi-talla: cuadro con TODAS las tallas cortadas y cantidad por cada una */}
@@ -775,9 +798,16 @@ function RegistroRow({ otId, registro: r, disabled }: { otId: string; registro: 
       else toast.error(res.error ?? 'Error');
     });
   }
+  // Con intervalo (inicio + fin) se muestra el rango. En "tiempo directo" solo
+  // hay fecha de trabajo (sin fin): se muestra solo el día, sin el "→ ?" que
+  // aparecía antes. Si el registro es viejo y no tiene fecha, cae a created_at.
+  const fmtFechaHora = (v: string) =>
+    new Date(v).toLocaleString('es-PE', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
   const fechaTxt = r.fecha_inicio
-    ? `${new Date(r.fecha_inicio).toLocaleString('es-PE', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })} → ${r.fecha_fin ? new Date(r.fecha_fin).toLocaleString('es-PE', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : '?'}`
-    : new Date(r.created_at).toLocaleString('es-PE', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+    ? r.fecha_fin
+      ? `${fmtFechaHora(r.fecha_inicio)} → ${fmtFechaHora(r.fecha_fin)}`
+      : new Date(r.fecha_inicio).toLocaleDateString('es-PE', { day: '2-digit', month: '2-digit', year: '2-digit' })
+    : fmtFechaHora(r.created_at);
   return (
     <div className="flex items-center gap-2 rounded border border-slate-100 bg-slate-50 px-2 py-1 text-[11px]">
       <span className="text-slate-500">{fechaTxt}</span>
