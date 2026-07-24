@@ -342,11 +342,114 @@ export async function declararProduccion(
  * PT, lotes, kardex, trazabilidad y marca OT como COMPLETADA. Si algo falla,
  * Postgres revierte todo — ninguna OT cerrada deja lotes huérfanos.
  */
-export async function cerrarOT(otId: string, almacenDestinoId: string): Promise<ActionResult<{ lotes: number }>> {
+/**
+ * Operaciones (proceso × talla) que aún no tienen NINGÚN registro de tiempo
+ * declarado en la OT. Se usa para bloquear el cierre (pedido del cliente
+ * 21/07/2026: "que no permita cerrar si faltan declarar procesos").
+ *
+ * Reglas:
+ *  - Solo procesos activos y NO tercerizados (los tercerizados se controlan
+ *    por órdenes de servicio, no por registros de tiempo).
+ *  - Una operación cuenta como "declarada" si tiene al menos 1 registro para
+ *    esa talla (no se exige cubrir el 100% de unidades).
+ *  - Solo tallas con cantidad_cortada > 0.
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function procesosPendientesDeOT(sbAny: { from: (t: string) => any }, otId: string) {
+  const [{ data: lineas }, { data: regs }] = await Promise.all([
+    sbAny.from('ot_lineas').select('producto_id, talla, cantidad_cortada').eq('ot_id', otId),
+    sbAny.from('ot_registros_tiempo').select('proceso_id, talla').eq('ot_id', otId),
+  ]);
+  const lineasArr = (lineas ?? []) as { producto_id: string; talla: string; cantidad_cortada: number | null }[];
+  const prodIds = Array.from(new Set(lineasArr.map((l) => l.producto_id)));
+  if (prodIds.length === 0) return [] as { operacion: string; talla: string }[];
+
+  const { data: procs } = await sbAny
+    .from('productos_procesos')
+    .select('id, producto_id, proceso, descripcion_operativa, es_tercerizado')
+    .in('producto_id', prodIds)
+    .eq('activo', true);
+  const procsArr = (procs ?? []) as {
+    id: string; producto_id: string; proceso: string; descripcion_operativa: string | null; es_tercerizado: boolean;
+  }[];
+
+  const declarado = new Set(
+    ((regs ?? []) as { proceso_id: string; talla: string }[]).map((r) => `${r.proceso_id}::${r.talla}`),
+  );
+
+  const pendientes: { operacion: string; talla: string }[] = [];
+  for (const p of procsArr) {
+    if (p.es_tercerizado) continue;
+    const nombre = (p.descripcion_operativa ?? '').trim() || p.proceso.replace(/_/g, ' ');
+    for (const l of lineasArr) {
+      if (l.producto_id !== p.producto_id) continue;
+      if (Number(l.cantidad_cortada ?? 0) <= 0) continue;
+      if (!declarado.has(`${p.id}::${l.talla}`)) {
+        pendientes.push({ operacion: nombre, talla: l.talla });
+      }
+    }
+  }
+  return pendientes;
+}
+
+/** Resumen de operaciones pendientes para la UI (antes de intentar cerrar). */
+export async function contarProcesosPendientesOT(
+  otId: string,
+): Promise<{ pendientes: number; resumen: string }> {
+  const { sb } = await requireUser();
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const sbAny = sb as unknown as { from: (t: string) => any };
+  const lista = await procesosPendientesDeOT(sbAny, otId);
+  // Agrupar por operación → cantidad de tallas, para un mensaje corto
+  const porOp = new Map<string, number>();
+  for (const p of lista) porOp.set(p.operacion, (porOp.get(p.operacion) ?? 0) + 1);
+  const nombres = Array.from(porOp.keys());
+  const resumen =
+    nombres.slice(0, 4).join(', ') + (nombres.length > 4 ? ` y ${nombres.length - 4} más` : '');
+  return { pendientes: lista.length, resumen };
+}
+
+export async function cerrarOT(
+  otId: string,
+  almacenDestinoId: string,
+  /** Solo gerencia: cerrar aunque falten operaciones por declarar. */
+  forzar = false,
+): Promise<ActionResult<{ lotes: number }>> {
   const r = await runAction(async () => {
     const { sb, userId } = await requireUser();
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const { data, error } = await (sb as unknown as { rpc: (fn: string, args: any) => any }).rpc(
+    const sbAny = sb as unknown as { from: (t: string) => any; rpc: (fn: string, args: any) => any };
+
+    // GUARD: no cerrar si faltan operaciones por declarar (pedido 21/07/2026).
+    const pendientes = await procesosPendientesDeOT(sbAny, otId);
+    if (pendientes.length > 0) {
+      const porOp = new Map<string, number>();
+      for (const p of pendientes) porOp.set(p.operacion, (porOp.get(p.operacion) ?? 0) + 1);
+      const nombres = Array.from(porOp.keys());
+      const resumen = nombres.slice(0, 5).join(', ') + (nombres.length > 5 ? '…' : '');
+      if (!forzar) {
+        throw new Error(
+          `No se puede cerrar: faltan declarar ${pendientes.length} operación(es) en producción ` +
+          `(${resumen}). Regístrelas en "Tiempos & costo MO" antes de cerrar la OT.`,
+        );
+      }
+      // Cierre forzado: solo gerencia, y queda registrado en la bitácora.
+      if (!(await esGerente())) {
+        throw new Error(
+          `Faltan declarar ${pendientes.length} operación(es) y solo gerencia puede cerrar en ese estado.`,
+        );
+      }
+      await sbAny.from('ot_eventos').insert({
+        ot_id: otId,
+        tipo: 'CIERRE_FORZADO',
+        usuario_id: userId,
+        detalle:
+          `OT cerrada por gerencia con ${pendientes.length} operación(es) sin declarar: ${resumen}`,
+        contexto: { pendientes: pendientes.slice(0, 50) },
+      });
+    }
+
+    const { data, error } = await sbAny.rpc(
       'close_ot_atomic',
       { p_ot_id: otId, p_almacen_destino: almacenDestinoId, p_user_id: userId },
     );

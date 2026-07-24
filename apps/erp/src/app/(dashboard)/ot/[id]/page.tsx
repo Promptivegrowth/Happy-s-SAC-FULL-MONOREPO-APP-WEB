@@ -149,6 +149,7 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
           // y no muestre transiciones a etapas que el producto no requiere
           // (ej. EN_DECORADO si la receta no tiene bordado/estampado/etc.).
           areasReceta={Array.from(new Set((procesos ?? []).map((p) => p.area?.codigo).filter((c): c is string => Boolean(c))))}
+          usuarioEsGerente={usuarioEsGerente}
         />
       }
     >
@@ -294,7 +295,7 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
                   <div key={e.id} className="flex gap-3 rounded-lg border bg-slate-50 p-3">
                     <div className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-corp-100 text-corp-700">
                       {e.tipo === 'NOTA' ? <User className="h-3.5 w-3.5" /> :
-                       e.tipo === 'ANOMALIA' || e.tipo === 'FALLA' || e.tipo === 'AUTORIZACION_CANTIDAD'
+                       e.tipo === 'ANOMALIA' || e.tipo === 'FALLA' || e.tipo === 'AUTORIZACION_CANTIDAD' || e.tipo === 'CIERRE_FORZADO'
                          ? <AlertTriangle className="h-3.5 w-3.5 text-amber-600" /> :
                        <Calendar className="h-3.5 w-3.5" />}
                     </div>

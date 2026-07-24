@@ -11,6 +11,7 @@ import {
   agregarNotaOT,
   declararProduccion,
   cerrarOT,
+  contarProcesosPendientesOT,
   agregarLineaOT,
   eliminarLineaOT,
 } from '@/server/actions/ot';
@@ -47,16 +48,20 @@ function filtrarTransiciones(allNext: string[], areas: string[]): string[] {
   });
 }
 
-export function OtAcciones({ otId, estado, almacenes, areasReceta = [] }: {
+export function OtAcciones({ otId, estado, almacenes, areasReceta = [], usuarioEsGerente = false }: {
   otId: string;
   estado: string;
   almacenes: { id: string; nombre: string; codigo: string }[];
   /** Códigos de área presentes en la receta del producto de la OT. */
   areasReceta?: string[];
+  /** Solo gerencia puede forzar el cierre con operaciones sin declarar. */
+  usuarioEsGerente?: boolean;
 }) {
   const [pending, start] = useTransition();
   const [showCierre, setShowCierre] = useState(false);
   const [almacenSel, setAlmacenSel] = useState(almacenes[0]?.id ?? '');
+  // Operaciones sin declarar detectadas al intentar cerrar (bloquea el cierre).
+  const [pendientes, setPendientes] = useState<{ n: number; resumen: string } | null>(null);
 
   const next = filtrarTransiciones(FLOW[estado] ?? [], areasReceta);
 
@@ -69,13 +74,30 @@ export function OtAcciones({ otId, estado, almacenes, areasReceta = [] }: {
     });
   }
 
-  function cerrar() {
-    if (!almacenSel) return toast.error('Selecciona almacén destino');
+  function cerrar(forzar = false) {
+    if (!almacenSel) return toast.error('Seleccione almacén destino');
     start(async () => {
-      const r = await cerrarOT(otId, almacenSel);
+      // Chequeo previo: ¿faltan operaciones por declarar? (pedido 21/07/2026)
+      if (!forzar) {
+        const chk = await contarProcesosPendientesOT(otId);
+        if (chk.pendientes > 0) {
+          setPendientes({ n: chk.pendientes, resumen: chk.resumen });
+          if (!usuarioEsGerente) {
+            toast.error(
+              `Faltan declarar ${chk.pendientes} operación(es) (${chk.resumen}). Regístrelas en "Tiempos & costo MO".`,
+              { duration: 8000 },
+            );
+            return;
+          }
+          // Gerente: se muestra el botón "Cerrar de todos modos" (no cerramos aún)
+          return;
+        }
+      }
+      const r = await cerrarOT(otId, almacenSel, forzar);
       if (r.ok && r.data) {
         toast.success(`OT cerrada · ${r.data.lotes} lote(s) PT generados`);
         setShowCierre(false);
+        setPendientes(null);
       } else toast.error(r.error ?? 'Error');
     });
   }
@@ -86,22 +108,47 @@ export function OtAcciones({ otId, estado, almacenes, areasReceta = [] }: {
     <div className="flex flex-wrap items-center gap-2">
       {estado === 'EN_CONTROL_CALIDAD' ? (
         showCierre ? (
-          <div className="flex items-center gap-2 rounded-lg border bg-white p-2">
-            {almacenes.length === 1 ? (
-              // 1 solo almacén PT — no mostrar dropdown, solo confirmar
-              <span className="rounded-md bg-emerald-50 px-3 py-1.5 text-xs font-medium text-emerald-700">
-                → {almacenes[0]!.nombre}
-              </span>
-            ) : (
-              <select value={almacenSel} onChange={(e) => setAlmacenSel(e.target.value)} className="h-9 rounded-md border bg-white px-2 text-sm">
-                {almacenes.map((a) => <option key={a.id} value={a.id}>{a.nombre}</option>)}
-              </select>
+          <div className="flex flex-col gap-2 rounded-lg border bg-white p-2">
+            <div className="flex items-center gap-2">
+              {almacenes.length === 1 ? (
+                // 1 solo almacén PT — no mostrar dropdown, solo confirmar
+                <span className="rounded-md bg-emerald-50 px-3 py-1.5 text-xs font-medium text-emerald-700">
+                  → {almacenes[0]!.nombre}
+                </span>
+              ) : (
+                <select value={almacenSel} onChange={(e) => setAlmacenSel(e.target.value)} className="h-9 rounded-md border bg-white px-2 text-sm">
+                  {almacenes.map((a) => <option key={a.id} value={a.id}>{a.nombre}</option>)}
+                </select>
+              )}
+              <Button variant="premium" size="sm" onClick={() => cerrar(false)} disabled={pending}>
+                {pending ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />}
+                Confirmar cierre
+              </Button>
+              <Button variant="ghost" size="sm" onClick={() => { setShowCierre(false); setPendientes(null); }}><X className="h-4 w-4" /></Button>
+            </div>
+            {pendientes && (
+              <div className="rounded-md border border-amber-300 bg-amber-50 p-2 text-xs text-amber-800">
+                <p>
+                  <strong>Faltan declarar {pendientes.n} operación(es):</strong> {pendientes.resumen}.
+                  Regístrelas en la pestaña <strong>Tiempos &amp; costo MO</strong> antes de cerrar.
+                </p>
+                {usuarioEsGerente && (
+                  <Button
+                    variant="destructive"
+                    size="sm"
+                    onClick={() => {
+                      if (confirm(`Como gerente, ¿cerrar la OT con ${pendientes.n} operación(es) sin declarar? Quedará registrado en la bitácora.`)) {
+                        cerrar(true);
+                      }
+                    }}
+                    disabled={pending}
+                    className="mt-2"
+                  >
+                    Cerrar de todos modos (gerencia)
+                  </Button>
+                )}
+              </div>
             )}
-            <Button variant="premium" size="sm" onClick={cerrar} disabled={pending}>
-              {pending ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />}
-              Confirmar cierre
-            </Button>
-            <Button variant="ghost" size="sm" onClick={() => setShowCierre(false)}><X className="h-4 w-4" /></Button>
           </div>
         ) : (
           <Button variant="premium" onClick={() => setShowCierre(true)} disabled={pending}>
