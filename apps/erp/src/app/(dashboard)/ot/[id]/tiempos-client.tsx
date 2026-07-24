@@ -13,12 +13,27 @@ import { crearRegistroTiempoOT, eliminarRegistroTiempoOT } from '@/server/action
 type Proceso = {
   id: string;
   producto_id: string;
+  /** Categoría del proceso (enum: CORTE, ACABADO…). Coincide con el área. */
   proceso: string;
+  /** Nombre real del paso (ej. "DOBLADO Y EMBOLSADO"). Es lo que se muestra. */
+  descripcion_operativa: string | null;
   talla: string | null;
   orden: number;
   tiempo_estandar_min: number;
   area: { id: string; codigo: string; nombre: string; valor_minuto: number | null } | null;
 };
+
+/**
+ * Nombre a mostrar de una operación. Se prioriza `descripcion_operativa` (el
+ * paso concreto que carga el cliente: "LIMPIEZA", "DOBLADO Y EMBOLSADO"…).
+ * Antes se mostraba `proceso`, que es la CATEGORÍA y coincide con el nombre
+ * del área — por eso las 5 operaciones de acabado salían todas como "ACABADO"
+ * (reporte del cliente 21/07/2026).
+ */
+function nombreOperacion(p: { proceso: string; descripcion_operativa?: string | null }): string {
+  const desc = (p.descripcion_operativa ?? '').trim();
+  return desc || p.proceso.replace(/_/g, ' ');
+}
 
 type Linea = {
   id: string;
@@ -332,7 +347,7 @@ export function TiemposCostoTab({ otId, procesos, lineas, registros, operarios, 
                 return (
                   <TableRow key={p.id}>
                     <TableCell className="text-center text-xs text-slate-500">{p.orden}</TableCell>
-                    <TableCell className="text-sm font-medium">{p.proceso.replace(/_/g, ' ')}</TableCell>
+                    <TableCell className="text-sm font-medium">{nombreOperacion(p)}</TableCell>
                     <TableCell className="text-xs"><Badge variant="outline" className="text-[10px]">{p.area?.codigo ?? '—'}</Badge></TableCell>
                     <TableCell className="text-right font-mono text-xs">{std.toFixed(2)}</TableCell>
                     <TableCell className="text-right font-mono text-xs">
@@ -461,7 +476,7 @@ function OperacionBlock({
         <div className="min-w-0 flex-1">
           <p className="text-sm font-medium text-corp-900">
             <span className="mr-2 text-[10px] text-slate-400">#{proceso.orden}</span>
-            {proceso.proceso.replace(/_/g, ' ')}
+            {nombreOperacion(proceso)}
           </p>
           <p className="text-[10px] text-slate-500">
             Estándar: {Number(proceso.tiempo_estandar_min ?? 0).toFixed(2)} min/u ·{' '}

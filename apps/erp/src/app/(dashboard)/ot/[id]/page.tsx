@@ -63,7 +63,7 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
     productosEnLineas.length > 0
       ? sbAny
           .from('productos_procesos')
-          .select('id, producto_id, proceso, talla, orden, tiempo_estandar_min, areas_produccion(id, codigo, nombre, valor_minuto)')
+          .select('id, producto_id, proceso, descripcion_operativa, talla, orden, tiempo_estandar_min, areas_produccion(id, codigo, nombre, valor_minuto)')
           .in('producto_id', productosEnLineas)
           .eq('activo', true)
           .order('producto_id')
@@ -81,12 +81,16 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
       .order('nombres'),
   ]);
   const procesos = ((procesosRaw ?? []) as Array<{
-    id: string; producto_id: string; proceso: string; talla: string; orden: number; tiempo_estandar_min: number;
+    id: string; producto_id: string; proceso: string; descripcion_operativa: string | null;
+    talla: string; orden: number; tiempo_estandar_min: number;
     areas_produccion: { id: string; codigo: string; nombre: string; valor_minuto: number | null } | null;
   }>).map((p) => ({
     id: p.id,
     producto_id: p.producto_id,
     proceso: p.proceso,
+    // Nombre real del paso — se muestra en vez de la categoría (ver
+    // nombreOperacion en tiempos-client).
+    descripcion_operativa: p.descripcion_operativa,
     talla: p.talla,
     orden: p.orden,
     tiempo_estandar_min: Number(p.tiempo_estandar_min ?? 0),
