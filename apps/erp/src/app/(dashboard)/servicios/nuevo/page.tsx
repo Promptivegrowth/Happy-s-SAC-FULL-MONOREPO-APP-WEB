@@ -13,7 +13,7 @@ export default async function Page() {
   const { data: cortesRaw } = await sb
     .from('ot_corte')
     .select(
-      'id, numero, estado, ot_id, producto_id, ot:ot_id(numero), productos:producto_id(nombre), ot_corte_lineas(talla, cantidad_real, cantidad_teorica)',
+      'id, numero, estado, ot_id, producto_id, ot:ot_id(numero), productos:producto_id(nombre)',
     )
     .in('estado', ['ABIERTO', 'EN_PROCESO', 'COMPLETADO'])
     .order('created_at', { ascending: false })
@@ -27,10 +27,29 @@ export default async function Page() {
     producto_id: string;
     ot: { numero: string } | null;
     productos: { nombre: string } | null;
-    ot_corte_lineas: { talla: string; cantidad_real: number | null; cantidad_teorica: number }[];
   };
+  const cortesBase = (cortesRaw ?? []) as unknown as CorteRaw[];
 
-  const cortes = ((cortesRaw ?? []) as unknown as CorteRaw[]).map((c) => ({
+  // Las tallas + cantidades del corte vinculado se toman de la OT
+  // (ot_lineas.cantidad_cortada), que es la fuente reconciliada — NO de
+  // ot_corte_lineas.cantidad_real (decisión del cliente 21/07/2026: la OS debe
+  // reflejar lo real de la OT, no lo del corte, que estaba desconectado).
+  const corteOtIds = Array.from(new Set(cortesBase.map((c) => c.ot_id).filter(Boolean)));
+  const { data: otLineasCorte } = corteOtIds.length > 0
+    ? await sb
+        .from('ot_lineas')
+        .select('ot_id, producto_id, talla, cantidad_planificada, cantidad_cortada')
+        .in('ot_id', corteOtIds)
+    : { data: [] as { ot_id: string; producto_id: string; talla: string; cantidad_planificada: number | null; cantidad_cortada: number | null }[] };
+  const otLineasMap = new Map<string, { talla: string; cortada: number; plan: number }[]>();
+  for (const l of (otLineasCorte ?? []) as { ot_id: string; producto_id: string; talla: string; cantidad_planificada: number | null; cantidad_cortada: number | null }[]) {
+    const key = `${l.ot_id}::${l.producto_id}`;
+    const arr = otLineasMap.get(key) ?? [];
+    arr.push({ talla: l.talla, cortada: Number(l.cantidad_cortada ?? 0), plan: Number(l.cantidad_planificada ?? 0) });
+    otLineasMap.set(key, arr);
+  }
+
+  const cortes = cortesBase.map((c) => ({
     id: c.id,
     numero: c.numero,
     estado: c.estado,
@@ -38,7 +57,10 @@ export default async function Page() {
     ot_numero: c.ot?.numero ?? '—',
     producto_id: c.producto_id,
     producto_nombre: c.productos?.nombre ?? '—',
-    lineas: c.ot_corte_lineas ?? [],
+    // cantidad_real ahora lleva la cantidad CORTADA de la OT (no la del corte).
+    lineas: (otLineasMap.get(`${c.ot_id}::${c.producto_id}`) ?? [])
+      .filter((l) => l.cortada > 0)
+      .map((l) => ({ talla: l.talla, cantidad_real: l.cortada, cantidad_teorica: l.plan })),
   }));
 
   // Traemos OTs activas con sus líneas (producto + talla + cantidades) para
@@ -83,7 +105,7 @@ export default async function Page() {
   return (
     <PageShell
       title="Nueva Orden de Servicio"
-      description="Envío de trabajo a taller externo. Podés elegir un corte (carga prendas + avíos del BOM) o directamente una OT y seleccionar las tallas a enviar."
+      description="Envío de trabajo a taller externo. Puede elegir un corte (carga las tallas con la cantidad CORTADA de la OT + los avíos del BOM) o directamente una OT y seleccionar las tallas a enviar."
     >
       <NuevaOSForm
         cortes={cortes}

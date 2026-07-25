@@ -164,20 +164,31 @@ async function poblarLineasYAviosOS(
   corteId: string,
   tallasFiltro?: string[],
 ): Promise<{ lineas: number; avios: number }> {
-  // 1) Cargar el corte y sus líneas no vacías
+  // 1) El corte aporta el vínculo producto/OT y dispara el cálculo de avíos
+  //    del BOM. Las CANTIDADES salen de la OT (ot_lineas.cantidad_cortada),
+  //    que es la fuente reconciliada — NO de ot_corte_lineas.cantidad_real
+  //    (decisión del cliente 21/07/2026: la OS jala lo de la OT, no lo del
+  //    corte, para que refleje las cantidades reales/ajustadas).
   const { data: corte, error: errC } = await sb
     .from('ot_corte')
-    .select('producto_id, ot_corte_lineas(talla, cantidad_real)')
+    .select('producto_id, ot_id')
     .eq('id', corteId)
     .single();
   if (errC) throw new Error(`corte: ${errC.message}`);
   if (!corte) return { lineas: 0, avios: 0 };
 
   const productoId = corte.producto_id as string;
-  type LC = { talla: string; cantidad_real: number | null };
-  const lineasTodas = ((corte as unknown as { ot_corte_lineas?: LC[] }).ot_corte_lineas ?? []).filter(
-    (l) => Number(l.cantidad_real ?? 0) > 0,
-  );
+  const otId = (corte as { ot_id: string }).ot_id;
+
+  const { data: lineasOtRaw } = await sb
+    .from('ot_lineas')
+    .select('talla, cantidad_cortada')
+    .eq('ot_id', otId)
+    .eq('producto_id', productoId);
+  type LC = { talla: string; cantidad: number };
+  const lineasTodas: LC[] = ((lineasOtRaw ?? []) as { talla: string; cantidad_cortada: number | null }[])
+    .map((l) => ({ talla: l.talla, cantidad: Number(l.cantidad_cortada ?? 0) }))
+    .filter((l) => l.cantidad > 0);
   const filtroSet = tallasFiltro && tallasFiltro.length > 0 ? new Set(tallasFiltro) : null;
   const lineasCorte = filtroSet ? lineasTodas.filter((l) => filtroSet.has(l.talla)) : lineasTodas;
 
@@ -188,7 +199,7 @@ async function poblarLineasYAviosOS(
     os_id: osId,
     producto_id: productoId,
     talla: l.talla as 'T0' | 'T2' | 'T4' | 'T6' | 'T8' | 'T10' | 'T12' | 'T14' | 'T16' | 'TS' | 'TAD',
-    cantidad: Number(l.cantidad_real),
+    cantidad: l.cantidad,
   }));
   const { error: errL } = await sb.from('ordenes_servicio_lineas').insert(filasLineas);
   if (errL) throw new Error(`OS lineas: ${errL.message}`);
@@ -214,7 +225,7 @@ async function poblarLineasYAviosOS(
     .in('talla', tallasNecesarias);
 
   const cantPorTalla = new Map<string, number>();
-  for (const l of lineasCorte) cantPorTalla.set(l.talla, Number(l.cantidad_real));
+  for (const l of lineasCorte) cantPorTalla.set(l.talla, l.cantidad);
 
   const aviosMap = new Map<string, number>();
   for (const lr of lineasReceta ?? []) {

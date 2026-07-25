@@ -242,7 +242,7 @@ export function NuevaOSForm({
       >
         <FormRow
           label="Corte vinculado (opcional)"
-          hint="Si elegís un corte, las líneas (tallas + cantidades) y los avíos del BOM se cargan automáticamente al guardar."
+          hint="Si elige un corte, las tallas se cargan con la cantidad CORTADA de la OT y los avíos del BOM se calculan automáticamente al guardar."
         >
           <ComboboxBusqueda
             options={corteOptions}
@@ -275,7 +275,7 @@ export function NuevaOSForm({
             ) : (
               <div>
                 <p className="mb-2 text-[11px] font-medium uppercase tracking-wider text-slate-600">
-                  Tallas a enviar al taller (desmarcá las que NO van — útil para dividir orden)
+                  Tallas a enviar al taller (desmarque las que NO van — útil para dividir orden)
                 </p>
                 <div className="flex flex-wrap gap-1.5">
                   {lineasPreview.map((l) => {
@@ -380,7 +380,7 @@ export function NuevaOSForm({
                       </p>
                     )}
                     <p className="mt-2 text-[10px] text-slate-500">
-                      Este monto ya está pre-cargado en &quot;Monto base&quot; abajo. Podés editarlo si querés override.
+                      Este monto ya está pre-cargado en &quot;Monto base&quot; abajo. Puede editarlo si desea un override.
                     </p>
                   </>
                 )}
@@ -412,7 +412,7 @@ export function NuevaOSForm({
             ) : (
               <div>
                 <p className="mb-2 text-[11px] font-medium uppercase tracking-wider text-slate-600">
-                  Tallas a enviar al taller (desmarcá las que NO van — útil para dividir orden)
+                  Tallas a enviar al taller (desmarque las que NO van — útil para dividir orden)
                 </p>
                 <div className="flex flex-wrap gap-1.5">
                   {lineasFuente.map((l) => {
