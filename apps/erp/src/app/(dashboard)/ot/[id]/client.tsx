@@ -215,7 +215,7 @@ export function OtNotaForm({ otId }: { otId: string }) {
 
 export function OtLineaProduccion({ otId, lineaId, planificada, cortada, fallas, disabled, usuarioEsGerente = false }: {
   otId: string; lineaId: string; planificada: number; cortada: number; fallas: number; disabled: boolean;
-  /** Solo gerencia puede liquidar cantidades distintas al plan (pedido 21/07/2026). */
+  /** Solo gerencia puede liquidar cantidades que EXCEDAN el plan (pedido 21/07/2026). */
   usuarioEsGerente?: boolean;
 }) {
   const [open, setOpen] = useState(false);
@@ -228,10 +228,11 @@ export function OtLineaProduccion({ otId, lineaId, planificada, cortada, fallas,
   const [f, setF] = useState(fallas);
   const [motivo, setMotivo] = useState('');
 
-  // Lo normal es liquidar exactamente el plan. Cualquier diferencia (extras o
-  // faltantes) necesita autorización de gerencia + motivo, y queda registrada
-  // en la bitácora de la OT.
-  const difiere = c !== planificada;
+  // Cortar MENOS o en avances parciales es normal y no pide nada. Solo cortar
+  // de MÁS (exceder el plan) requiere autorización de gerencia + motivo, que
+  // queda registrada en la bitácora ("solo pida autorización al quedar el
+  // total", aclaración del cliente 21/07/2026).
+  const difiere = c > planificada;
   const requiereAutorizacion = difiere && !usuarioEsGerente;
 
   function save() {
@@ -240,11 +241,11 @@ export function OtLineaProduccion({ otId, lineaId, planificada, cortada, fallas,
     }
     if (requiereAutorizacion) {
       return toast.error(
-        `Liquidar ${c} unidades no coincide con el plan (${planificada}). Requiere autorización de gerencia.`,
+        `Liquidar ${c} unidades supera el plan (${planificada}). Cortar de más requiere autorización de gerencia.`,
       );
     }
     if (difiere && !motivo.trim()) {
-      return toast.error('Indique el motivo de la diferencia para registrar la autorización.');
+      return toast.error('Indique el motivo de las unidades extra para registrar la autorización.');
     }
     start(async () => {
       const r = await declararProduccion(otId, lineaId, c, f, motivo.trim() || undefined);
@@ -308,13 +309,13 @@ export function OtLineaProduccion({ otId, lineaId, planificada, cortada, fallas,
       {difiere && (
         requiereAutorizacion ? (
           <p className="max-w-[260px] rounded border border-amber-300 bg-amber-50 px-2 py-1 text-[10px] leading-tight text-amber-800">
-            <strong>Requiere autorización de gerencia:</strong> son {c} unidades y el plan es {planificada}.
-            Solicite a gerencia que registre la liquidación.
+            <strong>Requiere autorización de gerencia:</strong> son {c} unidades y el plan es {planificada}
+            (corta {c - planificada} de más). Solicite a gerencia que registre la liquidación.
           </p>
         ) : (
           <div className="max-w-[260px]">
             <label className="text-[9px] font-semibold uppercase tracking-wide text-amber-700">
-              Motivo de la diferencia (plan {planificada} → {c})
+              Motivo de las {c - planificada} unidades extra (plan {planificada} → {c})
             </label>
             <Input
               value={motivo}

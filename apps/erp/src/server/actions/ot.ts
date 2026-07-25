@@ -287,21 +287,23 @@ export async function declararProduccion(
       throw new Error('No se puede declarar producción en una OT cerrada');
     }
 
-    // AUTORIZACIÓN DE GERENCIA (pedido del cliente 21/07/2026): lo normal es
-    // liquidar exactamente lo planificado. Si se declara una cantidad
-    // distinta (de más por extras, o de menos por faltantes), hace falta que
-    // lo autorice un gerente y que quede el motivo registrado en la bitácora.
+    // AUTORIZACIÓN DE GERENCIA (pedido del cliente 21/07/2026, aclarado el
+    // mismo día: "que solo pida autorización al quedar el total"). Cortar
+    // MENOS o en avances parciales es normal y NO pide autorización — el
+    // faltante se reconcilia al cerrar la OT. Solo cortar de MÁS (exceder lo
+    // planificado) requiere que un gerente lo autorice con motivo, y queda
+    // registrado en la bitácora.
     const planificada = Number(linea.cantidad_planificada ?? 0);
-    const difiere = cantidadCortada !== planificada;
+    const difiere = cantidadCortada > planificada;
     const motivoLimpio = (motivo ?? '').trim();
     if (difiere) {
       if (!(await esGerente())) {
         throw new Error(
-          `Las unidades cortadas (${cantidadCortada}) no coinciden con el plan (${planificada}). Este cambio requiere autorización de gerencia.`,
+          `Las unidades cortadas (${cantidadCortada}) superan el plan (${planificada}). Cortar de más requiere autorización de gerencia.`,
         );
       }
       if (!motivoLimpio) {
-        throw new Error('Indique el motivo de la diferencia para dejar registrada la autorización.');
+        throw new Error('Indique el motivo de las unidades extra para dejar registrada la autorización.');
       }
     }
 
