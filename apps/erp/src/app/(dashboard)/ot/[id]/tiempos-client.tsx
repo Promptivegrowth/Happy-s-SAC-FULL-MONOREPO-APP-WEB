@@ -194,70 +194,17 @@ export function TiemposCostoTab({ otId, procesos, lineas, registros, operarios, 
         <SelectorProducto productos={productos} productoSel={productoSel} setProductoSel={setProductoSel} tieneProcesosPorProducto={tieneProcesosPorProducto} />
       )}
 
-      {/* Selector talla */}
-      <div className="flex flex-wrap items-center gap-2">
-        <span className="text-xs font-medium text-slate-500">Talla:</span>
-        {tallasDisponibles.map((t) => (
-          <button
-            key={t}
-            type="button"
-            onClick={() => setTallaSel(t)}
-            className={`flex h-8 min-w-[2.5rem] items-center justify-center rounded-md border px-2 text-xs font-semibold transition ${
-              tallaSel === t ? 'border-happy-500 bg-happy-500 text-white' : 'border-slate-200 bg-white text-slate-600 hover:border-happy-300'
-            }`}
-          >
-            {t.replace('T', '')}
-          </button>
-        ))}
-      </div>
-
-      {/* Stats agregadas */}
-      <div className="grid gap-3 sm:grid-cols-4">
-        <StatBox label="Unidades cortadas" value={`${unidades} / ${unidadesPlan}`} sub="planificadas" />
-        <StatBox label="Tiempo estándar" value={`${totalEstandarMin.toFixed(2)} min`} sub="por unidad" />
-        <StatBox
-          label="Tiempo real"
-          value={hayRegistros ? `${totalRealMin.toFixed(2)} min` : '—'}
-          sub={
-            hayRegistros
-              ? `por unidad${parcial ? ` · parcial (${opsConRegistro} de ${totalOps} operaciones)` : ''}${
-                  totalRealMin !== totalEstandarMin ? ` · Δ ${(totalRealMin - totalEstandarMin).toFixed(2)}` : ''
-                }`
-              : 'aún sin operaciones declaradas'
-          }
-        />
-        <StatBox
-          label={
-            unidades > 0
-              ? hayRegistros ? 'Costo MO OT' : 'Costo MO OT (estimado)'
-              : 'Costo MO por unidad'
-          }
-          value={PEN(unidades > 0 ? totalCostoReal : totalCostoRealUnit)}
-          sub={
-            unidades === 0
-              ? totalCostoRealUnit > 0
-                ? `× 0 cortadas = S/ 0.00 total · declare avance para ver el total real`
-                : 'sin costo configurado'
-              : !hayRegistros
-                // Sin registros el costo sale de los tiempos ESTÁNDAR: mostrar
-                // "vs estándar (0.0%)" haría creer que ya se midió y coincidió.
-                ? `unitario ${PEN(totalCostoRealUnit)} · con tiempos estándar (aún sin registros)`
-                : totalCostoEstandar > 0
-                  ? `unitario ${PEN(totalCostoRealUnit)} · vs estándar ${PEN(totalCostoEstandar)} (${variacionPct > 0 ? '+' : ''}${variacionPct.toFixed(1)}%)${parcial ? ' · parcial' : ''}`
-                  : `unitario ${PEN(totalCostoRealUnit)}`
-          }
-          highlight={unidades > 0 && hayRegistros && Math.abs(variacionPct) > 5}
-        />
-      </div>
-
-      {/* Vista jerárquica área → operación → registros */}
+      {/* REGISTRO DE AVANCE (entrada de datos) — sin filtro por talla arriba:
+          dentro de cada registro se eligen las tallas trabajadas, así que el
+          filtro por talla se movió al final como "Avance por talla" (pedido
+          del cliente 21/07/2026, el filtro inicial confundía). */}
       <Card>
         <CardHeader>
           <CardTitle className="text-base">
-            Registro de avance · {productos.find((p) => p.id === productoSel)?.nombre} · Talla {tallaSel.replace('T', '')}
+            Registro de avance · {productos.find((p) => p.id === productoSel)?.nombre}
           </CardTitle>
           <p className="text-xs text-slate-500">
-            Por cada operación puede cargar uno o varios registros: fecha/hora inicio + fin (calcula duración) o tiempo total directo en minutos.
+            Por cada operación puede cargar uno o varios registros: fecha/hora inicio + fin (calcula duración) o tiempo total directo. Dentro de cada registro elige las tallas trabajadas.
           </p>
         </CardHeader>
         <CardContent className="space-y-3 p-3">
@@ -290,14 +237,22 @@ export function TiemposCostoTab({ otId, procesos, lineas, registros, operarios, 
                         };
                       })
                       .sort((a, b) => a.talla.localeCompare(b.talla));
+                    // Talla por defecto para prepoblar el form: la primera con
+                    // remanente por registrar (o la primera cortada).
+                    const tallaDefault =
+                      tallasParaForm.find((t) => t.cortada - t.yaRegistrado > 0)?.talla ??
+                      tallasParaForm[0]?.talla ??
+                      '';
                     return (
                       <OperacionBlock
                         key={p.id}
                         otId={otId}
                         proceso={p}
-                        tallaActual={tallaSel}
+                        tallaActual={tallaDefault}
                         tallasDisponibles={tallasParaForm}
-                        registros={registrosTalla.filter((r) => r.proceso_id === p.id)}
+                        // Todos los registros de la operación (todas las tallas):
+                        // el bloque de entrada ya no está filtrado por talla.
+                        registros={registros.filter((r) => r.proceso_id === p.id)}
                         operarios={operarios}
                         esAreaCorte={areaCodigo === 'CORTE'}
                         disabled={disabled}
@@ -311,10 +266,75 @@ export function TiemposCostoTab({ otId, procesos, lineas, registros, operarios, 
         </CardContent>
       </Card>
 
-      {/* Resumen tabla (lo que antes era el editor) */}
+      {/* AVANCE POR TALLA (consulta) — el selector de talla vive acá abajo:
+          sirve para VER el avance/costos de una talla puntual, no para
+          filtrar el registro de arriba. */}
       <Card>
         <CardHeader>
-          <CardTitle className="text-base">Resumen por operación</CardTitle>
+          <CardTitle className="text-base">Avance por talla</CardTitle>
+          <p className="text-xs text-slate-500">Elija una talla para ver sus unidades, tiempos y costo de mano de obra.</p>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          {/* Selector talla */}
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-xs font-medium text-slate-500">Talla:</span>
+            {tallasDisponibles.map((t) => (
+              <button
+                key={t}
+                type="button"
+                onClick={() => setTallaSel(t)}
+                className={`flex h-8 min-w-[2.5rem] items-center justify-center rounded-md border px-2 text-xs font-semibold transition ${
+                  tallaSel === t ? 'border-happy-500 bg-happy-500 text-white' : 'border-slate-200 bg-white text-slate-600 hover:border-happy-300'
+                }`}
+              >
+                {t.replace('T', '')}
+              </button>
+            ))}
+          </div>
+
+          {/* Stats agregadas de la talla seleccionada */}
+          <div className="grid gap-3 sm:grid-cols-4">
+            <StatBox label="Unidades cortadas" value={`${unidades} / ${unidadesPlan}`} sub="planificadas" />
+            <StatBox label="Tiempo estándar" value={`${totalEstandarMin.toFixed(2)} min`} sub="por unidad" />
+            <StatBox
+              label="Tiempo real"
+              value={hayRegistros ? `${totalRealMin.toFixed(2)} min` : '—'}
+              sub={
+                hayRegistros
+                  ? `por unidad${parcial ? ` · parcial (${opsConRegistro} de ${totalOps} operaciones)` : ''}${
+                      totalRealMin !== totalEstandarMin ? ` · Δ ${(totalRealMin - totalEstandarMin).toFixed(2)}` : ''
+                    }`
+                  : 'aún sin operaciones declaradas'
+              }
+            />
+            <StatBox
+              label={
+                unidades > 0
+                  ? hayRegistros ? 'Costo MO OT' : 'Costo MO OT (estimado)'
+                  : 'Costo MO por unidad'
+              }
+              value={PEN(unidades > 0 ? totalCostoReal : totalCostoRealUnit)}
+              sub={
+                unidades === 0
+                  ? totalCostoRealUnit > 0
+                    ? `× 0 cortadas = S/ 0.00 total · declare avance para ver el total real`
+                    : 'sin costo configurado'
+                  : !hayRegistros
+                    ? `unitario ${PEN(totalCostoRealUnit)} · con tiempos estándar (aún sin registros)`
+                    : totalCostoEstandar > 0
+                      ? `unitario ${PEN(totalCostoRealUnit)} · vs estándar ${PEN(totalCostoEstandar)} (${variacionPct > 0 ? '+' : ''}${variacionPct.toFixed(1)}%)${parcial ? ' · parcial' : ''}`
+                      : `unitario ${PEN(totalCostoRealUnit)}`
+              }
+              highlight={unidades > 0 && hayRegistros && Math.abs(variacionPct) > 5}
+            />
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Resumen tabla (por la talla seleccionada arriba) */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">Resumen por operación · Talla {tallaSel.replace('T', '')}</CardTitle>
         </CardHeader>
         <CardContent className="p-0">
           <Table>
@@ -810,6 +830,7 @@ function RegistroRow({ otId, registro: r, disabled }: { otId: string; registro: 
     : fmtFechaHora(r.created_at);
   return (
     <div className="flex items-center gap-2 rounded border border-slate-100 bg-slate-50 px-2 py-1 text-[11px]">
+      <Badge variant="outline" className="text-[9px]">T{r.talla.replace('T', '')}</Badge>
       <span className="text-slate-500">{fechaTxt}</span>
       <span className="font-mono font-semibold text-emerald-700">{Number(r.tiempo_total_min).toFixed(2)} min</span>
       {r.unidades_procesadas != null && <span className="text-slate-600">· {r.unidades_procesadas} u</span>}
