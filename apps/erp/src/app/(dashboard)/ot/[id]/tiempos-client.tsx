@@ -146,47 +146,17 @@ export function TiemposCostoTab({ otId, procesos, lineas, registros, operarios, 
     return map;
   }, [procesosTalla]);
 
-  // Registros filtrados a la talla seleccionada
+  // Registros filtrados a la talla seleccionada (para la vista "Avance por talla")
   const registrosTalla = useMemo(() => registros.filter((r) => r.talla === tallaSel), [registros, tallaSel]);
 
-  // Totales para el resumen.
-  // "Real por unidad" = total tiempo registrado / SUMA DE UNIDADES PROCESADAS
-  // de los registros (no `cantidad_cortada`, que es el total a producir).
-  // Esto refleja el avance parcial: si procesaste 50 de 100, el ratio es sobre
-  // 50. Si ninguno de los registros trae unidades_procesadas, caemos al
-  // cortado como fallback (legacy) para no romper datos viejos.
-  let totalEstandarMin = 0;
-  let totalRealMin = 0;
-  let totalCostoEstandarUnit = 0;
-  let totalCostoRealUnit = 0;
-  // Cuántas operaciones tienen tiempo declarado. Si no hay ninguna, el
-  // "tiempo real" no existe todavía: antes se caía al estándar y la tarjeta
-  // mostraba el mismo número que el estándar con 0.0% de variación, dando a
-  // entender que ya se había medido (reporte del cliente 21/07/2026).
-  let opsConRegistro = 0;
-  for (const p of procesosTalla) {
-    const std = Number(p.tiempo_estandar_min ?? 0);
-    const vmin = Number(p.area?.valor_minuto ?? 0);
-    const regs = registrosTalla.filter((r) => r.proceso_id === p.id);
-    const tiempoTotal = regs.reduce((s, r) => s + Number(r.tiempo_total_min), 0);
-    const unidadesProcesadasOp = regs.reduce((s, r) => s + Number(r.unidades_procesadas ?? 0), 0);
-    const denominador = unidadesProcesadasOp > 0 ? unidadesProcesadasOp : unidades;
-    const tiempoRealUnit = denominador > 0 ? tiempoTotal / denominador : 0;
-    if (tiempoRealUnit > 0) opsConRegistro++;
-    totalEstandarMin += std;
-    // Para las operaciones aún sin declarar se sigue usando el estándar como
-    // estimación (así el total no queda incompleto), pero la UI aclara que es
-    // parcial mientras falten operaciones.
-    totalRealMin += tiempoRealUnit > 0 ? tiempoRealUnit : std;
-    totalCostoEstandarUnit += std * vmin;
-    totalCostoRealUnit += (tiempoRealUnit > 0 ? tiempoRealUnit : std) * vmin;
-  }
-  const totalOps = procesosTalla.length;
-  const hayRegistros = opsConRegistro > 0;
-  const parcial = hayRegistros && opsConRegistro < totalOps;
-  const totalCostoEstandar = totalCostoEstandarUnit * unidades;
-  const totalCostoReal = totalCostoRealUnit * unidades;
-  const variacionPct = totalCostoEstandar > 0 ? ((totalCostoReal - totalCostoEstandar) / totalCostoEstandar) * 100 : 0;
+  // Totales GLOBALES de la orden (todas las tallas) — para el resumen global.
+  const unidadesGlobal = lineasProducto.reduce((s, l) => s + Number(l.cantidad_cortada ?? 0), 0);
+  const unidadesPlanGlobal = lineasProducto.reduce((s, l) => s + Number(l.cantidad_planificada ?? 0), 0);
+  // Registros de este producto (todas las tallas) para el resumen global.
+  const registrosProducto = useMemo(
+    () => registros.filter((r) => procesosProducto.some((p) => p.id === r.proceso_id)),
+    [registros, procesosProducto],
+  );
 
   return (
     <div className="space-y-4">
@@ -266,13 +236,37 @@ export function TiemposCostoTab({ otId, procesos, lineas, registros, operarios, 
         </CardContent>
       </Card>
 
-      {/* AVANCE POR TALLA (consulta) — el selector de talla vive acá abajo:
-          sirve para VER el avance/costos de una talla puntual, no para
-          filtrar el registro de arriba. */}
+      {/* RESUMEN GLOBAL DE LA ORDEN (todas las tallas) — pedido del cliente
+          21/07/2026: el resumen principal debe ser del total de la orden. */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">Resumen de la orden · toda la producción</CardTitle>
+          <p className="text-xs text-slate-500">Suma de todas las tallas de este producto.</p>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <StatsAvance
+            procesos={procesosProducto}
+            registros={registrosProducto}
+            unidades={unidadesGlobal}
+            unidadesPlan={unidadesPlanGlobal}
+          />
+        </CardContent>
+        <CardContent className="p-0">
+          <ResumenOperacionesTabla
+            procesos={procesosProducto}
+            registros={registrosProducto}
+            unidades={unidadesGlobal}
+          />
+        </CardContent>
+      </Card>
+
+      {/* AVANCE POR TALLA (consulta) — debajo del resumen global: el selector
+          de talla filtra este bloque para ver el avance de cada operación en
+          una talla puntual. */}
       <Card>
         <CardHeader>
           <CardTitle className="text-base">Avance por talla</CardTitle>
-          <p className="text-xs text-slate-500">Elija una talla para ver sus unidades, tiempos y costo de mano de obra.</p>
+          <p className="text-xs text-slate-500">Elija una talla para ver el avance y costo de cada operación en esa talla.</p>
         </CardHeader>
         <CardContent className="space-y-4">
           {/* Selector talla */}
@@ -292,129 +286,22 @@ export function TiemposCostoTab({ otId, procesos, lineas, registros, operarios, 
             ))}
           </div>
 
-          {/* Stats agregadas de la talla seleccionada */}
-          <div className="grid gap-3 sm:grid-cols-4">
-            <StatBox label="Unidades cortadas" value={`${unidades} / ${unidadesPlan}`} sub="planificadas" />
-            <StatBox label="Tiempo estándar" value={`${totalEstandarMin.toFixed(2)} min`} sub="por unidad" />
-            <StatBox
-              label="Tiempo real"
-              value={hayRegistros ? `${totalRealMin.toFixed(2)} min` : '—'}
-              sub={
-                hayRegistros
-                  ? `por unidad${parcial ? ` · parcial (${opsConRegistro} de ${totalOps} operaciones)` : ''}${
-                      totalRealMin !== totalEstandarMin ? ` · Δ ${(totalRealMin - totalEstandarMin).toFixed(2)}` : ''
-                    }`
-                  : 'aún sin operaciones declaradas'
-              }
-            />
-            <StatBox
-              label={
-                unidades > 0
-                  ? hayRegistros ? 'Costo MO OT' : 'Costo MO OT (estimado)'
-                  : 'Costo MO por unidad'
-              }
-              value={PEN(unidades > 0 ? totalCostoReal : totalCostoRealUnit)}
-              sub={
-                unidades === 0
-                  ? totalCostoRealUnit > 0
-                    ? `× 0 cortadas = S/ 0.00 total · declare avance para ver el total real`
-                    : 'sin costo configurado'
-                  : !hayRegistros
-                    ? `unitario ${PEN(totalCostoRealUnit)} · con tiempos estándar (aún sin registros)`
-                    : totalCostoEstandar > 0
-                      ? `unitario ${PEN(totalCostoRealUnit)} · vs estándar ${PEN(totalCostoEstandar)} (${variacionPct > 0 ? '+' : ''}${variacionPct.toFixed(1)}%)${parcial ? ' · parcial' : ''}`
-                      : `unitario ${PEN(totalCostoRealUnit)}`
-              }
-              highlight={unidades > 0 && hayRegistros && Math.abs(variacionPct) > 5}
-            />
-          </div>
+          <StatsAvance
+            procesos={procesosTalla}
+            registros={registrosTalla}
+            unidades={unidades}
+            unidadesPlan={unidadesPlan}
+          />
         </CardContent>
-      </Card>
-
-      {/* Resumen tabla (por la talla seleccionada arriba) */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">Resumen por operación · Talla {tallaSel.replace('T', '')}</CardTitle>
-        </CardHeader>
         <CardContent className="p-0">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead className="w-[40px] text-center">#</TableHead>
-                <TableHead>Operación</TableHead>
-                <TableHead>Área</TableHead>
-                <TableHead className="text-right">Estándar (min/u)</TableHead>
-                <TableHead className="text-right">Total registrado (min)</TableHead>
-                <TableHead>Avance</TableHead>
-                <TableHead className="text-right">Real (min/u)</TableHead>
-                <TableHead className="text-right">S/ por min</TableHead>
-                <TableHead className="text-right">Costo unit. real</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {procesosTalla.map((p) => {
-                const std = Number(p.tiempo_estandar_min ?? 0);
-                const vmin = Number(p.area?.valor_minuto ?? 0);
-                const regs = registrosTalla.filter((r) => r.proceso_id === p.id);
-                const totalRegistrado = regs.reduce((s, r) => s + Number(r.tiempo_total_min), 0);
-                const unidadesProcOp = regs.reduce((s, r) => s + Number(r.unidades_procesadas ?? 0), 0);
-                const denominador = unidadesProcOp > 0 ? unidadesProcOp : unidades;
-                const realPorUnidad = denominador > 0 ? totalRegistrado / denominador : 0;
-                const tiempoUsado = realPorUnidad > 0 ? realPorUnidad : std;
-                const parcial = unidadesProcOp > 0 && unidadesProcOp < unidades;
-                const pct = unidades > 0 ? Math.min(100, Math.round((unidadesProcOp / unidades) * 100)) : 0;
-                const completo = unidadesProcOp >= unidades && unidades > 0;
-                return (
-                  <TableRow key={p.id}>
-                    <TableCell className="text-center text-xs text-slate-500">{p.orden}</TableCell>
-                    <TableCell className="text-sm font-medium">{nombreOperacion(p)}</TableCell>
-                    <TableCell className="text-xs"><Badge variant="outline" className="text-[10px]">{p.area?.codigo ?? '—'}</Badge></TableCell>
-                    <TableCell className="text-right font-mono text-xs">{std.toFixed(2)}</TableCell>
-                    <TableCell className="text-right font-mono text-xs">
-                      {regs.length > 0 ? totalRegistrado.toFixed(2) : <span className="text-slate-300">—</span>}
-                    </TableCell>
-                    <TableCell>
-                      {unidades === 0 ? (
-                        <span className="text-[10px] text-slate-400">sin corte</span>
-                      ) : unidadesProcOp === 0 ? (
-                        <div className="flex flex-col gap-0.5">
-                          <span className="font-mono text-[10px] text-slate-400">0 / {unidades}</span>
-                          <div className="h-1 w-20 rounded-full bg-slate-100" />
-                        </div>
-                      ) : (
-                        <div className="flex flex-col gap-0.5" title={`Procesadas: ${unidadesProcOp} de ${unidades} cortadas`}>
-                          <span className={`font-mono text-[10px] ${completo ? 'text-emerald-700' : 'text-corp-900'}`}>
-                            {unidadesProcOp} / {unidades}
-                            <span className={`ml-1 font-semibold ${completo ? 'text-emerald-700' : 'text-amber-700'}`}>
-                              {pct}%
-                            </span>
-                          </span>
-                          <div className="h-1 w-20 overflow-hidden rounded-full bg-slate-100">
-                            <div
-                              className={`h-full rounded-full transition-all ${completo ? 'bg-emerald-500' : 'bg-amber-500'}`}
-                              style={{ width: `${pct}%` }}
-                            />
-                          </div>
-                        </div>
-                      )}
-                    </TableCell>
-                    <TableCell className="text-right font-mono text-xs">
-                      {realPorUnidad > 0 ? (
-                        <span title={parcial ? `Parcial: ${unidadesProcOp} de ${unidades} unidades procesadas` : undefined}>
-                          {realPorUnidad.toFixed(2)}
-                          {parcial && <span className="ml-1 text-[9px] text-amber-600">·{unidadesProcOp}u</span>}
-                        </span>
-                      ) : (
-                        <span className="text-slate-300">—</span>
-                      )}
-                    </TableCell>
-                    <TableCell className="text-right font-mono text-xs text-slate-500">{vmin > 0 ? PEN(vmin) : <span className="text-slate-400">—</span>}</TableCell>
-                    <TableCell className="text-right font-mono text-xs font-semibold text-emerald-700">{PEN(tiempoUsado * vmin)}</TableCell>
-                  </TableRow>
-                );
-              })}
-            </TableBody>
-          </Table>
+          <div className="border-t px-4 pt-3 text-xs font-medium text-slate-500">
+            Resumen por operación · Talla {tallaSel.replace('T', '')}
+          </div>
+          <ResumenOperacionesTabla
+            procesos={procesosTalla}
+            registros={registrosTalla}
+            unidades={unidades}
+          />
         </CardContent>
       </Card>
 
@@ -422,12 +309,180 @@ export function TiemposCostoTab({ otId, procesos, lineas, registros, operarios, 
         <p className="font-medium text-corp-900">¿Cómo funciona?</p>
         <ul className="ml-4 mt-1 list-disc space-y-0.5">
           <li>Cada operación puede tener <strong>múltiples registros de tiempo</strong> (uno por lote/sesión).</li>
-          <li>Podés ingresar <strong>fecha/hora inicio + fin</strong> y el sistema calcula la duración, o ingresar el <strong>tiempo total directo</strong> en minutos.</li>
+          <li>Puede ingresar <strong>fecha/hora inicio + fin</strong> y el sistema calcula la duración, o ingresar el <strong>tiempo total directo</strong> en minutos.</li>
           <li>El campo <strong>unidades procesadas</strong> es opcional; en CORTE muchas veces se deja vacío (es global por operación).</li>
-          <li>El <strong>resumen de abajo</strong> es informativo: suma los registros y calcula real/unidad y costo.</li>
+          <li>El <strong>resumen de la orden</strong> suma todas las tallas; el <strong>avance por talla</strong> permite ver una talla puntual.</li>
         </ul>
       </div>
     </div>
+  );
+}
+
+/**
+ * Tarjetas de resumen (unidades, tiempo estándar, tiempo real, costo MO).
+ * Recibe el set de procesos + registros + unidades cortadas y calcula todo.
+ * Se usa dos veces: global de la orden y por talla.
+ */
+function StatsAvance({
+  procesos, registros, unidades, unidadesPlan,
+}: {
+  procesos: Proceso[];
+  registros: RegistroTiempo[];
+  unidades: number;
+  unidadesPlan: number;
+}) {
+  let totalEstandarMin = 0;
+  let totalRealMin = 0;
+  let totalCostoEstandarUnit = 0;
+  let totalCostoRealUnit = 0;
+  let opsConRegistro = 0;
+  for (const p of procesos) {
+    const std = Number(p.tiempo_estandar_min ?? 0);
+    const vmin = Number(p.area?.valor_minuto ?? 0);
+    const regs = registros.filter((r) => r.proceso_id === p.id);
+    const tiempoTotal = regs.reduce((s, r) => s + Number(r.tiempo_total_min), 0);
+    const unidadesProcesadasOp = regs.reduce((s, r) => s + Number(r.unidades_procesadas ?? 0), 0);
+    const denominador = unidadesProcesadasOp > 0 ? unidadesProcesadasOp : unidades;
+    const tiempoRealUnit = denominador > 0 ? tiempoTotal / denominador : 0;
+    if (tiempoRealUnit > 0) opsConRegistro++;
+    totalEstandarMin += std;
+    totalRealMin += tiempoRealUnit > 0 ? tiempoRealUnit : std;
+    totalCostoEstandarUnit += std * vmin;
+    totalCostoRealUnit += (tiempoRealUnit > 0 ? tiempoRealUnit : std) * vmin;
+  }
+  const totalOps = procesos.length;
+  const hayRegistros = opsConRegistro > 0;
+  const parcial = hayRegistros && opsConRegistro < totalOps;
+  const totalCostoEstandar = totalCostoEstandarUnit * unidades;
+  const totalCostoReal = totalCostoRealUnit * unidades;
+  const variacionPct = totalCostoEstandar > 0 ? ((totalCostoReal - totalCostoEstandar) / totalCostoEstandar) * 100 : 0;
+
+  return (
+    <div className="grid gap-3 sm:grid-cols-4">
+      <StatBox label="Unidades cortadas" value={`${unidades} / ${unidadesPlan}`} sub="planificadas" />
+      <StatBox label="Tiempo estándar" value={`${totalEstandarMin.toFixed(2)} min`} sub="por unidad" />
+      <StatBox
+        label="Tiempo real"
+        value={hayRegistros ? `${totalRealMin.toFixed(2)} min` : '—'}
+        sub={
+          hayRegistros
+            ? `por unidad${parcial ? ` · parcial (${opsConRegistro} de ${totalOps} operaciones)` : ''}${
+                totalRealMin !== totalEstandarMin ? ` · Δ ${(totalRealMin - totalEstandarMin).toFixed(2)}` : ''
+              }`
+            : 'aún sin operaciones declaradas'
+        }
+      />
+      <StatBox
+        label={
+          unidades > 0
+            ? hayRegistros ? 'Costo MO OT' : 'Costo MO OT (estimado)'
+            : 'Costo MO por unidad'
+        }
+        value={PEN(unidades > 0 ? totalCostoReal : totalCostoRealUnit)}
+        sub={
+          unidades === 0
+            ? totalCostoRealUnit > 0
+              ? `× 0 cortadas = S/ 0.00 total · declare avance para ver el total real`
+              : 'sin costo configurado'
+            : !hayRegistros
+              ? `unitario ${PEN(totalCostoRealUnit)} · con tiempos estándar (aún sin registros)`
+              : totalCostoEstandar > 0
+                ? `unitario ${PEN(totalCostoRealUnit)} · vs estándar ${PEN(totalCostoEstandar)} (${variacionPct > 0 ? '+' : ''}${variacionPct.toFixed(1)}%)${parcial ? ' · parcial' : ''}`
+                : `unitario ${PEN(totalCostoRealUnit)}`
+        }
+        highlight={unidades > 0 && hayRegistros && Math.abs(variacionPct) > 5}
+      />
+    </div>
+  );
+}
+
+/** Tabla "Resumen por operación" — reutilizable (global o por talla). */
+function ResumenOperacionesTabla({
+  procesos, registros, unidades,
+}: {
+  procesos: Proceso[];
+  registros: RegistroTiempo[];
+  unidades: number;
+}) {
+  return (
+    <Table>
+      <TableHeader>
+        <TableRow>
+          <TableHead className="w-[40px] text-center">#</TableHead>
+          <TableHead>Operación</TableHead>
+          <TableHead>Área</TableHead>
+          <TableHead className="text-right">Estándar (min/u)</TableHead>
+          <TableHead className="text-right">Total registrado (min)</TableHead>
+          <TableHead>Avance</TableHead>
+          <TableHead className="text-right">Real (min/u)</TableHead>
+          <TableHead className="text-right">S/ por min</TableHead>
+          <TableHead className="text-right">Costo unit. real</TableHead>
+        </TableRow>
+      </TableHeader>
+      <TableBody>
+        {procesos.map((p) => {
+          const std = Number(p.tiempo_estandar_min ?? 0);
+          const vmin = Number(p.area?.valor_minuto ?? 0);
+          const regs = registros.filter((r) => r.proceso_id === p.id);
+          const totalRegistrado = regs.reduce((s, r) => s + Number(r.tiempo_total_min), 0);
+          const unidadesProcOp = regs.reduce((s, r) => s + Number(r.unidades_procesadas ?? 0), 0);
+          const denominador = unidadesProcOp > 0 ? unidadesProcOp : unidades;
+          const realPorUnidad = denominador > 0 ? totalRegistrado / denominador : 0;
+          const tiempoUsado = realPorUnidad > 0 ? realPorUnidad : std;
+          const parcial = unidadesProcOp > 0 && unidadesProcOp < unidades;
+          const pct = unidades > 0 ? Math.min(100, Math.round((unidadesProcOp / unidades) * 100)) : 0;
+          const completo = unidadesProcOp >= unidades && unidades > 0;
+          return (
+            <TableRow key={p.id}>
+              <TableCell className="text-center text-xs text-slate-500">{p.orden}</TableCell>
+              <TableCell className="text-sm font-medium">{nombreOperacion(p)}</TableCell>
+              <TableCell className="text-xs"><Badge variant="outline" className="text-[10px]">{p.area?.codigo ?? '—'}</Badge></TableCell>
+              <TableCell className="text-right font-mono text-xs">{std.toFixed(2)}</TableCell>
+              <TableCell className="text-right font-mono text-xs">
+                {regs.length > 0 ? totalRegistrado.toFixed(2) : <span className="text-slate-300">—</span>}
+              </TableCell>
+              <TableCell>
+                {unidades === 0 ? (
+                  <span className="text-[10px] text-slate-400">sin corte</span>
+                ) : unidadesProcOp === 0 ? (
+                  <div className="flex flex-col gap-0.5">
+                    <span className="font-mono text-[10px] text-slate-400">0 / {unidades}</span>
+                    <div className="h-1 w-20 rounded-full bg-slate-100" />
+                  </div>
+                ) : (
+                  <div className="flex flex-col gap-0.5" title={`Procesadas: ${unidadesProcOp} de ${unidades} cortadas`}>
+                    <span className={`font-mono text-[10px] ${completo ? 'text-emerald-700' : 'text-corp-900'}`}>
+                      {unidadesProcOp} / {unidades}
+                      <span className={`ml-1 font-semibold ${completo ? 'text-emerald-700' : 'text-amber-700'}`}>
+                        {pct}%
+                      </span>
+                    </span>
+                    <div className="h-1 w-20 overflow-hidden rounded-full bg-slate-100">
+                      <div
+                        className={`h-full rounded-full transition-all ${completo ? 'bg-emerald-500' : 'bg-amber-500'}`}
+                        style={{ width: `${pct}%` }}
+                      />
+                    </div>
+                  </div>
+                )}
+              </TableCell>
+              <TableCell className="text-right font-mono text-xs">
+                {realPorUnidad > 0 ? (
+                  <span title={parcial ? `Parcial: ${unidadesProcOp} de ${unidades} unidades procesadas` : undefined}>
+                    {realPorUnidad.toFixed(2)}
+                    {parcial && <span className="ml-1 text-[9px] text-amber-600">·{unidadesProcOp}u</span>}
+                  </span>
+                ) : (
+                  <span className="text-slate-300">—</span>
+                )}
+              </TableCell>
+              <TableCell className="text-right font-mono text-xs text-slate-500">{vmin > 0 ? PEN(vmin) : <span className="text-slate-400">—</span>}</TableCell>
+              <TableCell className="text-right font-mono text-xs font-semibold text-emerald-700">{PEN(tiempoUsado * vmin)}</TableCell>
+            </TableRow>
+          );
+        })}
+      </TableBody>
+    </Table>
   );
 }
 
