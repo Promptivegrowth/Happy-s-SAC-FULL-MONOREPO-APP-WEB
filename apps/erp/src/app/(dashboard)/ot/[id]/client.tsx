@@ -215,42 +215,33 @@ export function OtNotaForm({ otId }: { otId: string }) {
 
 export function OtLineaProduccion({ otId, lineaId, planificada, cortada, fallas, disabled, usuarioEsGerente = false }: {
   otId: string; lineaId: string; planificada: number; cortada: number; fallas: number; disabled: boolean;
-  /** Solo gerencia puede liquidar cantidades que EXCEDAN el plan (pedido 21/07/2026). */
+  /** Solo gerencia puede AJUSTAR la cantidad cortada (que viene del módulo Corte). */
   usuarioEsGerente?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const [pending, start] = useTransition();
-  // El campo es ACUMULADO (no incremento). Pre-popular con el plan sugiere
-  // "completar todo": el usuario solo modifica si no completó. Si ya está
-  // todo cortado, se mantiene cortada (no fuerza overshoot).
-  const sugerido = Math.max(planificada, cortada);
-  const [c, setC] = useState(sugerido);
+  // La cantidad cortada es la FUENTE del módulo Corte (decisión del cliente
+  // 21/07/2026). Se muestra como base; solo gerencia la ajusta con motivo.
+  const [c, setC] = useState(cortada);
   const [f, setF] = useState(fallas);
   const [motivo, setMotivo] = useState('');
 
-  // Cortar MENOS o en avances parciales es normal y no pide nada. Solo cortar
-  // de MÁS (exceder el plan) requiere autorización de gerencia + motivo, que
-  // queda registrada en la bitácora ("solo pida autorización al quedar el
-  // total", aclaración del cliente 21/07/2026).
-  const difiere = c > planificada;
-  const requiereAutorizacion = difiere && !usuarioEsGerente;
+  const ajustaCortada = c !== cortada;
 
   function save() {
     if (f > c) {
       return toast.error('Fallas no pueden superar cortadas');
     }
-    if (requiereAutorizacion) {
-      return toast.error(
-        `Liquidar ${c} unidades supera el plan (${planificada}). Cortar de más requiere autorización de gerencia.`,
-      );
+    if (ajustaCortada && !usuarioEsGerente) {
+      return toast.error('La cantidad cortada viene del módulo Corte. Ajustarla requiere autorización de gerencia.');
     }
-    if (difiere && !motivo.trim()) {
-      return toast.error('Indique el motivo de las unidades extra para registrar la autorización.');
+    if (ajustaCortada && !motivo.trim()) {
+      return toast.error('Indique el motivo del ajuste de la cantidad cortada.');
     }
     start(async () => {
       const r = await declararProduccion(otId, lineaId, c, f, motivo.trim() || undefined);
       if (r.ok) {
-        toast.success(difiere ? 'Producción declarada — autorización registrada en la bitácora' : 'Producción declarada');
+        toast.success(ajustaCortada ? 'Guardado — ajuste registrado en la bitácora' : 'Guardado');
         setMotivo('');
         setOpen(false);
       } else toast.error(r.error ?? 'Error');
@@ -263,21 +254,28 @@ export function OtLineaProduccion({ otId, lineaId, planificada, cortada, fallas,
     return <Button variant="ghost" size="sm" onClick={() => setOpen(true)}>Editar</Button>;
   }
 
-  const faltaCortar = Math.max(planificada - cortada, 0);
   return (
     <div className="space-y-1">
       <div className="flex items-end gap-1">
         <div className="flex flex-col">
-          <label className="text-[9px] font-semibold uppercase tracking-wide text-slate-500">Cortado</label>
+          <label className="text-[9px] font-semibold uppercase tracking-wide text-slate-500">
+            Cortado {!usuarioEsGerente && <span className="text-slate-400">(del Corte)</span>}
+          </label>
           <Input
             type="number"
             value={c}
             onChange={(e) => setC(Number(e.target.value))}
             min={0}
-            className={`h-8 w-16 text-xs ${difiere ? 'border-amber-400 bg-amber-50' : ''}`}
+            disabled={!usuarioEsGerente}
+            className={`h-8 w-16 text-xs ${
+              !usuarioEsGerente ? 'bg-slate-100 text-slate-500' : ajustaCortada ? 'border-amber-400 bg-amber-50' : ''
+            }`}
             placeholder="0"
-            title={`Acumulado. Plan ${planificada}. Falta cortar ${faltaCortar}. Una cantidad distinta al plan requiere autorización de gerencia.`}
-            autoFocus
+            title={
+              usuarioEsGerente
+                ? 'Viene del módulo Corte. Si lo ajusta, queda registrado en la bitácora con el motivo.'
+                : 'La cantidad cortada viene del módulo Corte (solo lectura). El ajuste lo hace gerencia.'
+            }
           />
         </div>
         <div className="flex flex-col">
@@ -291,42 +289,40 @@ export function OtLineaProduccion({ otId, lineaId, planificada, cortada, fallas,
             className="h-8 w-14 text-xs"
             placeholder="0"
             title="Unidades descartadas (acumulado)"
+            autoFocus
           />
         </div>
         <Button
           variant="premium"
           size="sm"
           onClick={save}
-          disabled={pending || requiereAutorizacion}
+          disabled={pending || (ajustaCortada && !usuarioEsGerente)}
           className="h-8 px-2"
-          title={requiereAutorizacion ? 'Requiere autorización de gerencia' : 'Guardar'}
+          title={ajustaCortada && !usuarioEsGerente ? 'Requiere autorización de gerencia' : 'Guardar'}
         >
           {pending ? <Loader2 className="h-3 w-3 animate-spin" /> : <Save className="h-3 w-3" />}
         </Button>
         <Button variant="ghost" size="sm" onClick={() => { setC(cortada); setF(fallas); setMotivo(''); setOpen(false); }} className="h-8 px-1" title="Cancelar"><X className="h-3 w-3" /></Button>
       </div>
 
-      {difiere && (
-        requiereAutorizacion ? (
-          <p className="max-w-[260px] rounded border border-amber-300 bg-amber-50 px-2 py-1 text-[10px] leading-tight text-amber-800">
-            <strong>Requiere autorización de gerencia:</strong> son {c} unidades y el plan es {planificada}
-            (corta {c - planificada} de más). Solicite a gerencia que registre la liquidación.
-          </p>
-        ) : (
-          <div className="max-w-[260px]">
-            <label className="text-[9px] font-semibold uppercase tracking-wide text-amber-700">
-              Motivo de las {c - planificada} unidades extra (plan {planificada} → {c})
-            </label>
-            <Input
-              value={motivo}
-              onChange={(e) => setMotivo(e.target.value)}
-              placeholder="Ej: se cortaron extras para cubrir mermas"
-              className="h-8 text-xs"
-              maxLength={200}
-            />
-          </div>
-        )
-      )}
+      {!usuarioEsGerente ? (
+        <p className="max-w-[260px] text-[10px] leading-tight text-slate-500">
+          La cantidad cortada viene del módulo <strong>Corte</strong>. Si difiere de lo real, gerencia puede ajustarla.
+        </p>
+      ) : ajustaCortada ? (
+        <div className="max-w-[260px]">
+          <label className="text-[9px] font-semibold uppercase tracking-wide text-amber-700">
+            Motivo del ajuste (del Corte {cortada} → {c})
+          </label>
+          <Input
+            value={motivo}
+            onChange={(e) => setMotivo(e.target.value)}
+            placeholder="Ej: recuento físico difiere del corte"
+            className="h-8 text-xs"
+            maxLength={200}
+          />
+        </div>
+      ) : null}
     </div>
   );
 }

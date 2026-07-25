@@ -275,10 +275,10 @@ export async function declararProduccion(
     }
     const { sb, userId } = await requireUser();
 
-    // Validar contra cantidad_planificada de la línea + estado de la OT
+    // Validar contra la línea de la OT + estado de la OT
     const { data: linea } = await sb
       .from('ot_lineas')
-      .select('cantidad_planificada, ot:ot_id(estado)')
+      .select('cantidad_planificada, cantidad_cortada, ot:ot_id(estado)')
       .eq('id', lineaId)
       .single();
     if (!linea) throw new Error('Línea de OT no encontrada');
@@ -287,23 +287,22 @@ export async function declararProduccion(
       throw new Error('No se puede declarar producción en una OT cerrada');
     }
 
-    // AUTORIZACIÓN DE GERENCIA (pedido del cliente 21/07/2026, aclarado el
-    // mismo día: "que solo pida autorización al quedar el total"). Cortar
-    // MENOS o en avances parciales es normal y NO pide autorización — el
-    // faltante se reconcilia al cerrar la OT. Solo cortar de MÁS (exceder lo
-    // planificado) requiere que un gerente lo autorice con motivo, y queda
-    // registrado en la bitácora.
+    // FUENTE DE VERDAD = módulo Corte (decisión del cliente 21/07/2026: la
+    // cantidad cortada de la OT viene del corte). Cambiarla acá es un AJUSTE
+    // que solo gerencia puede hacer, con motivo, y queda en la bitácora.
+    // Actualizar solo las fallas (sin tocar lo cortado) no requiere nada.
     const planificada = Number(linea.cantidad_planificada ?? 0);
-    const difiere = cantidadCortada > planificada;
+    const cortadaActual = Number(linea.cantidad_cortada ?? 0);
+    const ajustaCortada = cantidadCortada !== cortadaActual;
     const motivoLimpio = (motivo ?? '').trim();
-    if (difiere) {
+    if (ajustaCortada) {
       if (!(await esGerente())) {
         throw new Error(
-          `Las unidades cortadas (${cantidadCortada}) superan el plan (${planificada}). Cortar de más requiere autorización de gerencia.`,
+          `La cantidad cortada (${cortadaActual}) viene del módulo Corte. Ajustarla requiere autorización de gerencia.`,
         );
       }
       if (!motivoLimpio) {
-        throw new Error('Indique el motivo de las unidades extra para dejar registrada la autorización.');
+        throw new Error('Indique el motivo del ajuste de la cantidad cortada para registrar la autorización.');
       }
     }
 
@@ -313,21 +312,22 @@ export async function declararProduccion(
     }).eq('id', lineaId);
     if (error) throw new Error(error.message);
 
-    // Registrar la autorización en la bitácora de la OT (auditoría)
-    if (difiere) {
-      const signo = cantidadCortada > planificada ? '+' : '';
+    // Registrar el ajuste autorizado en la bitácora de la OT (auditoría)
+    if (ajustaCortada) {
+      const signo = cantidadCortada > cortadaActual ? '+' : '';
       await sb.from('ot_eventos').insert({
         ot_id: otId,
         tipo: 'AUTORIZACION_CANTIDAD',
         usuario_id: userId,
         detalle:
-          `Liquidación de corte autorizada por gerencia: ${cantidadCortada} unidades ` +
-          `(plan ${planificada}, diferencia ${signo}${cantidadCortada - planificada}). Motivo: ${motivoLimpio}`,
+          `Ajuste de cantidad cortada autorizado por gerencia: ${cortadaActual} → ${cantidadCortada} ` +
+          `(${signo}${cantidadCortada - cortadaActual}, plan ${planificada}). Motivo: ${motivoLimpio}`,
         contexto: {
           linea_id: lineaId,
           cantidad_planificada: planificada,
-          cantidad_cortada: cantidadCortada,
-          diferencia: cantidadCortada - planificada,
+          cortada_anterior: cortadaActual,
+          cortada_nueva: cantidadCortada,
+          diferencia: cantidadCortada - cortadaActual,
           motivo: motivoLimpio,
         },
       });
