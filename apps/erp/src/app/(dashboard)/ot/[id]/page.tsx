@@ -11,7 +11,7 @@ import { OtAcciones, OtNotaForm, OtLineaProduccion, AgregarLineaOTForm, Eliminar
 import { TiemposCostoTab } from './tiempos-client';
 import { EstadoBanner } from './estado-banner';
 import { formatDate, formatDateTime, formatNumber } from '@happy/lib';
-import { Calendar, AlertTriangle, User } from 'lucide-react';
+import { Calendar, AlertTriangle, User, ShieldCheck, Scissors } from 'lucide-react';
 
 export const dynamic = 'force-dynamic';
 
@@ -63,7 +63,7 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
     productosEnLineas.length > 0
       ? sbAny
           .from('productos_procesos')
-          .select('id, producto_id, proceso, descripcion_operativa, talla, orden, tiempo_estandar_min, areas_produccion(id, codigo, nombre, valor_minuto)')
+          .select('id, producto_id, proceso, descripcion_operativa, es_tercerizado, talla, orden, tiempo_estandar_min, areas_produccion(id, codigo, nombre, valor_minuto)')
           .in('producto_id', productosEnLineas)
           .eq('activo', true)
           .order('producto_id')
@@ -82,7 +82,7 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
   ]);
   const procesos = ((procesosRaw ?? []) as Array<{
     id: string; producto_id: string; proceso: string; descripcion_operativa: string | null;
-    talla: string; orden: number; tiempo_estandar_min: number;
+    es_tercerizado: boolean; talla: string; orden: number; tiempo_estandar_min: number;
     areas_produccion: { id: string; codigo: string; nombre: string; valor_minuto: number | null } | null;
   }>).map((p) => ({
     id: p.id,
@@ -91,6 +91,7 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
     // Nombre real del paso — se muestra en vez de la categoría (ver
     // nombreOperacion en tiempos-client).
     descripcion_operativa: p.descripcion_operativa,
+    es_tercerizado: p.es_tercerizado,
     talla: p.talla,
     orden: p.orden,
     tiempo_estandar_min: Number(p.tiempo_estandar_min ?? 0),
@@ -129,6 +130,39 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
 
   const plan = (ot as unknown as { plan_maestro?: { codigo: string } | null }).plan_maestro;
 
+  // ÁREA EN CURSO derivada de las declaraciones (pedido del cliente
+  // 21/07/2026): la primera área — en orden de proceso — que todavía tiene
+  // operaciones sin declarar. A medida que se declaran los tiempos, el
+  // indicador avanza solo a la siguiente área. No cambia el `estado` de la OT
+  // (ese sigue siendo manual y controla el cierre / ingreso a PT); es un
+  // semáforo de avance real. Ignora procesos tercerizados (van por OS).
+  const areaEnCurso = (() => {
+    if (['COMPLETADA', 'CANCELADA'].includes(ot.estado)) return null;
+    const declarado = new Set(registros.map((r) => `${r.proceso_id}::${r.talla}`));
+    const lineasCorte = ((lineas ?? []) as Array<{ producto_id: string; talla: string; cantidad_cortada: number | null }>)
+      .filter((l) => Number(l.cantidad_cortada ?? 0) > 0);
+    if (lineasCorte.length === 0) return null; // aún sin corte declarado
+    const info = new Map<string, { nombre: string; minOrden: number; pendientes: number; total: number }>();
+    for (const p of procesos) {
+      if (p.es_tercerizado) continue;
+      const cod = p.area?.codigo;
+      if (!cod) continue;
+      for (const l of lineasCorte) {
+        if (l.producto_id !== p.producto_id) continue;
+        const prev = info.get(cod) ?? { nombre: p.area?.nombre ?? cod, minOrden: p.orden, pendientes: 0, total: 0 };
+        prev.minOrden = Math.min(prev.minOrden, p.orden);
+        prev.total += 1;
+        if (!declarado.has(`${p.id}::${l.talla}`)) prev.pendientes += 1;
+        info.set(cod, prev);
+      }
+    }
+    const ordenadas = [...info.entries()].sort((a, b) => a[1].minOrden - b[1].minOrden);
+    const enCurso = ordenadas.find(([, i]) => i.pendientes > 0);
+    if (!enCurso) return { completo: true as const };
+    const [codigo, i] = enCurso;
+    return { completo: false as const, codigo, nombre: i.nombre, pendientes: i.pendientes, total: i.total };
+  })();
+
   return (
     <PageShell
       title={`OT ${ot.numero}`}
@@ -154,6 +188,30 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
       }
     >
       <EstadoBanner estado={ot.estado} />
+
+      {/* Semáforo de AVANCE REAL por área (derivado de las declaraciones de
+          tiempo). Avanza solo a medida que se declaran las operaciones. */}
+      {areaEnCurso && (
+        areaEnCurso.completo ? (
+          <div className="flex items-center gap-2 rounded-lg border border-emerald-300 bg-emerald-50 px-4 py-2 text-sm text-emerald-800">
+            <ShieldCheck className="h-4 w-4 shrink-0" />
+            <span>
+              <strong>Avance de producción:</strong> todas las áreas tienen sus operaciones declaradas.
+            </span>
+          </div>
+        ) : (
+          <div className="flex flex-wrap items-center gap-2 rounded-lg border border-sky-300 bg-sky-50 px-4 py-2 text-sm text-sky-900">
+            <Scissors className="h-4 w-4 shrink-0" />
+            <span>
+              <strong>Avance de producción:</strong> según lo declarado, la OT está en el área{' '}
+              <Badge variant="default" className="bg-sky-600 align-middle">{areaEnCurso.nombre}</Badge>
+            </span>
+            <span className="text-xs text-sky-700">
+              (faltan {areaEnCurso.pendientes} de {areaEnCurso.total} operación(es) de esta área por declarar)
+            </span>
+          </div>
+        )
+      )}
 
       <div className="grid gap-3 sm:grid-cols-4">
         <Stat label="Estado" value={<Badge variant={COLOR[ot.estado] ?? 'secondary'}>{ot.estado.replace('_', ' ')}</Badge>} />
