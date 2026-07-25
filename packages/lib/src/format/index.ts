@@ -23,6 +23,11 @@ const DF_DATETIME = new Intl.DateTimeFormat('es-PE', {
   hour: '2-digit',
   minute: '2-digit',
   hour12: false,
+  // Forzar hora de Perú: el servidor (Vercel) corre en UTC y mostraba las
+  // fechas 5 horas adelantadas (ej. 16:26 en vez de 11:26) — reporte del
+  // cliente 21/07/2026. Solo se aplica al datetime (instante real); las
+  // fechas "solo día" no se tocan para no correr un día por zona horaria.
+  timeZone: 'America/Lima',
 });
 
 /**

@@ -11,7 +11,7 @@ import { OtAcciones, OtNotaForm, OtLineaProduccion, AgregarLineaOTForm, Eliminar
 import { TiemposCostoTab } from './tiempos-client';
 import { EstadoBanner } from './estado-banner';
 import { formatDate, formatDateTime, formatNumber } from '@happy/lib';
-import { Calendar, AlertTriangle, User, ShieldCheck, Scissors } from 'lucide-react';
+import { Calendar, AlertTriangle, User, ShieldCheck, Scissors, Clock } from 'lucide-react';
 
 export const dynamic = 'force-dynamic';
 
@@ -163,6 +163,33 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
     return { completo: false as const, codigo, nombre: i.nombre, pendientes: i.pendientes, total: i.total };
   })();
 
+  // TIMELINE de la bitácora — se arma de las DECLARACIONES de tiempo (lo que
+  // realmente se produjo) + eventos relevantes (creación, notas, autorización
+  // de corte, cierre forzado). Se OCULTAN los cambios de estado por botón
+  // (ESTADO_CAMBIO): el cliente no los quiere en el resumen (pedido 21/07/2026,
+  // "que salga de las declaraciones, no de los botones").
+  const nombreOp = new Map(
+    procesos.map((p) => [p.id, (p.descripcion_operativa ?? '').trim() || p.proceso.replace(/_/g, ' ')]),
+  );
+  type TLItem = { id: string; fecha: string; tipo: string; detalle: string };
+  const tlDeclaraciones: TLItem[] = registros.map((r) => ({
+    id: `reg-${r.id}`,
+    // fecha_inicio = fecha real del trabajo; si no hay, cae a cuando se cargó.
+    fecha: r.fecha_inicio ?? r.created_at,
+    tipo: 'DECLARACION',
+    detalle:
+      `${nombreOp.get(r.proceso_id) ?? 'Operación'} · Talla ${r.talla.replace('T', '')} · ` +
+      `${Number(r.tiempo_total_min).toFixed(2)} min` +
+      `${r.unidades_procesadas ? ` · ${r.unidades_procesadas} und` : ''}` +
+      `${r.operario_nombre ? ` · ${r.operario_nombre}` : ''}`,
+  }));
+  const tlEventos: TLItem[] = ((eventos ?? []) as Array<{ id: number; fecha: string; tipo: string; detalle: string | null }>)
+    .filter((e) => e.tipo !== 'ESTADO_CAMBIO')
+    .map((e) => ({ id: `evt-${e.id}`, fecha: e.fecha, tipo: e.tipo, detalle: e.detalle ?? '' }));
+  const timeline = [...tlDeclaraciones, ...tlEventos].sort(
+    (a, b) => new Date(b.fecha).getTime() - new Date(a.fecha).getTime(),
+  );
+
   return (
     <PageShell
       title={`OT ${ot.numero}`}
@@ -227,7 +254,7 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
         <TabsList>
           <TabsTrigger value="lineas">Líneas / Producción</TabsTrigger>
           <TabsTrigger value="tiempos">Tiempos &amp; costo MO</TabsTrigger>
-          <TabsTrigger value="eventos">Bitácora ({(eventos ?? []).length})</TabsTrigger>
+          <TabsTrigger value="eventos">Bitácora ({timeline.length})</TabsTrigger>
         </TabsList>
 
         <TabsContent value="lineas">
@@ -346,23 +373,28 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
             </CardHeader>
             <CardContent>
               <OtNotaForm otId={id} />
-              <div className="mt-6 space-y-3">
-                {(eventos ?? []).length === 0 ? (
-                  <div className="rounded-lg border border-dashed py-10 text-center text-sm text-slate-400">Sin eventos.</div>
-                ) : eventos?.map((e) => (
+              <p className="mt-3 text-xs text-slate-500">
+                Registro de las declaraciones de tiempo y las novedades de la OT (notas, autorizaciones, cierre).
+              </p>
+              <div className="mt-4 space-y-3">
+                {timeline.length === 0 ? (
+                  <div className="rounded-lg border border-dashed py-10 text-center text-sm text-slate-400">
+                    Aún no hay declaraciones ni novedades. Registre tiempos en &quot;Tiempos &amp; costo MO&quot;.
+                  </div>
+                ) : timeline.map((e) => (
                   <div key={e.id} className="flex gap-3 rounded-lg border bg-slate-50 p-3">
                     <div className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-corp-100 text-corp-700">
-                      {e.tipo === 'NOTA' ? <User className="h-3.5 w-3.5" /> :
+                      {e.tipo === 'DECLARACION' ? <Clock className="h-3.5 w-3.5 text-sky-600" /> :
+                       e.tipo === 'NOTA' ? <User className="h-3.5 w-3.5" /> :
                        e.tipo === 'ANOMALIA' || e.tipo === 'FALLA' || e.tipo === 'AUTORIZACION_CANTIDAD' || e.tipo === 'CIERRE_FORZADO'
                          ? <AlertTriangle className="h-3.5 w-3.5 text-amber-600" /> :
                        <Calendar className="h-3.5 w-3.5" />}
                     </div>
                     <div className="flex-1">
                       <div className="flex items-center gap-2 text-xs text-slate-500">
-                        <Badge variant="secondary" className="text-[9px]">{e.tipo.replace('_', ' ')}</Badge>
-                        {e.estado_anterior && e.estado_nuevo && (
-                          <span>{e.estado_anterior.replace('_',' ')} → <span className="font-medium text-corp-900">{e.estado_nuevo.replace('_',' ')}</span></span>
-                        )}
+                        <Badge variant="secondary" className="text-[9px]">
+                          {e.tipo === 'DECLARACION' ? 'TIEMPO DECLARADO' : e.tipo.replace(/_/g, ' ')}
+                        </Badge>
                         <span className="ml-auto">{formatDateTime(e.fecha)}</span>
                       </div>
                       {e.detalle && <p className="mt-1 text-sm text-slate-700">{e.detalle}</p>}
