@@ -879,34 +879,50 @@ export function PosTerminal({
         void marcarCotizacionConvertida(cotizacionActivaId, r.venta_id ?? undefined);
       }
       // Reset COMPLETO — deja la caja lista para la siguiente venta.
-      // Incluye overrides de precio, descuentos y campos nuevos del cliente.
-      setCarrito([]);
-      setPagos([]);
-      setNombreCliente('');
-      setDocCliente('');
-      setDireccionCliente('');
-      setTelefonoCliente('');
-      setClienteIdSeleccionado(null);
-      setOverridesPrecio({});
-      setDescuentosLinea({});
-      setEfectivoInput('');
-      // Limpiar también el buscador de clientes frecuentes — sin esto el
-      // dropdown reabría con los resultados de la venta anterior al enfocar
-      // el input Nombre (fix 2026-07-12).
-      setBusquedaCliente('');
-      setResultadosCliente([]);
-      setDropdownClienteAbierto(false);
-      setSaldoAdelanto(0);
-      setCotizacionActivaId(null);
-      setCotizacionActivaNumero(null);
-      setCobrarOpen(false);
-      setCobrarKey((k) => k + 1);
+      limpiarVenta();
       // NO reseteamos vendedorId / tipoDoc / formato — persisten por sesión.
       // Refrescar balance para que el cierre vea la venta
       void refrescarSesion();
     } finally {
       setCobrando(false);
     }
+  }
+
+  /** Vacía todos los campos de la venta en curso (carrito, cliente, pagos,
+   *  overrides, descuentos, cotización activa). No toca la sesión de caja ni
+   *  las preferencias de sesión (vendedor / tipo doc / formato). */
+  function limpiarVenta() {
+    setCarrito([]);
+    setPagos([]);
+    setNombreCliente('');
+    setDocCliente('');
+    setDireccionCliente('');
+    setTelefonoCliente('');
+    setClienteIdSeleccionado(null);
+    setOverridesPrecio({});
+    setDescuentosLinea({});
+    setEfectivoInput('');
+    setBusquedaCliente('');
+    setResultadosCliente([]);
+    setDropdownClienteAbierto(false);
+    setSaldoAdelanto(0);
+    setCotizacionActivaId(null);
+    setCotizacionActivaNumero(null);
+    setCobrarOpen(false);
+    setCobrarKey((k) => k + 1);
+  }
+
+  /** Botón "Nueva venta" (pedido del cliente 21/07/2026): descarta la venta
+   *  en curso para empezar de cero, sin tener que cobrar. Pide confirmación
+   *  si hay algo cargado para no perderlo por accidente. */
+  function nuevaVenta() {
+    const hayAlgo = carrito.length > 0 || nombreCliente.trim() !== '' || docCliente.trim() !== '';
+    if (hayAlgo && !confirm('¿Descartar la venta actual y empezar una nueva? Se vaciará el carrito.')) {
+      return;
+    }
+    limpiarVenta();
+    setVista('busqueda');
+    if (hayAlgo) toast.success('Venta nueva — carrito vacío');
   }
 
   /** Abre el modal de cotización. Antes disparaba wa.me directo con el
@@ -1804,6 +1820,15 @@ export function PosTerminal({
             </div>
           )}
           <div className="flex gap-1.5">
+            <Button
+              onClick={nuevaVenta}
+              variant="outline"
+              disabled={cobrando}
+              className="flex-1 gap-1 px-2 text-slate-600"
+              title="Descartar la venta actual y empezar una nueva (vacía el carrito)"
+            >
+              <X className="h-4 w-4" /> Nueva
+            </Button>
             <Button
               onClick={pedirPorWhatsapp}
               variant="outline"
