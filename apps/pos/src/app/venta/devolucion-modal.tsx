@@ -40,9 +40,16 @@ export type VarianteDev = {
   codigo_barras: string | null;
   talla: string;
   precio: number;
+  /** Precios por escalón — para respetar el precio por mayor en el cambio
+   *  cuando la venta original fue mayorista (pedido del cliente 21/07/2026). */
+  precio_mayorista?: number;
+  precio_fabrica?: number;
   producto_nombre: string;
   stock: number;
 };
+
+type EscalonVenta = 'PUBLICO' | 'MAYORISTA' | 'INDUSTRIAL';
+type ConfigEscalones = { mayorista_desde: number; industrial_desde: number; activos: boolean };
 
 type LineaEntrega = {
   variante_id: string;
@@ -61,12 +68,16 @@ export function DevolucionModal({
   cajaId,
   sesionId,
   cuentasBancarias = [],
+  configEscalones = { mayorista_desde: 3, industrial_desde: 100, activos: true },
   onClose,
   onCompleted,
 }: {
   variantes: VarianteDev[];
   cajaId: string;
   sesionId: string;
+  /** Umbrales de precio por mayor — para respetar el escalón de la venta
+   *  original al entregar el producto del cambio. */
+  configEscalones?: ConfigEscalones;
   /** Cuentas bancarias visibles en el POS (BCP HAPPYS, BBVA, YAPE/PLIN…).
    *  Se usan como opciones de cobro/devolución de diferencia — cliente
    *  reportó (2026-07-12) que el dropdown mostraba métodos hardcodeados
@@ -99,6 +110,25 @@ export function DevolucionModal({
   const [entregaScan, setEntregaScan] = useState('');
   const [entregaLineas, setEntregaLineas] = useState<LineaEntrega[]>([]);
 
+  // ESCALÓN de la venta original: si el cliente compró por mayor, el producto
+  // entregado en el cambio se cobra a ese mismo escalón, no a precio unitario
+  // (pedido del cliente 21/07/2026). Se deriva de la cantidad TOTAL vendida.
+  const totalUnidadesVenta = (venta?.lineas ?? []).reduce((s, l) => s + Number(l.cantidad_vendida ?? 0), 0);
+  const escalonVenta: EscalonVenta = useMemo(() => {
+    if (!configEscalones.activos || totalUnidadesVenta < configEscalones.mayorista_desde) return 'PUBLICO';
+    if (totalUnidadesVenta >= configEscalones.industrial_desde) return 'INDUSTRIAL';
+    return 'MAYORISTA';
+  }, [totalUnidadesVenta, configEscalones]);
+
+  /** Precio del producto entregado según el escalón de la venta original. */
+  function precioEntrega(v: VarianteDev): number {
+    const may = Number(v.precio_mayorista ?? 0);
+    const fab = Number(v.precio_fabrica ?? 0);
+    if (escalonVenta === 'INDUSTRIAL') return fab > 0 ? fab : may > 0 ? may : v.precio;
+    if (escalonVenta === 'MAYORISTA') return may > 0 ? may : v.precio;
+    return v.precio;
+  }
+
   function agregarVarianteAEntrega(v: VarianteDev) {
     // BLOQUEO ESTRICTO: en cambio NO se permite entregar sin stock.
     // (Distinto al POS regular donde el cajero ya tiene el producto en mano;
@@ -122,7 +152,8 @@ export function DevolucionModal({
           producto_nombre: v.producto_nombre,
           talla: v.talla,
           cantidad: 1,
-          precio_unitario: v.precio,
+          // Respeta el escalón de la venta original (mayor/fábrica/público).
+          precio_unitario: precioEntrega(v),
         },
       ]);
     }
@@ -470,8 +501,14 @@ export function DevolucionModal({
               <Card className="bg-indigo-50 p-3">
                 <p className="text-xs text-indigo-800">
                   El cliente devolvió <strong>{itemsSeleccionados} unid.</strong> por <strong>{formatPEN(totalSeleccionado)}</strong>.
-                  Agregá los productos que se lleva.
+                  Agregue los productos que se lleva.
                 </p>
+                {escalonVenta !== 'PUBLICO' && (
+                  <p className="mt-1.5 text-[11px] font-medium text-amber-700">
+                    🏷 La venta original fue por {escalonVenta === 'INDUSTRIAL' ? 'fábrica' : 'mayor'} ({totalUnidadesVenta} unid.);
+                    los productos entregados se cobran a ese mismo precio.
+                  </p>
+                )}
               </Card>
 
               <div>
