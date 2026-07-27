@@ -6,7 +6,7 @@ import { Card } from '@happy/ui/card';
 import { Input } from '@happy/ui/input';
 import { Button } from '@happy/ui/button';
 import { Badge } from '@happy/ui/badge';
-import { Trash2, Plus, Minus, ScanBarcode, X, Banknote, Building2, MessageCircle, Loader2, LayoutGrid, ShoppingBag, LogOut, Receipt, History, RotateCcw, Coins, Wallet, Search, LogIn, UserX, Pencil, Send } from 'lucide-react';
+import { Trash2, Plus, Minus, ScanBarcode, X, Banknote, Building2, MessageCircle, Loader2, LayoutGrid, ShoppingBag, LogOut, Receipt, History, RotateCcw, Coins, Wallet, Search, LogIn, UserX, Pencil, Send, FileText } from 'lucide-react';
 import { toast } from 'sonner';
 import { formatPEN, ordenTalla, formatTalla, normalizarTexto } from '@happy/lib';
 
@@ -37,6 +37,12 @@ import { GastosModal } from './gastos-modal';
 import { AdelantosModal } from './adelantos-modal';
 import { StockAlmacenesModal } from './stock-almacenes-modal';
 import { DevolucionModal } from './devolucion-modal';
+import { CotizacionesModal } from './cotizaciones-modal';
+import {
+  guardarCotizacion,
+  marcarCotizacionConvertida,
+  type CotizacionDetalle,
+} from '@/server/actions/cotizaciones';
 import { construirMensajeWhatsApp, abrirWhatsApp } from './whatsapp-helper';
 
 type Variante = {
@@ -153,6 +159,12 @@ export function PosTerminal({
   // "Abrir caja" (ya NO se dispara automático al cargar sin sesión)
   const [abrirCajaOpen, setAbrirCajaOpen] = useState(false);
   const [devolucionOpen, setDevolucionOpen] = useState(false);
+  // Cotizaciones guardadas (pedido 21/07/2026): modal de búsqueda + conversión.
+  // cotizacionActiva* recuerda la cotización que se está convirtiendo, para
+  // marcarla CONVERTIDA una vez que la venta se registra.
+  const [cotizacionesOpen, setCotizacionesOpen] = useState(false);
+  const [cotizacionActivaId, setCotizacionActivaId] = useState<string | null>(null);
+  const [cotizacionActivaNumero, setCotizacionActivaNumero] = useState<string | null>(null);
   const [efectivoInput, setEfectivoInput] = useState<string>('');
   const [cobrarOpen, setCobrarOpen] = useState(false);
   // Counter para forzar REMOUNT del CobrarModal después de cada venta.
@@ -502,6 +514,57 @@ export function PosTerminal({
     // Se cierra manualmente con la X o click fuera.
   }
 
+  /**
+   * Convierte una cotización guardada en venta: carga sus líneas al carrito
+   * con los PRECIOS CONGELADOS (override por variante) y los datos del
+   * cliente. Valida stock actual; avisa de líneas sin stock o con producto
+   * ya inactivo. La cotización se marca CONVERTIDA cuando la venta se cobra.
+   */
+  function convertirCotizacion(det: CotizacionDetalle) {
+    const nuevoCarrito: { variante: Variante; cantidad: number }[] = [];
+    const nuevosOverrides: Record<string, number> = {};
+    const avisos: string[] = [];
+    for (const l of det.lineas) {
+      const v = variantes.find((x) => x.id === l.variante_id);
+      if (!v) {
+        avisos.push(`${l.producto_nombre} T${l.talla.replace('T', '')} ya no está disponible`);
+        continue;
+      }
+      const stock = Math.max(0, stockPorVariante[v.id] ?? 0);
+      if (stock <= 0) {
+        avisos.push(`${v.productos.nombre} T${formatTalla(v.talla)} sin stock`);
+        continue;
+      }
+      const cant = Math.min(l.cantidad, stock);
+      if (cant < l.cantidad) {
+        avisos.push(`${v.productos.nombre} T${formatTalla(v.talla)}: solo ${stock} de ${l.cantidad}`);
+      }
+      nuevoCarrito.push({ variante: v, cantidad: cant });
+      nuevosOverrides[v.id] = l.precio_unitario; // precio congelado
+    }
+    if (nuevoCarrito.length === 0) {
+      toast.error('Ninguna línea de la cotización tiene stock disponible.');
+      return;
+    }
+    setCarrito(nuevoCarrito);
+    setOverridesPrecio(nuevosOverrides);
+    setDescuentosLinea({});
+    if (det.cliente_id) setClienteIdSeleccionado(det.cliente_id);
+    if (det.cliente_nombre) setNombreCliente(det.cliente_nombre);
+    if (det.cliente_documento) setDocCliente(det.cliente_documento);
+    setCotizacionActivaId(det.id);
+    setCotizacionActivaNumero(det.numero);
+    setCotizacionesOpen(false);
+    setVista('busqueda');
+    toast.success(
+      `Cotización ${det.numero} cargada al carrito con sus precios. Elija boleta o factura y cobre.`,
+      { duration: 7000 },
+    );
+    if (avisos.length > 0) {
+      toast.info(`Ajustes por stock: ${avisos.slice(0, 4).join(' · ')}${avisos.length > 4 ? '…' : ''}`, { duration: 9000 });
+    }
+  }
+
   function setQty(varianteId: string, qty: number) {
     setCarrito((prev) =>
       prev.map((l) => {
@@ -810,6 +873,11 @@ export function PosTerminal({
       toast.success(
         `✅ ${r.numero}${numeroComprobante ? ` · ${numeroComprobante}` : ''} · ${formatPEN(total)}`,
       );
+      // Si esta venta vino de una cotización, marcarla CONVERTIDA (best-effort;
+      // no bloquea el flujo si falla).
+      if (cotizacionActivaId) {
+        void marcarCotizacionConvertida(cotizacionActivaId, r.venta_id ?? undefined);
+      }
       // Reset COMPLETO — deja la caja lista para la siguiente venta.
       // Incluye overrides de precio, descuentos y campos nuevos del cliente.
       setCarrito([]);
@@ -829,6 +897,8 @@ export function PosTerminal({
       setResultadosCliente([]);
       setDropdownClienteAbierto(false);
       setSaldoAdelanto(0);
+      setCotizacionActivaId(null);
+      setCotizacionActivaNumero(null);
       setCobrarOpen(false);
       setCobrarKey((k) => k + 1);
       // NO reseteamos vendedorId / tipoDoc / formato — persisten por sesión.
@@ -952,6 +1022,17 @@ export function PosTerminal({
               title="Devolución o cambio de mercadería"
             >
               <RotateCcw className="h-3.5 w-3.5" /> Devolución
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setCotizacionesOpen(true)}
+              disabled={!sesionActiva}
+              data-pos-no-focus
+              className="gap-1 text-xs"
+              title="Cotizaciones guardadas — buscar y pasar a venta"
+            >
+              <FileText className="h-3.5 w-3.5" /> Cotizaciones
             </Button>
             <Button
               variant="ghost"
@@ -1378,11 +1459,18 @@ export function PosTerminal({
               <ShoppingBag className="h-3.5 w-3.5 text-happy-600" />
               Venta actual
             </span>
-            {carrito.length > 0 && (
-              <span className="rounded-full bg-happy-100 px-2 py-0.5 text-[10px] font-bold text-happy-700">
-                {carrito.length} {carrito.length === 1 ? 'ítem' : 'ítems'} · {formatPEN(total)}
-              </span>
-            )}
+            <div className="flex items-center gap-2">
+              {cotizacionActivaNumero && (
+                <span className="rounded-full bg-sky-100 px-2 py-0.5 text-[10px] font-bold text-sky-700" title="Esta venta viene de una cotización — precios congelados">
+                  Cotización {cotizacionActivaNumero}
+                </span>
+              )}
+              {carrito.length > 0 && (
+                <span className="rounded-full bg-happy-100 px-2 py-0.5 text-[10px] font-bold text-happy-700">
+                  {carrito.length} {carrito.length === 1 ? 'ítem' : 'ítems'} · {formatPEN(total)}
+                </span>
+              )}
+            </div>
           </div>
           {carrito.length === 0 ? (
             <div className="flex flex-1 flex-col items-center justify-center gap-1 p-4 text-center">
@@ -1984,8 +2072,7 @@ export function PosTerminal({
       )}
 
       {/* MODAL — Cotización (botón WA del carrito). Cajero ingresa
-          tel/email del comprador y descarga PDF para enviarlo por
-          WhatsApp o email. NO persiste en BD. */}
+          tel/email del comprador, GUARDA la cotización y/o descarga PDF. */}
       {modalCotizacion && (
         <CotizacionModal
           nombreCliente={nombreCliente}
@@ -2000,7 +2087,28 @@ export function PosTerminal({
             precioUnit: l.precio_unitario,
           }))}
           totalCarrito={total}
+          // Datos para PERSISTIR la cotización (guardar en BD)
+          lineasGuardar={lineasConPrecio.map((l) => ({
+            variante_id: l.variante.id,
+            sku: l.variante.sku,
+            producto_nombre: l.variante.productos.nombre,
+            talla: l.variante.talla,
+            cantidad: l.cantidad,
+            precio_unitario: l.precio_unitario,
+          }))}
+          clienteId={clienteIdSeleccionado}
+          vendedorId={vendedorId}
+          vendedorNombreGuardar={vendedores.find((v) => v.id === vendedorId)?.nombre ?? cajeroNombre}
+          cajaId={cajaActual?.id ?? null}
           onClose={() => setModalCotizacion(false)}
+        />
+      )}
+
+      {/* MODAL — Cotizaciones guardadas: buscar + pasar a venta */}
+      {cotizacionesOpen && (
+        <CotizacionesModal
+          onConvertir={convertirCotizacion}
+          onClose={() => setCotizacionesOpen(false)}
         />
       )}
 
@@ -2180,6 +2288,11 @@ function CotizacionModal({
   vendedorNombre,
   items,
   totalCarrito,
+  lineasGuardar,
+  clienteId,
+  vendedorId,
+  vendedorNombreGuardar,
+  cajaId,
   onClose,
 }: {
   nombreCliente: string;
@@ -2189,13 +2302,52 @@ function CotizacionModal({
   vendedorNombre: string;
   items: { nombre: string; talla: string; cantidad: number; precioUnit: number }[];
   totalCarrito: number;
+  /** Líneas con variante_id + precio para PERSISTIR la cotización. */
+  lineasGuardar: { variante_id: string; sku: string; producto_nombre: string; talla: string; cantidad: number; precio_unitario: number }[];
+  clienteId: string | null;
+  vendedorId: string | null;
+  vendedorNombreGuardar: string;
+  cajaId: string | null;
   onClose: () => void;
 }) {
   const [tel, setTel] = useState(telefonoCliente);
   const [email, setEmail] = useState('');
-  const [vigenciaDias, setVigenciaDias] = useState(7);
+  // Default 20 días — el cliente pidió guardar cotizaciones por 20 días.
+  const [vigenciaDias, setVigenciaDias] = useState(20);
   const [notas, setNotas] = useState('');
   const [generando, setGenerando] = useState(false);
+  const [guardando, setGuardando] = useState(false);
+  const [guardadaNumero, setGuardadaNumero] = useState<string | null>(null);
+
+  async function guardar() {
+    if (lineasGuardar.length === 0) {
+      toast.error('El carrito está vacío.');
+      return;
+    }
+    setGuardando(true);
+    try {
+      const r = await guardarCotizacion({
+        cliente_id: clienteId,
+        cliente_nombre: nombreCliente.trim() || undefined,
+        cliente_documento: docCliente || undefined,
+        cliente_telefono: tel || undefined,
+        vigencia_dias: vigenciaDias,
+        vendedor_id: vendedorId,
+        vendedor_nombre: vendedorNombreGuardar,
+        caja_id: cajaId,
+        notas: notas || undefined,
+        lineas: lineasGuardar,
+      });
+      if (r.ok) {
+        setGuardadaNumero(r.numero ?? null);
+        toast.success(`Cotización ${r.numero} guardada por ${vigenciaDias} días. Puede buscarla en "Cotizaciones".`, { duration: 8000 });
+      } else {
+        toast.error(r.error ?? 'No se pudo guardar la cotización');
+      }
+    } finally {
+      setGuardando(false);
+    }
+  }
   // Formato del PDF (pedido 21/07/2026: cotizaciones también en A4)
   const [formatoCot, setFormatoCot] = useState<FormatoCotizacion>('TICKET_80MM');
 
@@ -2368,7 +2520,7 @@ function CotizacionModal({
           <div>
             <label className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">Vigencia</label>
             <div className="mt-1 flex gap-1">
-              {[3, 7, 15, 30].map((d) => (
+              {[7, 15, 20, 30].map((d) => (
                 <button
                   key={d}
                   type="button"
@@ -2401,32 +2553,46 @@ function CotizacionModal({
           <pre className="mt-2 max-h-40 overflow-auto whitespace-pre-wrap rounded border bg-slate-50 p-2 text-[10px] leading-tight">{mensajeWa}</pre>
         </details>
 
-        <div className="mt-4 grid grid-cols-3 gap-2">
-          <Button variant="outline" onClick={soloDescargar} disabled={generando} className="gap-1 text-xs">
-            {generando ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Receipt className="h-3.5 w-3.5" />}
-            Solo PDF
-          </Button>
-          <Button
-            onClick={enviarEmail}
-            disabled={generando || !email.includes('@')}
-            className="gap-1 bg-blue-600 text-xs hover:bg-blue-700"
-            title={email.includes('@') ? 'Descargar PDF + abrir correo' : 'Ingresá un correo válido'}
-          >
-            <Send className="h-3.5 w-3.5" /> Email
-          </Button>
-          <Button
-            onClick={enviarWhatsApp}
-            disabled={generando || tel.replace(/\D/g, '').length < 8}
-            className="gap-1 bg-emerald-600 text-xs hover:bg-emerald-700"
-            title={tel.replace(/\D/g, '').length >= 8 ? 'Descargar PDF + abrir WhatsApp' : 'Ingresá el número del cliente'}
-          >
-            {generando ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <MessageCircle className="h-3.5 w-3.5" />}
-            WhatsApp
-          </Button>
+        {/* GUARDAR la cotización en el sistema (para buscarla y convertirla
+            en venta después). Es independiente de mandar el PDF. */}
+        <Button
+          onClick={guardar}
+          disabled={guardando || guardadaNumero != null}
+          className="mt-3 w-full gap-2 bg-happy-600 text-sm hover:bg-happy-700"
+        >
+          {guardando ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileText className="h-4 w-4" />}
+          {guardadaNumero ? `Guardada: ${guardadaNumero}` : `Guardar cotización (${vigenciaDias} días)`}
+        </Button>
+
+        <div className="mt-3 border-t pt-3">
+          <p className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-slate-400">Enviar al cliente (opcional)</p>
+          <div className="grid grid-cols-3 gap-2">
+            <Button variant="outline" onClick={soloDescargar} disabled={generando} className="gap-1 text-xs">
+              {generando ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Receipt className="h-3.5 w-3.5" />}
+              Solo PDF
+            </Button>
+            <Button
+              onClick={enviarEmail}
+              disabled={generando || !email.includes('@')}
+              className="gap-1 bg-blue-600 text-xs hover:bg-blue-700"
+              title={email.includes('@') ? 'Descargar PDF + abrir correo' : 'Ingrese un correo válido'}
+            >
+              <Send className="h-3.5 w-3.5" /> Email
+            </Button>
+            <Button
+              onClick={enviarWhatsApp}
+              disabled={generando || tel.replace(/\D/g, '').length < 8}
+              className="gap-1 bg-emerald-600 text-xs hover:bg-emerald-700"
+              title={tel.replace(/\D/g, '').length >= 8 ? 'Descargar PDF + abrir WhatsApp' : 'Ingrese el número del cliente'}
+            >
+              {generando ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <MessageCircle className="h-3.5 w-3.5" />}
+              WhatsApp
+            </Button>
+          </div>
         </div>
         <p className="mt-2 text-[10px] text-slate-400">
-          El PDF se descarga a tu equipo. WhatsApp/email abre con el mensaje ya escrito —
-          adjuntá el PDF descargado al chat/correo antes de enviar.
+          Guardar la deja registrada para buscarla y pasarla a venta después. El PDF se descarga a su equipo;
+          WhatsApp/email abre con el mensaje ya escrito — adjunte el PDF antes de enviar.
         </p>
       </Card>
     </div>
