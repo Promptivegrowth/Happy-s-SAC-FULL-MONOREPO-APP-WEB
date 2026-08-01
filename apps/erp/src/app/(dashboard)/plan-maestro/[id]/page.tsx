@@ -7,6 +7,7 @@ import { Badge } from '@happy/ui/badge';
 import { Button } from '@happy/ui/button';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@happy/ui/table';
 import { PageShell } from '@/components/page-shell';
+import { esGerente } from '@/server/actions/_helpers';
 import { LineasEditor, AccionesPlan } from './client';
 import { DescargarPdfButton } from './descargar-pdf-button';
 import { formatDate, formatNumber } from '@happy/lib';
@@ -66,12 +67,14 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
   const isEditable = plan.estado === 'BORRADOR';
   const totalUnidades = lineas.reduce((a, l) => a + Number(l.cantidad_planificada ?? 0), 0);
   const codigoCorrupto = (plan.codigo ?? '').endsWith('-null');
+  // Solo gerencia aprueba el plan (pedido 21/07/2026). El server revalida.
+  const usuarioEsGerente = await esGerente();
 
   return (
     <PageShell
       title={`Plan ${plan.codigo}`}
       description={`Semana ${plan.semana ?? '-'}/${plan.anio ?? '-'} · ${formatDate(plan.fecha_inicio)} a ${formatDate(plan.fecha_fin)}`}
-      actions={<AccionesPlan planId={id} estado={plan.estado ?? 'BORRADOR'} hayLineas={lineas.length > 0} lineasSinReceta={lineasSinReceta.length} />}
+      actions={<AccionesPlan planId={id} estado={plan.estado ?? 'BORRADOR'} hayLineas={lineas.length > 0} lineasSinReceta={lineasSinReceta.length} usuarioEsGerente={usuarioEsGerente} />}
     >
       {codigoCorrupto && (
         <div className="flex items-start gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">

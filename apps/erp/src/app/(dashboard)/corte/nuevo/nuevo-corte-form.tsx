@@ -30,10 +30,13 @@ export type OtConProductos = {
 export function NuevoCorteForm({
   ots,
   operarios,
+  telasPorProducto = {},
   defaultOtId,
 }: {
   ots: OtConProductos[];
   operarios: Operario[];
+  /** Telas de la receta activa por producto_id (pedido del cliente 21/07/2026). */
+  telasPorProducto?: Record<string, { codigo: string; nombre: string }[]>;
   defaultOtId?: string;
 }) {
   const router = useRouter();
@@ -55,6 +58,9 @@ export function NuevoCorteForm({
     if (productosDeOt.length === 1) return productosDeOt[0];
     return productosDeOt.find((p) => p.id === productoId) ?? null;
   }, [otSel, productosDeOt, productoId]);
+
+  // Telas de la receta del producto efectivo (para mostrar cuál cortar).
+  const telasDelProducto = productoEfectivo ? (telasPorProducto[productoEfectivo.id] ?? []) : [];
 
   const otOptions = ots.map((o) => ({ id: o.id, label: o.numero }));
   const opOptions = operarios.map((o) => ({
@@ -132,6 +138,33 @@ export function NuevoCorteForm({
                 onChange={setProductoId}
                 placeholder="Esta OT tiene varios productos — elegí uno"
               />
+            )}
+          </FormRow>
+          {/* Tela — telas de la receta del producto (pedido del cliente
+              21/07/2026). Informativo: le dice al cortador qué tela usar. */}
+          <FormRow label="Tela" hint="Telas de la receta del modelo" className="sm:col-span-2">
+            {!productoEfectivo ? (
+              <div className="flex h-10 items-center rounded-md border border-dashed border-slate-200 bg-slate-50 px-3 text-xs text-slate-400">
+                Elegí una OT / modelo para ver sus telas
+              </div>
+            ) : telasDelProducto.length === 0 ? (
+              <div className="flex h-10 items-center gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 text-xs text-amber-800">
+                <AlertTriangle className="h-3.5 w-3.5" />
+                La receta del modelo no tiene telas cargadas
+              </div>
+            ) : (
+              <div className="flex flex-wrap gap-1.5 rounded-md border border-slate-200 bg-white p-2">
+                {telasDelProducto.map((t) => (
+                  <span
+                    key={t.codigo}
+                    className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-xs text-corp-900"
+                    title={t.codigo}
+                  >
+                    {t.nombre}
+                    <span className="font-mono text-[9px] text-slate-400">{t.codigo}</span>
+                  </span>
+                ))}
+              </div>
             )}
           </FormRow>
           <FormRow label="Responsable (operario)">

@@ -2,7 +2,7 @@
 
 import { z } from 'zod';
 import { redirect } from 'next/navigation';
-import { runAction, requireUser, bumpPaths, type ActionResult } from './_helpers';
+import { runAction, requireUser, bumpPaths, esGerente, type ActionResult } from './_helpers';
 
 const TALLAS = ['T0','T2','T4','T6','T8','T10','T12','T14','T16','TS','TAD'] as const;
 
@@ -251,6 +251,11 @@ export async function eliminarLineaPlan(id: string, planId: string): Promise<Act
 export async function aprobarPlan(planId: string): Promise<ActionResult> {
   const r = await runAction(async () => {
     const { sb } = await requireUser();
+    // Solo gerencia aprueba el plan (pedido del cliente 21/07/2026): el
+    // supervisor lo arma, pero la aprobación es del gerente.
+    if (!(await esGerente())) {
+      throw new Error('Solo gerencia puede aprobar el plan maestro. El supervisor arma el plan y el gerente lo aprueba.');
+    }
     const { error, count } = await sb
       .from('plan_maestro')
       .update({ estado: 'APROBADO' }, { count: 'exact' })

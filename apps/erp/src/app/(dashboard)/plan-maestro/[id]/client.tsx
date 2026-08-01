@@ -493,11 +493,14 @@ export function AccionesPlan({
   estado,
   hayLineas,
   lineasSinReceta = 0,
+  usuarioEsGerente = false,
 }: {
   planId: string;
   estado: string;
   hayLineas: boolean;
   lineasSinReceta?: number;
+  /** Solo gerencia aprueba el plan (pedido 21/07/2026). */
+  usuarioEsGerente?: boolean;
 }) {
   const [pending, start] = useTransition();
 
@@ -520,11 +523,19 @@ export function AccionesPlan({
   }
 
   if (estado === 'BORRADOR') {
+    // Solo gerencia aprueba: el supervisor arma el plan pero no lo aprueba.
+    if (!usuarioEsGerente) {
+      return (
+        <span className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-xs font-medium text-amber-800">
+          Plan en borrador — la aprobación la realiza gerencia.
+        </span>
+      );
+    }
     return (
       <Button
         onClick={aprobar}
         disabled={pending || !hayLineas}
-        title={!hayLineas ? 'Agrega al menos una línea para poder aprobar' : 'Aprobar plan'}
+        title={!hayLineas ? 'Agrega al menos una línea para poder aprobar' : 'Aprobar plan (gerencia)'}
         variant="premium-corp"
       >
         {pending ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />}
