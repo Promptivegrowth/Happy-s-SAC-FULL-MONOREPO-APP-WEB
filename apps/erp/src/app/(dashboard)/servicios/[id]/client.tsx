@@ -6,9 +6,11 @@ import { Button } from '@happy/ui/button';
 import { Input } from '@happy/ui/input';
 import { Badge } from '@happy/ui/badge';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@happy/ui/table';
-import { Loader2, ArrowRight, Save, Pencil, X } from 'lucide-react';
+import { Loader2, ArrowRight, Save, Pencil, X, Printer } from 'lucide-react';
 import { toast } from 'sonner';
 import { cambiarEstadoOS, registrarRecepcionOS, editarOS } from '@/server/actions/corte';
+import { generarOSPdf, type OSPdfData } from './os-pdf';
+import type { EmpresaPDFData } from '@/server/empresa-pdf-helper';
 
 const FLOW: Record<string, string[]> = {
   EMITIDA: ['DESPACHADA','ANULADA'],
@@ -46,6 +48,31 @@ export function OsTransitions({ osId, estado }: { osId: string; estado: string }
         </Button>
       ))}
     </div>
+  );
+}
+
+/**
+ * Botón de impresión de la OS: genera UN PDF con 3 copias (2 con tarifas —
+ * gerencia y taller — y 1 de control sin tarifas). Pedido del cliente 21/07/2026.
+ */
+export function ImprimirOSButton({ os, empresa }: { os: OSPdfData; empresa: EmpresaPDFData | null }) {
+  const [loading, setLoading] = useState(false);
+  async function imprimir() {
+    setLoading(true);
+    try {
+      await generarOSPdf(os, empresa);
+      toast.success('PDF generado — 3 copias (gerencia, taller, control)');
+    } catch (e) {
+      toast.error(`No se pudo generar el PDF: ${(e as Error).message}`);
+    } finally {
+      setLoading(false);
+    }
+  }
+  return (
+    <Button variant="corp" size="sm" onClick={imprimir} disabled={loading}>
+      {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Printer className="h-4 w-4" />}
+      Imprimir (3 copias)
+    </Button>
   );
 }
 

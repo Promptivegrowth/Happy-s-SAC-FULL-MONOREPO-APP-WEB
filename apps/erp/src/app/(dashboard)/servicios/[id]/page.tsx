@@ -5,7 +5,8 @@ import { Card, CardContent, CardHeader, CardTitle } from '@happy/ui/card';
 import { Badge } from '@happy/ui/badge';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@happy/ui/table';
 import { PageShell } from '@/components/page-shell';
-import { OsTransitions, RecepcionOSEditor, EditarOSEditor } from './client';
+import { OsTransitions, RecepcionOSEditor, EditarOSEditor, ImprimirOSButton } from './client';
+import { cargarEmpresaPDF } from '@/server/empresa-pdf-helper';
 import { formatDate, formatPEN } from '@happy/lib';
 
 export const dynamic = 'force-dynamic';
@@ -56,6 +57,7 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
     sb.from('talleres').select('id, nombre').eq('activo', true).order('nombre'),
   ]);
   if (!os) notFound();
+  const empresa = await cargarEmpresaPDF();
   // Tipo extendido: los nuevos campos no están aún en la generación de tipos.
   const osExt = os as unknown as typeof os & {
     movilidad_por_unidad: number | null;
@@ -75,6 +77,38 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
   const totalUnidades = lineas.reduce((s, l) => s + Number(l.cantidad), 0);
   const totalRecep = lineas.reduce((s, l) => s + Number(l.cantidad_recepcionada ?? 0), 0);
 
+  const osPdf = {
+    numero: os.numero,
+    taller_nombre: t?.nombre ?? '—',
+    taller_contacto: t?.contacto_nombre ?? null,
+    taller_telefono: t?.telefono ?? null,
+    proceso: (os.proceso ?? '—').replace('_', ' '),
+    ot_numero: ot?.numero ?? null,
+    fecha_emision: os.fecha_emision ?? null,
+    fecha_envio: osExt.fecha_envio ?? null,
+    fecha_entrega: os.fecha_entrega_esperada ?? null,
+    monto_base: Number(os.monto_base ?? 0),
+    adicional_movilidad: Number(os.adicional_movilidad ?? 0),
+    adicional_campana: Number(os.adicional_campana ?? 0),
+    movilidad_por_unidad: Number(osExt.movilidad_por_unidad ?? 0),
+    campana_por_unidad: Number(osExt.campana_por_unidad ?? 0),
+    monto_total: Number(os.monto_total ?? 0),
+    observaciones: os.observaciones ?? null,
+    cuidados: os.cuidados ?? null,
+    consideraciones: os.consideraciones ?? null,
+    lineas: lineas.map((l) => ({
+      producto: l.productos?.nombre ?? '—',
+      codigo: l.productos?.codigo ?? null,
+      talla: l.talla,
+      cantidad: Number(l.cantidad ?? 0),
+    })),
+    avios: avios.map((a) => ({
+      material: a.materiales?.nombre ?? '—',
+      categoria: a.materiales?.categoria ?? null,
+      cantidad: Number(a.cantidad_enviada ?? 0),
+    })),
+  };
+
   return (
     <PageShell
       title={`OS ${os.numero}`}
@@ -84,7 +118,12 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
           {ot && <> · OT <Link href={`/ot/${ot.id}`} className="text-happy-600 hover:underline">{ot.numero}</Link></>}
         </>
       }
-      actions={<OsTransitions osId={id} estado={os.estado ?? 'EMITIDA'} />}
+      actions={
+        <div className="flex flex-wrap items-center gap-2">
+          <ImprimirOSButton os={osPdf} empresa={empresa} />
+          <OsTransitions osId={id} estado={os.estado ?? 'EMITIDA'} />
+        </div>
+      }
     >
       <div className="grid gap-3 sm:grid-cols-5">
         <Stat label="Estado" value={<Badge variant={COLOR[os.estado ?? 'EMITIDA'] ?? 'secondary'}>{(os.estado ?? 'EMITIDA').replace('_', ' ')}</Badge>} />
