@@ -7,7 +7,7 @@ import { Button } from '@happy/ui/button';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@happy/ui/table';
 import { PageShell } from '@/components/page-shell';
 import { esGerente } from '@/server/actions/_helpers';
-import { LineasCorteEditor, AccionCerrarCorte, GenerarOSDesdeCorte } from './client';
+import { LineasCorteEditor, TiemposCorteEditor, AccionCerrarCorte, GenerarOSDesdeCorte } from './client';
 import { formatDateTime } from '@happy/lib';
 
 export const dynamic = 'force-dynamic';
@@ -33,6 +33,47 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
   const prod = (corte as unknown as { productos?: { codigo: string; nombre: string } | null }).productos;
   const editable = corte.estado !== 'COMPLETADO' && corte.estado !== 'ANULADO';
   const usuarioEsGerente = await esGerente();
+
+  // Telas de la receta activa del modelo + tiempos ya guardados (mig 69).
+  // Las 3 operaciones (tendido/corte/habilitado) se registran POR tela.
+  type TelaTiempo = { material_id: string; tela_nombre: string; codigo: string; tiempo_tendido_min: number; tiempo_corte_min: number; tiempo_habilitado_min: number };
+  const telasCorte: TelaTiempo[] = [];
+  if (corte.producto_id) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const sbAny = sb as unknown as { from: (t: string) => any };
+    const [{ data: receta }, { data: tiemposGuardados }] = await Promise.all([
+      sb.from('recetas').select('id').eq('producto_id', corte.producto_id).eq('activa', true).maybeSingle(),
+      sbAny.from('ot_corte_tiempos').select('material_id, tiempo_tendido_min, tiempo_corte_min, tiempo_habilitado_min').eq('corte_id', id),
+    ]);
+    const guardadosMap = new Map<string, { t: number; c: number; h: number }>(
+      ((tiemposGuardados ?? []) as { material_id: string; tiempo_tendido_min: number | string; tiempo_corte_min: number | string; tiempo_habilitado_min: number | string }[]).map((g) => [
+        g.material_id,
+        { t: Number(g.tiempo_tendido_min ?? 0), c: Number(g.tiempo_corte_min ?? 0), h: Number(g.tiempo_habilitado_min ?? 0) },
+      ]),
+    );
+    if (receta?.id) {
+      const { data: lineasRec } = await sb
+        .from('recetas_lineas')
+        .select('material:material_id(id, codigo, nombre, categoria)')
+        .eq('receta_id', receta.id);
+      type LR = { material: { id: string; codigo: string; nombre: string; categoria: string } | null };
+      const vistos = new Set<string>();
+      for (const l of (lineasRec ?? []) as unknown as LR[]) {
+        if (!l.material || String(l.material.categoria) !== 'TELA' || vistos.has(l.material.id)) continue;
+        vistos.add(l.material.id);
+        const g = guardadosMap.get(l.material.id);
+        telasCorte.push({
+          material_id: l.material.id,
+          tela_nombre: l.material.nombre,
+          codigo: l.material.codigo,
+          tiempo_tendido_min: g?.t ?? 0,
+          tiempo_corte_min: g?.c ?? 0,
+          tiempo_habilitado_min: g?.h ?? 0,
+        });
+      }
+      telasCorte.sort((a, b) => a.tela_nombre.localeCompare(b.tela_nombre, 'es'));
+    }
+  }
 
   // Plan de la OT para este modelo (cantidad planificada por talla) y lo que
   // ya se cortó en OTROS cortes del mismo OT/producto, para calcular el saldo
@@ -101,6 +142,18 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
             cortadoOtrosPorTalla={cortadoOtrosPorTalla}
             usuarioEsGerente={usuarioEsGerente}
           />
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">Tiempos por tela</CardTitle>
+          <p className="text-xs text-slate-500">
+            Tendido, corte y habilitado (en minutos) de cada tela de la receta del modelo. Las tres operaciones se hacen por tela.
+          </p>
+        </CardHeader>
+        <CardContent className="p-0">
+          <TiemposCorteEditor corteId={id} telas={telasCorte} editable={editable} />
         </CardContent>
       </Card>
     </PageShell>

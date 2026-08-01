@@ -10,7 +10,7 @@ import { FormGrid, FormRow } from '@happy/ui/form-row';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@happy/ui/table';
 import { Plus, Loader2, CheckCircle2, Wrench } from 'lucide-react';
 import { toast } from 'sonner';
-import { agregarLineaCorte, cerrarCorte, crearOS } from '@/server/actions/corte';
+import { agregarLineaCorte, cerrarCorte, crearOS, guardarTiemposCorte } from '@/server/actions/corte';
 
 const TALLAS = ['T0','T2','T4','T6','T8','T10','T12','T14','T16','TS','TAD'] as const;
 
@@ -213,6 +213,118 @@ export function LineasCorteEditor({
           })}
         </TableBody>
       </Table>
+    </div>
+  );
+}
+
+/**
+ * Editor de tiempos por TELA: para cada tela de la receta, tendido/corte/
+ * habilitado en minutos (pedido del cliente 21/07/2026). Las 3 operaciones
+ * de corte se registran por cada tela.
+ */
+type TelaTiempo = {
+  material_id: string;
+  tela_nombre: string;
+  codigo: string;
+  tiempo_tendido_min: number;
+  tiempo_corte_min: number;
+  tiempo_habilitado_min: number;
+};
+export function TiemposCorteEditor({
+  corteId,
+  telas,
+  editable,
+}: {
+  corteId: string;
+  telas: TelaTiempo[];
+  editable: boolean;
+}) {
+  const router = useRouter();
+  const [pending, start] = useTransition();
+  const [rows, setRows] = useState<TelaTiempo[]>(telas);
+
+  function setVal(i: number, campo: 'tiempo_tendido_min' | 'tiempo_corte_min' | 'tiempo_habilitado_min', v: string) {
+    const n = v === '' ? 0 : Number(v);
+    setRows((prev) => prev.map((r, idx) => (idx === i ? { ...r, [campo]: Number.isFinite(n) && n >= 0 ? n : 0 } : r)));
+  }
+
+  function guardar() {
+    start(async () => {
+      const r = await guardarTiemposCorte(
+        corteId,
+        rows.map((t) => ({
+          material_id: t.material_id,
+          tela_nombre: t.tela_nombre,
+          tiempo_tendido_min: t.tiempo_tendido_min,
+          tiempo_corte_min: t.tiempo_corte_min,
+          tiempo_habilitado_min: t.tiempo_habilitado_min,
+        })),
+      );
+      if (r.ok) { toast.success('Tiempos guardados'); router.refresh(); }
+      else toast.error(r.error ?? 'Error');
+    });
+  }
+
+  if (telas.length === 0) {
+    return (
+      <div className="p-4 text-sm text-slate-400">
+        La receta del modelo no tiene telas cargadas — no hay tiempos que registrar.
+      </div>
+    );
+  }
+
+  const totalPorTela = (t: TelaTiempo) => t.tiempo_tendido_min + t.tiempo_corte_min + t.tiempo_habilitado_min;
+
+  return (
+    <div className="p-4">
+      <div className="overflow-x-auto">
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead className="min-w-[200px]">Tela</TableHead>
+              <TableHead className="w-28 text-right">Tendido (min)</TableHead>
+              <TableHead className="w-28 text-right">Corte (min)</TableHead>
+              <TableHead className="w-28 text-right">Habilitado (min)</TableHead>
+              <TableHead className="w-24 text-right">Total</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {rows.map((t, i) => (
+              <TableRow key={t.material_id}>
+                <TableCell>
+                  <div className="text-sm font-medium text-corp-900">{t.tela_nombre}</div>
+                  <div className="font-mono text-[10px] text-slate-400">{t.codigo}</div>
+                </TableCell>
+                {(['tiempo_tendido_min', 'tiempo_corte_min', 'tiempo_habilitado_min'] as const).map((campo) => (
+                  <TableCell key={campo} className="text-right">
+                    <Input
+                      type="number"
+                      step="0.01"
+                      min={0}
+                      value={t[campo] || ''}
+                      onChange={(e) => setVal(i, campo, e.target.value)}
+                      disabled={!editable || pending}
+                      placeholder="0"
+                      className="ml-auto h-8 w-24 text-right text-xs"
+                    />
+                  </TableCell>
+                ))}
+                <TableCell className="text-right font-mono text-sm font-semibold text-corp-900">
+                  {totalPorTela(t).toFixed(2)}
+                </TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      </div>
+      {editable && (
+        <div className="mt-3 flex justify-end">
+          <Button variant="premium" size="sm" onClick={guardar} disabled={pending}>
+            {pending ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />}
+            Guardar tiempos
+          </Button>
+        </div>
+      )}
     </div>
   );
 }

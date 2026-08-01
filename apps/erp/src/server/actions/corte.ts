@@ -143,6 +143,49 @@ export async function agregarLineaCorte(_prev: unknown, fd: FormData): Promise<A
 }
 
 /**
+ * Guarda los tiempos de TENDIDO / CORTE / HABILITADO por cada tela de la
+ * receta (mig 69, pedido del cliente 21/07/2026). Reemplaza los tiempos del
+ * corte con lo enviado (upsert por material).
+ */
+const tiempoTelaSchema = z.object({
+  material_id: z.string().uuid(),
+  tela_nombre: z.string().optional().or(z.literal('')),
+  tiempo_tendido_min: z.coerce.number().min(0).default(0),
+  tiempo_corte_min: z.coerce.number().min(0).default(0),
+  tiempo_habilitado_min: z.coerce.number().min(0).default(0),
+});
+export async function guardarTiemposCorte(
+  corteId: string,
+  tiempos: z.input<typeof tiempoTelaSchema>[],
+): Promise<ActionResult> {
+  const r = await runAction(async () => {
+    const parsed = tiempos.map((t) => tiempoTelaSchema.parse(t));
+    const { sb } = await requireUser();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const sbAny = sb as unknown as { from: (t: string) => any };
+    for (const t of parsed) {
+      const { error } = await sbAny
+        .from('ot_corte_tiempos')
+        .upsert(
+          {
+            corte_id: corteId,
+            material_id: t.material_id,
+            tela_nombre: t.tela_nombre || null,
+            tiempo_tendido_min: t.tiempo_tendido_min,
+            tiempo_corte_min: t.tiempo_corte_min,
+            tiempo_habilitado_min: t.tiempo_habilitado_min,
+          },
+          { onConflict: 'corte_id,material_id' },
+        );
+      if (error) throw new Error(error.message);
+    }
+    return null;
+  });
+  if (r.ok) await bumpPaths(`/corte/${corteId}`);
+  return r;
+}
+
+/**
  * Cierra un corte ATÓMICAMENTE: sincroniza ot_lineas.cantidad_cortada y
  * marca el corte como COMPLETADO en una sola transacción PL/pgSQL
  * (función close_corte_atomic — migración 32).
