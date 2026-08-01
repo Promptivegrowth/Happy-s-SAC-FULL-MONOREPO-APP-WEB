@@ -228,6 +228,7 @@ const osSchema = z.object({
   ot_id: z.string().uuid(),
   taller_id: z.string().uuid(),
   proceso: z.enum(['COSTURA','BORDADO','ESTAMPADO','SUBLIMADO','PLISADO','DECORADO','ACABADO','PLANCHADO','OJAL_BOTON']).default('COSTURA'),
+  fecha_envio: z.string().optional().or(z.literal('')),
   fecha_entrega_esperada: z.string().optional().or(z.literal('')),
   monto_base: z.coerce.number().min(0).default(0),
   // Adicionales en S/ POR UNIDAD enviada (no es un total). El total se
@@ -393,6 +394,7 @@ export async function crearOS(
       ot_id: fd.get('ot_id'),
       taller_id: fd.get('taller_id'),
       proceso: fd.get('proceso') || 'COSTURA',
+      fecha_envio: fd.get('fecha_envio') || '',
       fecha_entrega_esperada: fd.get('fecha_entrega_esperada') || '',
       monto_base: fd.get('monto_base') || 0,
       movilidad_por_unidad: fd.get('movilidad_por_unidad') || 0,
@@ -412,6 +414,7 @@ export async function crearOS(
       ot_id: data.ot_id,
       taller_id: data.taller_id,
       proceso: data.proceso,
+      fecha_envio: data.fecha_envio || null,
       fecha_entrega_esperada: data.fecha_entrega_esperada || null,
       monto_base: data.monto_base,
       // Inicialmente dejamos los totales en 0 — se recalculan tras poblar

@@ -492,6 +492,9 @@ export function NuevaOSForm({
               ))}
             </select>
           </FormRow>
+          <FormRow label="Fecha de envío al taller" hint="Día en que se manda la mercadería al taller">
+            <Input name="fecha_envio" type="date" defaultValue={new Date().toISOString().slice(0, 10)} />
+          </FormRow>
           <FormRow label="Fecha entrega esperada">
             <Input name="fecha_entrega_esperada" type="date" />
           </FormRow>

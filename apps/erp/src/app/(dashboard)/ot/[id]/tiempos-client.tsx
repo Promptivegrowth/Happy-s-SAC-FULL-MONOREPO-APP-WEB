@@ -68,11 +68,18 @@ type Props = {
   registros: RegistroTiempo[];
   operarios: Operario[];
   disabled: boolean;
+  /** Orden de la operación de confección (COSTURA). Las operaciones con orden
+   *  mayor son post-taller y requieren que retorne la OS. -1 si no hay. */
+  ordenConfeccion?: number;
+  /** ¿Hay al menos una OS de la OT recepcionada/cerrada? */
+  osRetornada?: boolean;
+  /** ¿Existe alguna OS para esta OT? */
+  hayOs?: boolean;
 };
 
 const PEN = (n: number) => `S/ ${n.toFixed(2)}`;
 
-export function TiemposCostoTab({ otId, procesos, lineas, registros, operarios, disabled }: Props) {
+export function TiemposCostoTab({ otId, procesos, lineas, registros, operarios, disabled, ordenConfeccion = -1, osRetornada = false, hayOs = false }: Props) {
   // Productos únicos en las líneas de la OT
   const productos = useMemo(() => {
     const map = new Map<string, { id: string; nombre: string; codigo: string }>();
@@ -261,6 +268,9 @@ export function TiemposCostoTab({ otId, procesos, lineas, registros, operarios, 
                         bloqueado={bloqueoPorProceso.get(p.id)?.bloqueado ?? false}
                         operacionAnterior={bloqueoPorProceso.get(p.id)?.prevNombre ?? ''}
                         faltanAnterior={bloqueoPorProceso.get(p.id)?.prevFaltan ?? 0}
+                        // Post-confección: bloqueado hasta que retorne la OS.
+                        esperandoTaller={ordenConfeccion >= 0 && p.orden > ordenConfeccion && !osRetornada}
+                        hayOs={hayOs}
                       />
                     );
                   })}
@@ -568,6 +578,7 @@ type TallaDisp = { talla: string; cortada: number; yaRegistrado: number };
 function OperacionBlock({
   otId, proceso, tallaActual, tallasDisponibles, registros, operarios, esAreaCorte, disabled,
   bloqueado = false, operacionAnterior = '', faltanAnterior = 0,
+  esperandoTaller = false, hayOs = false,
 }: {
   otId: string;
   proceso: Proceso;
@@ -577,10 +588,13 @@ function OperacionBlock({
   operarios: Operario[];
   esAreaCorte: boolean;
   disabled: boolean;
-  /** No se puede registrar hasta que la operación anterior esté completa. */
+  /** No se puede registrar hasta que la operación anterior esté completa (aviso). */
   bloqueado?: boolean;
   operacionAnterior?: string;
   faltanAnterior?: number;
+  /** Operación post-confección: bloqueada (duro) hasta que retorne la OS. */
+  esperandoTaller?: boolean;
+  hayOs?: boolean;
 }) {
   const [openForm, setOpenForm] = useState(false);
   const totalMin = registros.reduce((s, r) => s + Number(r.tiempo_total_min), 0);
@@ -606,14 +620,23 @@ function OperacionBlock({
           </p>
           {/* Aviso informativo (NO bloquea): el equipo puede trabajar
               operaciones en paralelo (aclaración del cliente 21/07/2026). */}
-          {bloqueado && (
+          {bloqueado && !esperandoTaller && (
             <p className="mt-0.5 text-[10px] text-amber-600">
               ⚠ La operación anterior (<strong>{operacionAnterior}</strong>) aún no está completa
               {faltanAnterior > 0 ? ` (faltan ${faltanAnterior} unid.)` : ''} — puede registrar igual si trabajan en paralelo.
             </p>
           )}
+          {/* Bloqueo DURO: operación posterior a la confección — no se puede
+              registrar hasta que retorne la orden de servicio del taller. */}
+          {esperandoTaller && (
+            <p className="mt-0.5 text-[10px] font-medium text-sky-700">
+              🔒 {hayOs
+                ? 'Disponible cuando la orden de servicio del taller se marque RECEPCIONADA (retorno).'
+                : 'Va después de la confección — primero envíe la orden de servicio al taller y regístrela como recepcionada al retornar.'}
+            </p>
+          )}
         </div>
-        {!disabled && (
+        {!disabled && !esperandoTaller && (
           <Button variant="outline" size="sm" onClick={() => setOpenForm((o) => !o)} className="h-7 gap-1 px-2 text-xs">
             {openForm ? <X className="h-3 w-3" /> : <Plus className="h-3 w-3" />}
             {openForm ? 'Cerrar' : 'Registrar'}

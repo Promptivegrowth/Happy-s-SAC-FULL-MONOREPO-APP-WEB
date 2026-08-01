@@ -59,7 +59,7 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
   // de esta OT (mig 43) + operarios activos para el dropdown.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const sbAny = sb as unknown as { from: (t: string) => any };
-  const [{ data: procesosRaw }, { data: registrosRaw }, { data: operariosRaw }] = await Promise.all([
+  const [{ data: procesosRaw }, { data: registrosRaw }, { data: operariosRaw }, { data: osRaw }] = await Promise.all([
     productosEnLineas.length > 0
       ? sbAny
           .from('productos_procesos')
@@ -79,6 +79,13 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
       .select('id, nombres, apellido_paterno, apellido_materno')
       .eq('activo', true)
       .order('nombres'),
+    // Órdenes de servicio de esta OT — para gatear las operaciones que van
+    // DESPUÉS de la confección: solo se registran cuando la OS retorna
+    // (pedido del cliente 21/07/2026).
+    sbAny
+      .from('ordenes_servicio')
+      .select('estado, proceso')
+      .eq('ot_id', id),
   ]);
   const procesos = ((procesosRaw ?? []) as Array<{
     id: string; producto_id: string; proceso: string; descripcion_operativa: string | null;
@@ -129,6 +136,18 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
   const atrasada = ot.fecha_entrega_objetivo && new Date(ot.fecha_entrega_objetivo) < new Date() && !['COMPLETADA','CANCELADA'].includes(ot.estado);
 
   const plan = (ot as unknown as { plan_maestro?: { codigo: string } | null }).plan_maestro;
+
+  // Gate de las operaciones POST-CONFECCIÓN (pedido del cliente 21/07/2026):
+  // se pueden registrar solo cuando RETORNA la orden de servicio del taller.
+  // - ordenConfeccion = orden de la operación de COSTURA (confección); las
+  //   operaciones con orden mayor son "post-taller".
+  // - osRetornada = hay al menos una OS de la OT recepcionada/cerrada.
+  const ordenConfeccion = ((procesos ?? []) as { proceso: string; orden: number }[])
+    .filter((p) => p.proceso === 'COSTURA')
+    .reduce((max, p) => Math.max(max, Number(p.orden ?? 0)), -1);
+  const osArr = (osRaw ?? []) as { estado: string; proceso: string }[];
+  const osRetornada = osArr.some((o) => o.estado === 'RECEPCIONADA' || o.estado === 'CERRADA');
+  const hayOs = osArr.length > 0;
 
   // ÁREA EN CURSO derivada de las declaraciones (pedido del cliente
   // 21/07/2026): la primera área — en orden de proceso — que todavía tiene
@@ -363,6 +382,9 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
             registros={registros}
             operarios={operarios}
             disabled={!puedeEditarLineas}
+            ordenConfeccion={ordenConfeccion}
+            osRetornada={osRetornada}
+            hayOs={hayOs}
           />
         </TabsContent>
 
