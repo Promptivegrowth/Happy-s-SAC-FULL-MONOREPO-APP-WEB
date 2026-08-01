@@ -1,12 +1,14 @@
 import { createClient } from '@happy/db/server';
 import { PageShell } from '@/components/page-shell';
 import { NuevaOSForm } from './form-client';
+import { esGerente } from '@/server/actions/_helpers';
 
 export const metadata = { title: 'Nueva orden de servicio' };
 export const dynamic = 'force-dynamic';
 
 export default async function Page() {
   const sb = await createClient();
+  const gerente = await esGerente();
 
   // Cortes recientes con sus líneas + nombre del producto y número de OT.
   // Solo trae los que aún no fueron facturados al taller (estado relevante).
@@ -110,6 +112,7 @@ export default async function Page() {
       <NuevaOSForm
         cortes={cortes}
         ots={ots}
+        esGerente={gerente}
         talleres={(talleres ?? []).map((t) => ({
           id: t.id as string,
           codigo: t.codigo as string,

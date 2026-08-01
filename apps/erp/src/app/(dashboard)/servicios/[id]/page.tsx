@@ -5,8 +5,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@happy/ui/card';
 import { Badge } from '@happy/ui/badge';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@happy/ui/table';
 import { PageShell } from '@/components/page-shell';
-import { OsTransitions } from './client';
-import { TicketsOperacionOS, type Ticket } from './procesos-client';
+import { OsTransitions, RecepcionOSEditor } from './client';
 import { formatDate, formatPEN } from '@happy/lib';
 
 export const dynamic = 'force-dynamic';
@@ -39,9 +38,7 @@ type AvioOS = {
 export default async function Page({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const sb = await createClient();
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const sbAny = sb as unknown as { from: (t: string) => any };
-  const [{ data: os }, { data: lineasData }, { data: aviosData }, { data: ticketsRaw }, { data: ops }, { data: areas }] = await Promise.all([
+  const [{ data: os }, { data: lineasData }, { data: aviosData }] = await Promise.all([
     sb
       .from('ordenes_servicio')
       .select('*, talleres(id, nombre, telefono, contacto_nombre), ot(numero, id), ot_corte(numero, id)')
@@ -56,24 +53,14 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
       .from('ordenes_servicio_avios')
       .select('id, cantidad_enviada, cantidad_devuelta, observacion, materiales(nombre, codigo, categoria)')
       .eq('os_id', id),
-    sbAny
-      .from('tickets_operacion')
-      .select('id, proceso, inicio, fin, duracion_min, cantidad, observacion, operario:operario_id(id, nombres, apellido_paterno), area:area_id(id, nombre)')
-      .eq('os_id', id)
-      .order('inicio', { ascending: false }),
-    sb.from('operarios').select('id, codigo, nombres, apellido_paterno').eq('activo', true).order('nombres'),
-    sb.from('areas_produccion').select('id, nombre').eq('activa', true).order('nombre'),
   ]);
   if (!os) notFound();
   // Tipo extendido: los nuevos campos no están aún en la generación de tipos.
-  const osExt = os as unknown as typeof os & { movilidad_por_unidad: number | null; campana_por_unidad: number | null };
-  const tickets = (ticketsRaw ?? []) as unknown as Ticket[];
-  const operariosOpts = (ops ?? []).map((o) => ({
-    id: o.id as string,
-    codigo: (o.codigo as string) ?? '',
-    nombre: `${o.nombres ?? ''} ${o.apellido_paterno ?? ''}`.trim(),
-  }));
-  const areasOpts = (areas ?? []).map((a) => ({ id: a.id as string, nombre: a.nombre as string }));
+  const osExt = os as unknown as typeof os & {
+    movilidad_por_unidad: number | null;
+    campana_por_unidad: number | null;
+    fecha_recepcion: string | null;
+  };
 
   const t = (os as unknown as { talleres?: { id: string; nombre: string; telefono: string | null; contacto_nombre: string | null } | null }).talleres;
   const ot = (os as unknown as { ot?: { numero: string; id: string } | null }).ot;
@@ -142,37 +129,16 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
         </Card>
       )}
 
+      {/* Recepción del taller — la OS la trabaja un tercero, así que acá no
+          hay registro de procesos/tiempos internos (se quitó por pedido del
+          cliente 21/07/2026). Solo se registra el RETORNO: fecha + unidades
+          aprobadas y falladas por línea. */}
       <Card>
         <CardHeader>
           <CardTitle className="text-base">
-            Procesos / tiempos
-            {tickets.length > 0 && (
-              <Badge variant="secondary" className="ml-2 text-[10px]">
-                {tickets.filter((t) => t.fin === null).length} en curso · {tickets.length} totales
-              </Badge>
-            )}
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          <TicketsOperacionOS
-            osId={id}
-            otId={ot?.id ?? null}
-            procesoOS={os.proceso ?? 'COSTURA'}
-            cantidadOS={totalUnidades}
-            tickets={tickets}
-            operarios={operariosOpts}
-            areas={areasOpts}
-          />
-        </CardContent>
-      </Card>
-
-      {/* Líneas de la OS — qué prendas se mandaron al taller */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">
-            Prendas enviadas al taller{' '}
+            Recepción del taller{' '}
             <Badge variant="secondary" className="ml-2 text-[10px]">
-              {totalUnidades} unidad{totalUnidades === 1 ? '' : 'es'}
+              {totalUnidades} enviada{totalUnidades === 1 ? '' : 's'}
             </Badge>
             {totalRecep > 0 && (
               <Badge variant="success" className="ml-1 text-[10px]">
@@ -180,47 +146,26 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
               </Badge>
             )}
           </CardTitle>
+          <p className="text-xs text-slate-500">Registre la fecha de retorno y cuántas unidades volvieron aprobadas o con falla.</p>
         </CardHeader>
         <CardContent className="p-0">
           {lineas.length === 0 ? (
-            <p className="px-6 py-6 text-sm text-slate-400">
-              Sin líneas registradas. (Si esta OS se creó desde un corte, debería poblarse al
-              recrearla.)
-            </p>
+            <p className="px-6 py-6 text-sm text-slate-400">Sin líneas registradas.</p>
           ) : (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Producto</TableHead>
-                  <TableHead>Talla</TableHead>
-                  <TableHead className="text-right">Enviado</TableHead>
-                  <TableHead className="text-right">Recepcionado</TableHead>
-                  <TableHead className="text-right">Falladas</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {lineas.map((l) => (
-                  <TableRow key={l.id}>
-                    <TableCell className="font-medium">
-                      {l.productos?.nombre ?? '—'}
-                      {l.productos?.codigo && (
-                        <span className="ml-2 font-mono text-[10px] text-slate-400">{l.productos.codigo}</span>
-                      )}
-                    </TableCell>
-                    <TableCell>
-                      <Badge variant="outline">{l.talla.replace('T', '')}</Badge>
-                    </TableCell>
-                    <TableCell className="text-right font-mono text-sm">{l.cantidad}</TableCell>
-                    <TableCell className="text-right font-mono text-sm text-emerald-600">
-                      {l.cantidad_recepcionada ?? 0}
-                    </TableCell>
-                    <TableCell className="text-right font-mono text-sm text-amber-600">
-                      {l.cantidad_fallada ?? 0}
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
+            <RecepcionOSEditor
+              osId={id}
+              fechaRetornoInicial={osExt.fecha_recepcion ?? ''}
+              disabled={os.estado === 'ANULADA' || os.estado === 'CERRADA'}
+              lineas={lineas.map((l) => ({
+                id: l.id,
+                producto_nombre: l.productos?.nombre ?? '—',
+                producto_codigo: l.productos?.codigo ?? '',
+                talla: l.talla,
+                enviado: Number(l.cantidad ?? 0),
+                recepcionada: Number(l.cantidad_recepcionada ?? 0),
+                fallada: Number(l.cantidad_fallada ?? 0),
+              }))}
+            />
           )}
         </CardContent>
       </Card>

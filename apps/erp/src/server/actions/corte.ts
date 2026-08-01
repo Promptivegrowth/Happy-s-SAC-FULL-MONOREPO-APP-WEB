@@ -5,6 +5,10 @@ import { runAction, requireUser, bumpPaths, esGerente, type ActionResult } from 
 
 const TALLAS = ['T0','T2','T4','T6','T8','T10','T12','T14','T16','TS','TAD'] as const;
 
+// Movilidad por defecto de la OS: S/ 0.10 por unidad enviada al taller.
+// Modificar este valor exige autorización de gerencia (ver crearOS).
+const MOVILIDAD_DEFAULT_OS = 0.1;
+
 const corteSchema = z.object({
   ot_id: z.string().uuid(),
   // producto_id es opcional: si no viene, se infiere de ot_lineas (caso normal:
@@ -233,7 +237,7 @@ const osSchema = z.object({
   monto_base: z.coerce.number().min(0).default(0),
   // Adicionales en S/ POR UNIDAD enviada (no es un total). El total se
   // calcula al guardar = por_unidad * unidades_enviadas.
-  movilidad_por_unidad: z.coerce.number().min(0).default(0),
+  movilidad_por_unidad: z.coerce.number().min(0).default(MOVILIDAD_DEFAULT_OS),
   campana_por_unidad: z.coerce.number().min(0).default(0),
   es_campana: z.boolean().default(false),
   observaciones: z.string().optional().or(z.literal('')),
@@ -397,7 +401,9 @@ export async function crearOS(
       fecha_envio: fd.get('fecha_envio') || '',
       fecha_entrega_esperada: fd.get('fecha_entrega_esperada') || '',
       monto_base: fd.get('monto_base') || 0,
-      movilidad_por_unidad: fd.get('movilidad_por_unidad') || 0,
+      // Vacío ⇒ usa el default (S/ 0.10). No lo forzamos a 0 para no disparar
+      // la validación de gerencia cuando el usuario simplemente lo deja en blanco.
+      movilidad_por_unidad: (fd.get('movilidad_por_unidad') as string) || String(MOVILIDAD_DEFAULT_OS),
       campana_por_unidad: fd.get('campana_por_unidad') || 0,
       es_campana: fd.get('es_campana') === 'on',
       observaciones: fd.get('observaciones') || '',
@@ -405,6 +411,20 @@ export async function crearOS(
       consideraciones: fd.get('consideraciones') || '',
     });
     const { sb, userId } = await requireUser();
+
+    // AUTORIZACIÓN DE GERENCIA (pedido del cliente 21/07/2026): la movilidad
+    // sale S/ 0.10 por unidad en automático. Cambiar ese valor —o cargar
+    // cualquier monto de campaña— requiere que el usuario sea gerente.
+    const movModificada = Math.abs(data.movilidad_por_unidad - MOVILIDAD_DEFAULT_OS) > 0.001;
+    const campanaAplicada = data.campana_por_unidad > 0;
+    if ((movModificada || campanaAplicada) && !(await esGerente())) {
+      const que = [
+        movModificada ? `la movilidad (S/ ${data.movilidad_por_unidad.toFixed(2)} en vez de S/ ${MOVILIDAD_DEFAULT_OS.toFixed(2)})` : null,
+        campanaAplicada ? `el adicional de campaña (S/ ${data.campana_por_unidad.toFixed(2)})` : null,
+      ].filter(Boolean).join(' y ');
+      throw new Error(`Modificar ${que} requiere autorización de gerencia. Ingrese con un usuario gerente para continuar.`);
+    }
+
     const { data: nro } = await sb.rpc('next_correlativo', { p_clave: 'OS', p_padding: 6 });
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const sbAny = sb as unknown as { from: (t: string) => any };
@@ -479,6 +499,71 @@ export async function crearOS(
   // crearCorte y eliminarTaller — evita que el redirect interrumpa el
   // useTransition antes de que el toast se renderice.
   if (r.ok) await bumpPaths('/servicios');
+  return r;
+}
+
+/**
+ * Registra la RECEPCIÓN de la OS: fecha de retorno + unidades recepcionadas
+ * (aprobadas) y falladas por línea. Marca la OS como RECEPCIONADA (pedido del
+ * cliente 21/07/2026). Con esto se habilitan las operaciones post-confección
+ * en la OT.
+ */
+const recepcionLineaSchema = z.object({
+  id: z.string().uuid(),
+  recepcionada: z.coerce.number().int().min(0).default(0),
+  fallada: z.coerce.number().int().min(0).default(0),
+});
+export async function registrarRecepcionOS(
+  osId: string,
+  fechaRetorno: string,
+  lineas: z.input<typeof recepcionLineaSchema>[],
+): Promise<ActionResult> {
+  const r = await runAction(async () => {
+    const parsed = lineas.map((l) => recepcionLineaSchema.parse(l));
+    const { sb } = await requireUser();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const sbAny = sb as unknown as { from: (t: string) => any };
+
+    const { data: osRow } = await sbAny.from('ordenes_servicio').select('estado').eq('id', osId).maybeSingle();
+    if (!osRow) throw new Error('OS no encontrada');
+    if (osRow.estado === 'ANULADA') throw new Error('La OS está anulada.');
+
+    // Validar contra lo enviado por línea (no se puede recibir más de lo enviado).
+    const { data: lineasEnv } = await sbAny
+      .from('ordenes_servicio_lineas')
+      .select('id, cantidad')
+      .eq('os_id', osId);
+    const enviadoPorId = new Map<string, number>(
+      ((lineasEnv ?? []) as { id: string; cantidad: number }[]).map((l) => [l.id, Number(l.cantidad ?? 0)]),
+    );
+    for (const l of parsed) {
+      const env = enviadoPorId.get(l.id);
+      if (env === undefined) throw new Error('Línea de OS no encontrada');
+      if (l.recepcionada + l.fallada > env) {
+        throw new Error(`Recepcionadas + falladas (${l.recepcionada + l.fallada}) no puede superar lo enviado (${env}).`);
+      }
+    }
+
+    for (const l of parsed) {
+      const { error } = await sbAny
+        .from('ordenes_servicio_lineas')
+        .update({ cantidad_recepcionada: l.recepcionada, cantidad_fallada: l.fallada })
+        .eq('id', l.id)
+        .eq('os_id', osId);
+      if (error) throw new Error(error.message);
+    }
+
+    // Fecha de retorno + estado RECEPCIONADA (si no está cerrada/anulada).
+    const nuevoEstado = ['CERRADA', 'ANULADA'].includes(osRow.estado) ? osRow.estado : 'RECEPCIONADA';
+    const { error: e2 } = await sbAny
+      .from('ordenes_servicio')
+      .update({ fecha_recepcion: fechaRetorno || null, estado: nuevoEstado })
+      .eq('id', osId);
+    if (e2) throw new Error(e2.message);
+    return null;
+  });
+  // Refrescar OS + OT (para habilitar operaciones post-confección).
+  if (r.ok) await bumpPaths(`/servicios/${osId}`, '/servicios', '/ot');
   return r;
 }
 

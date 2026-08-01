@@ -45,14 +45,20 @@ const PROCESOS = [
   'OJAL_BOTON',
 ] as const;
 
+// Movilidad por defecto (S/ 0.10 por unidad). Cambiarla o cargar campaña
+// requiere ser gerente (validado también en el server, ver crearOS).
+const MOVILIDAD_DEFAULT = '0.10';
+
 export function NuevaOSForm({
   cortes,
   ots,
   talleres,
+  esGerente,
 }: {
   cortes: CorteOption[];
   ots: OT[];
   talleres: Taller[];
+  esGerente: boolean;
 }) {
   const router = useRouter();
   const [pending, start] = useTransition();
@@ -63,7 +69,7 @@ export function NuevaOSForm({
   const [esCampana, setEsCampana] = useState(false);
   const [tallasSel, setTallasSel] = useState<Set<string>>(new Set());
   const [montoBase, setMontoBase] = useState<string>('0');
-  const [movilidadUnit, setMovilidadUnit] = useState<string>('');
+  const [movilidadUnit, setMovilidadUnit] = useState<string>(MOVILIDAD_DEFAULT);
   const [campanaUnit, setCampanaUnit] = useState<string>('');
   const [tarifaInfo, setTarifaInfo] = useState<{ total: number; detalle: { talla: string; cantidad: number; tarifa: number; subtotal: number }[]; faltantes: string[] } | null>(null);
   const [calcPending, setCalcPending] = useState(false);
@@ -531,7 +537,11 @@ export function NuevaOSForm({
           })()}
           <FormRow
             label="Movilidad por unidad (S/)"
-            hint={totalPrendasSeleccionadas > 0 ? `Total movilidad ≈ S/ ${(Number(movilidadUnit || 0) * totalPrendasSeleccionadas).toFixed(2)} (${totalPrendasSeleccionadas} unid)` : 'S/ por unidad enviada'}
+            hint={
+              esGerente
+                ? (totalPrendasSeleccionadas > 0 ? `Default S/ 0.10. Total movilidad ≈ S/ ${(Number(movilidadUnit || 0) * totalPrendasSeleccionadas).toFixed(2)} (${totalPrendasSeleccionadas} unid)` : 'Sale S/ 0.10 por unidad en automático — como gerente puede modificarlo')
+                : '🔒 Fijo en S/ 0.10 por unidad. Modificarlo requiere autorización de gerencia.'
+            }
           >
             <Input
               type="number"
@@ -539,12 +549,20 @@ export function NuevaOSForm({
               min={0}
               value={movilidadUnit}
               onChange={(e) => setMovilidadUnit(e.target.value)}
-              placeholder="0.00"
+              placeholder="0.10"
+              readOnly={!esGerente}
+              disabled={!esGerente}
+              className={!esGerente ? 'bg-slate-50 text-slate-700 cursor-not-allowed' : ''}
+              title={!esGerente ? 'Solo gerencia puede modificar la movilidad' : undefined}
             />
           </FormRow>
           <FormRow
             label="Campaña por unidad (S/)"
-            hint={totalPrendasSeleccionadas > 0 ? `Total campaña ≈ S/ ${(Number(campanaUnit || 0) * totalPrendasSeleccionadas).toFixed(2)}` : 'S/ extra por unidad si es de campaña'}
+            hint={
+              esGerente
+                ? (totalPrendasSeleccionadas > 0 ? `Total campaña ≈ S/ ${(Number(campanaUnit || 0) * totalPrendasSeleccionadas).toFixed(2)}` : 'S/ extra por unidad si es de campaña')
+                : '🔒 Cargar un adicional de campaña requiere autorización de gerencia.'
+            }
           >
             <Input
               type="number"
@@ -553,6 +571,10 @@ export function NuevaOSForm({
               value={campanaUnit}
               onChange={(e) => setCampanaUnit(e.target.value)}
               placeholder="0.00"
+              readOnly={!esGerente}
+              disabled={!esGerente}
+              className={!esGerente ? 'bg-slate-50 text-slate-700 cursor-not-allowed' : ''}
+              title={!esGerente ? 'Solo gerencia puede cargar campaña' : undefined}
             />
           </FormRow>
           <FormRow label="Es campaña">
