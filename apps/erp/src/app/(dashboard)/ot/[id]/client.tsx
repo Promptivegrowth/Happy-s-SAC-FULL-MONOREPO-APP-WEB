@@ -213,36 +213,28 @@ export function OtNotaForm({ otId }: { otId: string }) {
   );
 }
 
-export function OtLineaProduccion({ otId, lineaId, planificada, cortada, fallas, disabled, usuarioEsGerente = false }: {
+export function OtLineaProduccion({ otId, lineaId, cortada, fallas, disabled }: {
   otId: string; lineaId: string; planificada: number; cortada: number; fallas: number; disabled: boolean;
-  /** Solo gerencia puede AJUSTAR la cantidad cortada (que viene del módulo Corte). */
+  /** @deprecated ya no se usa — la cantidad cortada no se edita en la OT. */
   usuarioEsGerente?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const [pending, start] = useTransition();
-  // La cantidad cortada es la FUENTE del módulo Corte (decisión del cliente
-  // 21/07/2026). Se muestra como base; solo gerencia la ajusta con motivo.
-  const [c, setC] = useState(cortada);
   const [f, setF] = useState(fallas);
-  const [motivo, setMotivo] = useState('');
 
-  const ajustaCortada = c !== cortada;
-
+  // La cantidad cortada VIENE del módulo Corte y no se edita en la OT
+  // (pedido del cliente 21/07/2026: la restricción/ajuste vive en la orden
+  // de corte). En la OT solo se declaran las FALLAS.
   function save() {
-    if (f > c) {
-      return toast.error('Fallas no pueden superar cortadas');
-    }
-    if (ajustaCortada && !usuarioEsGerente) {
-      return toast.error('La cantidad cortada viene del módulo Corte. Ajustarla requiere autorización de gerencia.');
-    }
-    if (ajustaCortada && !motivo.trim()) {
-      return toast.error('Indique el motivo del ajuste de la cantidad cortada.');
+    if (f > cortada) {
+      return toast.error('Las fallas no pueden superar lo cortado');
     }
     start(async () => {
-      const r = await declararProduccion(otId, lineaId, c, f, motivo.trim() || undefined);
+      // Reenvía la cortada SIN cambios (solo actualiza fallas). Al ser igual
+      // a lo guardado, el server no pide ninguna autorización.
+      const r = await declararProduccion(otId, lineaId, cortada, f);
       if (r.ok) {
-        toast.success(ajustaCortada ? 'Guardado — ajuste registrado en la bitácora' : 'Guardado');
-        setMotivo('');
+        toast.success('Guardado');
         setOpen(false);
       } else toast.error(r.error ?? 'Error');
     });
@@ -255,74 +247,36 @@ export function OtLineaProduccion({ otId, lineaId, planificada, cortada, fallas,
   }
 
   return (
-    <div className="space-y-1">
-      <div className="flex items-end gap-1">
-        <div className="flex flex-col">
-          <label className="text-[9px] font-semibold uppercase tracking-wide text-slate-500">
-            Cortado {!usuarioEsGerente && <span className="text-slate-400">(del Corte)</span>}
-          </label>
-          <Input
-            type="number"
-            value={c}
-            onChange={(e) => setC(Number(e.target.value))}
-            min={0}
-            disabled={!usuarioEsGerente}
-            className={`h-8 w-16 text-xs ${
-              !usuarioEsGerente ? 'bg-slate-100 text-slate-500' : ajustaCortada ? 'border-amber-400 bg-amber-50' : ''
-            }`}
-            placeholder="0"
-            title={
-              usuarioEsGerente
-                ? 'Viene del módulo Corte. Si lo ajusta, queda registrado en la bitácora con el motivo.'
-                : 'La cantidad cortada viene del módulo Corte (solo lectura). El ajuste lo hace gerencia.'
-            }
-          />
-        </div>
-        <div className="flex flex-col">
-          <label className="text-[9px] font-semibold uppercase tracking-wide text-slate-500">Fallas</label>
-          <Input
-            type="number"
-            value={f}
-            onChange={(e) => setF(Number(e.target.value))}
-            min={0}
-            max={c}
-            className="h-8 w-14 text-xs"
-            placeholder="0"
-            title="Unidades descartadas (acumulado)"
-            autoFocus
-          />
-        </div>
-        <Button
-          variant="premium"
-          size="sm"
-          onClick={save}
-          disabled={pending || (ajustaCortada && !usuarioEsGerente)}
-          className="h-8 px-2"
-          title={ajustaCortada && !usuarioEsGerente ? 'Requiere autorización de gerencia' : 'Guardar'}
+    <div className="flex items-end gap-1">
+      <div className="flex flex-col">
+        <label className="text-[9px] font-semibold uppercase tracking-wide text-slate-500">
+          Cortado <span className="text-slate-400">(del Corte)</span>
+        </label>
+        <div
+          className="flex h-8 w-16 items-center justify-center rounded-md border bg-slate-100 text-xs font-semibold text-slate-600"
+          title="La cantidad cortada se declara en la orden de Corte y se refleja acá al cerrar el corte."
         >
-          {pending ? <Loader2 className="h-3 w-3 animate-spin" /> : <Save className="h-3 w-3" />}
-        </Button>
-        <Button variant="ghost" size="sm" onClick={() => { setC(cortada); setF(fallas); setMotivo(''); setOpen(false); }} className="h-8 px-1" title="Cancelar"><X className="h-3 w-3" /></Button>
-      </div>
-
-      {!usuarioEsGerente ? (
-        <p className="max-w-[260px] text-[10px] leading-tight text-slate-500">
-          La cantidad cortada viene del módulo <strong>Corte</strong>. Si difiere de lo real, gerencia puede ajustarla.
-        </p>
-      ) : ajustaCortada ? (
-        <div className="max-w-[260px]">
-          <label className="text-[9px] font-semibold uppercase tracking-wide text-amber-700">
-            Motivo del ajuste (del Corte {cortada} → {c})
-          </label>
-          <Input
-            value={motivo}
-            onChange={(e) => setMotivo(e.target.value)}
-            placeholder="Ej: recuento físico difiere del corte"
-            className="h-8 text-xs"
-            maxLength={200}
-          />
+          {cortada}
         </div>
-      ) : null}
+      </div>
+      <div className="flex flex-col">
+        <label className="text-[9px] font-semibold uppercase tracking-wide text-slate-500">Fallas</label>
+        <Input
+          type="number"
+          value={f}
+          onChange={(e) => setF(Number(e.target.value))}
+          min={0}
+          max={cortada}
+          className="h-8 w-14 text-xs"
+          placeholder="0"
+          title="Unidades descartadas (acumulado)"
+          autoFocus
+        />
+      </div>
+      <Button variant="premium" size="sm" onClick={save} disabled={pending} className="h-8 px-2" title="Guardar fallas">
+        {pending ? <Loader2 className="h-3 w-3 animate-spin" /> : <Save className="h-3 w-3" />}
+      </Button>
+      <Button variant="ghost" size="sm" onClick={() => { setF(fallas); setOpen(false); }} className="h-8 px-1" title="Cancelar"><X className="h-3 w-3" /></Button>
     </div>
   );
 }

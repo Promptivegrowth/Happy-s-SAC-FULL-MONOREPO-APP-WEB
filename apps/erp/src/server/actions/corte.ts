@@ -119,6 +119,20 @@ export async function agregarLineaCorte(_prev: unknown, fd: FormData): Promise<A
     });
     if (error) throw new Error(error.message);
 
+    // La OT jala EN VIVO lo cortado (mig 70): recalcular cantidad_cortada de
+    // la OT desde la suma de lo real de sus cortes. Así el "Cortado" de la OT
+    // refleja lo declarado en el corte sin esperar al cierre.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const rpcClient = sb as unknown as { from: (t: string) => any; rpc: (fn: string, args: any) => any };
+    const { data: corteInfo } = await rpcClient
+      .from('ot_corte')
+      .select('ot_id, producto_id')
+      .eq('id', data.corte_id)
+      .maybeSingle();
+    if (corteInfo?.ot_id && corteInfo?.producto_id) {
+      await rpcClient.rpc('sync_ot_cortada', { p_ot_id: corteInfo.ot_id, p_producto_id: corteInfo.producto_id });
+    }
+
     // Registrar la autorización (auditoría). Se guarda como nota en la
     // observación del corte con marca de fecha; no hay tabla de eventos de
     // corte, así que dejamos rastro acá.
@@ -138,7 +152,7 @@ export async function agregarLineaCorte(_prev: unknown, fd: FormData): Promise<A
     }
     return null;
   });
-  if (r.ok) await bumpPaths(`/corte/${fd.get('corte_id')}`);
+  if (r.ok) await bumpPaths(`/corte/${fd.get('corte_id')}`, '/ot');
   return r;
 }
 
