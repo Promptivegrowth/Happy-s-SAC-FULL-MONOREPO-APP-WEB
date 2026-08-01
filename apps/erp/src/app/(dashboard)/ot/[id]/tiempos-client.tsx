@@ -158,6 +158,38 @@ export function TiemposCostoTab({ otId, procesos, lineas, registros, operarios, 
     [registros, procesosProducto],
   );
 
+  // BLOQUEO SECUENCIAL (pedido del cliente 21/07/2026): una operación solo se
+  // puede registrar si la ANTERIOR (por orden) ya se completó — es decir,
+  // declaró todas las unidades cortadas de la orden. Se calcula sobre el total.
+  const bloqueoPorProceso = useMemo(() => {
+    const orden = [...procesosProducto].sort((a, b) => a.orden - b.orden);
+    const declaradas = new Map<string, number>();
+    const tieneRegistro = new Map<string, boolean>();
+    for (const r of registrosProducto) {
+      declaradas.set(r.proceso_id, (declaradas.get(r.proceso_id) ?? 0) + Number(r.unidades_procesadas ?? 0));
+      tieneRegistro.set(r.proceso_id, true);
+    }
+    // Una operación está "completa" si declaró todas las unidades cortadas.
+    // En el ÁREA DE CORTE las unidades son opcionales, así que ahí basta con
+    // que tenga al menos un registro (para no bloquear el flujo).
+    const completa = (op: Proceso) => {
+      if (unidadesGlobal <= 0) return true;
+      const dec = declaradas.get(op.id) ?? 0;
+      if (dec >= unidadesGlobal) return true;
+      if (op.area?.codigo === 'CORTE') return tieneRegistro.get(op.id) === true;
+      return false;
+    };
+    const map = new Map<string, { bloqueado: boolean; prevNombre: string; prevFaltan: number }>();
+    for (let i = 0; i < orden.length; i++) {
+      const op = orden[i]!;
+      const prev = i > 0 ? orden[i - 1]! : null;
+      const bloqueado = prev != null && unidadesGlobal > 0 && !completa(prev);
+      const prevFaltan = prev ? Math.max(0, unidadesGlobal - (declaradas.get(prev.id) ?? 0)) : 0;
+      map.set(op.id, { bloqueado, prevNombre: prev ? nombreOperacion(prev) : '', prevFaltan });
+    }
+    return map;
+  }, [procesosProducto, registrosProducto, unidadesGlobal]);
+
   return (
     <div className="space-y-4">
       {productos.length > 1 && (
@@ -226,6 +258,9 @@ export function TiemposCostoTab({ otId, procesos, lineas, registros, operarios, 
                         operarios={operarios}
                         esAreaCorte={areaCodigo === 'CORTE'}
                         disabled={disabled}
+                        bloqueado={bloqueoPorProceso.get(p.id)?.bloqueado ?? false}
+                        operacionAnterior={bloqueoPorProceso.get(p.id)?.prevNombre ?? ''}
+                        faltanAnterior={bloqueoPorProceso.get(p.id)?.prevFaltan ?? 0}
                       />
                     );
                   })}
@@ -532,6 +567,7 @@ type TallaDisp = { talla: string; cortada: number; yaRegistrado: number };
 
 function OperacionBlock({
   otId, proceso, tallaActual, tallasDisponibles, registros, operarios, esAreaCorte, disabled,
+  bloqueado = false, operacionAnterior = '', faltanAnterior = 0,
 }: {
   otId: string;
   proceso: Proceso;
@@ -541,12 +577,16 @@ function OperacionBlock({
   operarios: Operario[];
   esAreaCorte: boolean;
   disabled: boolean;
+  /** No se puede registrar hasta que la operación anterior esté completa. */
+  bloqueado?: boolean;
+  operacionAnterior?: string;
+  faltanAnterior?: number;
 }) {
   const [openForm, setOpenForm] = useState(false);
   const totalMin = registros.reduce((s, r) => s + Number(r.tiempo_total_min), 0);
   const totalUnid = registros.reduce((s, r) => s + Number(r.unidades_procesadas ?? 0), 0);
   return (
-    <div className="rounded-md border border-slate-200 bg-white p-2">
+    <div className={`rounded-md border bg-white p-2 ${bloqueado ? 'border-slate-200 opacity-70' : 'border-slate-200'}`}>
       <div className="flex items-center justify-between gap-2">
         <div className="min-w-0 flex-1">
           <p className="text-sm font-medium text-corp-900">
@@ -564,8 +604,14 @@ function OperacionBlock({
               </span>
             )}
           </p>
+          {bloqueado && (
+            <p className="mt-0.5 text-[10px] font-medium text-amber-700">
+              🔒 Complete primero <strong>{operacionAnterior}</strong>
+              {faltanAnterior > 0 ? ` (faltan ${faltanAnterior} unid.)` : ''} para registrar esta operación.
+            </p>
+          )}
         </div>
-        {!disabled && (
+        {!disabled && !bloqueado && (
           <Button variant="outline" size="sm" onClick={() => setOpenForm((o) => !o)} className="h-7 gap-1 px-2 text-xs">
             {openForm ? <X className="h-3 w-3" /> : <Plus className="h-3 w-3" />}
             {openForm ? 'Cerrar' : 'Registrar'}
@@ -683,17 +729,55 @@ function FormRegistro({
         return;
       }
     }
+
+    // TIEMPO TOTAL de la operación (una sola vez, no por talla). El cliente
+    // reportó (21/07/2026) que al poner 50 min y marcar varias tallas, el
+    // sistema lo tomaba como 50 min POR talla. Ahora los 50 min son el TOTAL
+    // y se REPARTEN entre las tallas en proporción a sus unidades.
+    let totalMin: number;
+    if (modo === 'directo') {
+      totalMin = Number(tiempoDirecto);
+      if (!(totalMin > 0)) return toast.error('Ingrese el tiempo total (minutos)');
+    } else {
+      if (!fechaInicio || !fechaFin) return toast.error('Ingrese fecha/hora de inicio y fin');
+      const ti = new Date(fechaInicio).getTime();
+      const tf = new Date(fechaFin).getTime();
+      if (Number.isNaN(ti) || Number.isNaN(tf)) return toast.error('Fechas inválidas');
+      if (tf < ti) return toast.error('La fecha de fin no puede ser anterior al inicio');
+      totalMin = Math.round(((tf - ti) / 60000) * 100) / 100;
+      if (!(totalMin > 0)) return toast.error('El intervalo debe ser mayor a 0 minutos');
+    }
+    // Fecha de trabajo: en directo la elegida; en intervalo, el día del inicio.
+    const fechaTrabajoEnvio =
+      modo === 'directo' ? fechaTrabajoISO : (fechaInicio ? `${fechaInicio.slice(0, 10)}T12:00:00` : '');
+
+    // Reparto proporcional a las unidades; el último toma el remanente para
+    // que la suma sea exactamente el total (sin arrastre de redondeo).
+    const totalUnidades = tallasAEnviar.reduce((s, t) => s + t.cantidad, 0);
+    let acumulado = 0;
+    const conTiempo = tallasAEnviar.map((t, i) => {
+      let min: number;
+      if (i === tallasAEnviar.length - 1) {
+        min = Math.round((totalMin - acumulado) * 100) / 100;
+      } else {
+        min = Math.round((totalMin * (t.cantidad / (totalUnidades || 1))) * 100) / 100;
+        acumulado += min;
+      }
+      return { ...t, min: Math.max(0, min) };
+    });
+
     start(async () => {
       let okCount = 0;
       let errMsg = '';
-      for (const t of tallasAEnviar) {
+      for (const t of conTiempo) {
         const r = await crearRegistroTiempoOT(otId, {
           proceso_id: procesoId,
           talla: t.talla,
-          fecha_inicio: modo === 'intervalo' ? fechaInicio : '',
-          fecha_fin: modo === 'intervalo' ? fechaFin : '',
-          tiempo_total_min: modo === 'directo' && tiempoDirecto ? Number(tiempoDirecto) : undefined,
-          fecha_trabajo: modo === 'directo' ? fechaTrabajoISO : '',
+          fecha_inicio: '',
+          fecha_fin: '',
+          // Cada talla lleva SU parte del tiempo total.
+          tiempo_total_min: t.min,
+          fecha_trabajo: fechaTrabajoEnvio,
           unidades_procesadas: t.cantidad,
           operario_id: operarioId || '',
           notas: notas || null,
@@ -701,15 +785,15 @@ function FormRegistro({
         if (r.ok) okCount++;
         else { errMsg = r.error ?? 'Error'; break; }
       }
-      if (okCount === tallasAEnviar.length) {
+      if (okCount === conTiempo.length) {
         toast.success(
           okCount === 1
             ? 'Registro guardado'
-            : `${okCount} registros guardados (uno por talla)`,
+            : `${okCount} tallas · ${totalMin.toFixed(2)} min repartidos entre ellas`,
         );
         onSaved();
       } else {
-        toast.error(`${errMsg} · Se guardaron ${okCount}/${tallasAEnviar.length} antes del error`);
+        toast.error(`${errMsg} · Se guardaron ${okCount}/${conTiempo.length} antes del error`);
       }
     });
   }
@@ -828,8 +912,9 @@ function FormRegistro({
         </div>
         {tallasAEnviar.length > 0 && (
           <p className="mt-1 text-[10px] text-emerald-700">
-            Se crearán {tallasAEnviar.length} registro{tallasAEnviar.length === 1 ? '' : 's'} (uno por talla),
-            cada uno con el mismo tiempo total ingresado arriba.
+            {tallasAEnviar.length === 1
+              ? 'Se creará 1 registro con el tiempo ingresado.'
+              : `El tiempo total ingresado se REPARTE entre las ${tallasAEnviar.length} tallas (según sus unidades), no se cobra por cada una.`}
           </p>
         )}
       </div>
