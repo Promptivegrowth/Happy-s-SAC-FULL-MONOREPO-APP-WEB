@@ -586,7 +586,7 @@ function OperacionBlock({
   const totalMin = registros.reduce((s, r) => s + Number(r.tiempo_total_min), 0);
   const totalUnid = registros.reduce((s, r) => s + Number(r.unidades_procesadas ?? 0), 0);
   return (
-    <div className={`rounded-md border bg-white p-2 ${bloqueado ? 'border-slate-200 opacity-70' : 'border-slate-200'}`}>
+    <div className="rounded-md border border-slate-200 bg-white p-2">
       <div className="flex items-center justify-between gap-2">
         <div className="min-w-0 flex-1">
           <p className="text-sm font-medium text-corp-900">
@@ -604,14 +604,16 @@ function OperacionBlock({
               </span>
             )}
           </p>
+          {/* Aviso informativo (NO bloquea): el equipo puede trabajar
+              operaciones en paralelo (aclaración del cliente 21/07/2026). */}
           {bloqueado && (
-            <p className="mt-0.5 text-[10px] font-medium text-amber-700">
-              🔒 Complete primero <strong>{operacionAnterior}</strong>
-              {faltanAnterior > 0 ? ` (faltan ${faltanAnterior} unid.)` : ''} para registrar esta operación.
+            <p className="mt-0.5 text-[10px] text-amber-600">
+              ⚠ La operación anterior (<strong>{operacionAnterior}</strong>) aún no está completa
+              {faltanAnterior > 0 ? ` (faltan ${faltanAnterior} unid.)` : ''} — puede registrar igual si trabajan en paralelo.
             </p>
           )}
         </div>
-        {!disabled && !bloqueado && (
+        {!disabled && (
           <Button variant="outline" size="sm" onClick={() => setOpenForm((o) => !o)} className="h-7 gap-1 px-2 text-xs">
             {openForm ? <X className="h-3 w-3" /> : <Plus className="h-3 w-3" />}
             {openForm ? 'Cerrar' : 'Registrar'}
