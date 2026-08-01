@@ -6,9 +6,9 @@ import { Button } from '@happy/ui/button';
 import { Input } from '@happy/ui/input';
 import { Badge } from '@happy/ui/badge';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@happy/ui/table';
-import { Loader2, ArrowRight, Save } from 'lucide-react';
+import { Loader2, ArrowRight, Save, Pencil, X } from 'lucide-react';
 import { toast } from 'sonner';
-import { cambiarEstadoOS, registrarRecepcionOS } from '@/server/actions/corte';
+import { cambiarEstadoOS, registrarRecepcionOS, editarOS } from '@/server/actions/corte';
 
 const FLOW: Record<string, string[]> = {
   EMITIDA: ['DESPACHADA','ANULADA'],
@@ -45,6 +45,155 @@ export function OsTransitions({ osId, estado }: { osId: string; estado: string }
           {n.replace('_', ' ')}
         </Button>
       ))}
+    </div>
+  );
+}
+
+/**
+ * Editor de la OS ANTES del despacho (pedido del cliente 21/07/2026): permite
+ * cambiar el taller, la fecha de envío / entrega y las cantidades por línea
+ * mientras la OS está EMITIDA. Al guardar, el server regenera avíos y totales.
+ */
+type LineaEdit = { id: string; producto_nombre: string; talla: string; cantidad: number };
+export function EditarOSEditor({
+  osId,
+  tallerActual,
+  fechaEnvioInicial,
+  fechaEntregaInicial,
+  montoBaseInicial,
+  talleres,
+  lineas,
+}: {
+  osId: string;
+  tallerActual: string;
+  fechaEnvioInicial: string;
+  fechaEntregaInicial: string;
+  montoBaseInicial: number;
+  talleres: { id: string; nombre: string }[];
+  lineas: LineaEdit[];
+}) {
+  const router = useRouter();
+  const [pending, start] = useTransition();
+  const [abierto, setAbierto] = useState(false);
+  const [tallerId, setTallerId] = useState(tallerActual);
+  const [fechaEnvio, setFechaEnvio] = useState(fechaEnvioInicial);
+  const [fechaEntrega, setFechaEntrega] = useState(fechaEntregaInicial);
+  const [montoBase, setMontoBase] = useState(String(montoBaseInicial));
+  const [rows, setRows] = useState<LineaEdit[]>(lineas);
+
+  function setCant(i: number, v: string) {
+    const n = v === '' ? 0 : Math.max(0, Math.floor(Number(v)));
+    setRows((prev) => prev.map((r, idx) => (idx === i ? { ...r, cantidad: Number.isFinite(n) ? n : 0 } : r)));
+  }
+  function cancelar() {
+    setTallerId(tallerActual);
+    setFechaEnvio(fechaEnvioInicial);
+    setFechaEntrega(fechaEntregaInicial);
+    setMontoBase(String(montoBaseInicial));
+    setRows(lineas);
+    setAbierto(false);
+  }
+  function guardar() {
+    if (!tallerId) return toast.error('Elegí un taller.');
+    start(async () => {
+      const r = await editarOS(osId, {
+        tallerId,
+        fechaEnvio,
+        fechaEntrega,
+        montoBase: Number(montoBase || 0),
+        lineas: rows.map((x) => ({ id: x.id, cantidad: x.cantidad })),
+      });
+      if (r.ok) {
+        toast.success('Orden actualizada — avíos y totales recalculados');
+        setAbierto(false);
+        router.refresh();
+      } else toast.error(r.error ?? 'Error');
+    });
+  }
+
+  if (!abierto) {
+    return (
+      <Button variant="outline" size="sm" onClick={() => setAbierto(true)}>
+        <Pencil className="h-4 w-4" /> Modificar orden
+      </Button>
+    );
+  }
+
+  return (
+    <div className="space-y-4 rounded-lg border-2 border-happy-200 bg-happy-50/40 p-4">
+      <div className="flex items-center justify-between">
+        <h3 className="font-display text-sm font-semibold text-corp-900">Modificar orden (antes del despacho)</h3>
+        <Button variant="ghost" size="sm" onClick={cancelar} disabled={pending}>
+          <X className="h-4 w-4" /> Cancelar
+        </Button>
+      </div>
+      <div className="grid gap-3 sm:grid-cols-2">
+        <div>
+          <label className="block text-[10px] font-semibold uppercase tracking-wide text-slate-500">Taller</label>
+          <select
+            value={tallerId}
+            onChange={(e) => setTallerId(e.target.value)}
+            disabled={pending}
+            className="mt-1 h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
+          >
+            {talleres.map((t) => (
+              <option key={t.id} value={t.id}>{t.nombre}</option>
+            ))}
+          </select>
+        </div>
+        <div>
+          <label className="block text-[10px] font-semibold uppercase tracking-wide text-slate-500">Monto base (S/)</label>
+          <Input type="number" step="0.01" min={0} value={montoBase} onChange={(e) => setMontoBase(e.target.value)} disabled={pending} className="mt-1 h-9 text-sm" />
+        </div>
+        <div>
+          <label className="block text-[10px] font-semibold uppercase tracking-wide text-slate-500">Fecha de envío al taller</label>
+          <Input type="date" value={fechaEnvio} onChange={(e) => setFechaEnvio(e.target.value)} disabled={pending} className="mt-1 h-9 text-sm" />
+        </div>
+        <div>
+          <label className="block text-[10px] font-semibold uppercase tracking-wide text-slate-500">Fecha entrega esperada</label>
+          <Input type="date" value={fechaEntrega} onChange={(e) => setFechaEntrega(e.target.value)} disabled={pending} className="mt-1 h-9 text-sm" />
+        </div>
+      </div>
+      <div>
+        <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-slate-500">Cantidades por línea</p>
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>Producto</TableHead>
+              <TableHead>Talla</TableHead>
+              <TableHead className="text-right">Cantidad a enviar</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {rows.map((l, i) => (
+              <TableRow key={l.id}>
+                <TableCell className="font-medium">{l.producto_nombre}</TableCell>
+                <TableCell><Badge variant="outline">{l.talla.replace('T', '')}</Badge></TableCell>
+                <TableCell className="text-right">
+                  <Input
+                    type="number"
+                    min={0}
+                    value={l.cantidad || ''}
+                    onChange={(e) => setCant(i, e.target.value)}
+                    disabled={pending}
+                    className="ml-auto h-8 w-24 text-right text-xs"
+                    placeholder="0"
+                  />
+                </TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+        <p className="mt-2 text-[11px] text-slate-500">
+          Al guardar se recalculan los avíos del BOM y los totales (movilidad/campaña) según las nuevas cantidades. Si cambiaste de taller, revisá el monto base.
+        </p>
+      </div>
+      <div className="flex justify-end">
+        <Button variant="premium" size="sm" onClick={guardar} disabled={pending}>
+          {pending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+          Guardar cambios
+        </Button>
+      </div>
     </div>
   );
 }

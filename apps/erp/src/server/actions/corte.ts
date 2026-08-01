@@ -306,19 +306,40 @@ async function poblarLineasYAviosOS(
   const { error: errL } = await sb.from('ordenes_servicio_lineas').insert(filasLineas);
   if (errL) throw new Error(`OS lineas: ${errL.message}`);
 
-  // 3) Calcular avíos: receta activa × cantidad por talla
-  // Considera cantidad_almacen para dividir avíos (parte va al taller, parte queda en planta).
+  // 3) Calcular avíos del BOM (receta activa × cantidad por talla).
+  const cantPorTalla = new Map<string, number>();
+  for (const l of lineasCorte) cantPorTalla.set(l.talla, l.cantidad);
+  const avios = await generarAviosOS(sb, osId, productoId, cantPorTalla);
+
+  return { lineas: filasLineas.length, avios };
+}
+
+/**
+ * Genera los avíos de una OS a partir de la receta activa del producto.
+ * Por cada línea de receta con sale_a_servicio=true, la cantidad enviada al
+ * taller = (cantidad_unitaria − cantidad_almacen) × unidades de esa talla.
+ * cantidad_almacen es la parte que QUEDA en planta. Devuelve la cantidad de
+ * materiales (avíos) insertados. Si no hay receta activa, no falla → 0.
+ *
+ * Se usa tanto en el flujo con corte vinculado como en el de OT directa, para
+ * que los avíos siempre se muestren en la OS (pedido del cliente 21/07/2026).
+ */
+async function generarAviosOS(
+  sb: Awaited<ReturnType<typeof requireUser>>['sb'],
+  osId: string,
+  productoId: string,
+  cantPorTalla: Map<string, number>,
+): Promise<number> {
+  if (cantPorTalla.size === 0) return 0;
   const { data: receta } = await sb
     .from('recetas')
     .select('id')
     .eq('producto_id', productoId)
     .eq('activa', true)
     .maybeSingle();
-  if (!receta) {
-    return { lineas: filasLineas.length, avios: 0 };
-  }
+  if (!receta) return 0;
 
-  const tallasNecesarias = lineasCorte.map((l) => l.talla as 'T0' | 'T2' | 'T4' | 'T6' | 'T8' | 'T10' | 'T12' | 'T14' | 'T16' | 'TS' | 'TAD');
+  const tallasNecesarias = [...cantPorTalla.keys()] as ('T0' | 'T2' | 'T4' | 'T6' | 'T8' | 'T10' | 'T12' | 'T14' | 'T16' | 'TS' | 'TAD')[];
   const { data: lineasReceta } = await sb
     .from('recetas_lineas')
     .select('material_id, talla, cantidad, cantidad_almacen')
@@ -326,20 +347,14 @@ async function poblarLineasYAviosOS(
     .eq('sale_a_servicio', true)
     .in('talla', tallasNecesarias);
 
-  const cantPorTalla = new Map<string, number>();
-  for (const l of lineasCorte) cantPorTalla.set(l.talla, l.cantidad);
-
   const aviosMap = new Map<string, number>();
   for (const lr of lineasReceta ?? []) {
     const cantUnidades = cantPorTalla.get(lr.talla as string) ?? 0;
     if (cantUnidades <= 0) continue;
-    // Cantidad efectiva al taller = cantidad por unidad - lo que queda en almacén.
-    // Si cantidad_almacen >= cantidad, no se manda nada al taller (todo queda en planta).
     const cantAlTaller = Math.max(0, Number(lr.cantidad) - Number(lr.cantidad_almacen ?? 0));
     if (cantAlTaller <= 0) continue;
-    const cantAvios = cantAlTaller * cantUnidades;
     const matId = lr.material_id as string;
-    aviosMap.set(matId, (aviosMap.get(matId) ?? 0) + cantAvios);
+    aviosMap.set(matId, (aviosMap.get(matId) ?? 0) + cantAlTaller * cantUnidades);
   }
 
   if (aviosMap.size > 0) {
@@ -351,15 +366,15 @@ async function poblarLineasYAviosOS(
     const { error: errA } = await sb.from('ordenes_servicio_avios').insert(filasAvios);
     if (errA) throw new Error(`OS avios: ${errA.message}`);
   }
-
-  return { lineas: filasLineas.length, avios: aviosMap.size };
+  return aviosMap.size;
 }
 
 /**
  * Variante: poblar líneas de OS directamente desde ot_lineas (sin corte
  * vinculado). Usa cantidad_cortada si > 0, sino cantidad_planificada.
- * Acepta filtro opcional de tallas. NO genera avíos porque eso requiere
- * el flujo del corte que coordina con almacén.
+ * Acepta filtro opcional de tallas. Los avíos se generan igual desde la
+ * receta activa del producto (pedido del cliente 21/07/2026: la OS debe
+ * mostrar los avíos aunque se cree directo desde la OT, sin corte).
  */
 async function poblarLineasOSDesdeOT(
   sb: Awaited<ReturnType<typeof requireUser>>['sb'],
@@ -385,7 +400,19 @@ async function poblarLineasOSDesdeOT(
     candidatas.map((c) => ({ os_id: osId, producto_id: c.producto_id, talla: c.talla, cantidad: c.cantidad })),
   );
   if (errIns) throw new Error(`OS lineas (OT): ${errIns.message}`);
-  return { lineas: candidatas.length, avios: 0 };
+
+  // Avíos por producto (la OT puede tener varios): agrupamos cantidad por talla.
+  const porProducto = new Map<string, Map<string, number>>();
+  for (const c of candidatas) {
+    const m = porProducto.get(c.producto_id) ?? new Map<string, number>();
+    m.set(c.talla, (m.get(c.talla) ?? 0) + c.cantidad);
+    porProducto.set(c.producto_id, m);
+  }
+  let avios = 0;
+  for (const [productoId, cantPorTalla] of porProducto) {
+    avios += await generarAviosOS(sb, osId, productoId, cantPorTalla);
+  }
+  return { lineas: candidatas.length, avios };
 }
 
 export async function crearOS(
@@ -499,6 +526,144 @@ export async function crearOS(
   // crearCorte y eliminarTaller — evita que el redirect interrumpa el
   // useTransition antes de que el toast se renderice.
   if (r.ok) await bumpPaths('/servicios');
+  return r;
+}
+
+/**
+ * Recalcula avíos y totales (movilidad/campaña) de una OS a partir de sus
+ * líneas actuales. Se usa al editar una OS antes del despacho: borra los
+ * avíos previos y los regenera con las nuevas cantidades, y recompone los
+ * adicionales = por_unidad × unidades enviadas.
+ */
+async function recomputarAviosYTotalesOS(
+  sb: Awaited<ReturnType<typeof requireUser>>['sb'],
+  osId: string,
+): Promise<void> {
+  // 1) Líneas actuales agrupadas por producto/talla
+  const { data: lineas } = await sb
+    .from('ordenes_servicio_lineas')
+    .select('producto_id, talla, cantidad')
+    .eq('os_id', osId);
+  const porProducto = new Map<string, Map<string, number>>();
+  let totalUnidades = 0;
+  for (const l of (lineas ?? []) as { producto_id: string; talla: string; cantidad: number }[]) {
+    const cant = Number(l.cantidad ?? 0);
+    totalUnidades += cant;
+    if (cant <= 0) continue;
+    const m = porProducto.get(l.producto_id) ?? new Map<string, number>();
+    m.set(l.talla, (m.get(l.talla) ?? 0) + cant);
+    porProducto.set(l.producto_id, m);
+  }
+
+  // 2) Regenerar avíos: borrar y recalcular desde la receta
+  await sb.from('ordenes_servicio_avios').delete().eq('os_id', osId);
+  for (const [productoId, cantPorTalla] of porProducto) {
+    await generarAviosOS(sb, osId, productoId, cantPorTalla);
+  }
+
+  // 3) Recomponer totales de adicionales con los por-unidad actuales
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const sbAny = sb as unknown as { from: (t: string) => any };
+  const { data: osRow } = await sbAny
+    .from('ordenes_servicio')
+    .select('movilidad_por_unidad, campana_por_unidad')
+    .eq('id', osId)
+    .maybeSingle();
+  const movUnit = Number(osRow?.movilidad_por_unidad ?? 0);
+  const campUnit = Number(osRow?.campana_por_unidad ?? 0);
+  await sbAny
+    .from('ordenes_servicio')
+    .update({
+      adicional_movilidad: Math.round(movUnit * totalUnidades * 100) / 100,
+      adicional_campana: Math.round(campUnit * totalUnidades * 100) / 100,
+    })
+    .eq('id', osId);
+}
+
+/**
+ * Edita una OS ANTES del despacho (estado EMITIDA): permite cambiar el taller,
+ * la fecha de envío / entrega y las cantidades por línea (pedido del cliente
+ * 21/07/2026). Al guardar, regenera avíos y recompone los totales. Una vez
+ * despachada (o más adelante) ya no se puede editar por acá.
+ */
+const editarOSLineaSchema = z.object({
+  id: z.string().uuid(),
+  cantidad: z.coerce.number().int().min(0).default(0),
+});
+export async function editarOS(
+  osId: string,
+  payload: {
+    tallerId: string;
+    fechaEnvio: string;
+    fechaEntrega: string;
+    montoBase: number;
+    lineas: z.input<typeof editarOSLineaSchema>[];
+  },
+): Promise<ActionResult> {
+  const r = await runAction(async () => {
+    const tallerId = z.string().uuid().parse(payload.tallerId);
+    const montoBase = z.coerce.number().min(0).parse(payload.montoBase);
+    const lineas = payload.lineas.map((l) => editarOSLineaSchema.parse(l));
+    const { sb } = await requireUser();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const sbAny = sb as unknown as { from: (t: string) => any };
+
+    const { data: osRow } = await sbAny.from('ordenes_servicio').select('estado').eq('id', osId).maybeSingle();
+    if (!osRow) throw new Error('OS no encontrada');
+    if (osRow.estado !== 'EMITIDA') {
+      throw new Error('Solo se puede modificar una OS que aún está EMITIDA (antes del despacho al taller).');
+    }
+
+    // Validar líneas contra las de la OS
+    const { data: lineasOs } = await sbAny
+      .from('ordenes_servicio_lineas')
+      .select('id')
+      .eq('os_id', osId);
+    const idsOs = new Set(((lineasOs ?? []) as { id: string }[]).map((l) => l.id));
+    for (const l of lineas) if (!idsOs.has(l.id)) throw new Error('Línea de OS no encontrada');
+
+    // Cabecera: taller, fechas, monto base
+    const { error: e1 } = await sbAny
+      .from('ordenes_servicio')
+      .update({
+        taller_id: tallerId,
+        fecha_envio: payload.fechaEnvio || null,
+        fecha_entrega_esperada: payload.fechaEntrega || null,
+        monto_base: montoBase,
+      })
+      .eq('id', osId);
+    if (e1) throw new Error(e1.message);
+
+    // Cantidades por línea
+    for (const l of lineas) {
+      const { error } = await sbAny
+        .from('ordenes_servicio_lineas')
+        .update({ cantidad: l.cantidad })
+        .eq('id', l.id)
+        .eq('os_id', osId);
+      if (error) throw new Error(error.message);
+    }
+
+    // Regenerar avíos + totales con las nuevas cantidades
+    await recomputarAviosYTotalesOS(sb, osId);
+    return null;
+  });
+  if (r.ok) await bumpPaths(`/servicios/${osId}`, '/servicios');
+  return r;
+}
+
+/**
+ * Regenera los avíos de una OS existente desde la receta activa (backfill).
+ * Útil para OS creadas antes de que el flujo directo-desde-OT generara avíos.
+ * No toca cantidades ni estado — solo recompone avíos y totales.
+ */
+export async function regenerarAviosOS(osId: string): Promise<ActionResult> {
+  const r = await runAction(async () => {
+    const { sb } = await requireUser();
+    await recomputarAviosYTotalesOS(sb, osId);
+    return null;
+  });
+  if (r.ok) await bumpPaths(`/servicios/${osId}`);
   return r;
 }
 

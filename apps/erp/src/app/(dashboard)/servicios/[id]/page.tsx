@@ -5,7 +5,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@happy/ui/card';
 import { Badge } from '@happy/ui/badge';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@happy/ui/table';
 import { PageShell } from '@/components/page-shell';
-import { OsTransitions, RecepcionOSEditor } from './client';
+import { OsTransitions, RecepcionOSEditor, EditarOSEditor } from './client';
 import { formatDate, formatPEN } from '@happy/lib';
 
 export const dynamic = 'force-dynamic';
@@ -38,7 +38,7 @@ type AvioOS = {
 export default async function Page({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const sb = await createClient();
-  const [{ data: os }, { data: lineasData }, { data: aviosData }] = await Promise.all([
+  const [{ data: os }, { data: lineasData }, { data: aviosData }, { data: talleresData }] = await Promise.all([
     sb
       .from('ordenes_servicio')
       .select('*, talleres(id, nombre, telefono, contacto_nombre), ot(numero, id), ot_corte(numero, id)')
@@ -53,6 +53,7 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
       .from('ordenes_servicio_avios')
       .select('id, cantidad_enviada, cantidad_devuelta, observacion, materiales(nombre, codigo, categoria)')
       .eq('os_id', id),
+    sb.from('talleres').select('id, nombre').eq('activo', true).order('nombre'),
   ]);
   if (!os) notFound();
   // Tipo extendido: los nuevos campos no están aún en la generación de tipos.
@@ -60,7 +61,11 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
     movilidad_por_unidad: number | null;
     campana_por_unidad: number | null;
     fecha_recepcion: string | null;
+    fecha_envio: string | null;
+    taller_id: string | null;
+    monto_base: number | null;
   };
+  const talleres = ((talleresData ?? []) as { id: string; nombre: string }[]).map((t) => ({ id: t.id, nombre: t.nombre }));
 
   const t = (os as unknown as { talleres?: { id: string; nombre: string; telefono: string | null; contacto_nombre: string | null } | null }).talleres;
   const ot = (os as unknown as { ot?: { numero: string; id: string } | null }).ot;
@@ -81,12 +86,30 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
       }
       actions={<OsTransitions osId={id} estado={os.estado ?? 'EMITIDA'} />}
     >
-      <div className="grid gap-3 sm:grid-cols-4">
+      <div className="grid gap-3 sm:grid-cols-5">
         <Stat label="Estado" value={<Badge variant={COLOR[os.estado ?? 'EMITIDA'] ?? 'secondary'}>{(os.estado ?? 'EMITIDA').replace('_', ' ')}</Badge>} />
         <Stat label="Emisión" value={formatDate(os.fecha_emision)} />
+        <Stat label="Envío al taller" value={osExt.fecha_envio ? formatDate(osExt.fecha_envio) : '—'} />
         <Stat label="Entrega esperada" value={formatDate(os.fecha_entrega_esperada)} />
         <Stat label="Total" value={formatPEN(Number(os.monto_total ?? 0))} />
       </div>
+
+      {os.estado === 'EMITIDA' && lineas.length > 0 && (
+        <EditarOSEditor
+          osId={id}
+          tallerActual={osExt.taller_id ?? ''}
+          fechaEnvioInicial={osExt.fecha_envio ?? ''}
+          fechaEntregaInicial={os.fecha_entrega_esperada ?? ''}
+          montoBaseInicial={Number(osExt.monto_base ?? 0)}
+          talleres={talleres}
+          lineas={lineas.map((l) => ({
+            id: l.id,
+            producto_nombre: l.productos?.nombre ?? '—',
+            talla: l.talla,
+            cantidad: Number(l.cantidad ?? 0),
+          }))}
+        />
+      )}
 
       <div className="grid gap-4 lg:grid-cols-2">
         <Card>
