@@ -6,6 +6,7 @@ import { Badge } from '@happy/ui/badge';
 import { Button } from '@happy/ui/button';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@happy/ui/table';
 import { PageShell } from '@/components/page-shell';
+import { esGerente } from '@/server/actions/_helpers';
 import { LineasCorteEditor, AccionCerrarCorte, GenerarOSDesdeCorte } from './client';
 import { formatDateTime } from '@happy/lib';
 
@@ -31,6 +32,7 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
   const ot = (corte as unknown as { ot?: { numero: string; id: string } | null }).ot;
   const prod = (corte as unknown as { productos?: { codigo: string; nombre: string } | null }).productos;
   const editable = corte.estado !== 'COMPLETADO' && corte.estado !== 'ANULADO';
+  const usuarioEsGerente = await esGerente();
 
   // Plan de la OT para este modelo (cantidad planificada por talla) y lo que
   // ya se cortó en OTROS cortes del mismo OT/producto, para calcular el saldo
@@ -97,6 +99,7 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
             editable={editable}
             planPorTalla={planPorTalla}
             cortadoOtrosPorTalla={cortadoOtrosPorTalla}
+            usuarioEsGerente={usuarioEsGerente}
           />
         </CardContent>
       </Card>

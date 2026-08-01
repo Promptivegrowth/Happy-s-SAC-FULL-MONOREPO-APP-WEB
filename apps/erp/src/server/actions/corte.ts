@@ -1,7 +1,7 @@
 'use server';
 
 import { z } from 'zod';
-import { runAction, requireUser, bumpPaths, type ActionResult } from './_helpers';
+import { runAction, requireUser, bumpPaths, esGerente, type ActionResult } from './_helpers';
 
 const TALLAS = ['T0','T2','T4','T6','T8','T10','T12','T14','T16','TS','TAD'] as const;
 
@@ -74,6 +74,7 @@ const lineaCorteSchema = z.object({
   talla: z.enum(TALLAS),
   cantidad_teorica: z.coerce.number().int().min(1, 'Cantidad teórica debe ser > 0'),
   cantidad_real: z.coerce.number().int().min(0).optional().or(z.literal('')),
+  motivo: z.string().optional().or(z.literal('')),
 });
 
 export async function agregarLineaCorte(_prev: unknown, fd: FormData): Promise<ActionResult> {
@@ -83,8 +84,29 @@ export async function agregarLineaCorte(_prev: unknown, fd: FormData): Promise<A
       talla: fd.get('talla'),
       cantidad_teorica: fd.get('cantidad_teorica'),
       cantidad_real: fd.get('cantidad_real') || '',
+      motivo: fd.get('motivo') || '',
     });
-    const { sb } = await requireUser();
+    const { sb, userId } = await requireUser();
+
+    // AUTORIZACIÓN DE GERENCIA (pedido del cliente 21/07/2026): si la cantidad
+    // REAL declarada difiere de la TEÓRICA (la del plan), hace falta que un
+    // gerente lo autorice con motivo, y queda registrado. Igualar o dejar la
+    // real vacía no pide nada.
+    const real = data.cantidad_real === '' ? null : Number(data.cantidad_real);
+    const difiere = real != null && real !== data.cantidad_teorica;
+    const motivoLimpio = (data.motivo ?? '').trim();
+    if (difiere) {
+      if (!(await esGerente())) {
+        throw new Error(
+          `La cantidad real (${real}) difiere de la teórica del plan (${data.cantidad_teorica}). ` +
+          `Este cambio requiere autorización de gerencia.`,
+        );
+      }
+      if (!motivoLimpio) {
+        throw new Error('Indique el motivo de la diferencia entre la cantidad real y la teórica.');
+      }
+    }
+
     // merma por talla quedó deprecada — la merma del corte se carga en metros
     // a nivel cabecera (ot_corte.merma_metros). Insertamos 0 para no romper
     // la columna existente.
@@ -92,10 +114,28 @@ export async function agregarLineaCorte(_prev: unknown, fd: FormData): Promise<A
       corte_id: data.corte_id,
       talla: data.talla,
       cantidad_teorica: data.cantidad_teorica,
-      cantidad_real: data.cantidad_real === '' ? null : Number(data.cantidad_real),
+      cantidad_real: real,
       merma: 0,
     });
     if (error) throw new Error(error.message);
+
+    // Registrar la autorización (auditoría). Se guarda como nota en la
+    // observación del corte con marca de fecha; no hay tabla de eventos de
+    // corte, así que dejamos rastro acá.
+    if (difiere) {
+      const fecha = new Date().toLocaleDateString('es-PE', { day: '2-digit', month: '2-digit', year: 'numeric' });
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const sbAny = sb as unknown as { from: (t: string) => any };
+      const { data: corteRow } = await sbAny.from('ot_corte').select('observacion').eq('id', data.corte_id).maybeSingle();
+      const nota =
+        `[${fecha}] Talla ${data.talla.replace('T', '')}: real ${real} vs teórica ${data.cantidad_teorica} ` +
+        `(dif ${(real ?? 0) - data.cantidad_teorica >= 0 ? '+' : ''}${(real ?? 0) - data.cantidad_teorica}) — ` +
+        `autorizado por gerencia. Motivo: ${motivoLimpio}`;
+      await sbAny.from('ot_corte').update({
+        observacion: corteRow?.observacion ? `${corteRow.observacion}\n${nota}` : nota,
+      }).eq('id', data.corte_id);
+      void userId;
+    }
     return null;
   });
   if (r.ok) await bumpPaths(`/corte/${fd.get('corte_id')}`);

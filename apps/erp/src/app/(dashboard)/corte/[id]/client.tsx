@@ -28,6 +28,7 @@ export function LineasCorteEditor({
   editable,
   planPorTalla,
   cortadoOtrosPorTalla,
+  usuarioEsGerente = false,
 }: {
   corteId: string;
   lineas: Linea[];
@@ -36,6 +37,8 @@ export function LineasCorteEditor({
   planPorTalla: Record<string, number>;
   /** Cantidad ya cortada en otros cortes del mismo OT/modelo, para calcular saldo. */
   cortadoOtrosPorTalla: Record<string, number>;
+  /** Solo gerencia autoriza una cantidad real distinta a la teórica del plan. */
+  usuarioEsGerente?: boolean;
 }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
@@ -43,6 +46,13 @@ export function LineasCorteEditor({
   const [tallaSel, setTallaSel] = useState('');
   const [cantTeorica, setCantTeorica] = useState('');
   const [cantReal, setCantReal] = useState('');
+  const [motivo, setMotivo] = useState('');
+
+  // ¿La real difiere de la teórica? → requiere gerencia + motivo.
+  const realNum = cantReal.trim() === '' ? null : Number(cantReal);
+  const teoNum = Number(cantTeorica) || 0;
+  const difiereReal = realNum != null && realNum !== teoNum;
+  const requiereAutorizacion = difiereReal && !usuarioEsGerente;
 
   const tallasUsadas = useMemo(() => new Set(lineas.map((l) => l.talla)), [lineas]);
   // Tallas disponibles: las que están en el plan de la OT y no fueron usadas
@@ -72,18 +82,26 @@ export function LineasCorteEditor({
   }
 
   function submit() {
-    if (!tallaSel) return toast.error('Elegí una talla');
-    if (!cantTeorica || Number(cantTeorica) <= 0) return toast.error('Ingresá la cantidad teórica');
+    if (!tallaSel) return toast.error('Elija una talla');
+    if (!cantTeorica || Number(cantTeorica) <= 0) return toast.error('Ingrese la cantidad teórica');
+    if (requiereAutorizacion) {
+      return toast.error(`La cantidad real (${realNum}) difiere de la teórica (${teoNum}). Requiere autorización de gerencia.`);
+    }
+    if (difiereReal && !motivo.trim()) {
+      return toast.error('Indique el motivo de la diferencia entre la real y la teórica.');
+    }
     const fd = new FormData();
     fd.set('corte_id', corteId);
     fd.set('talla', tallaSel);
     fd.set('cantidad_teorica', cantTeorica);
     if (cantReal) fd.set('cantidad_real', cantReal);
+    if (motivo.trim()) fd.set('motivo', motivo.trim());
     start(async () => {
       const r = await agregarLineaCorte(null, fd);
       if (r.ok) {
-        toast.success('Línea agregada');
+        toast.success(difiereReal ? 'Línea agregada — autorización registrada' : 'Línea agregada');
         setOpen(false);
+        setMotivo('');
         router.refresh();
       } else {
         toast.error(r.error ?? 'Error');
@@ -124,16 +142,38 @@ export function LineasCorteEditor({
                 onChange={(e) => setCantTeorica(e.target.value)}
               />
             </FormRow>
-            <FormRow label="Cant. real" hint="Cuánto efectivamente salió del corte (si ya lo sabés)">
+            <FormRow label="Cant. real" hint="Cuánto efectivamente salió del corte (si ya lo sabe)">
               <Input
                 type="number"
                 min={0}
                 value={cantReal}
                 onChange={(e) => setCantReal(e.target.value)}
                 placeholder="opcional"
+                className={difiereReal ? 'border-amber-400 bg-amber-50' : ''}
               />
             </FormRow>
           </FormGrid>
+
+          {difiereReal && (
+            requiereAutorizacion ? (
+              <div className="mt-3 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                <strong>Requiere autorización de gerencia:</strong> la cantidad real ({realNum}) difiere de la teórica del plan ({teoNum}).
+                Solicite a gerencia que registre esta liquidación.
+              </div>
+            ) : (
+              <div className="mt-3">
+                <FormRow label={`Motivo de la diferencia (teórica ${teoNum} → real ${realNum})`} required>
+                  <Input
+                    value={motivo}
+                    onChange={(e) => setMotivo(e.target.value)}
+                    placeholder="Ej: falla de tela, se cortó de más para cubrir merma…"
+                    maxLength={200}
+                  />
+                </FormRow>
+              </div>
+            )
+          )}
+
           <div className="mt-3 flex justify-end gap-2">
             <Button type="button" variant="outline" onClick={() => setOpen(false)} disabled={pending}>Cancelar</Button>
             <Button type="button" variant="premium" onClick={submit} disabled={pending}>
