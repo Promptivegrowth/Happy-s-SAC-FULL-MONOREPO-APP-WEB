@@ -25,6 +25,36 @@ type Props = {
   className?: string;
 };
 
+/**
+ * Reduce una imagen en el navegador a un máximo de `maxSide` px por el lado
+ * más largo y la re-codifica a WebP. Devuelve un File liviano (típicamente
+ * < 500KB). Si algo falla (formato no rasterizable, canvas bloqueado), devuelve
+ * el archivo original sin romper la subida.
+ */
+async function comprimirImagen(file: File, maxSide = 1600, quality = 0.85): Promise<File> {
+  try {
+    if (!file.type.startsWith('image/')) return file;
+    const bitmap = await createImageBitmap(file).catch(() => null);
+    if (!bitmap) return file;
+    const escala = Math.min(1, maxSide / Math.max(bitmap.width, bitmap.height));
+    const w = Math.max(1, Math.round(bitmap.width * escala));
+    const h = Math.max(1, Math.round(bitmap.height * escala));
+    const canvas = document.createElement('canvas');
+    canvas.width = w;
+    canvas.height = h;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return file;
+    ctx.drawImage(bitmap, 0, 0, w, h);
+    const blob = await new Promise<Blob | null>((res) => canvas.toBlob(res, 'image/webp', quality));
+    bitmap.close?.();
+    if (!blob || blob.size >= file.size) return file; // no mejoró: usar original
+    const base = file.name.replace(/\.[^.]+$/, '') || 'imagen';
+    return new File([blob], `${base}.webp`, { type: 'image/webp' });
+  } catch {
+    return file;
+  }
+}
+
 export function ImageUploader({
   value,
   onChange,
@@ -55,8 +85,13 @@ export function ImageUploader({
     const file = e.target.files?.[0];
     if (!file) return;
     start(async () => {
+      // Comprimir/redimensionar en el navegador ANTES de subir. Evita el límite
+      // de body de los server actions (1MB por defecto) y el tope de ~4.5MB de
+      // las funciones serverless de Vercel — que hacían fallar fotos grandes —,
+      // y de paso hace que las imágenes carguen más rápido en la web.
+      const optimizada = await comprimirImagen(file);
       const fd = new FormData();
-      fd.append('file', file);
+      fd.append('file', optimizada);
       const r = await subirArchivo(fd, bucket, prefix);
       if (r.ok && r.data) {
         // Notificar al padre con la URL nueva
