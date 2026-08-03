@@ -1,6 +1,6 @@
 'use server';
 
-import { runAction, requireUser, type ActionResult } from './_helpers';
+import { runAction, requireUser, bumpPaths, type ActionResult } from './_helpers';
 
 const BUCKET_DEFAULT = 'disfraces-fotos';
 const MAX_BYTES = 10 * 1024 * 1024;
@@ -63,7 +63,7 @@ export async function agregarImagenProducto(
   url: string,
   esPortada: boolean = false,
 ): Promise<ActionResult<{ id: string; orden: number }>> {
-  return runAction(async () => {
+  const r = await runAction(async () => {
     const { sb } = await requireUser();
 
     // Idempotencia: si ya existe una imagen con la misma URL en este producto,
@@ -125,13 +125,31 @@ export async function agregarImagenProducto(
     }
     return { id: row.id as string, orden: (row.orden as number) ?? orden };
   });
+  // Invalidar la caché de la ficha para que add/delete se reflejen al recargar
+  // (sin esto, la página cacheada seguía mostrando las imágenes viejas → el
+  // cliente reportó que las fotos "reaparecen" tras eliminarlas — 21/07/2026).
+  if (r.ok) await bumpPaths(`/productos/${productoId}`, '/productos', '/web-catalogo');
+  return r;
 }
 
 export async function eliminarImagenProducto(imagenId: string): Promise<ActionResult> {
-  return runAction(async () => {
+  let productoId: string | null = null;
+  const r = await runAction(async () => {
     const { sb } = await requireUser();
+    // Capturamos el producto antes de borrar, para revalidar su ficha después.
+    const { data: row } = await sb
+      .from('productos_imagenes')
+      .select('producto_id')
+      .eq('id', imagenId)
+      .maybeSingle();
+    productoId = (row?.producto_id as string) ?? null;
     const { error } = await sb.from('productos_imagenes').delete().eq('id', imagenId);
     if (error) throw new Error(error.message);
     return null;
   });
+  if (r.ok) {
+    if (productoId) await bumpPaths(`/productos/${productoId}`, '/productos', '/web-catalogo');
+    else await bumpPaths('/productos', '/web-catalogo');
+  }
+  return r;
 }
