@@ -1,14 +1,32 @@
 'use client';
 
+import Link from 'next/link';
 import { useMemo, useState, useTransition } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@happy/ui/card';
 import { Badge } from '@happy/ui/badge';
 import { Input } from '@happy/ui/input';
 import { Button } from '@happy/ui/button';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@happy/ui/table';
-import { Loader2, Plus, Trash2, Clock, X } from 'lucide-react';
+import { Loader2, Plus, Trash2, Clock, X, Scissors, ExternalLink } from 'lucide-react';
 import { toast } from 'sonner';
 import { crearRegistroTiempoOT, eliminarRegistroTiempoOT } from '@/server/actions/ot';
+
+/** Resumen (solo lectura) de la liquidación de tiempos del área de corte, que
+ *  se declara en la orden de corte y en la OT solo se muestra informativo. */
+type CorteResumen = {
+  declarado: boolean;
+  totalMin: number;
+  cortes: { id: string; numero: string; estado: string }[];
+  telas: {
+    tela_nombre: string;
+    tendido: number;
+    corte: number;
+    habilitado: number;
+    fecha_tendido: string | null;
+    fecha_corte: string | null;
+    fecha_habilitado: string | null;
+  }[];
+};
 
 type Proceso = {
   id: string;
@@ -75,11 +93,13 @@ type Props = {
   osRetornada?: boolean;
   /** ¿Existe alguna OS para esta OT? */
   hayOs?: boolean;
+  /** Resumen de la liquidación de tiempos de corte (se declara en la orden de corte). */
+  corteResumen?: CorteResumen;
 };
 
 const PEN = (n: number) => `S/ ${n.toFixed(2)}`;
 
-export function TiemposCostoTab({ otId, procesos, lineas, registros, operarios, disabled, ordenConfeccion = -1, osRetornada = false, hayOs = false }: Props) {
+export function TiemposCostoTab({ otId, procesos, lineas, registros, operarios, disabled, ordenConfeccion = -1, osRetornada = false, hayOs = false, corteResumen }: Props) {
   // Productos únicos en las líneas de la OT
   const productos = useMemo(() => {
     const map = new Map<string, { id: string; nombre: string; codigo: string }>();
@@ -181,9 +201,11 @@ export function TiemposCostoTab({ otId, procesos, lineas, registros, operarios, 
     // que tenga al menos un registro (para no bloquear el flujo).
     const completa = (op: Proceso) => {
       if (unidadesGlobal <= 0) return true;
+      // El área de corte se liquida en la orden de corte: se considera completa
+      // si la liquidación tiene tiempos cargados (no se declara en la OT).
+      if (op.area?.codigo === 'CORTE') return corteResumen?.declarado ?? tieneRegistro.get(op.id) === true;
       const dec = declaradas.get(op.id) ?? 0;
       if (dec >= unidadesGlobal) return true;
-      if (op.area?.codigo === 'CORTE') return tieneRegistro.get(op.id) === true;
       return false;
     };
     const map = new Map<string, { bloqueado: boolean; prevNombre: string; prevFaltan: number }>();
@@ -195,7 +217,7 @@ export function TiemposCostoTab({ otId, procesos, lineas, registros, operarios, 
       map.set(op.id, { bloqueado, prevNombre: prev ? nombreOperacion(prev) : '', prevFaltan });
     }
     return map;
-  }, [procesosProducto, registrosProducto, unidadesGlobal]);
+  }, [procesosProducto, registrosProducto, unidadesGlobal, corteResumen?.declarado]);
 
   return (
     <div className="space-y-4">
@@ -219,6 +241,13 @@ export function TiemposCostoTab({ otId, procesos, lineas, registros, operarios, 
         <CardContent className="space-y-3 p-3">
           {[...procesosPorArea.entries()].map(([areaCodigo, procs]) => {
             const area = procs[0]!.area;
+            // El área de CORTE NO se registra en la OT: los tiempos (tendido,
+            // corte, habilitado) se declaran en la orden de corte. Acá solo se
+            // muestra un resumen informativo de solo lectura (pedido del cliente
+            // 21/07/2026).
+            if (areaCodigo === 'CORTE') {
+              return <CorteAreaInfo key={areaCodigo} procesos={procs} resumen={corteResumen} />;
+            }
             return (
               <div key={areaCodigo} className="rounded-md border border-slate-200 bg-slate-50/50 p-3">
                 <div className="mb-2 flex items-center gap-2">
@@ -574,6 +603,86 @@ function StatBox({ label, value, sub, highlight }: { label: string; value: strin
 }
 
 type TallaDisp = { talla: string; cortada: number; yaRegistrado: number };
+
+/**
+ * Bloque de SOLO LECTURA del área de corte en la OT. Los tiempos de corte se
+ * declaran en la orden de corte (liquidación); acá se muestran como resumen
+ * informativo con un enlace a la orden de corte para editarlos (pedido del
+ * cliente 21/07/2026).
+ */
+function CorteAreaInfo({ procesos, resumen }: { procesos: Proceso[]; resumen?: CorteResumen }) {
+  const fmt = (v: string | null) =>
+    v ? new Date(`${v}T12:00:00`).toLocaleDateString('es-PE', { day: '2-digit', month: '2-digit', year: '2-digit' }) : '—';
+  const telasConTiempo = (resumen?.telas ?? []).filter((t) => t.tendido + t.corte + t.habilitado > 0);
+  return (
+    <div className="rounded-md border border-sky-200 bg-sky-50/50 p-3">
+      <div className="mb-2 flex flex-wrap items-center gap-2">
+        <Badge variant="default" className="bg-sky-600 text-[10px]">CORTE</Badge>
+        <span className="flex items-center gap-1 text-xs font-medium text-sky-800">
+          <Scissors className="h-3.5 w-3.5" /> Los tiempos de corte se declaran en la orden de corte (liquidación)
+        </span>
+        {resumen?.cortes.map((c) => (
+          <Link
+            key={c.id}
+            href={`/corte/${c.id}`}
+            className="inline-flex items-center gap-1 rounded border border-sky-300 bg-white px-1.5 py-0.5 text-[10px] font-medium text-sky-700 hover:bg-sky-100"
+          >
+            {c.numero} <ExternalLink className="h-2.5 w-2.5" />
+          </Link>
+        ))}
+      </div>
+
+      {/* Operaciones de corte (solo referencia, sin registro acá) */}
+      <div className="mb-2 flex flex-wrap gap-1.5">
+        {procesos.map((p) => (
+          <span key={p.id} className="rounded border border-slate-200 bg-white px-2 py-0.5 text-[10px] text-slate-600">
+            #{p.orden} {nombreOperacion(p)}
+          </span>
+        ))}
+      </div>
+
+      {telasConTiempo.length === 0 ? (
+        <p className="text-[11px] text-amber-700">
+          Aún no se declararon tiempos de corte. Regístrelos en la liquidación de la orden de corte.
+        </p>
+      ) : (
+        <div className="overflow-x-auto">
+          <table className="w-full text-[11px]">
+            <thead>
+              <tr className="border-b border-sky-200 text-left text-[10px] uppercase tracking-wide text-sky-700">
+                <th className="py-1">Tela</th>
+                <th className="py-1 text-right">Tendido</th>
+                <th className="py-1 text-right">Corte</th>
+                <th className="py-1 text-right">Habilitado</th>
+                <th className="py-1 text-right">Fechas (T/C/H)</th>
+              </tr>
+            </thead>
+            <tbody>
+              {telasConTiempo.map((t, i) => (
+                <tr key={i} className="border-b border-sky-100 last:border-0">
+                  <td className="py-1 font-medium text-slate-700">{t.tela_nombre}</td>
+                  <td className="py-1 text-right font-mono">{t.tendido.toFixed(2)}</td>
+                  <td className="py-1 text-right font-mono">{t.corte.toFixed(2)}</td>
+                  <td className="py-1 text-right font-mono">{t.habilitado.toFixed(2)}</td>
+                  <td className="py-1 text-right font-mono text-[10px] text-slate-500">
+                    {fmt(t.fecha_tendido)} · {fmt(t.fecha_corte)} · {fmt(t.fecha_habilitado)}
+                  </td>
+                </tr>
+              ))}
+              <tr className="font-semibold text-sky-800">
+                <td className="py-1">Total</td>
+                <td className="py-1 text-right font-mono">{telasConTiempo.reduce((s, t) => s + t.tendido, 0).toFixed(2)}</td>
+                <td className="py-1 text-right font-mono">{telasConTiempo.reduce((s, t) => s + t.corte, 0).toFixed(2)}</td>
+                <td className="py-1 text-right font-mono">{telasConTiempo.reduce((s, t) => s + t.habilitado, 0).toFixed(2)}</td>
+                <td className="py-1 text-right font-mono">{(resumen?.totalMin ?? 0).toFixed(2)} min</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
 
 function OperacionBlock({
   otId, proceso, tallaActual, tallasDisponibles, registros, operarios, esAreaCorte, disabled,

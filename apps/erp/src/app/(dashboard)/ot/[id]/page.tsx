@@ -149,6 +149,46 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
   const osRetornada = osArr.some((o) => o.estado === 'RECEPCIONADA' || o.estado === 'CERRADA');
   const hayOs = osArr.length > 0;
 
+  // TIEMPOS DEL ÁREA DE CORTE (pedido del cliente 21/07/2026): se declaran en
+  // la ORDEN DE CORTE (liquidación), no en la OT. Acá solo se muestran como
+  // resumen informativo y sirven para saber si el área de corte ya está
+  // declarada (habilita el avance).
+  const { data: cortesRaw } = await sbAny
+    .from('ot_corte')
+    .select('id, numero, estado')
+    .eq('ot_id', id)
+    .neq('estado', 'ANULADO');
+  const corteIds = ((cortesRaw ?? []) as { id: string }[]).map((c) => c.id);
+  const { data: corteTiemposRaw } = corteIds.length > 0
+    ? await sbAny
+        .from('ot_corte_tiempos')
+        .select('tela_nombre, tiempo_tendido_min, tiempo_corte_min, tiempo_habilitado_min, fecha_tendido, fecha_corte, fecha_habilitado')
+        .in('corte_id', corteIds)
+    : { data: [] as unknown[] };
+  const corteTiempos = ((corteTiemposRaw ?? []) as Array<{
+    tela_nombre: string | null;
+    tiempo_tendido_min: number | string | null;
+    tiempo_corte_min: number | string | null;
+    tiempo_habilitado_min: number | string | null;
+    fecha_tendido: string | null; fecha_corte: string | null; fecha_habilitado: string | null;
+  }>).map((t) => ({
+    tela_nombre: t.tela_nombre ?? '—',
+    tendido: Number(t.tiempo_tendido_min ?? 0),
+    corte: Number(t.tiempo_corte_min ?? 0),
+    habilitado: Number(t.tiempo_habilitado_min ?? 0),
+    fecha_tendido: t.fecha_tendido,
+    fecha_corte: t.fecha_corte,
+    fecha_habilitado: t.fecha_habilitado,
+  }));
+  const corteTotalMin = corteTiempos.reduce((s, t) => s + t.tendido + t.corte + t.habilitado, 0);
+  const corteDeclarado = corteTotalMin > 0;
+  const corteResumen = {
+    declarado: corteDeclarado,
+    totalMin: corteTotalMin,
+    cortes: ((cortesRaw ?? []) as { id: string; numero: string; estado: string }[]).map((c) => ({ id: c.id, numero: c.numero, estado: c.estado })),
+    telas: corteTiempos,
+  };
+
   // ÁREA EN CURSO derivada de las declaraciones (pedido del cliente
   // 21/07/2026): la primera área — en orden de proceso — que todavía tiene
   // operaciones sin declarar. A medida que se declaran los tiempos, el
@@ -171,7 +211,11 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
         const prev = info.get(cod) ?? { nombre: p.area?.nombre ?? cod, minOrden: p.orden, pendientes: 0, total: 0 };
         prev.minOrden = Math.min(prev.minOrden, p.orden);
         prev.total += 1;
-        if (!declarado.has(`${p.id}::${l.talla}`)) prev.pendientes += 1;
+        // El área de CORTE se declara en la orden de corte (liquidación), no en
+        // los registros de la OT. Se considera declarada si la liquidación tiene
+        // tiempos cargados.
+        const estaDeclarado = cod === 'CORTE' ? corteDeclarado : declarado.has(`${p.id}::${l.talla}`);
+        if (!estaDeclarado) prev.pendientes += 1;
         info.set(cod, prev);
       }
     }
@@ -196,7 +240,7 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
     if (!areaEnCurso || areaEnCurso.completo) return null;
     const codigos = AREA_DE_ESTADO[ot.estado];
     if (!codigos || !codigos.includes(areaEnCurso.codigo)) return null;
-    return { nombre: areaEnCurso.nombre, pendientes: areaEnCurso.pendientes, total: areaEnCurso.total };
+    return { nombre: areaEnCurso.nombre, pendientes: areaEnCurso.pendientes, total: areaEnCurso.total, esCorte: areaEnCurso.codigo === 'CORTE' };
   })();
 
   // TIMELINE de la bitácora — se arma de las DECLARACIONES de tiempo (lo que
@@ -391,6 +435,7 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
             ordenConfeccion={ordenConfeccion}
             osRetornada={osRetornada}
             hayOs={hayOs}
+            corteResumen={corteResumen}
           />
         </TabsContent>
 

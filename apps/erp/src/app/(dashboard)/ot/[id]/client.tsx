@@ -57,7 +57,7 @@ export function OtAcciones({ otId, estado, almacenes, areasReceta = [], usuarioE
   /** Solo gerencia puede forzar el cierre con operaciones sin declarar. */
   usuarioEsGerente?: boolean;
   /** Si hay operaciones del área actual sin declarar, se bloquea el avance. */
-  avanceBloqueo?: { nombre: string; pendientes: number; total: number } | null;
+  avanceBloqueo?: { nombre: string; pendientes: number; total: number; esCorte?: boolean } | null;
 }) {
   const [pending, start] = useTransition();
   const [showCierre, setShowCierre] = useState(false);
@@ -71,8 +71,11 @@ export function OtAcciones({ otId, estado, almacenes, areasReceta = [], usuarioE
     // Bloqueo de avance: no dejar pasar de proceso si el área actual tiene
     // operaciones sin declarar (CANCELAR siempre permitido).
     if (avanceBloqueo && nuevo !== 'CANCELADA') {
+      const donde = avanceBloqueo.esCorte
+        ? 'Declare la liquidación de tiempos en la orden de corte.'
+        : 'Regístrelas en "Tiempos & costo MO".';
       toast.error(
-        `No se puede avanzar: faltan declarar ${avanceBloqueo.pendientes} de ${avanceBloqueo.total} operación(es) del área ${avanceBloqueo.nombre}. Regístrelas en "Tiempos & costo MO".`,
+        `No se puede avanzar: faltan declarar ${avanceBloqueo.pendientes} de ${avanceBloqueo.total} operación(es) del área ${avanceBloqueo.nombre}. ${donde}`,
         { duration: 8000 },
       );
       return;
@@ -191,7 +194,7 @@ export function OtAcciones({ otId, estado, almacenes, areasReceta = [], usuarioE
           </div>
           {avanceBloqueo && (
             <p className="max-w-xs text-right text-[11px] text-amber-700">
-              Para avanzar, declare los tiempos del área <strong>{avanceBloqueo.nombre}</strong> ({avanceBloqueo.pendientes} de {avanceBloqueo.total} pendientes).
+              Para avanzar, {avanceBloqueo.esCorte ? 'declare la liquidación de tiempos en la orden de corte' : <>declare los tiempos del área <strong>{avanceBloqueo.nombre}</strong></>} ({avanceBloqueo.pendientes} de {avanceBloqueo.total} pendientes).
             </p>
           )}
         </div>
