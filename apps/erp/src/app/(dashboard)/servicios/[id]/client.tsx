@@ -4,6 +4,7 @@ import { useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
 import { Button } from '@happy/ui/button';
 import { Input } from '@happy/ui/input';
+import { Textarea } from '@happy/ui/textarea';
 import { Badge } from '@happy/ui/badge';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@happy/ui/table';
 import { Loader2, ArrowRight, Save, Pencil, X, Printer } from 'lucide-react';
@@ -16,6 +17,9 @@ const FLOW: Record<string, string[]> = {
   EMITIDA: ['DESPACHADA','ANULADA'],
   DESPACHADA: ['EN_PROCESO'],
   EN_PROCESO: ['RECEPCIONADA'],
+  // La recepción parcial se completa desde el editor de recepción; acá solo
+  // ofrecemos cerrar (si ya volvió todo) o anular.
+  RECEPCION_PARCIAL: ['CERRADA','ANULADA'],
   RECEPCIONADA: ['CERRADA'],
 };
 
@@ -242,11 +246,13 @@ type LineaRecep = {
 export function RecepcionOSEditor({
   osId,
   fechaRetornoInicial,
+  motivoFallaInicial = '',
   lineas,
   disabled,
 }: {
   osId: string;
   fechaRetornoInicial: string;
+  motivoFallaInicial?: string;
   lineas: LineaRecep[];
   disabled: boolean;
 }) {
@@ -256,6 +262,7 @@ export function RecepcionOSEditor({
     fechaRetornoInicial || new Date().toISOString().slice(0, 10),
   );
   const [rows, setRows] = useState<LineaRecep[]>(lineas);
+  const [motivoFalla, setMotivoFalla] = useState(motivoFallaInicial);
 
   function setVal(i: number, campo: 'recepcionada' | 'fallada', v: string) {
     const n = v === '' ? 0 : Math.max(0, Math.floor(Number(v)));
@@ -270,17 +277,29 @@ export function RecepcionOSEditor({
   const totalFall = rows.reduce((s, r) => s + r.fallada, 0);
   const totalEnv = rows.reduce((s, r) => s + r.enviado, 0);
   const excede = rows.some((r) => r.recepcionada + r.fallada > r.enviado);
+  // Entrega parcial: se procesó algo pero no todo lo enviado (en campaña el
+  // taller devuelve por partes). Se puede guardar igual y volver más adelante.
+  const totalProcesado = totalRecep + totalFall;
+  const esParcial = totalProcesado > 0 && totalProcesado < totalEnv;
+  const hayFallas = totalFall > 0;
 
   function guardar() {
     if (excede) return toast.error('Recepcionadas + falladas no puede superar lo enviado.');
+    if (totalProcesado === 0) return toast.error('Ingrese al menos una unidad recepcionada o fallada.');
+    if (hayFallas && !motivoFalla.trim()) return toast.error('Indique el motivo de las fallas.');
     start(async () => {
       const r = await registrarRecepcionOS(
         osId,
         fechaRetorno,
         rows.map((x) => ({ id: x.id, recepcionada: x.recepcionada, fallada: x.fallada })),
+        motivoFalla,
       );
       if (r.ok) {
-        toast.success('Recepción registrada — OS marcada como RECEPCIONADA');
+        toast.success(
+          esParcial
+            ? `Recepción parcial registrada (${totalProcesado} de ${totalEnv}). Puede registrar el resto al siguiente retorno.`
+            : 'Recepción completa registrada — OS marcada como RECEPCIONADA',
+        );
         router.refresh();
       } else toast.error(r.error ?? 'Error');
     });
@@ -306,8 +325,14 @@ export function RecepcionOSEditor({
         )}
         <div className="ml-auto text-right text-xs text-slate-500">
           Enviado {totalEnv} · <span className="text-emerald-600">Recep. {totalRecep}</span> · <span className="text-amber-600">Fallas {totalFall}</span>
+          {esParcial && <span className="ml-2 rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-medium text-amber-700">Entrega parcial</span>}
         </div>
       </div>
+      {esParcial && !disabled && (
+        <p className="px-4 pt-2 text-[11px] text-amber-700">
+          Aún no volvió todo lo enviado ({totalProcesado} de {totalEnv}). Puede guardar esta entrega parcial y registrar el resto cuando el taller devuelva más.
+        </p>
+      )}
       <Table>
         <TableHeader>
           <TableRow>
@@ -358,11 +383,27 @@ export function RecepcionOSEditor({
           })}
         </TableBody>
       </Table>
+      {hayFallas && (
+        <div className="px-4 pt-3">
+          <label className="block text-[10px] font-semibold uppercase tracking-wide text-slate-500">
+            Motivo de la(s) falla(s) <span className="text-danger">*</span>
+          </label>
+          <Textarea
+            value={motivoFalla}
+            onChange={(e) => setMotivoFalla(e.target.value)}
+            disabled={disabled || pending}
+            rows={2}
+            maxLength={500}
+            placeholder="Ej. costura abierta, mancha de aceite, talla mal cortada…"
+            className="mt-1 text-sm"
+          />
+        </div>
+      )}
       {!disabled && (
         <div className="flex justify-end p-4">
           <Button variant="premium" size="sm" onClick={guardar} disabled={pending || excede}>
             {pending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
-            Registrar recepción
+            {esParcial ? 'Registrar entrega parcial' : 'Registrar recepción'}
           </Button>
         </div>
       )}

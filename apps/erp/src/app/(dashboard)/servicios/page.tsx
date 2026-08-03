@@ -16,6 +16,7 @@ const COLOR: Record<string, 'success' | 'warning' | 'secondary' | 'destructive' 
   EMITIDA: 'default',
   DESPACHADA: 'warning',
   EN_PROCESO: 'warning',
+  RECEPCION_PARCIAL: 'warning',
   RECEPCIONADA: 'success',
   CERRADA: 'success',
   ANULADA: 'destructive',

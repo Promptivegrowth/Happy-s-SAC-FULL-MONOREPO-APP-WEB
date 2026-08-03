@@ -446,15 +446,20 @@ export async function crearOS(
     });
     const { sb, userId } = await requireUser();
 
+    // CAMPAÑA solo aplica si el check "Es campaña" está en SÍ (pedido del
+    // cliente 21/07/2026). Si no es campaña, el adicional se fuerza a 0 aunque
+    // venga un valor en el campo.
+    const campanaUnit = data.es_campana ? data.campana_por_unidad : 0;
+
     // AUTORIZACIÓN DE GERENCIA (pedido del cliente 21/07/2026): la movilidad
     // sale S/ 0.10 por unidad en automático. Cambiar ese valor —o cargar
     // cualquier monto de campaña— requiere que el usuario sea gerente.
     const movModificada = Math.abs(data.movilidad_por_unidad - MOVILIDAD_DEFAULT_OS) > 0.001;
-    const campanaAplicada = data.campana_por_unidad > 0;
+    const campanaAplicada = campanaUnit > 0;
     if ((movModificada || campanaAplicada) && !(await esGerente())) {
       const que = [
         movModificada ? `la movilidad (S/ ${data.movilidad_por_unidad.toFixed(2)} en vez de S/ ${MOVILIDAD_DEFAULT_OS.toFixed(2)})` : null,
-        campanaAplicada ? `el adicional de campaña (S/ ${data.campana_por_unidad.toFixed(2)})` : null,
+        campanaAplicada ? `el adicional de campaña (S/ ${campanaUnit.toFixed(2)})` : null,
       ].filter(Boolean).join(' y ');
       throw new Error(`Modificar ${que} requiere autorización de gerencia. Ingrese con un usuario gerente para continuar.`);
     }
@@ -476,7 +481,7 @@ export async function crearOS(
       adicional_movilidad: 0,
       adicional_campana: 0,
       movilidad_por_unidad: data.movilidad_por_unidad,
-      campana_por_unidad: data.campana_por_unidad,
+      campana_por_unidad: campanaUnit,
       es_campana: data.es_campana,
       observaciones: data.observaciones || null,
       cuidados: data.cuidados || null,
@@ -519,7 +524,7 @@ export async function crearOS(
       .eq('os_id', row.id);
     const totalUnidades = (lineasOs ?? []).reduce((s, l) => s + Number(l.cantidad ?? 0), 0);
     const totalMovilidad = Math.round(data.movilidad_por_unidad * totalUnidades * 100) / 100;
-    const totalCampana = Math.round(data.campana_por_unidad * totalUnidades * 100) / 100;
+    const totalCampana = Math.round(campanaUnit * totalUnidades * 100) / 100;
     if (totalMovilidad > 0 || totalCampana > 0) {
       await sbAny.from('ordenes_servicio')
         .update({ adicional_movilidad: totalMovilidad, adicional_campana: totalCampana })
@@ -689,6 +694,7 @@ export async function registrarRecepcionOS(
   osId: string,
   fechaRetorno: string,
   lineas: z.input<typeof recepcionLineaSchema>[],
+  motivoFalla?: string,
 ): Promise<ActionResult> {
   const r = await runAction(async () => {
     const parsed = lineas.map((l) => recepcionLineaSchema.parse(l));
@@ -725,11 +731,32 @@ export async function registrarRecepcionOS(
       if (error) throw new Error(error.message);
     }
 
-    // Fecha de retorno + estado RECEPCIONADA (si no está cerrada/anulada).
-    const nuevoEstado = ['CERRADA', 'ANULADA'].includes(osRow.estado) ? osRow.estado : 'RECEPCIONADA';
+    // ENTREGAS PARCIALES (pedido del cliente 21/07/2026): en campaña el taller
+    // devuelve la mercadería en varias veces. El estado refleja si ya volvió
+    // TODO (RECEPCIONADA) o solo una parte (RECEPCION_PARCIAL). Se compara el
+    // total procesado (recepcionadas + falladas) contra el total enviado.
+    const totalEnviado = [...enviadoPorId.values()].reduce((s, v) => s + v, 0);
+    const totalProcesado = parsed.reduce((s, l) => s + l.recepcionada + l.fallada, 0);
+    let nuevoEstado: string;
+    if (['CERRADA', 'ANULADA'].includes(osRow.estado)) {
+      nuevoEstado = osRow.estado;
+    } else if (totalEnviado > 0 && totalProcesado >= totalEnviado) {
+      nuevoEstado = 'RECEPCIONADA';
+    } else if (totalProcesado > 0) {
+      nuevoEstado = 'RECEPCION_PARCIAL';
+    } else {
+      nuevoEstado = osRow.estado; // nada recibido aún: no cambia
+    }
+
+    const hayFallas = parsed.some((l) => l.fallada > 0);
     const { error: e2 } = await sbAny
       .from('ordenes_servicio')
-      .update({ fecha_recepcion: fechaRetorno || null, estado: nuevoEstado })
+      .update({
+        fecha_recepcion: fechaRetorno || null,
+        estado: nuevoEstado,
+        // Solo persistimos motivo si hay fallas; si no, lo limpiamos.
+        motivo_falla: hayFallas ? (motivoFalla?.trim() || null) : null,
+      })
       .eq('id', osId);
     if (e2) throw new Error(e2.message);
     return null;
@@ -745,12 +772,15 @@ export async function registrarRecepcionOS(
  * ANULADA es accesible desde cualquier estado activo (no desde finales).
  */
 const FLOW_OS: Record<string, string[]> = {
-  EMITIDA:      ['DESPACHADA', 'ANULADA'],
-  DESPACHADA:   ['EN_PROCESO', 'ANULADA'],
-  EN_PROCESO:   ['RECEPCIONADA', 'ANULADA'],
-  RECEPCIONADA: ['CERRADA', 'ANULADA'],
-  CERRADA:      [],
-  ANULADA:      [],
+  EMITIDA:            ['DESPACHADA', 'ANULADA'],
+  DESPACHADA:         ['EN_PROCESO', 'ANULADA'],
+  EN_PROCESO:         ['RECEPCIONADA', 'ANULADA'],
+  // Recepción parcial: la recepción se completa desde el editor; desde acá solo
+  // se puede cerrar (si ya volvió todo) o anular.
+  RECEPCION_PARCIAL:  ['RECEPCIONADA', 'CERRADA', 'ANULADA'],
+  RECEPCIONADA:       ['CERRADA', 'ANULADA'],
+  CERRADA:            [],
+  ANULADA:            [],
 };
 
 export async function cambiarEstadoOS(osId: string, nuevoEstado: string): Promise<ActionResult> {

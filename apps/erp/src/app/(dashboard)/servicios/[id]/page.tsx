@@ -15,6 +15,7 @@ const COLOR: Record<string, 'success' | 'warning' | 'secondary' | 'default' | 'd
   EMITIDA: 'default',
   DESPACHADA: 'warning',
   EN_PROCESO: 'warning',
+  RECEPCION_PARCIAL: 'warning',
   RECEPCIONADA: 'success',
   CERRADA: 'success',
   ANULADA: 'destructive',
@@ -66,6 +67,7 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
     fecha_envio: string | null;
     taller_id: string | null;
     monto_base: number | null;
+    motivo_falla: string | null;
   };
   const talleres = ((talleresData ?? []) as { id: string; nombre: string }[]).map((t) => ({ id: t.id, nombre: t.nombre }));
 
@@ -217,6 +219,7 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
             <RecepcionOSEditor
               osId={id}
               fechaRetornoInicial={osExt.fecha_recepcion ?? ''}
+              motivoFallaInicial={osExt.motivo_falla ?? ''}
               disabled={os.estado === 'ANULADA' || os.estado === 'CERRADA'}
               lineas={lineas.map((l) => ({
                 id: l.id,

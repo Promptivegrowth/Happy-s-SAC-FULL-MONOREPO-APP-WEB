@@ -216,7 +216,8 @@ export function NuevaOSForm({
     fd.set('es_campana', esCampana ? 'on' : 'off');
     fd.set('monto_base', montoBase || '0');
     fd.set('movilidad_por_unidad', movilidadUnit || '0');
-    fd.set('campana_por_unidad', campanaUnit || '0');
+    // Campaña solo si el check está activo; si no, se manda 0.
+    fd.set('campana_por_unidad', esCampana ? (campanaUnit || '0') : '0');
     // Mandar tallas seleccionadas siempre que haya alguna marcada. Se usan
     // tanto para filtrar las líneas del corte como para poblar las líneas de
     // la OS desde ot_lineas cuando no hay corte vinculado.
@@ -556,12 +557,29 @@ export function NuevaOSForm({
               title={!esGerente ? 'Solo gerencia puede modificar la movilidad' : undefined}
             />
           </FormRow>
+          <FormRow label="Es campaña">
+            <label className="flex h-10 items-center gap-3 rounded-md border border-input bg-background px-3 text-sm">
+              <input
+                type="checkbox"
+                checked={esCampana}
+                onChange={(e) => {
+                  setEsCampana(e.target.checked);
+                  // Si deja de ser campaña, se limpia el adicional de campaña.
+                  if (!e.target.checked) setCampanaUnit('');
+                }}
+                className="h-4 w-4 accent-happy-500"
+              />
+              <span>{esCampana ? 'Sí, es de campaña' : 'No'}</span>
+            </label>
+          </FormRow>
           <FormRow
             label="Campaña por unidad (S/)"
             hint={
-              esGerente
-                ? (totalPrendasSeleccionadas > 0 ? `Total campaña ≈ S/ ${(Number(campanaUnit || 0) * totalPrendasSeleccionadas).toFixed(2)}` : 'S/ extra por unidad si es de campaña')
-                : '🔒 Cargar un adicional de campaña requiere autorización de gerencia.'
+              !esCampana
+                ? 'Solo se puede cargar campaña si "Es campaña" está en Sí.'
+                : esGerente
+                  ? (totalPrendasSeleccionadas > 0 ? `Total campaña ≈ S/ ${(Number(campanaUnit || 0) * totalPrendasSeleccionadas).toFixed(2)}` : 'S/ extra por unidad de campaña')
+                  : '🔒 Cargar un adicional de campaña requiere autorización de gerencia.'
             }
           >
             <Input
@@ -571,22 +589,11 @@ export function NuevaOSForm({
               value={campanaUnit}
               onChange={(e) => setCampanaUnit(e.target.value)}
               placeholder="0.00"
-              readOnly={!esGerente}
-              disabled={!esGerente}
-              className={!esGerente ? 'bg-slate-50 text-slate-700 cursor-not-allowed' : ''}
-              title={!esGerente ? 'Solo gerencia puede cargar campaña' : undefined}
+              readOnly={!esGerente || !esCampana}
+              disabled={!esGerente || !esCampana}
+              className={(!esGerente || !esCampana) ? 'bg-slate-50 text-slate-700 cursor-not-allowed' : ''}
+              title={!esCampana ? 'Active "Es campaña" para cargar el adicional' : !esGerente ? 'Solo gerencia puede cargar campaña' : undefined}
             />
-          </FormRow>
-          <FormRow label="Es campaña">
-            <label className="flex h-10 items-center gap-3 rounded-md border border-input bg-background px-3 text-sm">
-              <input
-                type="checkbox"
-                checked={esCampana}
-                onChange={(e) => setEsCampana(e.target.checked)}
-                className="h-4 w-4 accent-happy-500"
-              />
-              <span>{esCampana ? 'Sí, es de campaña' : 'No'}</span>
-            </label>
           </FormRow>
         </FormGrid>
 

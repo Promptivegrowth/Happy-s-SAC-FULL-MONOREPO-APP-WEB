@@ -158,6 +158,18 @@ export async function cambiarEstadoOT(otId: string, nuevoEstado: typeof ESTADOS[
     // Validación server-side de la transición. Espeja al FLOW del cliente
     // pero acá no se puede saltear vía DevTools / API directa.
     const estadoActual = actual.estado as EstadoOT;
+
+    // COMPLETADA NO se marca por acá: solo se llega a COMPLETADA cerrando la OT
+    // (cerrarOT → close_ot_atomic), que es lo que genera el ingreso a almacén,
+    // los lotes PT y el kardex. Marcarla directo dejaba la OT "completada" sin
+    // stock (bug reportado 21/07/2026).
+    if (nuevoEstado === 'COMPLETADA') {
+      throw new Error(
+        'Para completar la OT use el botón "Cerrar OT" (genera el ingreso a almacén). ' +
+        'No se puede marcar COMPLETADA sin cerrar.',
+      );
+    }
+
     const permitidos = FLOW_ESTADOS[estadoActual] ?? [];
     if (!permitidos.includes(nuevoEstado)) {
       throw new Error(

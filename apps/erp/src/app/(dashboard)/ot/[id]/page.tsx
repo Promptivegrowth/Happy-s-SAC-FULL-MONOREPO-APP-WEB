@@ -146,7 +146,9 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
     .filter((p) => p.proceso === 'COSTURA')
     .reduce((max, p) => Math.max(max, Number(p.orden ?? 0)), -1);
   const osArr = (osRaw ?? []) as { estado: string; proceso: string }[];
-  const osRetornada = osArr.some((o) => o.estado === 'RECEPCIONADA' || o.estado === 'CERRADA');
+  // Recepción parcial (campaña) también cuenta como retorno: las unidades que
+  // ya volvieron habilitan las operaciones post-confección.
+  const osRetornada = osArr.some((o) => ['RECEPCION_PARCIAL', 'RECEPCIONADA', 'CERRADA'].includes(o.estado));
   const hayOs = osArr.length > 0;
 
   // TIEMPOS DEL ÁREA DE CORTE (pedido del cliente 21/07/2026): se declaran en
