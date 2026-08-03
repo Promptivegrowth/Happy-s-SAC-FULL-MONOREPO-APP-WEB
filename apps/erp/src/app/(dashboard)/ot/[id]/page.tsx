@@ -7,7 +7,7 @@ import { Badge } from '@happy/ui/badge';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@happy/ui/table';
 import { PageShell } from '@/components/page-shell';
 import { esGerente } from '@/server/actions/_helpers';
-import { OtAcciones, OtNotaForm, OtLineaProduccion, AgregarLineaOTForm, EliminarLineaOT } from './client';
+import { OtAcciones, OtNotaForm, AgregarLineaOTForm, EliminarLineaOT } from './client';
 import { TiemposCostoTab } from './tiempos-client';
 import { EstadoBanner } from './estado-banner';
 import { formatDate, formatDateTime, formatNumber } from '@happy/lib';
@@ -182,6 +182,23 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
     return { completo: false as const, codigo, nombre: i.nombre, pendientes: i.pendientes, total: i.total };
   })();
 
+  // BLOQUEO DE AVANCE (pedido del cliente 21/07/2026): no se puede pasar la OT
+  // al siguiente proceso si el área del proceso ACTUAL todavía tiene operaciones
+  // sin declarar como tiempo ejecutado. El área en curso se deriva de las
+  // declaraciones; si coincide con el área del estado actual y hay pendientes,
+  // se bloquean los botones de avance (CANCELAR siempre queda disponible).
+  const AREA_DE_ESTADO: Record<string, string[]> = {
+    EN_CORTE: ['CORTE'],
+    EN_HABILITADO: ['CORTE'],
+    EN_DECORADO: ['BORDADO', 'ESTAMPADO', 'DECORADO', 'SUBLIMADO', 'PLISADO'],
+  };
+  const avanceBloqueo = (() => {
+    if (!areaEnCurso || areaEnCurso.completo) return null;
+    const codigos = AREA_DE_ESTADO[ot.estado];
+    if (!codigos || !codigos.includes(areaEnCurso.codigo)) return null;
+    return { nombre: areaEnCurso.nombre, pendientes: areaEnCurso.pendientes, total: areaEnCurso.total };
+  })();
+
   // TIMELINE de la bitácora — se arma de las DECLARACIONES de tiempo (lo que
   // realmente se produjo) + eventos relevantes (creación, notas, autorización
   // de corte, cierre forzado). Se OCULTAN los cambios de estado por botón
@@ -230,6 +247,7 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
           // (ej. EN_DECORADO si la receta no tiene bordado/estampado/etc.).
           areasReceta={Array.from(new Set((procesos ?? []).map((p) => p.area?.codigo).filter((c): c is string => Boolean(c))))}
           usuarioEsGerente={usuarioEsGerente}
+          avanceBloqueo={avanceBloqueo}
         />
       }
     >
@@ -300,7 +318,6 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
                     <TableHead className="text-right" title="Unidades descartadas durante producción">Fallas</TableHead>
                     <TableHead className="text-right" title="Unidades que terminaron como PT. Durante el proceso muestra estimación (cortado − fallas); se confirma al cerrar la OT.">Terminado</TableHead>
                     <TableHead className="text-right" title="Plan − Cortado">Falta cortar</TableHead>
-                    <TableHead className="w-[200px]" title="Registrar avance: unidades cortadas y fallas (acumulado, no incremento)">Declarar</TableHead>
                     <TableHead className="w-[40px]"></TableHead>
                   </TableRow></TableHeader>
                   <TableBody>
@@ -338,17 +355,6 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
                             ) : (
                               <span className="font-semibold text-amber-700">{faltaCortar}</span>
                             )}
-                          </TableCell>
-                          <TableCell>
-                            <OtLineaProduccion
-                              otId={id}
-                              lineaId={l.id}
-                              planificada={Number(l.cantidad_planificada ?? 0)}
-                              cortada={Number(l.cantidad_cortada ?? 0)}
-                              fallas={Number(l.cantidad_fallas ?? 0)}
-                              disabled={!puedeEditarLineas}
-                              usuarioEsGerente={usuarioEsGerente}
-                            />
                           </TableCell>
                           <TableCell className="text-right">
                             <EliminarLineaOT otId={id} lineaId={l.id} disabled={!puedeEditarLineas} />

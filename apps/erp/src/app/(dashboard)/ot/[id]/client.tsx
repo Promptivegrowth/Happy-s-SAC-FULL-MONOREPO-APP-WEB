@@ -48,7 +48,7 @@ function filtrarTransiciones(allNext: string[], areas: string[]): string[] {
   });
 }
 
-export function OtAcciones({ otId, estado, almacenes, areasReceta = [], usuarioEsGerente = false }: {
+export function OtAcciones({ otId, estado, almacenes, areasReceta = [], usuarioEsGerente = false, avanceBloqueo = null }: {
   otId: string;
   estado: string;
   almacenes: { id: string; nombre: string; codigo: string }[];
@@ -56,6 +56,8 @@ export function OtAcciones({ otId, estado, almacenes, areasReceta = [], usuarioE
   areasReceta?: string[];
   /** Solo gerencia puede forzar el cierre con operaciones sin declarar. */
   usuarioEsGerente?: boolean;
+  /** Si hay operaciones del área actual sin declarar, se bloquea el avance. */
+  avanceBloqueo?: { nombre: string; pendientes: number; total: number } | null;
 }) {
   const [pending, start] = useTransition();
   const [showCierre, setShowCierre] = useState(false);
@@ -66,6 +68,15 @@ export function OtAcciones({ otId, estado, almacenes, areasReceta = [], usuarioE
   const next = filtrarTransiciones(FLOW[estado] ?? [], areasReceta);
 
   function transicion(nuevo: string) {
+    // Bloqueo de avance: no dejar pasar de proceso si el área actual tiene
+    // operaciones sin declarar (CANCELAR siempre permitido).
+    if (avanceBloqueo && nuevo !== 'CANCELADA') {
+      toast.error(
+        `No se puede avanzar: faltan declarar ${avanceBloqueo.pendientes} de ${avanceBloqueo.total} operación(es) del área ${avanceBloqueo.nombre}. Regístrelas en "Tiempos & costo MO".`,
+        { duration: 8000 },
+      );
+      return;
+    }
     if (!confirm(`¿Cambiar estado a ${nuevo.replace('_',' ')}?`)) return;
     start(async () => {
       const r = await cambiarEstadoOT(otId, nuevo as Parameters<typeof cambiarEstadoOT>[1]);
@@ -159,18 +170,31 @@ export function OtAcciones({ otId, estado, almacenes, areasReceta = [], usuarioE
           </Button>
         )
       ) : (
-        next.map((n) => (
-          <Button
-            key={n}
-            variant={n === 'CANCELADA' ? 'destructive' : 'corp'}
-            size="sm"
-            onClick={() => transicion(n)}
-            disabled={pending}
-          >
-            {pending ? <Loader2 className="h-4 w-4 animate-spin" /> : <ArrowRight className="h-4 w-4" />}
-            {n.replace('_', ' ')}
-          </Button>
-        ))
+        <div className="flex flex-col items-end gap-1">
+          <div className="flex flex-wrap items-center gap-2">
+            {next.map((n) => {
+              const bloqueado = !!avanceBloqueo && n !== 'CANCELADA';
+              return (
+                <Button
+                  key={n}
+                  variant={n === 'CANCELADA' ? 'destructive' : 'corp'}
+                  size="sm"
+                  onClick={() => transicion(n)}
+                  disabled={pending || bloqueado}
+                  title={bloqueado ? `Faltan declarar ${avanceBloqueo!.pendientes} de ${avanceBloqueo!.total} operación(es) del área ${avanceBloqueo!.nombre}` : undefined}
+                >
+                  {pending ? <Loader2 className="h-4 w-4 animate-spin" /> : <ArrowRight className="h-4 w-4" />}
+                  {n.replace('_', ' ')}
+                </Button>
+              );
+            })}
+          </div>
+          {avanceBloqueo && (
+            <p className="max-w-xs text-right text-[11px] text-amber-700">
+              Para avanzar, declare los tiempos del área <strong>{avanceBloqueo.nombre}</strong> ({avanceBloqueo.pendientes} de {avanceBloqueo.total} pendientes).
+            </p>
+          )}
+        </div>
       )}
     </div>
   );

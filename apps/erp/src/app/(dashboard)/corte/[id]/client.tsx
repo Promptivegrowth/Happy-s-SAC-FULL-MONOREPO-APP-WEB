@@ -229,6 +229,9 @@ type TelaTiempo = {
   tiempo_tendido_min: number;
   tiempo_corte_min: number;
   tiempo_habilitado_min: number;
+  fecha_tendido: string;
+  fecha_corte: string;
+  fecha_habilitado: string;
 };
 // Fila interna: los tiempos se guardan como STRING mientras se edita para
 // permitir escribir "0", "0.5", borrar, etc. sin que el valor se reinicie
@@ -240,6 +243,9 @@ type TelaRow = {
   tendido: string;
   corte: string;
   habilitado: string;
+  fecha_tendido: string;
+  fecha_corte: string;
+  fecha_habilitado: string;
 };
 const numOrCero = (s: string): number => {
   const n = Number((s ?? '').replace(',', '.'));
@@ -264,12 +270,18 @@ export function TiemposCorteEditor({
       tendido: t.tiempo_tendido_min ? String(t.tiempo_tendido_min) : '',
       corte: t.tiempo_corte_min ? String(t.tiempo_corte_min) : '',
       habilitado: t.tiempo_habilitado_min ? String(t.tiempo_habilitado_min) : '',
+      fecha_tendido: t.fecha_tendido ?? '',
+      fecha_corte: t.fecha_corte ?? '',
+      fecha_habilitado: t.fecha_habilitado ?? '',
     })),
   );
 
   function setVal(i: number, campo: 'tendido' | 'corte' | 'habilitado', v: string) {
     // Acepta solo dígitos, punto/coma y vacío — deja escribir libremente.
     if (v !== '' && !/^\d*[.,]?\d*$/.test(v)) return;
+    setRows((prev) => prev.map((r, idx) => (idx === i ? { ...r, [campo]: v } : r)));
+  }
+  function setFecha(i: number, campo: 'fecha_tendido' | 'fecha_corte' | 'fecha_habilitado', v: string) {
     setRows((prev) => prev.map((r, idx) => (idx === i ? { ...r, [campo]: v } : r)));
   }
 
@@ -283,6 +295,9 @@ export function TiemposCorteEditor({
           tiempo_tendido_min: numOrCero(t.tendido),
           tiempo_corte_min: numOrCero(t.corte),
           tiempo_habilitado_min: numOrCero(t.habilitado),
+          fecha_tendido: t.fecha_tendido,
+          fecha_corte: t.fecha_corte,
+          fecha_habilitado: t.fecha_habilitado,
         })),
       );
       if (r.ok) { toast.success('Tiempos guardados'); router.refresh(); }
@@ -300,21 +315,24 @@ export function TiemposCorteEditor({
 
   const totalPorTela = (t: TelaRow) => numOrCero(t.tendido) + numOrCero(t.corte) + numOrCero(t.habilitado);
   const CAMPOS = [
-    { key: 'tendido' as const },
-    { key: 'corte' as const },
-    { key: 'habilitado' as const },
+    { key: 'tendido' as const, fecha: 'fecha_tendido' as const },
+    { key: 'corte' as const, fecha: 'fecha_corte' as const },
+    { key: 'habilitado' as const, fecha: 'fecha_habilitado' as const },
   ];
 
   return (
     <div className="p-4">
+      <p className="mb-2 text-xs text-slate-500">
+        Ingrese los minutos y la <strong>fecha</strong> de ejecución de cada operación (tendido, corte y habilitado) por tela.
+      </p>
       <div className="overflow-x-auto">
         <Table>
           <TableHeader>
             <TableRow>
               <TableHead className="min-w-[200px]">Tela</TableHead>
-              <TableHead className="w-28 text-right">Tendido (min)</TableHead>
-              <TableHead className="w-28 text-right">Corte (min)</TableHead>
-              <TableHead className="w-28 text-right">Habilitado (min)</TableHead>
+              <TableHead className="w-36 text-right">Tendido (min · fecha)</TableHead>
+              <TableHead className="w-36 text-right">Corte (min · fecha)</TableHead>
+              <TableHead className="w-36 text-right">Habilitado (min · fecha)</TableHead>
               <TableHead className="w-24 text-right">Total</TableHead>
             </TableRow>
           </TableHeader>
@@ -325,17 +343,27 @@ export function TiemposCorteEditor({
                   <div className="text-sm font-medium text-corp-900">{t.tela_nombre}</div>
                   <div className="font-mono text-[10px] text-slate-400">{t.codigo}</div>
                 </TableCell>
-                {CAMPOS.map(({ key }) => (
-                  <TableCell key={key} className="text-right">
-                    <Input
-                      type="text"
-                      inputMode="decimal"
-                      value={t[key]}
-                      onChange={(e) => setVal(i, key, e.target.value)}
-                      disabled={!editable || pending}
-                      placeholder="0"
-                      className="ml-auto h-8 w-24 text-right text-xs"
-                    />
+                {CAMPOS.map(({ key, fecha }) => (
+                  <TableCell key={key} className="text-right align-top">
+                    <div className="flex flex-col items-end gap-1">
+                      <Input
+                        type="text"
+                        inputMode="decimal"
+                        value={t[key]}
+                        onChange={(e) => setVal(i, key, e.target.value)}
+                        disabled={!editable || pending}
+                        placeholder="0 min"
+                        className="ml-auto h-8 w-28 text-right text-xs"
+                      />
+                      <Input
+                        type="date"
+                        value={t[fecha]}
+                        onChange={(e) => setFecha(i, fecha, e.target.value)}
+                        disabled={!editable || pending}
+                        className="ml-auto h-7 w-28 text-[11px]"
+                        title="Fecha de ejecución de esta operación"
+                      />
+                    </div>
                   </TableCell>
                 ))}
                 <TableCell className="text-right font-mono text-sm font-semibold text-corp-900">

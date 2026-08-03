@@ -40,8 +40,8 @@ const ESTADOS: Record<Estado, Config> = {
     icon: Scissors,
     titulo: 'En corte — declarando unidades cortadas',
     descripcion:
-      'Mientras se corta, usá el botón "Editar" de cada línea para registrar el avance (cortado + fallas, en unidades acumuladas). La columna Terminado todavía marca 0 — se completa al cierre.',
-    proximoPaso: 'Próximo: EN_HABILITADO o EN_SERVICIO.',
+      'Las unidades cortadas se declaran en el módulo Corte (la OT las refleja automáticamente); acá no se editan. Declare los tiempos de corte (tendido/corte/habilitado) para poder avanzar de área. La columna Terminado se completa al cierre.',
+    proximoPaso: 'Próximo: EN_HABILITADO o EN_SERVICIO (cuando el área de Corte esté declarada).',
     tone: 'orange',
   },
   EN_HABILITADO: {

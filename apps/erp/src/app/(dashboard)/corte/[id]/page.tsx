@@ -36,19 +36,19 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
 
   // Telas de la receta activa del modelo + tiempos ya guardados (mig 69).
   // Las 3 operaciones (tendido/corte/habilitado) se registran POR tela.
-  type TelaTiempo = { material_id: string; tela_nombre: string; codigo: string; tiempo_tendido_min: number; tiempo_corte_min: number; tiempo_habilitado_min: number };
+  type TelaTiempo = { material_id: string; tela_nombre: string; codigo: string; tiempo_tendido_min: number; tiempo_corte_min: number; tiempo_habilitado_min: number; fecha_tendido: string; fecha_corte: string; fecha_habilitado: string };
   const telasCorte: TelaTiempo[] = [];
   if (corte.producto_id) {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const sbAny = sb as unknown as { from: (t: string) => any };
     const [{ data: receta }, { data: tiemposGuardados }] = await Promise.all([
       sb.from('recetas').select('id').eq('producto_id', corte.producto_id).eq('activa', true).maybeSingle(),
-      sbAny.from('ot_corte_tiempos').select('material_id, tiempo_tendido_min, tiempo_corte_min, tiempo_habilitado_min').eq('corte_id', id),
+      sbAny.from('ot_corte_tiempos').select('material_id, tiempo_tendido_min, tiempo_corte_min, tiempo_habilitado_min, fecha_tendido, fecha_corte, fecha_habilitado').eq('corte_id', id),
     ]);
-    const guardadosMap = new Map<string, { t: number; c: number; h: number }>(
-      ((tiemposGuardados ?? []) as { material_id: string; tiempo_tendido_min: number | string; tiempo_corte_min: number | string; tiempo_habilitado_min: number | string }[]).map((g) => [
+    const guardadosMap = new Map<string, { t: number; c: number; h: number; ft: string; fc: string; fh: string }>(
+      ((tiemposGuardados ?? []) as { material_id: string; tiempo_tendido_min: number | string; tiempo_corte_min: number | string; tiempo_habilitado_min: number | string; fecha_tendido: string | null; fecha_corte: string | null; fecha_habilitado: string | null }[]).map((g) => [
         g.material_id,
-        { t: Number(g.tiempo_tendido_min ?? 0), c: Number(g.tiempo_corte_min ?? 0), h: Number(g.tiempo_habilitado_min ?? 0) },
+        { t: Number(g.tiempo_tendido_min ?? 0), c: Number(g.tiempo_corte_min ?? 0), h: Number(g.tiempo_habilitado_min ?? 0), ft: g.fecha_tendido ?? '', fc: g.fecha_corte ?? '', fh: g.fecha_habilitado ?? '' },
       ]),
     );
     if (receta?.id) {
@@ -69,6 +69,9 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
           tiempo_tendido_min: g?.t ?? 0,
           tiempo_corte_min: g?.c ?? 0,
           tiempo_habilitado_min: g?.h ?? 0,
+          fecha_tendido: g?.ft ?? '',
+          fecha_corte: g?.fc ?? '',
+          fecha_habilitado: g?.fh ?? '',
         });
       }
       telasCorte.sort((a, b) => a.tela_nombre.localeCompare(b.tela_nombre, 'es'));

@@ -171,6 +171,10 @@ const tiempoTelaSchema = z.object({
   tiempo_tendido_min: z.coerce.number().min(0).default(0),
   tiempo_corte_min: z.coerce.number().min(0).default(0),
   tiempo_habilitado_min: z.coerce.number().min(0).default(0),
+  // Fechas de ejecución por operación (mig 72). Opcionales.
+  fecha_tendido: z.string().optional().or(z.literal('')),
+  fecha_corte: z.string().optional().or(z.literal('')),
+  fecha_habilitado: z.string().optional().or(z.literal('')),
 });
 export async function guardarTiemposCorte(
   corteId: string,
@@ -192,6 +196,9 @@ export async function guardarTiemposCorte(
             tiempo_tendido_min: t.tiempo_tendido_min,
             tiempo_corte_min: t.tiempo_corte_min,
             tiempo_habilitado_min: t.tiempo_habilitado_min,
+            fecha_tendido: t.fecha_tendido || null,
+            fecha_corte: t.fecha_corte || null,
+            fecha_habilitado: t.fecha_habilitado || null,
           },
           { onConflict: 'corte_id,material_id' },
         );
