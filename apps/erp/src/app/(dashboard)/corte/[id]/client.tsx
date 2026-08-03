@@ -230,6 +230,21 @@ type TelaTiempo = {
   tiempo_corte_min: number;
   tiempo_habilitado_min: number;
 };
+// Fila interna: los tiempos se guardan como STRING mientras se edita para
+// permitir escribir "0", "0.5", borrar, etc. sin que el valor se reinicie
+// (el patrón anterior con type=number + `value || ''` borraba el 0 al tipear).
+type TelaRow = {
+  material_id: string;
+  tela_nombre: string;
+  codigo: string;
+  tendido: string;
+  corte: string;
+  habilitado: string;
+};
+const numOrCero = (s: string): number => {
+  const n = Number((s ?? '').replace(',', '.'));
+  return Number.isFinite(n) && n >= 0 ? n : 0;
+};
 export function TiemposCorteEditor({
   corteId,
   telas,
@@ -241,11 +256,21 @@ export function TiemposCorteEditor({
 }) {
   const router = useRouter();
   const [pending, start] = useTransition();
-  const [rows, setRows] = useState<TelaTiempo[]>(telas);
+  const [rows, setRows] = useState<TelaRow[]>(
+    telas.map((t) => ({
+      material_id: t.material_id,
+      tela_nombre: t.tela_nombre,
+      codigo: t.codigo,
+      tendido: t.tiempo_tendido_min ? String(t.tiempo_tendido_min) : '',
+      corte: t.tiempo_corte_min ? String(t.tiempo_corte_min) : '',
+      habilitado: t.tiempo_habilitado_min ? String(t.tiempo_habilitado_min) : '',
+    })),
+  );
 
-  function setVal(i: number, campo: 'tiempo_tendido_min' | 'tiempo_corte_min' | 'tiempo_habilitado_min', v: string) {
-    const n = v === '' ? 0 : Number(v);
-    setRows((prev) => prev.map((r, idx) => (idx === i ? { ...r, [campo]: Number.isFinite(n) && n >= 0 ? n : 0 } : r)));
+  function setVal(i: number, campo: 'tendido' | 'corte' | 'habilitado', v: string) {
+    // Acepta solo dígitos, punto/coma y vacío — deja escribir libremente.
+    if (v !== '' && !/^\d*[.,]?\d*$/.test(v)) return;
+    setRows((prev) => prev.map((r, idx) => (idx === i ? { ...r, [campo]: v } : r)));
   }
 
   function guardar() {
@@ -255,9 +280,9 @@ export function TiemposCorteEditor({
         rows.map((t) => ({
           material_id: t.material_id,
           tela_nombre: t.tela_nombre,
-          tiempo_tendido_min: t.tiempo_tendido_min,
-          tiempo_corte_min: t.tiempo_corte_min,
-          tiempo_habilitado_min: t.tiempo_habilitado_min,
+          tiempo_tendido_min: numOrCero(t.tendido),
+          tiempo_corte_min: numOrCero(t.corte),
+          tiempo_habilitado_min: numOrCero(t.habilitado),
         })),
       );
       if (r.ok) { toast.success('Tiempos guardados'); router.refresh(); }
@@ -273,7 +298,12 @@ export function TiemposCorteEditor({
     );
   }
 
-  const totalPorTela = (t: TelaTiempo) => t.tiempo_tendido_min + t.tiempo_corte_min + t.tiempo_habilitado_min;
+  const totalPorTela = (t: TelaRow) => numOrCero(t.tendido) + numOrCero(t.corte) + numOrCero(t.habilitado);
+  const CAMPOS = [
+    { key: 'tendido' as const },
+    { key: 'corte' as const },
+    { key: 'habilitado' as const },
+  ];
 
   return (
     <div className="p-4">
@@ -295,14 +325,13 @@ export function TiemposCorteEditor({
                   <div className="text-sm font-medium text-corp-900">{t.tela_nombre}</div>
                   <div className="font-mono text-[10px] text-slate-400">{t.codigo}</div>
                 </TableCell>
-                {(['tiempo_tendido_min', 'tiempo_corte_min', 'tiempo_habilitado_min'] as const).map((campo) => (
-                  <TableCell key={campo} className="text-right">
+                {CAMPOS.map(({ key }) => (
+                  <TableCell key={key} className="text-right">
                     <Input
-                      type="number"
-                      step="0.01"
-                      min={0}
-                      value={t[campo] || ''}
-                      onChange={(e) => setVal(i, campo, e.target.value)}
+                      type="text"
+                      inputMode="decimal"
+                      value={t[key]}
+                      onChange={(e) => setVal(i, key, e.target.value)}
                       disabled={!editable || pending}
                       placeholder="0"
                       className="ml-auto h-8 w-24 text-right text-xs"
