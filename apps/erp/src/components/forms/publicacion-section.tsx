@@ -11,6 +11,7 @@ import { FormGrid, FormRow } from '@happy/ui/form-row';
 import { Globe, Loader2, ExternalLink } from 'lucide-react';
 import { toast } from 'sonner';
 import { actualizarPublicacion, togglePublicacionWeb } from '@/server/actions/productos';
+import { formatTallaChip } from '@happy/lib';
 
 type Pub = {
   publicado?: boolean;
@@ -211,7 +212,7 @@ export function PublicacionSection({
                           : 'border-happy-400 bg-white text-happy-700 hover:bg-happy-50'
                       }`}
                     >
-                      {t.replace('T', '')}
+                      {formatTallaChip(t)}
                     </button>
                   );
                 })}
@@ -219,7 +220,7 @@ export function PublicacionSection({
               {excluidas.size > 0 && (
                 <p className="mt-2 text-[11px] text-slate-500">
                   {excluidas.size} talla{excluidas.size === 1 ? '' : 's'} excluida{excluidas.size === 1 ? '' : 's'}: {' '}
-                  {Array.from(excluidas).map((t) => t.replace('T', '')).join(', ')}
+                  {Array.from(excluidas).map((t) => formatTallaChip(t)).join(', ')}
                 </p>
               )}
             </div>

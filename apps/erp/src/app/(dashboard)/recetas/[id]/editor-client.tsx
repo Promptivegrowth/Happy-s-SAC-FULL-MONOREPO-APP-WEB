@@ -279,7 +279,7 @@ function CongeladoBanner({
   const tallasMostrar = tallasCongeladas
     .slice()
     .sort()
-    .map((t) => t.replace('T', ''))
+    .map((t) => formatTallaChip(t))
     .join(', ');
   return (
     <div className="rounded-lg border-2 border-amber-300 bg-amber-50 p-4">
@@ -1068,7 +1068,7 @@ function DuplicarRecetaModal({
       );
       if (r.ok && r.data) {
         const detalle = tallaOrigen
-          ? ` (talla ${tallaOrigen.replace('T', '')}${tallaDestino ? ` → ${tallaDestino.replace('T', '')}` : ''})`
+          ? ` (talla ${formatTallaChip(tallaOrigen)}${tallaDestino ? ` → ${formatTallaChip(tallaDestino)}` : ''})`
           : '';
         toast.success(`✨ ${r.data.lineas} líneas duplicadas${detalle}`);
         onClose();
@@ -1138,7 +1138,7 @@ function DuplicarRecetaModal({
               >
                 <option value="">Todas las tallas</option>
                 {tallasConLineas.map((t) => (
-                  <option key={t} value={t}>{t.replace('T', '')}</option>
+                  <option key={t} value={t}>{formatTallaChip(t)}</option>
                 ))}
               </select>
             </div>
@@ -1154,7 +1154,7 @@ function DuplicarRecetaModal({
               >
                 <option value="">Misma que la origen</option>
                 {TALLAS.filter((t) => t !== tallaOrigen).map((t) => (
-                  <option key={t} value={t}>{t.replace('T', '')}</option>
+                  <option key={t} value={t}>{formatTallaChip(t)}</option>
                 ))}
               </select>
             </div>
@@ -1196,7 +1196,7 @@ function DuplicarTallaModal({
     start(async () => {
       const r = await duplicarLineasTalla(recetaId, tallaOrigen, tallaDestino);
       if (r.ok && r.data) {
-        toast.success(`✨ ${r.data.lineas} líneas copiadas a talla ${tallaDestino.replace('T', '')}`);
+        toast.success(`✨ ${r.data.lineas} líneas copiadas a talla ${formatTallaChip(tallaDestino)}`);
         onClose();
       } else toast.error(r.error ?? 'Error');
     });
@@ -1208,7 +1208,7 @@ function DuplicarTallaModal({
         <div className="mb-4 flex items-start justify-between">
           <div>
             <h3 className="font-display text-base font-semibold">
-              Duplicar líneas de talla {tallaOrigen.replace('T', '')}
+              Duplicar líneas de talla {formatTallaChip(tallaOrigen)}
             </h3>
             <p className="text-xs text-slate-500">Elegí la talla destino. Las líneas se copian con sus cantidades; ajustás después.</p>
           </div>
@@ -1228,7 +1228,7 @@ function DuplicarTallaModal({
                 disabled={pending}
                 className="h-12"
               >
-                {t.replace('T', '')}
+                {formatTallaChip(t)}
               </Button>
             ))}
           </div>
@@ -1587,7 +1587,7 @@ function ProcesosEditor({
                 className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
               >
                 <option value="">Todas</option>
-                {TALLAS.map((t) => <option key={t} value={t}>{t.replace('T', '')}</option>)}
+                {TALLAS.map((t) => <option key={t} value={t}>{formatTallaChip(t)}</option>)}
               </select>
             </FormRow>
             {/* Quitado el toggle "Tercerizado": no pertenece a la definición
@@ -1975,7 +1975,7 @@ function ProcesoFila({
       </TableCell>
       <TableCell>
         {p.talla ? (
-          <Badge variant="outline">{p.talla.replace('T', '')}</Badge>
+          <Badge variant="outline">{formatTallaChip(p.talla)}</Badge>
         ) : (
           <span className="text-xs text-slate-400">Todas</span>
         )}

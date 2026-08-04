@@ -10,6 +10,7 @@ import { FormGrid, FormRow, FormSection } from '@happy/ui/form-row';
 import { Trash2, Search, RefreshCw, Info } from 'lucide-react';
 import { registrarVentaExportacion } from '@/server/actions/ventas-exportacion';
 import { obtenerTipoCambio, type TipoCambio } from '@/server/actions/tipo-cambio';
+import { formatTallaChip } from '@happy/lib';
 
 type Pais = {
   codigo_iso: string;
@@ -285,7 +286,7 @@ export function NuevaVentaExportForm({
                       onClick={() => agregarLinea(v)}>
                       <span>
                         <span className="font-mono text-xs text-slate-500">{v.sku}</span>{' '}
-                        {v.productos?.nombre} · <span className="text-xs">talla {v.talla.replace('T','')}</span>
+                        {v.productos?.nombre} · <span className="text-xs">talla {formatTallaChip(v.talla)}</span>
                       </span>
                       <Badge variant="outline">{monedaSimbolo}{Number(v.precio_publico ?? 0).toFixed(2)}</Badge>
                     </button>
@@ -305,7 +306,7 @@ export function NuevaVentaExportForm({
                 <div key={l.variante_id} className="grid grid-cols-[1fr_80px_100px_100px_100px_40px] gap-2 rounded border p-2">
                   <div className="text-sm">
                     <p className="font-medium">{v?.productos?.nombre}</p>
-                    <p className="font-mono text-xs text-slate-500">{v?.sku} · T{v?.talla.replace('T','')}</p>
+                    <p className="font-mono text-xs text-slate-500">{v?.sku} · {formatTallaChip(v?.talla)}</p>
                   </div>
                   <Input type="number" min={1} value={l.cantidad} onChange={(e) => actualizarLinea(idx, { cantidad: Math.max(1, Number(e.target.value)) })} />
                   <Input type="number" step="0.01" value={l.precio_unitario} onChange={(e) => actualizarLinea(idx, { precio_unitario: Number(e.target.value) })} />

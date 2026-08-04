@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { Ruler, X } from 'lucide-react';
+import { formatTallaChip } from '@happy/lib';
 
 /**
  * Botón "Tabla de medidas" que despliega un modal con las medidas del
@@ -80,7 +81,7 @@ export function TablaMedidas({
                     <th className="border-b px-3 py-2 text-left font-semibold">Medida</th>
                     {tallas.map((t) => (
                       <th key={t} className="border-b border-l px-3 py-2 text-center font-semibold">
-                        {t.replace('T', '')}
+                        {formatTallaChip(t)}
                       </th>
                     ))}
                   </tr>

@@ -2,6 +2,7 @@
 
 import { z } from 'zod';
 import { runAction, requireUser, bumpPaths, esGerente, type ActionResult } from './_helpers';
+import { formatTallaChip } from '@happy/lib';
 
 const TALLAS = ['T0','T2','T4','T6','T8','T10','T12','T14','T16','TS','TAD'] as const;
 
@@ -146,7 +147,7 @@ export async function agregarLineaCorte(_prev: unknown, fd: FormData): Promise<A
       const sbAny = sb as unknown as { from: (t: string) => any };
       const { data: corteRow } = await sbAny.from('ot_corte').select('observacion').eq('id', data.corte_id).maybeSingle();
       const nota =
-        `[${fecha}] Talla ${data.talla.replace('T', '')}: real ${real} vs teórica ${data.cantidad_teorica} ` +
+        `[${fecha}] Talla ${formatTallaChip(data.talla)}: real ${real} vs teórica ${data.cantidad_teorica} ` +
         `(dif ${(real ?? 0) - data.cantidad_teorica >= 0 ? '+' : ''}${(real ?? 0) - data.cantidad_teorica}) — ` +
         `autorizado por gerencia. Motivo: ${motivoLimpio}`;
       await sbAny.from('ot_corte').update({

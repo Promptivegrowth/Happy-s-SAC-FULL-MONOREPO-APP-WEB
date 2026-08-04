@@ -7,6 +7,7 @@ import { Factory, Warehouse, ArrowLeft, Package } from 'lucide-react';
 import { PageShell } from '@/components/page-shell';
 import { historicoOT } from '@/server/actions/trazabilidad';
 import { TrazabilidadTimeline } from '../../timeline';
+import { formatTallaChip } from '@happy/lib';
 
 export const dynamic = 'force-dynamic';
 
@@ -104,7 +105,7 @@ export default async function OtTrazaPage({
                       : 0;
                   return (
                     <TableRow key={`${l.producto_id}-${l.talla}`}>
-                      <TableCell className="font-mono text-xs">{l.talla.replace('T', '')}</TableCell>
+                      <TableCell className="font-mono text-xs">{formatTallaChip(l.talla)}</TableCell>
                       <TableCell className="text-right font-mono text-sm">{l.cantidad_planificada}</TableCell>
                       <TableCell className="text-right font-mono text-sm text-emerald-700">
                         {l.cantidad_terminada}

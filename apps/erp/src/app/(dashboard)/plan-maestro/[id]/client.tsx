@@ -9,6 +9,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { FormGrid, FormRow } from '@happy/ui/form-row';
 import { Plus, Trash2, Loader2, CheckCircle2, Factory, X, Search, Pencil, Save } from 'lucide-react';
 import { toast } from 'sonner';
+import { formatTallaChip } from '@happy/lib';
 import {
   agregarLineasPlanBatch,
   actualizarLineaPlan,
@@ -105,7 +106,7 @@ export function LineasEditor({
     // Validar: toda talla seleccionada tiene que tener cantidad numérica > 0.
     const sinCantidad = seleccionadas.filter(([, c]) => c === '' || Number(c) <= 0 || !Number.isFinite(Number(c)));
     if (sinCantidad.length > 0) {
-      const tallasFalt = sinCantidad.map(([t]) => t.replace('T', '')).join(', ');
+      const tallasFalt = sinCantidad.map(([t]) => formatTallaChip(t)).join(', ');
       return toast.error(`Falta cantidad en talla(s): ${tallasFalt}`);
     }
     const tallas = seleccionadas.map(([talla, c]) => ({
@@ -240,7 +241,7 @@ export function LineasEditor({
                                 : 'border-slate-300 bg-white text-slate-700 hover:border-happy-400'
                           }`}
                         >
-                          {t.replace('T', '')}
+                          {formatTallaChip(t)}
                         </button>
                       );
                     })}
@@ -269,7 +270,7 @@ export function LineasEditor({
                       {Object.entries(tallasSel).map(([t, c]) => (
                         <div key={t} className="flex items-center gap-2 rounded-md border bg-white px-3 py-1.5">
                           <Badge variant="outline" className="min-w-10 justify-center">
-                            {t.replace('T', '')}
+                            {formatTallaChip(t)}
                           </Badge>
                           <Input
                             type="number"
@@ -421,7 +422,7 @@ function LineaPlanRow({
       <TableRow>
         <TableCell className="font-mono text-xs">{l.productos?.codigo}</TableCell>
         <TableCell className="font-medium">{l.productos?.nombre}</TableCell>
-        <TableCell><Badge variant="outline">{l.talla.replace('T', '')}</Badge></TableCell>
+        <TableCell><Badge variant="outline">{formatTallaChip(l.talla)}</Badge></TableCell>
         <TableCell className="text-right font-mono">{l.cantidad_planificada}</TableCell>
         <TableCell>{l.prioridad ?? 100}</TableCell>
         <TableCell className="text-right">
@@ -444,7 +445,7 @@ function LineaPlanRow({
     <TableRow className="bg-happy-50/40">
       <TableCell className="font-mono text-xs">{l.productos?.codigo}</TableCell>
       <TableCell className="font-medium">{l.productos?.nombre}</TableCell>
-      <TableCell><Badge variant="outline">{l.talla.replace('T', '')}</Badge></TableCell>
+      <TableCell><Badge variant="outline">{formatTallaChip(l.talla)}</Badge></TableCell>
       <TableCell className="text-right">
         <Input
           type="number"

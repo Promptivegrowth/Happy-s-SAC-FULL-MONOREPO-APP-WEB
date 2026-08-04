@@ -9,6 +9,7 @@ import { ArrowDownCircle, ArrowUpCircle, ArrowRightLeft, History, Warehouse } fr
 import { PageShell } from '@/components/page-shell';
 import { TableSkeleton } from '@/components/skeletons';
 import { listarKardex, listarAlmacenes, type KardexMov } from '@/server/actions/kardex';
+import { formatTallaChip } from '@happy/lib';
 
 export const metadata = { title: 'Kardex' };
 export const dynamic = 'force-dynamic';
@@ -230,7 +231,7 @@ function MovimientoRow({ m }: { m: KardexMov }) {
   let itemLink: string | null = null;
   let itemLabel = '—';
   if (m.variante) {
-    itemLabel = `${m.variante.producto_nombre} · Talla ${m.variante.talla.replace('T', '')}`;
+    itemLabel = `${m.variante.producto_nombre} · Talla ${formatTallaChip(m.variante.talla)}`;
     itemLink = `/kardex/variante/${m.variante.id}`;
   } else if (m.material) {
     itemLabel = m.material.nombre;

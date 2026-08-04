@@ -10,7 +10,7 @@ import { esGerente } from '@/server/actions/_helpers';
 import { OtAcciones, OtNotaForm, AgregarLineaOTForm, EliminarLineaOT } from './client';
 import { TiemposCostoTab } from './tiempos-client';
 import { EstadoBanner } from './estado-banner';
-import { formatDate, formatDateTime, formatNumber } from '@happy/lib';
+import { formatDate, formatDateTime, formatNumber , formatTallaChip } from '@happy/lib';
 import { Calendar, AlertTriangle, User, ShieldCheck, Scissors, Clock } from 'lucide-react';
 
 export const dynamic = 'force-dynamic';
@@ -260,7 +260,7 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
     fecha: r.fecha_inicio ?? r.created_at,
     tipo: 'DECLARACION',
     detalle:
-      `${nombreOp.get(r.proceso_id) ?? 'Operación'} · Talla ${r.talla.replace('T', '')} · ` +
+      `${nombreOp.get(r.proceso_id) ?? 'Operación'} · Talla ${formatTallaChip(r.talla)} · ` +
       `${Number(r.tiempo_total_min).toFixed(2)} min` +
       `${r.unidades_procesadas ? ` · ${r.unidades_procesadas} und` : ''}` +
       `${r.operario_nombre ? ` · ${r.operario_nombre}` : ''}`,
@@ -385,7 +385,7 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
                             <div className="font-medium text-sm">{p?.nombre}</div>
                             <div className="font-mono text-[10px] text-slate-500">{p?.codigo}</div>
                           </TableCell>
-                          <TableCell><Badge variant="outline">{l.talla.replace('T', '')}</Badge></TableCell>
+                          <TableCell><Badge variant="outline">{formatTallaChip(l.talla)}</Badge></TableCell>
                           <TableCell className="text-right font-mono">{l.cantidad_planificada}</TableCell>
                           <TableCell className="text-right font-mono">{l.cantidad_cortada ?? 0}</TableCell>
                           <TableCell className="text-right font-mono text-danger">{l.cantidad_fallas ?? 0}</TableCell>

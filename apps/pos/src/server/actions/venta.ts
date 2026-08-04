@@ -4,6 +4,7 @@ import { z } from 'zod';
 import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 import { createClient } from '@happy/db/server';
+import { formatTallaChip } from '@happy/lib';
 
 // Datos de exportación (Art. 33 Ley IGV): cuando la venta es exportación,
 // IGV=0, se usa serie de factura de exportación y se requieren país destino,
@@ -133,7 +134,7 @@ export async function registrarVenta(input: VentaInput): Promise<VentaResultado>
           .maybeSingle();
         const vr = v as unknown as { sku: string; talla: string; productos: { nombre: string } | null } | null;
         const desc = vr
-          ? `${vr.productos?.nombre ?? 'producto'} talla ${vr.talla.replace('T', '')} (${vr.sku})`
+          ? `${vr.productos?.nombre ?? 'producto'} talla ${formatTallaChip(vr.talla)} (${vr.sku})`
           : `variante ${vid.slice(0, 8)}`;
         faltantes.push(`${desc}: pide ${cant}, hay ${stock}`);
       }

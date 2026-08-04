@@ -11,6 +11,7 @@
  */
 
 import type { EmpresaPDFData } from '@/server/empresa-pdf-helper';
+import { formatTallaChip } from '@happy/lib';
 
 export type OSPdfData = {
   numero: string;
@@ -217,7 +218,7 @@ function renderCopia(
       String(i + 1),
       l.producto,
       l.codigo ?? '—',
-      l.talla.replace('T', ''),
+      formatTallaChip(l.talla),
       String(l.cantidad),
     ]),
     foot: [[{ content: 'TOTAL', colSpan: 4, styles: { halign: 'right' } }, String(totalUnidades)]],

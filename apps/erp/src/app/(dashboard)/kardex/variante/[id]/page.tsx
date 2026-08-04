@@ -3,6 +3,7 @@ import { createClient } from '@happy/db/server';
 import { PageShell } from '@/components/page-shell';
 import { historicoVariante } from '@/server/actions/kardex';
 import { HistoricoTabla } from '../../historico-tabla';
+import { formatTallaChip } from '@happy/lib';
 
 export const dynamic = 'force-dynamic';
 
@@ -37,7 +38,7 @@ export default async function HistoricoVariantePage({
 
   return (
     <PageShell
-      title={`Kardex de ${prod.nombre} · talla ${variante.talla.replace('T', '')}`}
+      title={`Kardex de ${prod.nombre} · talla ${formatTallaChip(variante.talla)}`}
       description={`SKU ${variante.sku} · código producto ${prod.codigo}${sp.almacen ? ' · almacén filtrado' : ' · todos los almacenes'}`}
     >
       <HistoricoTabla movimientos={movimientos} stockActual={stock_actual} unidadEtiqueta="unid" />

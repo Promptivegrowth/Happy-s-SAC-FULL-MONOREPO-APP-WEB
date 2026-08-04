@@ -6,6 +6,7 @@ import { Input } from '@happy/ui/input';
 import { Textarea } from '@happy/ui/textarea';
 import { Loader2, ArrowRight, CheckCircle2, X, Save, Plus, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
+import { formatTallaChip } from '@happy/lib';
 import {
   cambiarEstadoOT,
   agregarNotaOT,
@@ -408,7 +409,7 @@ export function AgregarLineaOTForm({
           className="h-9 w-20 rounded-md border border-input bg-white px-2 text-sm"
         >
           {TALLAS_OPCIONES.map((t) => (
-            <option key={t} value={t}>{t.replace('T', '')}</option>
+            <option key={t} value={t}>{formatTallaChip(t)}</option>
           ))}
         </select>
       </div>

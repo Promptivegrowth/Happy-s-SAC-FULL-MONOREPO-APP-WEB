@@ -16,6 +16,7 @@ import { z } from 'zod';
 import { revalidatePath } from 'next/cache';
 import ExcelJS from 'exceljs';
 import { createClient } from '@happy/db/server';
+import { formatTallaChip } from '@happy/lib';
 import {
   BRAND,
   type SesionCajaDTO,
@@ -1069,7 +1070,7 @@ export async function emitirComprobante(input: z.infer<typeof emitirSchema>): Pr
         return {
           comprobante_id: comp.id,
           codigo: producto?.codigo ?? '',
-          descripcion: producto?.nombre ? `${producto.nombre} - Talla ${variante?.talla.replace('T', '') ?? ''}` : '',
+          descripcion: producto?.nombre ? `${producto.nombre} - Talla ${formatTallaChip(variante?.talla) ?? ''}` : '',
           cantidad: l.cantidad,
           unidad_sunat: 'NIU',
           precio_unitario: l.precio_unitario,
@@ -1116,7 +1117,7 @@ export async function emitirComprobante(input: z.infer<typeof emitirSchema>): Pr
     const desc = Number(l.descuento_monto ?? 0);
     return {
       descripcion: producto?.nombre
-        ? `${producto.nombre} (T ${variante?.talla.replace('T', '') ?? ''})`
+        ? `${producto.nombre} (${formatTallaChip(variante?.talla)})`
         : variante?.sku ?? 'Item',
       cantidad: l.cantidad,
       precio_unitario: Number(l.precio_unitario),

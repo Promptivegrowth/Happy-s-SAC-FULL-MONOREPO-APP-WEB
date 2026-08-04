@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { Button } from '@happy/ui/button';
 import { Download, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
+import { formatTallaChip } from '@happy/lib';
 
 type Material = {
   material_codigo: string;
@@ -143,7 +144,7 @@ export function DescargarPdfButton({ planCodigo, totalLineas, totalUnidades, mat
       const foot = [['Total', ...totalesPorTalla.map((v) => String(v)), String(totalUnidades)]];
 
       // 5) Cabeceras: "Producto" + cada talla sin la "T" inicial + "Total".
-      const head = [['Producto', ...tallasPresentes.map((t) => t.replace('T', '')), 'Total']];
+      const head = [['Producto', ...tallasPresentes.map((t) => formatTallaChip(t)), 'Total']];
 
       // 6) Estilos: centrar columnas numéricas, derecha en "Total", celdas vacías sin fondo alterno raro.
       // eslint-disable-next-line @typescript-eslint/no-explicit-any

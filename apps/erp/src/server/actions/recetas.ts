@@ -2,6 +2,7 @@
 
 import { z } from 'zod';
 import { runAction, requireUser, bumpPaths, type ActionResult } from './_helpers';
+import { formatTallaChip } from '@happy/lib';
 
 /**
  * Cliente pidió (reunión post-2026-07-08): las recetas son sensibles al costo
@@ -141,7 +142,7 @@ function siguienteVersion(versionesExistentes: string[]): string {
 
 function msgTallaCongelada(talla: string) {
   return (
-    `La talla ${talla.replace('T', '')} de este producto ya entró a producción (hay OTs generadas para esa talla). ` +
+    `La talla ${formatTallaChip(talla)} de este producto ya entró a producción (hay OTs generadas para esa talla). ` +
     'No se puede modificar la receta de esa talla específica. ' +
     'Las tallas que aún no tuvieron OTs sí podés editarlas libremente. ' +
     'Para cambiar una talla congelada, creá una nueva versión desde el banner.'
@@ -340,7 +341,7 @@ export async function upsertRecetaMulti(
       const tallasCong = await tallasEnProduccionPosterior(sb, data.receta_id, pid);
       const conflictos = data.tallas.filter((t) => tallasCong.has(t));
       if (conflictos.length > 0) {
-        const lista = conflictos.map((t) => t.replace('T', '')).join(', ');
+        const lista = conflictos.map((t) => formatTallaChip(t)).join(', ');
         throw new Error(
           `Las tallas ${lista} ya tienen OTs generadas y no se pueden modificar. ` +
           `Desmarcalas o creá una nueva versión de la receta.`,
@@ -422,7 +423,7 @@ export async function duplicarReceta(
     if (!lineas || lineas.length === 0) {
       throw new Error(
         tallaOrigen
-          ? `La receta origen no tiene líneas en la talla ${tallaOrigen.replace('T', '')}`
+          ? `La receta origen no tiene líneas en la talla ${formatTallaChip(tallaOrigen)}`
           : 'La receta origen no tiene líneas que duplicar',
       );
     }
@@ -452,7 +453,7 @@ export async function duplicarReceta(
       const tallasCong = await tallasEnProduccionPosterior(sb, recetaDestId, productoDestinoId);
       const conflictos = Array.from(tallasACopiar).filter((t) => tallasCong.has(t));
       if (conflictos.length > 0) {
-        const lista = conflictos.map((t) => t.replace('T', '')).join(', ');
+        const lista = conflictos.map((t) => formatTallaChip(t)).join(', ');
         throw new Error(
           `El producto destino ya tiene OTs para las tallas ${lista}. ` +
           `No se pueden sobreescribir esas líneas. Creá una nueva versión en el destino o filtrá por tallas libres.`,
@@ -530,7 +531,7 @@ export async function duplicarLineasTalla(
       .eq('receta_id', recetaId)
       .eq('talla', tallaOrigen as (typeof TALLAS)[number]);
     if (errL) throw new Error(errL.message);
-    if (!lineas || lineas.length === 0) throw new Error(`La talla ${tallaOrigen.replace('T', '')} no tiene líneas`);
+    if (!lineas || lineas.length === 0) throw new Error(`La talla ${formatTallaChip(tallaOrigen)} no tiene líneas`);
 
     const filas = lineas.map((l) => ({
       receta_id: recetaId,

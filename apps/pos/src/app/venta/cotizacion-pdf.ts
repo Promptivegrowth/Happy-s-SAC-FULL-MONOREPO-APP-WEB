@@ -14,7 +14,7 @@
  */
 
 import { jsPDF } from 'jspdf';
-import { formatPEN } from '@happy/lib';
+import { formatPEN , formatTallaChip } from '@happy/lib';
 
 export type ItemCotizacion = {
   nombre: string;
@@ -149,7 +149,7 @@ async function generarCotizacionTicket(data: DatosCotizacion): Promise<Blob> {
   // Items
   doc.setFont('helvetica', 'normal');
   for (const it of data.items) {
-    const talla = it.talla.replace('T', '');
+    const talla = formatTallaChip(it.talla);
     const sub = it.cantidad * it.precioUnit;
     doc.text(String(it.cantidad), 4, y);
     doc.text(`${it.nombre.slice(0, 22)} (T${talla})`, 12, y);
@@ -318,7 +318,7 @@ async function generarCotizacionA4(data: DatosCotizacion): Promise<Blob> {
     const sub = it.cantidad * it.precioUnit;
     doc.text(String(it.cantidad), X_CANT, y, { align: 'right' });
     doc.text(it.nombre.slice(0, 55), X_DESC, y);
-    doc.text(it.talla.replace('T', ''), X_TALLA, y, { align: 'center' });
+    doc.text(formatTallaChip(it.talla), X_TALLA, y, { align: 'center' });
     doc.text(formatPEN(it.precioUnit), X_PUNIT, y, { align: 'right' });
     doc.text(formatPEN(sub), X_TOTAL, y, { align: 'right' });
     y += 3;

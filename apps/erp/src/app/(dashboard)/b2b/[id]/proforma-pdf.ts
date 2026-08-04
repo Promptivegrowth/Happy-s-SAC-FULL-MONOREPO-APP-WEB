@@ -1,5 +1,6 @@
 import type { PedidoB2BDetalle, PedidoB2BLineaDetalle } from '@/server/actions/b2b';
 import type { EmpresaPDFData } from '@/server/empresa-pdf-helper';
+import { formatTallaChip } from '@happy/lib';
 
 /**
  * Genera la PDF de la proforma B2B (1-2 páginas A4). Imports dinámicos para
@@ -200,7 +201,7 @@ export async function generarProformaPdf(
   const filas = lineas.map((l, idx) => [
     String(idx + 1),
     l.sku,
-    `${l.producto_nombre}${l.talla ? ` · T${l.talla.replace('T', '')}` : ''}${
+    `${l.producto_nombre}${l.talla ? ` · ${formatTallaChip(l.talla)}` : ''}${
       l.color ? ` · ${l.color}` : ''
     }`,
     String(l.cantidad_pedida),

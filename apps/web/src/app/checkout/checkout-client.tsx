@@ -16,6 +16,7 @@ import { CreditCard, MessageCircle, Smartphone, Truck, Building2, Loader2, Lock 
 import { toast } from 'sonner';
 import { useRouter } from 'next/navigation';
 import { buildPedidoWaMessage, buildWhatsappUrl } from '@happy/lib/whatsapp';
+import { formatTallaChip } from '@happy/lib';
 
 type Metodo = 'yape' | 'plin' | 'culqi_card' | 'transferencia' | 'whatsapp';
 
@@ -433,7 +434,7 @@ export function CheckoutClient({ cuentasWeb = [] }: { cuentasWeb?: CuentaWeb[] }
             const precioUnit = precioEfectivoLinea(i, escalon);
             return (
               <div key={i.varianteId} className="flex justify-between">
-                <span className="text-slate-600">{i.cantidad}× {i.nombre} <Badge variant="outline" className="ml-1 text-[9px]">{i.talla.replace('T', '')}</Badge></span>
+                <span className="text-slate-600">{i.cantidad}× {i.nombre} <Badge variant="outline" className="ml-1 text-[9px]">{formatTallaChip(i.talla)}</Badge></span>
                 <span>S/ {(precioUnit * i.cantidad).toFixed(2)}</span>
               </div>
             );

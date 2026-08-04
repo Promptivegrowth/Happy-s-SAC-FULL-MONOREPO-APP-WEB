@@ -8,6 +8,7 @@ import { ShoppingBag, MessageCircle, Plus, Minus, Zap, AlertTriangle } from 'luc
 import { useCart, type CartItem } from '@/store/cart';
 import { toast } from 'sonner';
 import { WHATSAPP_NUMERO } from '@/lib/contacto';
+import { formatTallaChip } from '@happy/lib';
 
 // Umbrales para escalón de precio en la WEB pública (post-2026-07-08):
 //  - Desde 6 unidades → precio mayorista
@@ -101,10 +102,10 @@ export function ProductoDetalleClient({
 
   function agregarAlCarrito() {
     if (!seleccionada) return toast.error('Selecciona una talla');
-    if (sinStockSeleccionada) return toast.error(`Talla ${seleccionada.talla.replace('T', '')} agotada`);
+    if (sinStockSeleccionada) return toast.error(`Talla ${formatTallaChip(seleccionada.talla)} agotada`);
     if (cantidad <= 0) return toast.error('Ingresa una cantidad');
     if (cantidad > stockSeleccionada) {
-      return toast.error(`Solo quedan ${stockSeleccionada} unidades de talla ${seleccionada.talla.replace('T', '')}`);
+      return toast.error(`Solo quedan ${stockSeleccionada} unidades de talla ${formatTallaChip(seleccionada.talla)}`);
     }
     const item: CartItem = {
       varianteId: seleccionada.id,
@@ -122,7 +123,7 @@ export function ProductoDetalleClient({
       cantidad,
     };
     add(item);
-    toast.success(`${cantidad} × ${nombre} (${seleccionada.talla.replace('T', '')}) agregado`);
+    toast.success(`${cantidad} × ${nombre} (${formatTallaChip(seleccionada.talla)}) agregado`);
     // Reset cantidad a 0 (2026-07-10) — cliente pidió que se limpie a cero
     // para forzar al usuario a re-ingresar la cantidad conscientemente en
     // la siguiente adición, evitando repeticiones accidentales.
@@ -147,7 +148,7 @@ export function ProductoDetalleClient({
 
 Producto: *${nombre}*
 SKU: ${seleccionada.sku}
-Talla: ${seleccionada.talla.replace('T', '')}
+Talla: ${formatTallaChip(seleccionada.talla)}
 ${lineasPedido}${mensajeStock}
 
 ${esConsulta ? '¿Me das más información?' : '¿Cómo procedo con la compra?'}`;
@@ -218,7 +219,7 @@ ${esConsulta ? '¿Me das más información?' : '¿Cómo procedo con la compra?'}
             </p>
           ) : sinStockSeleccionada ? (
             <p className="mt-2 flex items-center gap-1 text-sm font-medium text-amber-600">
-              <AlertTriangle className="h-4 w-4" /> Talla {seleccionada.talla.replace('T', '')} agotada · elige otra o consulta
+              <AlertTriangle className="h-4 w-4" /> Talla {formatTallaChip(seleccionada.talla)} agotada · elige otra o consulta
             </p>
           ) : stockSeleccionada <= 5 ? (
             <p className="mt-2 flex items-center gap-1 text-xs text-amber-600">
@@ -235,7 +236,7 @@ ${esConsulta ? '¿Me das más información?' : '¿Cómo procedo con la compra?'}
       <div>
         <div className="mb-2 flex items-center justify-between">
           <p className="text-sm font-medium text-corp-900">
-            Talla: <span className="font-normal text-slate-600">{seleccionada?.talla.replace('T', '') ?? '—'}</span>
+            Talla: <span className="font-normal text-slate-600">{formatTallaChip(seleccionada?.talla) ?? '—'}</span>
           </p>
           {descuentoPorcentaje > 0 && (
             <p className="text-[10px] text-slate-500">
@@ -256,7 +257,7 @@ ${esConsulta ? '¿Me das más información?' : '¿Cómo procedo con la compra?'}
                 disabled={sinStock}
                 title={
                   sinStock
-                    ? `Talla ${t.replace('T', '')} agotada`
+                    ? `Talla ${formatTallaChip(t)} agotada`
                     : tieneDesc
                       ? `Stock: ${v.stock} · -${descuentoPorcentaje}% aplicado`
                       : descuentoPorcentaje > 0
@@ -271,7 +272,7 @@ ${esConsulta ? '¿Me das más información?' : '¿Cómo procedo con la compra?'}
                       : 'border-slate-300 hover:border-slate-400'
                 }`}
               >
-                {t.replace('T', '')}
+                {formatTallaChip(t)}
                 {tieneDesc && !sinStock && (
                   <span
                     className="absolute -right-1 -top-1 inline-block h-2.5 w-2.5 rounded-full bg-danger ring-2 ring-white"

@@ -11,6 +11,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Plus, Loader2, CheckCircle2, Wrench } from 'lucide-react';
 import { toast } from 'sonner';
 import { agregarLineaCorte, cerrarCorte, crearOS, guardarTiemposCorte } from '@/server/actions/corte';
+import { formatTallaChip } from '@happy/lib';
 
 const TALLAS = ['T0','T2','T4','T6','T8','T10','T12','T14','T16','TS','TAD'] as const;
 
@@ -128,7 +129,7 @@ export function LineasCorteEditor({
               >
                 {disponibles.map((t) => (
                   <option key={t} value={t}>
-                    {t.replace('T', '')}
+                    {formatTallaChip(t)}
                     {planPorTalla[t] !== undefined ? ` (saldo ${saldoDe(t)})` : ''}
                   </option>
                 ))}
@@ -204,7 +205,7 @@ export function LineasCorteEditor({
             const dif = (l.cantidad_real ?? l.cantidad_teorica) - l.cantidad_teorica;
             return (
               <TableRow key={l.id}>
-                <TableCell><Badge variant="outline">{l.talla.replace('T', '')}</Badge></TableCell>
+                <TableCell><Badge variant="outline">{formatTallaChip(l.talla)}</Badge></TableCell>
                 <TableCell className="text-right font-mono">{l.cantidad_teorica}</TableCell>
                 <TableCell className="text-right font-mono">{l.cantidad_real ?? '—'}</TableCell>
                 <TableCell className={`text-right font-mono ${dif < 0 ? 'text-danger' : dif > 0 ? 'text-emerald-600' : ''}`}>{dif > 0 ? '+' : ''}{dif}</TableCell>

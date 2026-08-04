@@ -6,6 +6,7 @@ import { Card } from '@happy/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@happy/ui/table';
 import { Package, ArrowLeft, ExternalLink, Factory } from 'lucide-react';
 import { PageShell } from '@/components/page-shell';
+import { formatTallaChip } from '@happy/lib';
 
 export const dynamic = 'force-dynamic';
 
@@ -159,7 +160,7 @@ export default async function ProductoTrazaPage({
                 return (
                   <TableRow key={v.id}>
                     <TableCell className="font-mono text-xs">{v.sku}</TableCell>
-                    <TableCell className="text-sm">{v.talla.replace('T', '')}</TableCell>
+                    <TableCell className="text-sm">{formatTallaChip(v.talla)}</TableCell>
                     <TableCell className="text-sm">{v.color_variante ?? '—'}</TableCell>
                     <TableCell>
                       <Badge variant={v.activo ? 'secondary' : 'destructive'} className="text-[10px]">
@@ -226,7 +227,7 @@ export default async function ProductoTrazaPage({
                         {e.variante && (
                           <Link href={`/trazabilidad/variante/${e.variante.id}`} className="hover:underline">
                             <span className="font-mono">{e.variante.sku}</span>
-                            <span className="text-slate-400"> · T{e.variante.talla.replace('T', '')}</span>
+                            <span className="text-slate-400"> · {formatTallaChip(e.variante.talla)}</span>
                           </Link>
                         )}
                       </TableCell>

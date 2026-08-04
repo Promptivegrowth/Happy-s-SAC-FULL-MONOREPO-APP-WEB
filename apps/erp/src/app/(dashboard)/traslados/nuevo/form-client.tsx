@@ -10,6 +10,7 @@ import { Textarea } from '@happy/ui/textarea';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@happy/ui/table';
 import { Loader2, Save, Plus, Trash2, AlertTriangle, Search, ScanLine, Zap, Upload, X, Truck } from 'lucide-react';
 import { toast } from 'sonner';
+import { formatTallaChip } from '@happy/lib';
 import {
   crearTraslado,
   consultarStockEnAlmacen,
@@ -189,7 +190,7 @@ export function NuevoTrasladoForm({
               variante_id: found.v.id,
               material_id: '',
               display: `${found.v.sku} · ${found.v.producto_nombre}`,
-              sub: `Talla ${found.v.talla.replace('T', '')}`,
+              sub: `Talla ${formatTallaChip(found.v.talla)}`,
               cantidad: String(cantidadAgregar),
               observacion: '',
             }
@@ -265,7 +266,7 @@ export function NuevoTrasladoForm({
       variante_id: v.id,
       material_id: '',
       display: `${v.sku} · ${v.producto_nombre}`,
-      sub: `Talla ${v.talla.replace('T', '')}`,
+      sub: `Talla ${formatTallaChip(v.talla)}`,
     });
   }
 
@@ -1141,7 +1142,7 @@ function MultiTallaModal({
                     const sinStock = !stockCargando && st <= 0;
                     return (
                       <tr key={v.id} className={`border-b last:border-b-0 ${sinStock ? 'opacity-60' : ''}`}>
-                        <td className="py-1.5 font-display font-semibold">{v.talla.replace('T', '')}</td>
+                        <td className="py-1.5 font-display font-semibold">{formatTallaChip(v.talla)}</td>
                         <td className="py-1.5 font-mono text-xs text-slate-500">{v.sku}</td>
                         <td className={`py-1.5 text-right font-mono text-xs ${st <= 0 ? 'text-rose-500' : 'text-slate-600'}`}>
                           {stockCargando ? '…' : st}
@@ -1322,7 +1323,7 @@ function ComboVariante(props: {
       items={props.variantes}
       matchText={(v) => `${v.sku} ${v.producto_nombre} ${v.talla}`}
       renderLabel={(v) => `${v.sku} · ${v.producto_nombre}`}
-      renderSub={(v) => `Talla ${v.talla.replace('T', '')}`}
+      renderSub={(v) => `Talla ${formatTallaChip(v.talla)}`}
       valueId={props.valueId}
       display={props.display}
       sub={props.sub}

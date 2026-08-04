@@ -2,6 +2,7 @@
 
 import { z } from 'zod';
 import { runAction, requireUser, type ActionResult } from './_helpers';
+import { formatTallaChip } from '@happy/lib';
 
 /**
  * Listado de alertas de stock bajo.
@@ -163,7 +164,7 @@ export async function listarStockBajo(
             id: `${b.variante_id}|${b.almacen_id}`,  // único por combinación
             nombre: v.producto_nombre,
             codigo: v.sku,
-            detalle: `Talla ${v.talla.replace('T', '')}`,
+            detalle: `Talla ${formatTallaChip(v.talla)}`,
             stock_actual: b.stock,
             stock_minimo: b.umbral,
             faltante: Math.max(0, b.umbral - b.stock),

@@ -8,7 +8,7 @@ import { Button } from '@happy/ui/button';
 import { Badge } from '@happy/ui/badge';
 import { Trash2, Plus, Minus, ScanBarcode, X, Banknote, Building2, MessageCircle, Loader2, LayoutGrid, ShoppingBag, LogOut, Receipt, History, RotateCcw, Coins, Wallet, Search, LogIn, UserX, Pencil, Send, FileText } from 'lucide-react';
 import { toast } from 'sonner';
-import { formatPEN, ordenTalla, formatTalla, normalizarTexto } from '@happy/lib';
+import { formatPEN, ordenTalla, formatTalla, normalizarTexto , formatTallaChip } from '@happy/lib';
 
 /** Búsqueda por palabras y sin tildes: "super ch" encuentra "Superchica",
  *  "falda mar" encuentra "Falda de marinera" (reporte del cliente 20/07/2026). */
@@ -527,7 +527,7 @@ export function PosTerminal({
     for (const l of det.lineas) {
       const v = variantes.find((x) => x.id === l.variante_id);
       if (!v) {
-        avisos.push(`${l.producto_nombre} T${l.talla.replace('T', '')} ya no está disponible`);
+        avisos.push(`${l.producto_nombre} ${formatTallaChip(l.talla)} ya no está disponible`);
         continue;
       }
       const stock = Math.max(0, stockPorVariante[v.id] ?? 0);
@@ -2201,7 +2201,7 @@ function construirMensajeWhatsAppExtendido(opts: {
   lineas.push('');
   lineas.push('*Productos:*');
   for (const it of opts.items) {
-    const talla = it.talla.replace('T', '');
+    const talla = formatTallaChip(it.talla);
     const sub = it.cantidad * it.precioUnit;
     lineas.push(`• ${it.cantidad}× ${it.nombre} (T${talla}) — S/ ${sub.toFixed(2)}`);
   }
@@ -2404,7 +2404,7 @@ function CotizacionModal({
     lineas.push('');
     lineas.push('*Productos:*');
     for (const it of items) {
-      const talla = it.talla.replace('T', '');
+      const talla = formatTallaChip(it.talla);
       const sub = it.cantidad * it.precioUnit;
       lineas.push(`• ${it.cantidad}× ${it.nombre} (T${talla}) — S/ ${sub.toFixed(2)}`);
     }

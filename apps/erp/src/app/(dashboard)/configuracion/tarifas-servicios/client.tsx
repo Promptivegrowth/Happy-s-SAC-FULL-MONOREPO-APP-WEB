@@ -17,6 +17,7 @@ import { Plus, Trash2, Loader2, Pencil } from 'lucide-react';
 import { toast } from 'sonner';
 import { ComboboxBusqueda } from '../../corte/nuevo/form-client';
 import { crearTarifaServicio, actualizarTarifaServicio, eliminarTarifaServicio } from '@/server/actions/tarifas-servicios';
+import { formatTallaChip } from '@happy/lib';
 
 const PROCESOS = [
   'TRAZADO', 'TENDIDO', 'CORTE', 'HABILITADO', 'COSTURA', 'BORDADO', 'ESTAMPADO',
@@ -128,7 +129,7 @@ function TarifaModal({
               >
                 <option value="">— Cualquier talla —</option>
                 {TALLAS.map((t) => (
-                  <option key={t} value={t}>{t.replace('T', '')}</option>
+                  <option key={t} value={t}>{formatTallaChip(t)}</option>
                 ))}
               </select>
             </div>

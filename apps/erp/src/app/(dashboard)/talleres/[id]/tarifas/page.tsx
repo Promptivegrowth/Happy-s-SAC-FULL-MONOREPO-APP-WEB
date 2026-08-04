@@ -10,7 +10,7 @@ import { PageShell } from '@/components/page-shell';
 import { ArrowLeft, Tags } from 'lucide-react';
 import { NuevaTarifaButton } from './nueva-tarifa-client';
 import { EliminarTarifaButton } from './eliminar-tarifa-client';
-import { formatPEN, formatDate } from '@happy/lib';
+import { formatPEN, formatDate , formatTallaChip } from '@happy/lib';
 
 export const dynamic = 'force-dynamic';
 
@@ -131,7 +131,7 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
                     </TableCell>
                     <TableCell>
                       {t.talla ? (
-                        <Badge variant="outline" className="text-[10px]">{t.talla.replace('T', '')}</Badge>
+                        <Badge variant="outline" className="text-[10px]">{formatTallaChip(t.talla)}</Badge>
                       ) : (
                         <Badge variant="secondary" className="text-[10px]">Cualquier talla</Badge>
                       )}

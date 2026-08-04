@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
 import { createServiceClient } from '@happy/db/service';
+import { formatTallaChip } from '@happy/lib';
 
 export const runtime = 'nodejs';
 
@@ -85,7 +86,7 @@ export async function POST(req: Request) {
     const mensajes = faltantes.map((f) => {
       const v = meta.get(f.varianteId);
       const desc = v
-        ? `${v.productos?.nombre ?? 'producto'} talla ${v.talla.replace('T', '')}`
+        ? `${v.productos?.nombre ?? 'producto'} talla ${formatTallaChip(v.talla)}`
         : 'producto';
       return `${desc}: pediste ${f.pide}, solo hay ${f.hay} disponible${f.hay === 1 ? '' : 's'}`;
     });

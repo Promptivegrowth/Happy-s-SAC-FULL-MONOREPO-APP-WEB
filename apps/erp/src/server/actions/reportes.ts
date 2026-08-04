@@ -14,6 +14,7 @@
 
 import { createClient } from '@happy/db/server';
 import { redirect } from 'next/navigation';
+import { formatTallaChip } from '@happy/lib';
 import {
   type CanalVenta,
   type EstadoOT,
@@ -1046,7 +1047,7 @@ export async function reporteStockValorizado(
           almacen: s.almacen ? `${s.almacen.codigo} · ${s.almacen.nombre}` : '—',
           codigo: v.sku,
           nombre: v.producto_nombre,
-          detalle: `Talla ${v.talla.replace('T', '')}`,
+          detalle: `Talla ${formatTallaChip(v.talla)}`,
           cantidad: cant,
           costo_unitario: costo,
           valor_total: valor,

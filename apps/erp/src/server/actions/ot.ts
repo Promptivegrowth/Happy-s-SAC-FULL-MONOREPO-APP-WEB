@@ -3,6 +3,7 @@
 import { z } from 'zod';
 import { redirect } from 'next/navigation';
 import { runAction, requireUser, bumpPaths, esGerente, type ActionResult } from './_helpers';
+import { formatTallaChip } from '@happy/lib';
 
 const ESTADOS = ['BORRADOR','PLANIFICADA','EN_CORTE','EN_HABILITADO','EN_SERVICIO','EN_DECORADO','EN_CONTROL_CALIDAD','COMPLETADA','CANCELADA'] as const;
 type EstadoOT = typeof ESTADOS[number];
@@ -621,7 +622,7 @@ export async function crearRegistroTiempoOT(
           const disponible = cortada - yaRegistrado;
           if (data.unidades_procesadas > disponible) {
             throw new Error(
-              `No podés registrar ${data.unidades_procesadas} unidades en talla ${data.talla.replace('T', '')}: ` +
+              `No podés registrar ${data.unidades_procesadas} unidades en talla ${formatTallaChip(data.talla)}: ` +
               `se cortaron ${cortada} y ya hay ${yaRegistrado} registradas (quedan ${Math.max(0, disponible)}).`,
             );
           }

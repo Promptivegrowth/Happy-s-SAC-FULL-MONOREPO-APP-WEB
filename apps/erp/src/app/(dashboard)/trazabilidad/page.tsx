@@ -11,6 +11,7 @@ import { PageShell } from '@/components/page-shell';
 import { SearchAutocomplete } from '@/components/search-autocomplete';
 import { TableSkeleton } from '@/components/skeletons';
 import { listarEventosTraza, trazaStats, type EventoTrazaListado } from '@/server/actions/trazabilidad';
+import { formatTallaChip } from '@happy/lib';
 
 export const metadata = { title: 'Trazabilidad' };
 export const dynamic = 'force-dynamic';
@@ -69,7 +70,7 @@ export default async function TrazabilidadPage({ searchParams }: { searchParams:
     ...((varsData.data ?? []) as unknown as VarItem[]).map((v) => ({
       id: `var-${v.id}`,
       label: v.sku,
-      sublabel: `SKU · ${v.producto?.nombre ?? ''} · talla ${v.talla.replace('T', '')}`,
+      sublabel: `SKU · ${v.producto?.nombre ?? ''} · talla ${formatTallaChip(v.talla)}`,
       href: `/trazabilidad/variante/${v.id}`,
       // searchKey incluye el código del producto base para que "PR0001" matchee
       // todas las variantes de ese producto (PR0001-T2, PR0001-T6, etc.).

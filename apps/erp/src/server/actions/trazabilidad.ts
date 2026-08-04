@@ -2,6 +2,7 @@
 
 import { z } from 'zod';
 import { runAction, requireUser, type ActionResult } from './_helpers';
+import { formatTallaChip } from '@happy/lib';
 
 /**
  * Trazabilidad end-to-end.
@@ -840,7 +841,7 @@ export async function buscarEntidad(query: string): Promise<ActionResult<Busqued
         tipo: 'VARIANTE',
         id: v.id,
         codigo: v.sku,
-        descripcion: `${v.producto?.nombre ?? 'Producto'} · talla ${v.talla.replace('T', '')}`,
+        descripcion: `${v.producto?.nombre ?? 'Producto'} · talla ${formatTallaChip(v.talla)}`,
         href: `/trazabilidad/variante/${v.id}`,
       });
     }

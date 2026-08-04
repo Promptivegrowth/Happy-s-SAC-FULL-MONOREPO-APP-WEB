@@ -15,6 +15,7 @@ import { Button } from '@happy/ui/button';
 import { Card } from '@happy/ui/card';
 import { Badge } from '@happy/ui/badge';
 import { Trash2, Plus, Minus, ArrowRight, ShoppingBag, TrendingDown } from 'lucide-react';
+import { formatTallaChip } from '@happy/lib';
 
 export default function CarritoPage() {
   const items = useCart((s) => s.items);
@@ -109,7 +110,7 @@ export default function CarritoPage() {
                 </div>
                 <div className="flex-1">
                   <p className="font-medium leading-tight">{it.nombre}</p>
-                  <p className="text-xs text-slate-500">Talla {it.talla.replace('T', '')} · SKU {it.sku}</p>
+                  <p className="text-xs text-slate-500">Talla {formatTallaChip(it.talla)} · SKU {it.sku}</p>
                   <div className="mt-1 flex items-baseline gap-2">
                     <p className="font-semibold text-happy-600">S/ {precioEfectivo.toFixed(2)}</p>
                     {conDescuento && (

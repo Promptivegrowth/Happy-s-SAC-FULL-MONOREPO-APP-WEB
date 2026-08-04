@@ -8,7 +8,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { PageShell } from '@/components/page-shell';
 import { ArrowLeft, Tags } from 'lucide-react';
 import { NewButton, EditButton, DeleteButton } from './client';
-import { formatPEN, formatDate } from '@happy/lib';
+import { formatPEN, formatDate , formatTallaChip } from '@happy/lib';
 
 export const metadata = { title: 'Tarifas de servicios' };
 export const dynamic = 'force-dynamic';
@@ -124,7 +124,7 @@ export default async function Page() {
                     </TableCell>
                     <TableCell>
                       {t.talla ? (
-                        <Badge variant="outline" className="text-[10px]">{t.talla.replace('T', '')}</Badge>
+                        <Badge variant="outline" className="text-[10px]">{formatTallaChip(t.talla)}</Badge>
                       ) : (
                         <Badge variant="secondary" className="text-[10px]">Cualquier talla</Badge>
                       )}

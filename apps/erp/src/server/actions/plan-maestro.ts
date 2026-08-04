@@ -3,6 +3,7 @@
 import { z } from 'zod';
 import { redirect } from 'next/navigation';
 import { runAction, requireUser, bumpPaths, esGerente, type ActionResult } from './_helpers';
+import { formatTallaChip } from '@happy/lib';
 
 const TALLAS = ['T0','T2','T4','T6','T8','T10','T12','T14','T16','TS','TAD'] as const;
 
@@ -344,7 +345,7 @@ export async function generarOTsDelPlan(planId: string): Promise<ActionResult<{ 
         .in('id', Array.from(new Set(lineasSinReceta.map((l) => l.producto_id))));
       const nombrePorId = new Map((prods ?? []).map((p) => [p.id as string, `${p.codigo} ${p.nombre}`]));
       const detalle = lineasSinReceta
-        .map((l) => `${nombrePorId.get(l.producto_id) ?? l.producto_id} (T${l.talla.replace('T', '')})`)
+        .map((l) => `${nombrePorId.get(l.producto_id) ?? l.producto_id} (${formatTallaChip(l.talla)})`)
         .slice(0, 6)
         .join(', ');
       const extra = lineasSinReceta.length > 6 ? ` y ${lineasSinReceta.length - 6} más` : '';

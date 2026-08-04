@@ -11,6 +11,7 @@
  */
 
 import type { DevolucionPDFData } from '@/server/actions/devoluciones';
+import { formatTallaChip } from '@happy/lib';
 
 const NARANJA: [number, number, number] = [255, 77, 13];
 const AZUL: [number, number, number] = [30, 58, 95];
@@ -176,7 +177,7 @@ export async function generarComprobanteDevolucionPDF(data: DevolucionPDFData): 
     body: data.lineas.map((l) => [
       l.producto_nombre,
       l.sku,
-      l.talla.replace('T', ''),
+      formatTallaChip(l.talla),
       String(l.cantidad),
       fmtPEN(l.precio_unitario),
       fmtPEN(l.sub_total),
@@ -219,7 +220,7 @@ export async function generarComprobanteDevolucionPDF(data: DevolucionPDFData): 
       body: data.venta_intercambio.lineas.map((l) => [
         l.producto_nombre,
         l.sku,
-        l.talla.replace('T', ''),
+        formatTallaChip(l.talla),
         String(l.cantidad),
         fmtPEN(l.precio_unitario),
         fmtPEN(l.sub_total),

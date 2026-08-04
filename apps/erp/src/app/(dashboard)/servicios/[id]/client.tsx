@@ -12,6 +12,7 @@ import { toast } from 'sonner';
 import { cambiarEstadoOS, registrarRecepcionOS, editarOS } from '@/server/actions/corte';
 import { generarOSPdf, type OSPdfData } from './os-pdf';
 import type { EmpresaPDFData } from '@/server/empresa-pdf-helper';
+import { formatTallaChip } from '@happy/lib';
 
 const FLOW: Record<string, string[]> = {
   EMITIDA: ['DESPACHADA','ANULADA'],
@@ -199,7 +200,7 @@ export function EditarOSEditor({
             {rows.map((l, i) => (
               <TableRow key={l.id}>
                 <TableCell className="font-medium">{l.producto_nombre}</TableCell>
-                <TableCell><Badge variant="outline">{l.talla.replace('T', '')}</Badge></TableCell>
+                <TableCell><Badge variant="outline">{formatTallaChip(l.talla)}</Badge></TableCell>
                 <TableCell className="text-right">
                   <Input
                     type="number"
@@ -352,7 +353,7 @@ export function RecepcionOSEditor({
                   {l.producto_nombre}
                   {l.producto_codigo && <span className="ml-2 font-mono text-[10px] text-slate-400">{l.producto_codigo}</span>}
                 </TableCell>
-                <TableCell><Badge variant="outline">{l.talla.replace('T', '')}</Badge></TableCell>
+                <TableCell><Badge variant="outline">{formatTallaChip(l.talla)}</Badge></TableCell>
                 <TableCell className="text-right font-mono text-sm">{l.enviado}</TableCell>
                 <TableCell className="text-right">
                   <Input

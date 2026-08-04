@@ -12,6 +12,7 @@ import { Button } from '@happy/ui/button';
 import { Badge } from '@happy/ui/badge';
 import { Loader2, MapPin, Package, Store, Warehouse, X } from 'lucide-react';
 import { obtenerStockPorAlmacen, type StockPorAlmacenItem } from '@/server/actions/stock-multi-almacen';
+import { formatTallaChip } from '@happy/lib';
 
 export function StockAlmacenesModal({
   varianteId,
@@ -54,7 +55,7 @@ export function StockAlmacenesModal({
             </h2>
             {variante && (
               <p className="text-xs text-slate-500">
-                {variante.producto_nombre} · Talla {variante.talla.replace('T', '')}
+                {variante.producto_nombre} · Talla {formatTallaChip(variante.talla)}
                 <span className="ml-1 font-mono text-slate-400">({variante.sku})</span>
               </p>
             )}

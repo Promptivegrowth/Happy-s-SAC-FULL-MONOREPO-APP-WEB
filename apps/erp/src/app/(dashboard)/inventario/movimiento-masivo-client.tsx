@@ -19,6 +19,7 @@ import { Textarea } from '@happy/ui/textarea';
 import { PackagePlus, Loader2, Plus, Trash2, Search, Zap, Upload } from 'lucide-react';
 import { toast } from 'sonner';
 import { registrarMovimientoStockBatch } from '@/server/actions/inventario';
+import { formatTallaChip } from '@happy/lib';
 
 type Almacen = { id: string; nombre: string; codigo: string };
 type Variante = { id: string; sku: string; talla: string; producto_nombre: string };
@@ -257,7 +258,7 @@ export function MovimientoMasivoButton({
                         onClick={() => agregarDelBuscador(v)}
                         className="block w-full px-2 py-1 text-left text-[11px] hover:bg-slate-50"
                       >
-                        <span className="font-mono text-slate-500">{v.sku}</span> · {v.producto_nombre} · T{v.talla.replace('T', '')}
+                        <span className="font-mono text-slate-500">{v.sku}</span> · {v.producto_nombre} · {formatTallaChip(v.talla)}
                       </button>
                     ))}
                   </div>
@@ -323,7 +324,7 @@ export function MovimientoMasivoButton({
                       <tr key={l.uid} className="border-t border-slate-100">
                         <td className="px-2 py-1.5 font-mono">{l.sku}</td>
                         <td className="px-2 py-1.5">
-                          {l.producto} · <span className="text-slate-500">T{l.talla.replace('T', '')}</span>
+                          {l.producto} · <span className="text-slate-500">{formatTallaChip(l.talla)}</span>
                         </td>
                         <td className="px-2 py-1.5 text-right">
                           <Input

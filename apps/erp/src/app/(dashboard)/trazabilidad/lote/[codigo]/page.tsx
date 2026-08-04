@@ -6,6 +6,7 @@ import { Package, Factory, Warehouse, ArrowLeft, User } from 'lucide-react';
 import { PageShell } from '@/components/page-shell';
 import { historicoLote, type TrazaEvento } from '@/server/actions/trazabilidad';
 import { TrazabilidadTimeline } from '../../timeline';
+import { formatTallaChip } from '@happy/lib';
 
 export const dynamic = 'force-dynamic';
 
@@ -47,7 +48,7 @@ export default async function LoteTrazaPage({
       description={
         <span className="inline-flex items-center gap-2 text-sm">
           <Package className="h-3.5 w-3.5" />
-          {lote.variante.producto.nombre} · talla {lote.variante.talla.replace('T', '')} · SKU{' '}
+          {lote.variante.producto.nombre} · talla {formatTallaChip(lote.variante.talla)} · SKU{' '}
           <Link href={`/trazabilidad/variante/${lote.variante.id}`} className="font-mono text-happy-700 hover:underline">
             {lote.variante.sku}
           </Link>

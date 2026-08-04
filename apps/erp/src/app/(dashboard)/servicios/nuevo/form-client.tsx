@@ -13,6 +13,7 @@ import { toast } from 'sonner';
 import { ComboboxBusqueda } from '../../corte/nuevo/form-client';
 import { crearOS } from '@/server/actions/corte';
 import { calcularMontoSugeridoOS } from '@/server/actions/tarifas-talleres';
+import { formatTallaChip } from '@happy/lib';
 
 type CorteOption = {
   id: string;
@@ -298,7 +299,7 @@ export function NuevaOSForm({
                             : 'border-slate-300 bg-white text-slate-500 line-through opacity-60 hover:border-happy-300'
                         }`}
                       >
-                        <span className="font-mono">{l.talla.replace('T', '')}</span>
+                        <span className="font-mono">{formatTallaChip(l.talla)}</span>
                         <span className="font-bold">{l.cantidad_real}u</span>
                       </button>
                     );
@@ -363,7 +364,7 @@ export function NuevaOSForm({
                       <tbody>
                         {tarifaInfo.detalle.map((d) => (
                           <tr key={d.talla} className="border-b border-emerald-100 last:border-0">
-                            <td className="py-1 font-mono">{d.talla.replace('T', '')}</td>
+                            <td className="py-1 font-mono">{formatTallaChip(d.talla)}</td>
                             <td className="py-1 text-right">{d.cantidad}</td>
                             <td className="py-1 text-right text-emerald-700">S/ {d.tarifa.toFixed(2)}</td>
                             <td className="py-1 text-right font-semibold text-emerald-800">S/ {d.subtotal.toFixed(2)}</td>
@@ -435,7 +436,7 @@ export function NuevaOSForm({
                             : 'border-slate-300 bg-white text-slate-500 line-through opacity-60 hover:border-corp-300'
                         }`}
                       >
-                        <span className="font-mono">{l.talla.replace('T', '')}</span>
+                        <span className="font-mono">{formatTallaChip(l.talla)}</span>
                         <span className="font-bold">{l.cantidad}u</span>
                       </button>
                     );

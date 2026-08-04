@@ -10,6 +10,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Loader2, Plus, Trash2, Clock, X, Scissors, ExternalLink } from 'lucide-react';
 import { toast } from 'sonner';
 import { crearRegistroTiempoOT, eliminarRegistroTiempoOT } from '@/server/actions/ot';
+import { formatTallaChip } from '@happy/lib';
 
 /** Resumen (solo lectura) de la liquidación de tiempos del área de corte, que
  *  se declara en la orden de corte y en la OT solo se muestra informativo. */
@@ -355,7 +356,7 @@ export function TiemposCostoTab({ otId, procesos, lineas, registros, operarios, 
                   tallaSel === t ? 'border-happy-500 bg-happy-500 text-white' : 'border-slate-200 bg-white text-slate-600 hover:border-happy-300'
                 }`}
               >
-                {t.replace('T', '')}
+                {formatTallaChip(t)}
               </button>
             ))}
           </div>
@@ -369,7 +370,7 @@ export function TiemposCostoTab({ otId, procesos, lineas, registros, operarios, 
         </CardContent>
         <CardContent className="p-0">
           <div className="border-t px-4 pt-3 text-xs font-medium text-slate-500">
-            Resumen por operación · Talla {tallaSel.replace('T', '')}
+            Resumen por operación · Talla {formatTallaChip(tallaSel)}
           </div>
           <ResumenOperacionesTabla
             procesos={procesosTalla}
@@ -857,7 +858,7 @@ function FormRegistro({
       const rem = t.cortada - t.yaRegistrado;
       if (t.cantidad > rem) {
         toast.error(
-          `Talla ${t.talla.replace('T', '')}: máximo ${Math.max(0, rem)} ` +
+          `Talla ${formatTallaChip(t.talla)}: máximo ${Math.max(0, rem)} ` +
           `(se cortaron ${t.cortada}, ya registradas ${t.yaRegistrado})`,
         );
         return;
@@ -1027,7 +1028,7 @@ function FormRegistro({
                   completo ? 'border-slate-200 bg-slate-50 opacity-60' : 'border-slate-200 bg-white'
                 }`}
               >
-                <Badge variant="outline" className="text-[9px]">{t.talla.replace('T', '')}</Badge>
+                <Badge variant="outline" className="text-[9px]">{formatTallaChip(t.talla)}</Badge>
                 <Input
                   type="number"
                   min="0"
@@ -1104,7 +1105,7 @@ function RegistroRow({ otId, registro: r, disabled }: { otId: string; registro: 
     : fmtFechaHora(r.created_at);
   return (
     <div className="flex items-center gap-2 rounded border border-slate-100 bg-slate-50 px-2 py-1 text-[11px]">
-      <Badge variant="outline" className="text-[9px]">T{r.talla.replace('T', '')}</Badge>
+      <Badge variant="outline" className="text-[9px]">{formatTallaChip(r.talla)}</Badge>
       <span className="text-slate-500">{fechaTxt}</span>
       <span className="font-mono font-semibold text-emerald-700">{Number(r.tiempo_total_min).toFixed(2)} min</span>
       {r.unidades_procesadas != null && <span className="text-slate-600">· {r.unidades_procesadas} u</span>}

@@ -15,6 +15,7 @@ import { Label } from '@happy/ui/label';
 import { Pencil, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { ajustarStock } from '@/server/actions/inventario';
+import { formatTallaChip } from '@happy/lib';
 
 type Props = {
   almacenId: string;
@@ -97,7 +98,7 @@ export function AjustarStockButton(props: Props) {
           <DialogHeader>
             <DialogTitle>Corregir cantidad por conteo físico</DialogTitle>
             <DialogDescription>
-              {props.productoNombre} · talla {props.talla.replace('T', '')} · SKU {props.sku} ·
+              {props.productoNombre} · talla {formatTallaChip(props.talla)} · SKU {props.sku} ·
               almacén {props.almacenNombre}
               <span className="mt-1 block rounded bg-amber-50 p-2 text-xs text-amber-700">
                 <strong>Usar cuando:</strong> contás físicamente y el sistema no coincide. La cantidad ingresada será el valor final exacto; el sistema genera el ajuste automático para llegar a ese número.

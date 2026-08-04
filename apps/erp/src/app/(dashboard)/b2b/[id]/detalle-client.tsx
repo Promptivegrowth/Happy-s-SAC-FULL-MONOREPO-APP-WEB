@@ -52,6 +52,7 @@ import {
 } from '@/server/actions/b2b-helpers';
 import { cargarEmpresaPDF } from '@/server/empresa-pdf-helper';
 import { generarProformaPdf } from './proforma-pdf';
+import { formatTallaChip } from '@happy/lib';
 
 type Almacen = { id: string; codigo: string; nombre: string };
 
@@ -370,7 +371,7 @@ function LineasEditor({
                     {variantePick.sku} · {variantePick.producto_nombre}
                   </div>
                   <div className="truncate text-[11px] text-slate-500">
-                    T{variantePick.talla.replace('T', '')}
+                    {formatTallaChip(variantePick.talla)}
                     {variantePick.color && ` · ${variantePick.color}`} · S/{' '}
                     {variantePick.precio_aplicable.toFixed(2)}
                     {variantePick.uso_fallback_precio && (
@@ -424,7 +425,7 @@ function LineasEditor({
                             {v.sku} · {v.producto_nombre}
                           </div>
                           <div className="truncate text-[10px] text-slate-500">
-                            T{v.talla.replace('T', '')}
+                            {formatTallaChip(v.talla)}
                             {v.color && ` · ${v.color}`}
                             {v.uso_fallback_precio && (
                               <span className="ml-1 text-amber-600">(precio público)</span>
@@ -586,7 +587,7 @@ function LineaEditable({ linea }: { linea: PedidoB2BLineaDetalle }) {
       <TableCell>
         <div className="text-sm text-corp-900">{linea.producto_nombre}</div>
         <div className="text-[10px] text-slate-500">
-          T{linea.talla.replace('T', '')}
+          {formatTallaChip(linea.talla)}
           {linea.color && ` · ${linea.color}`}
         </div>
       </TableCell>
@@ -701,7 +702,7 @@ function LineasLectura({
                     <TableCell>
                       <div className="text-sm text-corp-900">{l.producto_nombre}</div>
                       <div className="text-[10px] text-slate-500">
-                        T{l.talla.replace('T', '')}
+                        {formatTallaChip(l.talla)}
                         {l.color && ` · ${l.color}`}
                       </div>
                     </TableCell>
@@ -1063,7 +1064,7 @@ function RegistrarDespachoButton({
                       <TableCell>
                         <div className="text-sm text-corp-900">{l.producto_nombre}</div>
                         <div className="text-[10px] text-slate-500">
-                          T{l.talla.replace('T', '')}
+                          {formatTallaChip(l.talla)}
                           {l.color && ` · ${l.color}`}
                         </div>
                       </TableCell>

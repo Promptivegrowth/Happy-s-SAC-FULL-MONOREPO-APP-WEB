@@ -15,6 +15,7 @@ import { Label } from '@happy/ui/label';
 import { PackagePlus, Loader2, Search } from 'lucide-react';
 import { toast } from 'sonner';
 import { registrarMovimientoStock } from '@/server/actions/inventario';
+import { formatTallaChip } from '@happy/lib';
 
 type Almacen = { id: string; nombre: string; codigo: string };
 type Variante = { id: string; sku: string; talla: string; producto_nombre: string };
@@ -152,7 +153,7 @@ export function NuevoMovimientoButton({
                       type="button"
                       onClick={() => {
                         setVarianteId(v.id);
-                        setSearch(`${v.producto_nombre} · ${v.talla.replace('T', '')}`);
+                        setSearch(`${v.producto_nombre} · ${formatTallaChip(v.talla)}`);
                       }}
                       className={`flex w-full items-center justify-between border-b px-3 py-2 text-left text-xs transition hover:bg-happy-50 ${
                         varianteId === v.id ? 'bg-happy-100 font-semibold' : ''
@@ -163,7 +164,7 @@ export function NuevoMovimientoButton({
                         {v.producto_nombre}
                       </span>
                       <span className="rounded bg-slate-100 px-2 py-0.5 font-mono">
-                        {v.talla.replace('T', '')}
+                        {formatTallaChip(v.talla)}
                       </span>
                     </button>
                   ))
@@ -171,7 +172,7 @@ export function NuevoMovimientoButton({
               </div>
               {seleccionada && (
                 <p className="text-xs text-emerald-700">
-                  ✓ {seleccionada.producto_nombre} · talla {seleccionada.talla.replace('T', '')} ·{' '}
+                  ✓ {seleccionada.producto_nombre} · talla {formatTallaChip(seleccionada.talla)} ·{' '}
                   {seleccionada.sku}
                 </p>
               )}

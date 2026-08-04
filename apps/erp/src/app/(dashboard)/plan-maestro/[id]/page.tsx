@@ -10,7 +10,7 @@ import { PageShell } from '@/components/page-shell';
 import { esGerente } from '@/server/actions/_helpers';
 import { LineasEditor, AccionesPlan } from './client';
 import { DescargarPdfButton } from './descargar-pdf-button';
-import { formatDate, formatNumber } from '@happy/lib';
+import { formatDate, formatNumber , formatTallaChip } from '@happy/lib';
 import { Factory, AlertTriangle, FileWarning, FlaskConical } from 'lucide-react';
 
 export const dynamic = 'force-dynamic';
@@ -147,7 +147,7 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
                             <li key={l.id} className="flex items-center gap-2">
                               <Badge variant="destructive" className="text-[9px]">Falta</Badge>
                               <span className="font-medium text-amber-900">{l.productos?.nombre ?? '—'}</span>
-                              <Badge variant="outline" className="border-amber-300 text-[9px]">Talla {l.talla.replace('T', '')}</Badge>
+                              <Badge variant="outline" className="border-amber-300 text-[9px]">Talla {formatTallaChip(l.talla)}</Badge>
                               <span className="text-amber-700">·</span>
                               <span className="text-amber-700">{l.cantidad_planificada} unid</span>
                               {l.productos?.id && (

@@ -17,6 +17,7 @@ import { z } from 'zod';
 import { createClient } from '@happy/db/server';
 import { createServiceClient } from '@happy/db/service';
 import { runAction, requireUser, bumpPaths, type ActionResult } from './_helpers';
+import { formatTallaChip } from '@happy/lib';
 import {
   ESTADOS_PEDIDO_WEB, TRANSICIONES, STOCK_RESERVADO, type EstadoPedidoWeb,
 } from './pedidos-web-helpers';
@@ -356,7 +357,7 @@ export async function prepararPedidoWeb(
           .eq('id', l.variante_id)
           .single();
         const nom = vInfo
-          ? `${vInfo.productos?.nombre ?? ''} talla ${String(vInfo.talla ?? '').replace('T', '')} (${vInfo.sku})`
+          ? `${vInfo.productos?.nombre ?? ''} talla ${formatTallaChip(String(vInfo.talla ?? ''))} (${vInfo.sku})`
           : 'producto';
         faltantes.push(`${nom}: pide ${l.cantidad}, hay ${enStock}`);
       }

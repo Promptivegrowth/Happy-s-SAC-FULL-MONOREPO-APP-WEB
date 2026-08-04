@@ -14,7 +14,7 @@ import {
   CheckCircle2, Package, X as XIcon, Loader2,
 } from 'lucide-react';
 import { toast } from 'sonner';
-import { formatPEN } from '@happy/lib';
+import { formatPEN , formatTallaChip } from '@happy/lib';
 import {
   confirmarPagoPedidoWeb,
   prepararPedidoWeb,
@@ -291,7 +291,7 @@ export function DetalleClient({
                   <TableCell className="font-medium">{l.producto_nombre}</TableCell>
                   <TableCell className="font-mono text-xs text-slate-500">{l.sku}</TableCell>
                   <TableCell className="text-center">
-                    <Badge variant="outline" className="text-[10px]">{l.talla.replace('T', '')}</Badge>
+                    <Badge variant="outline" className="text-[10px]">{formatTallaChip(l.talla)}</Badge>
                   </TableCell>
                   <TableCell className="text-center font-mono text-sm">{l.cantidad}</TableCell>
                   <TableCell className="text-right font-mono text-sm">{formatPEN(l.precio_unitario)}</TableCell>

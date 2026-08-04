@@ -21,7 +21,7 @@ import {
   X, Search, Loader2, ArrowLeft, RotateCcw, Receipt, AlertCircle, ScanBarcode, Plus, Trash2,
 } from 'lucide-react';
 import { toast } from 'sonner';
-import { formatPEN } from '@happy/lib';
+import { formatPEN , formatTallaChip } from '@happy/lib';
 import {
   buscarVentaParaDevolucion,
   registrarDevolucion,
@@ -136,7 +136,7 @@ export function DevolucionModal({
     const existe = entregaLineas.find((l) => l.variante_id === v.id);
     const cantActual = existe?.cantidad ?? 0;
     if (cantActual + 1 > v.stock) {
-      toast.error(`Sin stock: ${v.stock} unid. disponibles de ${v.producto_nombre} talla ${v.talla.replace('T', '')}`);
+      toast.error(`Sin stock: ${v.stock} unid. disponibles de ${v.producto_nombre} talla ${formatTallaChip(v.talla)}`);
       return;
     }
     if (existe) {
@@ -460,7 +460,7 @@ export function DevolucionModal({
                         <TableRow key={l.venta_linea_id} className={l.cantidad_disponible === 0 ? 'opacity-50' : ''}>
                           <TableCell>
                             <div className="text-sm font-medium text-corp-900">{l.producto_nombre}</div>
-                            <div className="text-[10px] text-slate-500">{l.sku} · Talla {l.talla.replace('T', '')} · {formatPEN(l.precio_unitario)} c/u</div>
+                            <div className="text-[10px] text-slate-500">{l.sku} · Talla {formatTallaChip(l.talla)} · {formatPEN(l.precio_unitario)} c/u</div>
                           </TableCell>
                           <TableCell className="text-center font-mono text-xs">{l.cantidad_vendida}</TableCell>
                           <TableCell className="text-center font-mono text-xs text-amber-600">
@@ -551,7 +551,7 @@ export function DevolucionModal({
                           <div className="min-w-0 flex-1">
                             <p className="truncate text-sm font-medium text-corp-900">{v.producto_nombre}</p>
                             <p className="text-[10px] text-slate-500">
-                              {v.sku} · Talla {v.talla.replace('T', '')}
+                              {v.sku} · Talla {formatTallaChip(v.talla)}
                               {v.codigo_barras && <> · {v.codigo_barras}</>}
                             </p>
                           </div>
@@ -593,7 +593,7 @@ export function DevolucionModal({
                           <TableCell>
                             <div className="text-sm font-medium text-corp-900">{l.producto_nombre}</div>
                             <div className="text-[10px] text-slate-500">
-                              {l.sku} · Talla {l.talla.replace('T', '')} · Stock: {stockReal}
+                              {l.sku} · Talla {formatTallaChip(l.talla)} · Stock: {stockReal}
                             </div>
                           </TableCell>
                           <TableCell className="text-center">

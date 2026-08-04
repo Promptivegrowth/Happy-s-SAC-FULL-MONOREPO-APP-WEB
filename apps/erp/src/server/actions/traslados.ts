@@ -2,6 +2,7 @@
 
 import { z } from 'zod';
 import { runAction, requireUser, bumpPaths, type ActionResult } from './_helpers';
+import { formatTallaChip } from '@happy/lib';
 
 /**
  * Módulo de Traslados Multi-Almacén (traslados / traslados_lineas).
@@ -284,7 +285,7 @@ export async function obtenerTraslado(
             material_id: null,
             codigo: l.variante.sku,
             nombre: l.variante.producto?.nombre ?? '—',
-            detalle: `Talla ${l.variante.talla.replace('T', '')}`,
+            detalle: `Talla ${formatTallaChip(l.variante.talla)}`,
             cantidad: cant,
             cantidad_recibida: recibida,
             diferencia: recibida != null ? recibida - cant : null,

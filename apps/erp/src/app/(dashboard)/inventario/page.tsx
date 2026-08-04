@@ -10,7 +10,7 @@ import { PageShell } from '@/components/page-shell';
 import { SearchAutocomplete } from '@/components/search-autocomplete';
 import { FilterChip } from '@/components/filter-chip';
 import { TableSkeleton } from '@/components/skeletons';
-import { formatNumber, normalizarTexto } from '@happy/lib';
+import { formatNumber, normalizarTexto , formatTallaChip } from '@happy/lib';
 import { Boxes, AlertTriangle, History } from 'lucide-react';
 import { AjustarStockButton } from './ajustar-stock-client';
 import { NuevoMovimientoButton } from './nuevo-movimiento-client';
@@ -395,7 +395,7 @@ async function InventarioTable({ q, almacen, vista }: SP) {
                   <TableCell className="font-mono text-xs">{f.sku}</TableCell>
                   <TableCell className="font-medium">{f.producto_nombre}</TableCell>
                   <TableCell>
-                    <Badge variant="outline">{f.talla.replace('T', '')}</Badge>
+                    <Badge variant="outline">{formatTallaChip(f.talla)}</Badge>
                   </TableCell>
                   <TableCell className="text-right">
                     <span

@@ -19,6 +19,7 @@
 import { z } from 'zod';
 import { createClient } from '@happy/db/server';
 import { createServiceClient } from '@happy/db/service';
+import { formatTallaChip } from '@happy/lib';
 
 type ActionResult<T = null> = { ok: true; data: T } | { ok: false; error: string };
 
@@ -455,7 +456,7 @@ export async function registrarCambio(
             .eq('id', p.variante_id)
             .single();
           const nombre = vInfo
-            ? `${vInfo.productos?.nombre ?? ''} talla ${String(vInfo.talla ?? '').replace('T', '')} (${vInfo.sku})`
+            ? `${vInfo.productos?.nombre ?? ''} talla ${formatTallaChip(String(vInfo.talla ?? ''))} (${vInfo.sku})`
             : 'el producto entregado';
           throw new Error(`Sin stock suficiente de ${nombre}: pide ${p.cantidad}, disponible ${enStock}`);
         }

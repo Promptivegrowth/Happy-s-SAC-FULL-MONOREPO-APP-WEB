@@ -6,7 +6,7 @@ import { Badge } from '@happy/ui/badge';
 import { Card, CardContent } from '@happy/ui/card';
 import { EmptyState } from '@happy/ui/empty-state';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@happy/ui/table';
-import { formatPEN, ordenTalla } from '@happy/lib';
+import { formatPEN, ordenTalla , formatTallaChip } from '@happy/lib';
 import { PageShell } from '@/components/page-shell';
 import { SearchAutocomplete } from '@/components/search-autocomplete';
 import { FilterChip } from '@/components/filter-chip';
@@ -380,9 +380,9 @@ async function ProductosTable({ q, cat, estado, web, sin_categoria }: SP) {
                                 key={v.sku}
                                 variant={sinStock ? 'destructive' : 'outline'}
                                 className={`text-[10px] ${sinStock ? 'line-through opacity-80' : ''}`}
-                                title={sinStock ? `Talla ${v.talla.replace('T', '')} sin stock` : `Stock: ${stock}`}
+                                title={sinStock ? `Talla ${formatTallaChip(v.talla)} sin stock` : `Stock: ${stock}`}
                               >
-                                {v.talla.replace('T', '')}
+                                {formatTallaChip(v.talla)}
                               </Badge>
                             );
                           })}

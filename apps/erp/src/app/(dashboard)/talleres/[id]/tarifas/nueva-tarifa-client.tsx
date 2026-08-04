@@ -17,6 +17,7 @@ import { Plus, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { ComboboxBusqueda } from '../../../corte/nuevo/form-client';
 import { crearTarifa } from '@/server/actions/tarifas-talleres';
+import { formatTallaChip } from '@happy/lib';
 
 const PROCESOS = [
   'TRAZADO', 'TENDIDO', 'CORTE', 'HABILITADO', 'COSTURA', 'BORDADO', 'ESTAMPADO',
@@ -137,7 +138,7 @@ export function NuevaTarifaButton({ tallerId, productos }: { tallerId: string; p
                 >
                   <option value="">— Cualquier talla —</option>
                   {TALLAS.map((t) => (
-                    <option key={t} value={t}>{t.replace('T', '')}</option>
+                    <option key={t} value={t}>{formatTallaChip(t)}</option>
                   ))}
                 </select>
               </div>
