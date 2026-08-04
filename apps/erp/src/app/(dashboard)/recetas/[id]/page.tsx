@@ -8,6 +8,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { PageShell } from '@/components/page-shell';
 import { RecetaEditor } from './editor-client';
 import { obtenerTallasCongeladas } from '@/server/actions/recetas';
+import { formatTallaChip } from '@happy/lib';
 
 export const dynamic = 'force-dynamic';
 
@@ -100,7 +101,7 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
             {tallasFaltantes.length === 0 ? (
               <Badge variant="success" className="text-[10px]">Todas cubiertas</Badge>
             ) : tallasFaltantes.slice(0, 8).map((t) => (
-              <Badge key={t} variant="outline" className="text-[10px]">{t.replace('T','')}</Badge>
+              <Badge key={t} variant="outline" className="text-[10px]">{formatTallaChip(t)}</Badge>
             ))}
           </div>
         </Card>

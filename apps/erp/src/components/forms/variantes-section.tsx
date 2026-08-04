@@ -9,7 +9,7 @@ import { FormRow } from '@happy/ui/form-row';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@happy/ui/table';
 import { Plus, Trash2, Loader2, Pencil, Save, X, Copy } from 'lucide-react';
 import { toast } from 'sonner';
-import { formatPEN } from '@happy/lib';
+import { formatPEN, formatTallaChip } from '@happy/lib';
 import { crearVariante, actualizarVariante, eliminarVariante } from '@/server/actions/productos';
 
 const TALLAS = ['T0','T2','T4','T6','T8','T10','T12','T14','T16','TS','TAD'] as const;
@@ -122,13 +122,13 @@ export function VariantesSection({
           {prefill && (
             <p className="mb-3 flex items-center gap-1.5 text-xs font-medium text-happy-700">
               <Copy className="h-3.5 w-3.5" />
-              Duplicando precios de la talla {prefill.talla.replace('T', '')}. Elija la nueva talla y guarde.
+              Duplicando precios de la talla {formatTallaChip(prefill.talla)}. Elija la nueva talla y guarde.
             </p>
           )}
           <div className="grid gap-4 sm:grid-cols-3">
             <FormRow label="Talla" required>
               <select name="talla" required className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm">
-                {tallasDisponibles.map((t) => <option key={t} value={t}>{t.replace('T', '')}</option>)}
+                {tallasDisponibles.map((t) => <option key={t} value={t}>{formatTallaChip(t)}</option>)}
               </select>
             </FormRow>
             <FormRow
@@ -288,7 +288,7 @@ function VarianteRow({
   if (!editing) {
     return (
       <TableRow>
-        <TableCell><Badge variant="outline">{v.talla.replace('T', '')}</Badge></TableCell>
+        <TableCell><Badge variant="outline">{formatTallaChip(v.talla)}</Badge></TableCell>
         <TableCell className="font-mono text-xs">{v.sku}</TableCell>
         <TableCell className="font-mono text-xs text-slate-500">{v.codigo_barras ?? '—'}</TableCell>
         <TableCell className="text-right font-medium">{formatPEN(Number(v.precio_publico ?? 0))}</TableCell>
@@ -329,7 +329,7 @@ function VarianteRow({
 
   return (
     <TableRow className="bg-happy-50/40">
-      <TableCell><Badge variant="outline">{v.talla.replace('T', '')}</Badge></TableCell>
+      <TableCell><Badge variant="outline">{formatTallaChip(v.talla)}</Badge></TableCell>
       <TableCell>
         <Input value={sku} onChange={(e) => setSku(e.target.value.toUpperCase())} className="h-8 font-mono text-xs" disabled={pending} />
       </TableCell>

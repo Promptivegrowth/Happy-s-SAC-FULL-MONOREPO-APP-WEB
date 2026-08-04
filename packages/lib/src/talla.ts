@@ -57,3 +57,16 @@ export function formatTallaCorto(talla: string | null | undefined): string {
   if (talla === 'TAD') return 'AD';
   return talla.replace(/^T/i, '');
 }
+
+/**
+ * Etiqueta para CHIPS de selección de talla (recetas, variantes, etc.): clara
+ * pero compacta. TS se muestra como "Única" (talla única/estándar para
+ * accesorios: pañuelos, pelucas…) y TAD como "Adulto", en vez de "S"/"AD" que
+ * confundían al usuario (pedido del cliente 21/07/2026).
+ */
+export function formatTallaChip(talla: string | null | undefined): string {
+  if (!talla) return '—';
+  if (talla === 'TS') return 'Única';
+  if (talla === 'TAD') return 'Adulto';
+  return talla.replace(/^T/i, '');
+}

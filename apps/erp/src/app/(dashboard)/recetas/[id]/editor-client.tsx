@@ -13,6 +13,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Plus, Trash2, Loader2, Search, X, Copy, Scissors, Clock, ListOrdered, GripVertical } from 'lucide-react';
 import { toast } from 'sonner';
 import { NuevaAreaInlineModal, type AreaCreada } from '@/components/forms/nueva-area-inline-modal';
+import { formatTallaChip } from '@happy/lib';
 import {
   DndContext,
   closestCenter,
@@ -476,7 +477,7 @@ function BomEditor({
                       : 'border-slate-300 bg-white text-slate-700 hover:border-happy-400 hover:bg-happy-50'
                 }`}
               >
-                {t.replace('T', '')}
+                {formatTallaChip(t)}
                 {!sinReceta && (
                   <span className={`text-[9px] font-mono ${filtroTalla === t ? 'text-white/80' : 'text-slate-400'}`}>
                     ·{cantidad}
@@ -559,7 +560,7 @@ function BomEditor({
                       type="button"
                       onClick={() => !cong && toggleTallaNueva(t)}
                       disabled={cong}
-                      title={cong ? `Talla ${t.replace('T', '')} congelada — tiene OTs generadas` : undefined}
+                      title={cong ? `Talla ${formatTallaChip(t)} congelada — tiene OTs generadas` : undefined}
                       className={`rounded-full border px-3 py-1 text-xs font-medium transition ${
                         cong
                           ? 'cursor-not-allowed border-amber-200 bg-amber-50 text-amber-400 opacity-60 line-through'
@@ -570,7 +571,7 @@ function BomEditor({
                     >
                       {cong && '🔒 '}
                       {sel && !cong && '✓ '}
-                      {t.replace('T', '')}
+                      {formatTallaChip(t)}
                     </button>
                   );
                 })}
@@ -669,7 +670,7 @@ function BomEditor({
             <Card key={t} className="overflow-hidden">
               <div className="flex items-center justify-between border-b bg-slate-50 px-4 py-2">
                 <h3 className="font-display text-sm font-semibold">
-                  Talla {t.replace('T', '')}
+                  Talla {formatTallaChip(t)}
                   {tallaCong && !esHistorica && (
                     <span className="ml-2 inline-flex items-center gap-1 rounded-full bg-amber-100 px-2 py-0.5 text-[9px] font-semibold text-amber-800">
                       🔒 Congelada (OTs generadas)
@@ -790,7 +791,7 @@ function RecetaTabla({
           const costo = costoUnit * Number(l.cantidad);
           return (
             <TableRow key={l.id}>
-              {!compact && <TableCell><Badge variant="outline">{l.talla.replace('T', '')}</Badge></TableCell>}
+              {!compact && <TableCell><Badge variant="outline">{formatTallaChip(l.talla)}</Badge></TableCell>}
               <TableCell>
                 <div className="font-medium text-sm">{l.materiales?.nombre}</div>
                 <div className="font-mono text-[10px] text-slate-500">{l.materiales?.codigo}</div>
