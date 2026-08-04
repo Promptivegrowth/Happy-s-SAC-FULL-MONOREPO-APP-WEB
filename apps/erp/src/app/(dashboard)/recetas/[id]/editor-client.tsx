@@ -47,7 +47,7 @@ import {
   versionarProcesosProducto,
 } from '@/server/actions/recetas';
 
-const TALLAS = ['T0','T2','T4','T6','T8','T10','T12','T14','T16','TS','TAD'] as const;
+const TALLAS = ['T0','T2','T4','T6','T8','T10','T12','T14','T16','TS','TAD', 'TU'] as const;
 
 const PROCESOS = [
   'TRAZADO','TENDIDO','CORTE','HABILITADO','COSTURA','BORDADO','ESTAMPADO',
@@ -408,7 +408,7 @@ function BomEditor({
       const r = await upsertRecetaMulti({
         receta_id: recetaId,
         material_id: materialId,
-        tallas: Array.from(tallasNueva) as ('T0' | 'T2' | 'T4' | 'T6' | 'T8' | 'T10' | 'T12' | 'T14' | 'T16' | 'TS' | 'TAD')[],
+        tallas: Array.from(tallasNueva) as ('T0' | 'T2' | 'T4' | 'T6' | 'T8' | 'T10' | 'T12' | 'T14' | 'T16' | 'TS' | 'TAD' | 'TU')[],
         cantidad,
         sale_a_servicio: saleAServicio,
         cantidad_almacen: cantidadAlmacen,

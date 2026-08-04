@@ -12,7 +12,7 @@ import { formatTallaChip } from '@happy/lib';
 
 export const dynamic = 'force-dynamic';
 
-const TALLAS = ['T0','T2','T4','T6','T8','T10','T12','T14','T16','TS','TAD'] as const;
+const TALLAS = ['T0','T2','T4','T6','T8','T10','T12','T14','T16','TS','TAD', 'TU'] as const;
 
 export default async function Page({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;

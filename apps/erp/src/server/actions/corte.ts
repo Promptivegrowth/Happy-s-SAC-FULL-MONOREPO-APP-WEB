@@ -4,7 +4,7 @@ import { z } from 'zod';
 import { runAction, requireUser, bumpPaths, esGerente, type ActionResult } from './_helpers';
 import { formatTallaChip } from '@happy/lib';
 
-const TALLAS = ['T0','T2','T4','T6','T8','T10','T12','T14','T16','TS','TAD'] as const;
+const TALLAS = ['T0','T2','T4','T6','T8','T10','T12','T14','T16','TS','TAD', 'TU'] as const;
 
 // Movilidad por defecto de la OS: S/ 0.10 por unidad enviada al taller.
 // Modificar este valor exige autorización de gerencia (ver crearOS).
@@ -308,7 +308,7 @@ async function poblarLineasYAviosOS(
   const filasLineas = lineasCorte.map((l) => ({
     os_id: osId,
     producto_id: productoId,
-    talla: l.talla as 'T0' | 'T2' | 'T4' | 'T6' | 'T8' | 'T10' | 'T12' | 'T14' | 'T16' | 'TS' | 'TAD',
+    talla: l.talla as 'T0' | 'T2' | 'T4' | 'T6' | 'T8' | 'T10' | 'T12' | 'T14' | 'T16' | 'TS' | 'TAD' | 'TU',
     cantidad: l.cantidad,
   }));
   const { error: errL } = await sb.from('ordenes_servicio_lineas').insert(filasLineas);
@@ -347,7 +347,7 @@ async function generarAviosOS(
     .maybeSingle();
   if (!receta) return 0;
 
-  const tallasNecesarias = [...cantPorTalla.keys()] as ('T0' | 'T2' | 'T4' | 'T6' | 'T8' | 'T10' | 'T12' | 'T14' | 'T16' | 'TS' | 'TAD')[];
+  const tallasNecesarias = [...cantPorTalla.keys()] as ('T0' | 'T2' | 'T4' | 'T6' | 'T8' | 'T10' | 'T12' | 'T14' | 'T16' | 'TS' | 'TAD' | 'TU')[];
   const { data: lineasReceta } = await sb
     .from('recetas_lineas')
     .select('material_id, talla, cantidad, cantidad_almacen')
@@ -399,7 +399,7 @@ async function poblarLineasOSDesdeOT(
   const candidatas = (lineasOt ?? [])
     .map((l) => ({
       producto_id: l.producto_id as string,
-      talla: l.talla as 'T0' | 'T2' | 'T4' | 'T6' | 'T8' | 'T10' | 'T12' | 'T14' | 'T16' | 'TS' | 'TAD',
+      talla: l.talla as 'T0' | 'T2' | 'T4' | 'T6' | 'T8' | 'T10' | 'T12' | 'T14' | 'T16' | 'TS' | 'TAD' | 'TU',
       cantidad: Number(l.cantidad_cortada ?? 0) > 0 ? Number(l.cantidad_cortada) : Number(l.cantidad_planificada ?? 0),
     }))
     .filter((l) => l.cantidad > 0 && (!filtroSet || filtroSet.has(l.talla)));

@@ -25,7 +25,7 @@ const FLOW_ESTADOS: Record<EstadoOT, EstadoOT[]> = {
   CANCELADA:          [],
 };
 
-const TALLAS = ['T0','T2','T4','T6','T8','T10','T12','T14','T16','TS','TAD'] as const;
+const TALLAS = ['T0','T2','T4','T6','T8','T10','T12','T14','T16','TS','TAD', 'TU'] as const;
 
 const agregarLineaSchema = z.object({
   producto_id: z.string().uuid(),

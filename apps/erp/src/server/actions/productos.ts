@@ -4,7 +4,7 @@ import { z } from 'zod';
 import { redirect } from 'next/navigation';
 import { runAction, requireUser, bumpPaths, type ActionResult } from './_helpers';
 
-const TALLAS = ['T0','T2','T4','T6','T8','T10','T12','T14','T16','TS','TAD'] as const;
+const TALLAS = ['T0','T2','T4','T6','T8','T10','T12','T14','T16','TS','TAD', 'TU'] as const;
 
 const productoSchema = z.object({
   // Opcional: si está vacío, el server lo autogenera como <CAT_CODIGO>-<NNNN>

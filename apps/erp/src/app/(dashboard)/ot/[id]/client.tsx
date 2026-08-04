@@ -309,7 +309,7 @@ export function OtLineaProduccion({ otId, lineaId, cortada, fallas, disabled }: 
   );
 }
 
-const TALLAS_OPCIONES = ['T0','T2','T4','T6','T8','T10','T12','T14','T16','TS','TAD'] as const;
+const TALLAS_OPCIONES = ['T0','T2','T4','T6','T8','T10','T12','T14','T16','TS','TAD', 'TU'] as const;
 
 type ProductoOpcion = { id: string; codigo: string; nombre: string };
 

@@ -118,11 +118,11 @@ export type TipoReclamo = (typeof TIPOS_RECLAMO)[number];
 export const ESTADOS_RECLAMO = ['NUEVO', 'EN_REVISION', 'RESUELTO', 'DESESTIMADO'] as const;
 export type EstadoReclamo = (typeof ESTADOS_RECLAMO)[number];
 
-export const TALLAS = ['T0', 'T2', 'T4', 'T6', 'T8', 'T10', 'T12', 'T14', 'T16', 'TS', 'TAD'] as const;
+export const TALLAS = ['T0', 'T2', 'T4', 'T6', 'T8', 'T10', 'T12', 'T14', 'T16', 'TS', 'TAD', 'TU'] as const;
 export type Talla = (typeof TALLAS)[number];
 
 export const ETIQUETAS_TALLA: Record<Talla, string> = {
   T0: '0', T2: '2', T4: '4', T6: '6', T8: '8',
   T10: '10', T12: '12', T14: '14', T16: '16',
-  TS: 'Small', TAD: 'Adulto',
+  TS: 'Small', TAD: 'Adulto', TU: 'Única',
 };

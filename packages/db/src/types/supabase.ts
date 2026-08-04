@@ -9001,6 +9001,7 @@ export type Database = {
         | "T16"
         | "TS"
         | "TAD"
+        | "TU"
       tipo_almacen:
         | "MATERIA_PRIMA"
         | "PRODUCTO_TERMINADO"
@@ -9263,6 +9264,7 @@ export const Constants = {
         "T16",
         "TS",
         "TAD",
+        "TU",
       ],
       tipo_almacen: [
         "MATERIA_PRIMA",

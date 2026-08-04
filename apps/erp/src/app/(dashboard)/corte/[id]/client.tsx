@@ -13,7 +13,7 @@ import { toast } from 'sonner';
 import { agregarLineaCorte, cerrarCorte, crearOS, guardarTiemposCorte } from '@/server/actions/corte';
 import { formatTallaChip } from '@happy/lib';
 
-const TALLAS = ['T0','T2','T4','T6','T8','T10','T12','T14','T16','TS','TAD'] as const;
+const TALLAS = ['T0','T2','T4','T6','T8','T10','T12','T14','T16','TS','TAD', 'TU'] as const;
 
 type Linea = {
   id: string;

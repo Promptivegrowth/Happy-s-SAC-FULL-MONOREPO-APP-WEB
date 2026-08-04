@@ -996,8 +996,9 @@ function MultiTallaModal({
       // /\d/ y no n > 0: la talla T0 (bebé) vale 0 y debe ordenar PRIMERA,
       // no caer al bucket 99 del final (fix 2026-07-12).
       if (/\d/.test(t)) return Number(t.replace(/\D/g, ''));
-      if (t === 'TS') return 90;   // S adulto
+      if (t === 'TS') return 90;   // S
       if (t === 'TAD') return 95;  // adulto
+      if (t === 'TU') return 98;   // única (accesorios)
       return 99;
     };
     return arr.sort((a, b) => ordenTallaLocal(a.talla) - ordenTallaLocal(b.talla));

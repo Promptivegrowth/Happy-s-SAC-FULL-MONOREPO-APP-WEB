@@ -5,7 +5,7 @@ import { redirect } from 'next/navigation';
 import { runAction, requireUser, bumpPaths, esGerente, type ActionResult } from './_helpers';
 import { formatTallaChip } from '@happy/lib';
 
-const TALLAS = ['T0','T2','T4','T6','T8','T10','T12','T14','T16','TS','TAD'] as const;
+const TALLAS = ['T0','T2','T4','T6','T8','T10','T12','T14','T16','TS','TAD', 'TU'] as const;
 
 function isoSemana(d: Date): { semana: number; anio: number } {
   const target = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));

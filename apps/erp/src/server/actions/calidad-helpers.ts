@@ -5,7 +5,7 @@
  * las funciones/valores exportados desde archivos con 'use server' sean async.
  */
 
-export const CALIDAD_TALLAS = ['T0', 'T2', 'T4', 'T6', 'T8', 'T10', 'T12', 'T14', 'T16', 'TS', 'TAD'] as const;
+export const CALIDAD_TALLAS = ['T0', 'T2', 'T4', 'T6', 'T8', 'T10', 'T12', 'T14', 'T16', 'TS', 'TAD', 'TU'] as const;
 export const CALIDAD_ACCIONES = ['REPROCESO', 'SEGUNDA', 'MERMA', 'DEVOLVER_TALLER'] as const;
 export const CALIDAD_SEVERIDADES = ['BAJA', 'MEDIA', 'ALTA', 'CRITICA'] as const;
 

@@ -106,7 +106,7 @@ export function DescargarPdfButton({ planCodigo, totalLineas, totalUnidades, mat
       doc.setFont('helvetica', 'bold');
       doc.text('Productos y tallas del plan', 14, startY2 - 4);
 
-      const ordenTallas = ['T0','T2','T4','T6','T8','T10','T12','T14','T16','TS','TAD'];
+      const ordenTallas = ['T0','T2','T4','T6','T8','T10','T12','T14','T16','TS','TAD', 'TU'];
 
       // 1) Tallas que aparecen al menos una vez (ordenadas por convención).
       const tallasPresentes = ordenTallas.filter((t) =>
