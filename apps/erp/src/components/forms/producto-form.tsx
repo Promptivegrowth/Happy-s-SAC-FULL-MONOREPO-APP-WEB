@@ -10,6 +10,7 @@ import { Switch } from '@happy/ui/switch';
 import { FormGrid, FormRow, FormSection } from '@happy/ui/form-row';
 import { Button } from '@happy/ui/button';
 import { ImageUploader } from './image-uploader';
+import { GestionarFamiliasModal } from './gestionar-familias-modal';
 import { crearProducto, actualizarProducto } from '@/server/actions/productos';
 
 type Producto = {
@@ -133,15 +134,18 @@ export function ProductoForm({
             tarjeta consolidada del POS y un selector de color en la web.
             Cada color sigue siendo SU producto (receta/stock intactos). */}
         <FormGrid cols={3}>
-          <FormRow label="Familia (variantes de color)" hint="Agrupa este producto con sus otros colores">
-            <select
-              name="familia_id"
-              defaultValue={initial?.familia_id ?? ''}
-              className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
-            >
-              <option value="">— Sin familia —</option>
-              {familias.map((f) => <option key={f.id} value={f.id}>{f.nombre}</option>)}
-            </select>
+          <FormRow label="Familia (variantes de color)" hint="Agrupa este producto con sus otros colores. Para QUITARLO de su familia, elegí «— Sin familia —» y guardá.">
+            <div className="flex items-center gap-2">
+              <select
+                name="familia_id"
+                defaultValue={initial?.familia_id ?? ''}
+                className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
+              >
+                <option value="">— Sin familia —</option>
+                {familias.map((f) => <option key={f.id} value={f.id}>{f.nombre}</option>)}
+              </select>
+              <GestionarFamiliasModal />
+            </div>
           </FormRow>
           <FormRow label="…o crear familia nueva" hint="Se crea y asigna al guardar">
             <Input name="familia_nueva" placeholder="Ej: Polca para niña" maxLength={120} />

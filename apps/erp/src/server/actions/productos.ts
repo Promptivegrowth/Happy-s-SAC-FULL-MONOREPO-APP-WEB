@@ -490,3 +490,59 @@ export async function actualizarPublicacion(productoId: string, _prev: unknown, 
   if (r.ok) await bumpPaths('/web-catalogo', `/productos/${productoId}`);
   return r;
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// GESTIÓN DE FAMILIAS (mig 65) — pedido del cliente 22/07/2026:
+//   1) eliminar familias creadas por error (solo si están vacías).
+//   2) (quitar un producto de una familia ya se hace poniendo "— Sin familia —"
+//      en el selector del producto y guardando; el server lo resuelve como null.)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Lista las familias con la cantidad de productos que las usan. */
+export async function listarFamiliasConConteo(): Promise<
+  ActionResult<{ id: string; nombre: string; productos: number }[]>
+> {
+  return runAction(async () => {
+    const { sb } = await requireUser();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const sbAny = sb as unknown as { from: (t: string) => any };
+    const { data: fams } = await sbAny
+      .from('productos_familias')
+      .select('id, nombre')
+      .eq('activo', true)
+      .order('nombre');
+    const { data: prods } = await sbAny.from('productos').select('familia_id');
+    const conteo = new Map<string, number>();
+    for (const p of (prods ?? []) as { familia_id: string | null }[]) {
+      if (p.familia_id) conteo.set(p.familia_id, (conteo.get(p.familia_id) ?? 0) + 1);
+    }
+    return ((fams ?? []) as { id: string; nombre: string }[]).map((f) => ({
+      id: f.id,
+      nombre: f.nombre,
+      productos: conteo.get(f.id) ?? 0,
+    }));
+  });
+}
+
+/** Elimina una familia SOLO si no tiene productos asignados. */
+export async function eliminarFamilia(familiaId: string): Promise<ActionResult> {
+  const r = await runAction(async () => {
+    const { sb } = await requireUser();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const sbAny = sb as unknown as { from: (t: string) => any };
+    const { count } = await sbAny
+      .from('productos')
+      .select('id', { count: 'exact', head: true })
+      .eq('familia_id', familiaId);
+    if ((count ?? 0) > 0) {
+      throw new Error(
+        `La familia tiene ${count} producto(s) asignado(s). Quítelos primero (en cada producto, elija "— Sin familia —") antes de eliminarla.`,
+      );
+    }
+    const { error } = await sbAny.from('productos_familias').delete().eq('id', familiaId);
+    if (error) throw new Error(error.message);
+    return null;
+  });
+  if (r.ok) await bumpPaths('/productos', '/web-catalogo');
+  return r;
+}
