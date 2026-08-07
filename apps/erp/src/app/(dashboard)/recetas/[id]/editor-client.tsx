@@ -34,6 +34,7 @@ import {
   upsertReceta,
   upsertRecetaMulti,
   eliminarLinea,
+  vaciarReceta,
   toggleSaleAServicio,
   duplicarReceta,
   duplicarLineasTalla,
@@ -346,6 +347,25 @@ function BomEditor({
   const [openDup, setOpenDup] = useState(false);
   const [openDupTalla, setOpenDupTalla] = useState<string | null>(null);
   const [pending, start] = useTransition();
+  const routerBom = useRouter();
+
+  // Vaciar receta completa (pedido del cliente 22/07/2026). Conserva las líneas
+  // de tallas congeladas (con OTs). Pide confirmación.
+  function vaciarTodo() {
+    if (lineas.length === 0) return;
+    if (!confirm('¿Eliminar TODAS las líneas de esta receta? Las tallas que ya tienen OTs generadas se conservan.')) return;
+    start(async () => {
+      const r = await vaciarReceta(recetaId);
+      if (r.ok && r.data) {
+        toast.success(
+          r.data.congeladas > 0
+            ? `${r.data.eliminadas} línea(s) eliminada(s) · ${r.data.congeladas} conservada(s) (tallas con OTs)`
+            : `${r.data.eliminadas} línea(s) eliminada(s)`,
+        );
+        routerBom.refresh();
+      } else toast.error(r.error ?? 'Error');
+    });
+  }
   // Default OFF: la mayoría de avíos NO sale al taller (decoración interna,
   // botones, broches, etc.). El usuario lo activa cuando corresponda.
   const [saleAServicio, setSaleAServicio] = useState(false);
@@ -501,6 +521,22 @@ function BomEditor({
               }
             >
               <Copy className="h-3.5 w-3.5" /> Duplicar a otro producto
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={vaciarTodo}
+              disabled={lineas.length === 0 || congelada || pending}
+              title={
+                congelada
+                  ? 'Receta congelada — creá una nueva versión para editar'
+                  : lineas.length === 0
+                    ? 'La receta ya está vacía'
+                    : 'Eliminar todas las líneas de la receta'
+              }
+              className="border-red-200 text-danger hover:bg-red-50"
+            >
+              {pending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />} Vaciar receta
             </Button>
             <Button
               variant="premium"

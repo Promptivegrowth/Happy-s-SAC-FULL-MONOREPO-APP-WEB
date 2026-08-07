@@ -15,15 +15,12 @@ export default async function Page({ searchParams }: { searchParams: Promise<{ o
   const sp = await searchParams;
   const sb = await createClient();
 
-  const [{ data: ots }, { data: ops }] = await Promise.all([
-    sb
-      .from('ot')
-      .select('id, numero, ot_lineas(producto_id, productos(codigo, nombre))')
-      .not('estado', 'in', '("COMPLETADA","CANCELADA")')
-      .order('numero', { ascending: false })
-      .limit(100),
-    sb.from('operarios').select('id, codigo, nombres, apellido_paterno').eq('activo', true).order('nombres'),
-  ]);
+  const { data: ots } = await sb
+    .from('ot')
+    .select('id, numero, ot_lineas(producto_id, productos(codigo, nombre))')
+    .not('estado', 'in', '("COMPLETADA","CANCELADA")')
+    .order('numero', { ascending: false })
+    .limit(100);
 
   // De ot_lineas → lista de productos únicos por OT.
   const otsConProductos: OtConProductos[] = ((ots ?? []) as unknown as OtRow[]).map((o) => {
@@ -39,12 +36,6 @@ export default async function Page({ searchParams }: { searchParams: Promise<{ o
     }
     return { id: o.id, numero: o.numero, productos: Array.from(seen.values()) };
   });
-
-  const operarios = (ops ?? []).map((o) => ({
-    id: o.id as string,
-    codigo: (o.codigo as string) ?? '',
-    nombre: `${o.nombres ?? ''} ${o.apellido_paterno ?? ''}`.trim(),
-  }));
 
   // Telas de la receta ACTIVA de cada producto — pedido del cliente
   // (21/07/2026): mostrar en la orden de corte qué telas usa el modelo.
@@ -85,7 +76,7 @@ export default async function Page({ searchParams }: { searchParams: Promise<{ o
       title="Nueva orden de corte"
       description="Una orden por OT. El modelo se toma automáticamente del plan de la OT."
     >
-      <NuevoCorteForm ots={otsConProductos} operarios={operarios} telasPorProducto={telasPorProducto} defaultOtId={sp.ot} />
+      <NuevoCorteForm ots={otsConProductos} telasPorProducto={telasPorProducto} defaultOtId={sp.ot} />
     </PageShell>
   );
 }

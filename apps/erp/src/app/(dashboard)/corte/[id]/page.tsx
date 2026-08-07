@@ -36,19 +36,26 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
 
   // Telas de la receta activa del modelo + tiempos ya guardados (mig 69).
   // Las 3 operaciones (tendido/corte/habilitado) se registran POR tela.
-  type TelaTiempo = { material_id: string; tela_nombre: string; codigo: string; tiempo_tendido_min: number; tiempo_corte_min: number; tiempo_habilitado_min: number; fecha_tendido: string; fecha_corte: string; fecha_habilitado: string };
+  type TelaTiempo = { material_id: string; tela_nombre: string; codigo: string; tiempo_tendido_min: number; tiempo_corte_min: number; tiempo_habilitado_min: number; fecha_tendido: string; fecha_corte: string; fecha_habilitado: string; capas_tendidas: number; metros_consumidos: number; merma_metros: number; responsable_operario_id: string };
   const telasCorte: TelaTiempo[] = [];
+  let operariosCorte: { id: string; nombre: string }[] = [];
   if (corte.producto_id) {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const sbAny = sb as unknown as { from: (t: string) => any };
-    const [{ data: receta }, { data: tiemposGuardados }] = await Promise.all([
+    const [{ data: receta }, { data: tiemposGuardados }, { data: opsRaw }] = await Promise.all([
       sb.from('recetas').select('id').eq('producto_id', corte.producto_id).eq('activa', true).maybeSingle(),
-      sbAny.from('ot_corte_tiempos').select('material_id, tiempo_tendido_min, tiempo_corte_min, tiempo_habilitado_min, fecha_tendido, fecha_corte, fecha_habilitado').eq('corte_id', id),
+      sbAny.from('ot_corte_tiempos').select('material_id, tiempo_tendido_min, tiempo_corte_min, tiempo_habilitado_min, fecha_tendido, fecha_corte, fecha_habilitado, capas_tendidas, metros_consumidos, merma_metros, responsable_operario_id').eq('corte_id', id),
+      sbAny.from('operarios').select('id, nombres, apellido_paterno').eq('activo', true).order('nombres'),
     ]);
-    const guardadosMap = new Map<string, { t: number; c: number; h: number; ft: string; fc: string; fh: string }>(
-      ((tiemposGuardados ?? []) as { material_id: string; tiempo_tendido_min: number | string; tiempo_corte_min: number | string; tiempo_habilitado_min: number | string; fecha_tendido: string | null; fecha_corte: string | null; fecha_habilitado: string | null }[]).map((g) => [
+    operariosCorte = ((opsRaw ?? []) as { id: string; nombres: string; apellido_paterno: string | null }[]).map((o) => ({
+      id: o.id,
+      nombre: `${o.nombres ?? ''} ${o.apellido_paterno ?? ''}`.trim(),
+    }));
+    type G = { t: number; c: number; h: number; ft: string; fc: string; fh: string; capas: number; metros: number; merma: number; resp: string };
+    const guardadosMap = new Map<string, G>(
+      ((tiemposGuardados ?? []) as { material_id: string; tiempo_tendido_min: number | string; tiempo_corte_min: number | string; tiempo_habilitado_min: number | string; fecha_tendido: string | null; fecha_corte: string | null; fecha_habilitado: string | null; capas_tendidas: number | string | null; metros_consumidos: number | string | null; merma_metros: number | string | null; responsable_operario_id: string | null }[]).map((g) => [
         g.material_id,
-        { t: Number(g.tiempo_tendido_min ?? 0), c: Number(g.tiempo_corte_min ?? 0), h: Number(g.tiempo_habilitado_min ?? 0), ft: g.fecha_tendido ?? '', fc: g.fecha_corte ?? '', fh: g.fecha_habilitado ?? '' },
+        { t: Number(g.tiempo_tendido_min ?? 0), c: Number(g.tiempo_corte_min ?? 0), h: Number(g.tiempo_habilitado_min ?? 0), ft: g.fecha_tendido ?? '', fc: g.fecha_corte ?? '', fh: g.fecha_habilitado ?? '', capas: Number(g.capas_tendidas ?? 0), metros: Number(g.metros_consumidos ?? 0), merma: Number(g.merma_metros ?? 0), resp: g.responsable_operario_id ?? '' },
       ]),
     );
     if (receta?.id) {
@@ -72,6 +79,10 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
           fecha_tendido: g?.ft ?? '',
           fecha_corte: g?.fc ?? '',
           fecha_habilitado: g?.fh ?? '',
+          capas_tendidas: g?.capas ?? 0,
+          metros_consumidos: g?.metros ?? 0,
+          merma_metros: g?.merma ?? 0,
+          responsable_operario_id: g?.resp ?? '',
         });
       }
       telasCorte.sort((a, b) => a.tela_nombre.localeCompare(b.tela_nombre, 'es'));
@@ -150,13 +161,13 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
 
       <Card>
         <CardHeader>
-          <CardTitle className="text-base">Tiempos por tela</CardTitle>
+          <CardTitle className="text-base">Liquidación por tela</CardTitle>
           <p className="text-xs text-slate-500">
-            Tendido, corte y habilitado (en minutos) de cada tela de la receta del modelo. Las tres operaciones se hacen por tela.
+            Por cada tela de la receta: capas, metros, merma, responsable y los tiempos (con fecha) de tendido, corte y habilitado. Los totales se suman al resumen del corte.
           </p>
         </CardHeader>
         <CardContent className="p-0">
-          <TiemposCorteEditor corteId={id} telas={telasCorte} editable={editable} />
+          <TiemposCorteEditor corteId={id} telas={telasCorte} editable={editable} operarios={operariosCorte} />
         </CardContent>
       </Card>
     </PageShell>

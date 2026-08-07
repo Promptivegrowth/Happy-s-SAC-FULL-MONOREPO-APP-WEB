@@ -219,9 +219,9 @@ export function LineasCorteEditor({
 }
 
 /**
- * Editor de tiempos por TELA: para cada tela de la receta, tendido/corte/
- * habilitado en minutos (pedido del cliente 21/07/2026). Las 3 operaciones
- * de corte se registran por cada tela.
+ * Liquidación de corte por TELA (pedido del cliente 21-22/07/2026): para cada
+ * tela de la receta se declara capas, metros, merma, responsable y los tiempos
+ * de tendido/corte/habilitado (min + fecha). Los totales se suman a la cabecera.
  */
 type TelaTiempo = {
   material_id: string;
@@ -233,10 +233,13 @@ type TelaTiempo = {
   fecha_tendido: string;
   fecha_corte: string;
   fecha_habilitado: string;
+  capas_tendidas: number;
+  metros_consumidos: number;
+  merma_metros: number;
+  responsable_operario_id: string;
 };
-// Fila interna: los tiempos se guardan como STRING mientras se edita para
-// permitir escribir "0", "0.5", borrar, etc. sin que el valor se reinicie
-// (el patrón anterior con type=number + `value || ''` borraba el 0 al tipear).
+// Los valores numéricos se guardan como STRING mientras se edita para permitir
+// escribir "0", "0.5", borrar, etc. sin que el valor se reinicie.
 type TelaRow = {
   material_id: string;
   tela_nombre: string;
@@ -247,6 +250,10 @@ type TelaRow = {
   fecha_tendido: string;
   fecha_corte: string;
   fecha_habilitado: string;
+  capas: string;
+  metros: string;
+  merma: string;
+  responsable: string;
 };
 const numOrCero = (s: string): number => {
   const n = Number((s ?? '').replace(',', '.'));
@@ -256,10 +263,12 @@ export function TiemposCorteEditor({
   corteId,
   telas,
   editable,
+  operarios = [],
 }: {
   corteId: string;
   telas: TelaTiempo[];
   editable: boolean;
+  operarios?: { id: string; nombre: string }[];
 }) {
   const router = useRouter();
   const [pending, start] = useTransition();
@@ -274,15 +283,18 @@ export function TiemposCorteEditor({
       fecha_tendido: t.fecha_tendido ?? '',
       fecha_corte: t.fecha_corte ?? '',
       fecha_habilitado: t.fecha_habilitado ?? '',
+      capas: t.capas_tendidas ? String(t.capas_tendidas) : '',
+      metros: t.metros_consumidos ? String(t.metros_consumidos) : '',
+      merma: t.merma_metros ? String(t.merma_metros) : '',
+      responsable: t.responsable_operario_id ?? '',
     })),
   );
 
-  function setVal(i: number, campo: 'tendido' | 'corte' | 'habilitado', v: string) {
-    // Acepta solo dígitos, punto/coma y vacío — deja escribir libremente.
-    if (v !== '' && !/^\d*[.,]?\d*$/.test(v)) return;
+  function setNum(i: number, campo: 'tendido' | 'corte' | 'habilitado' | 'capas' | 'metros' | 'merma', v: string) {
+    if (v !== '' && !/^\d*[.,]?\d*$/.test(v)) return; // solo números
     setRows((prev) => prev.map((r, idx) => (idx === i ? { ...r, [campo]: v } : r)));
   }
-  function setFecha(i: number, campo: 'fecha_tendido' | 'fecha_corte' | 'fecha_habilitado', v: string) {
+  function setCampo(i: number, campo: 'fecha_tendido' | 'fecha_corte' | 'fecha_habilitado' | 'responsable', v: string) {
     setRows((prev) => prev.map((r, idx) => (idx === i ? { ...r, [campo]: v } : r)));
   }
 
@@ -299,9 +311,13 @@ export function TiemposCorteEditor({
           fecha_tendido: t.fecha_tendido,
           fecha_corte: t.fecha_corte,
           fecha_habilitado: t.fecha_habilitado,
+          capas_tendidas: Math.round(numOrCero(t.capas)),
+          metros_consumidos: numOrCero(t.metros),
+          merma_metros: numOrCero(t.merma),
+          responsable_operario_id: t.responsable,
         })),
       );
-      if (r.ok) { toast.success('Tiempos guardados'); router.refresh(); }
+      if (r.ok) { toast.success('Liquidación guardada'); router.refresh(); }
       else toast.error(r.error ?? 'Error');
     });
   }
@@ -309,77 +325,80 @@ export function TiemposCorteEditor({
   if (telas.length === 0) {
     return (
       <div className="p-4 text-sm text-slate-400">
-        La receta del modelo no tiene telas cargadas — no hay tiempos que registrar.
+        La receta del modelo no tiene telas cargadas — no hay liquidación que registrar.
       </div>
     );
   }
 
-  const totalPorTela = (t: TelaRow) => numOrCero(t.tendido) + numOrCero(t.corte) + numOrCero(t.habilitado);
-  const CAMPOS = [
-    { key: 'tendido' as const, fecha: 'fecha_tendido' as const },
-    { key: 'corte' as const, fecha: 'fecha_corte' as const },
-    { key: 'habilitado' as const, fecha: 'fecha_habilitado' as const },
+  const totalTiempo = (t: TelaRow) => numOrCero(t.tendido) + numOrCero(t.corte) + numOrCero(t.habilitado);
+  const OPERS = [
+    { key: 'tendido' as const, fecha: 'fecha_tendido' as const, label: 'Tendido' },
+    { key: 'corte' as const, fecha: 'fecha_corte' as const, label: 'Corte' },
+    { key: 'habilitado' as const, fecha: 'fecha_habilitado' as const, label: 'Habilitado' },
   ];
 
   return (
-    <div className="p-4">
-      <p className="mb-2 text-xs text-slate-500">
-        Ingrese los minutos y la <strong>fecha</strong> de ejecución de cada operación (tendido, corte y habilitado) por tela.
+    <div className="space-y-3 p-4">
+      <p className="text-xs text-slate-500">
+        Declare por cada <strong>tela</strong> de la receta: capas, metros, merma, responsable y los tiempos (con fecha) de tendido, corte y habilitado.
       </p>
-      <div className="overflow-x-auto">
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead className="min-w-[200px]">Tela</TableHead>
-              <TableHead className="w-36 text-right">Tendido (min · fecha)</TableHead>
-              <TableHead className="w-36 text-right">Corte (min · fecha)</TableHead>
-              <TableHead className="w-36 text-right">Habilitado (min · fecha)</TableHead>
-              <TableHead className="w-24 text-right">Total</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {rows.map((t, i) => (
-              <TableRow key={t.material_id}>
-                <TableCell>
-                  <div className="text-sm font-medium text-corp-900">{t.tela_nombre}</div>
-                  <div className="font-mono text-[10px] text-slate-400">{t.codigo}</div>
-                </TableCell>
-                {CAMPOS.map(({ key, fecha }) => (
-                  <TableCell key={key} className="text-right align-top">
-                    <div className="flex flex-col items-end gap-1">
-                      <Input
-                        type="text"
-                        inputMode="decimal"
-                        value={t[key]}
-                        onChange={(e) => setVal(i, key, e.target.value)}
-                        disabled={!editable || pending}
-                        placeholder="0 min"
-                        className="ml-auto h-8 w-28 text-right text-xs"
-                      />
-                      <Input
-                        type="date"
-                        value={t[fecha]}
-                        onChange={(e) => setFecha(i, fecha, e.target.value)}
-                        disabled={!editable || pending}
-                        className="ml-auto h-7 w-28 text-[11px]"
-                        title="Fecha de ejecución de esta operación"
-                      />
-                    </div>
-                  </TableCell>
-                ))}
-                <TableCell className="text-right font-mono text-sm font-semibold text-corp-900">
-                  {totalPorTela(t).toFixed(2)}
-                </TableCell>
-              </TableRow>
+      {rows.map((t, i) => (
+        <div key={t.material_id} className="rounded-lg border border-slate-200 bg-white p-3">
+          <div className="mb-2 flex items-baseline gap-2">
+            <span className="text-sm font-semibold text-corp-900">{t.tela_nombre}</span>
+            <span className="font-mono text-[10px] text-slate-400">{t.codigo}</span>
+            <span className="ml-auto font-mono text-[11px] text-slate-500">Tiempo total: {totalTiempo(t).toFixed(2)} min</span>
+          </div>
+
+          {/* Liquidación de tela */}
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+            <label className="text-[10px] font-medium uppercase tracking-wide text-slate-500">
+              Capas tendidas
+              <Input type="text" inputMode="numeric" value={t.capas} onChange={(e) => setNum(i, 'capas', e.target.value)}
+                disabled={!editable || pending} placeholder="0" className="mt-1 h-8 text-sm" />
+            </label>
+            <label className="text-[10px] font-medium uppercase tracking-wide text-slate-500">
+              Metros consumidos
+              <Input type="text" inputMode="decimal" value={t.metros} onChange={(e) => setNum(i, 'metros', e.target.value)}
+                disabled={!editable || pending} placeholder="0.00" className="mt-1 h-8 text-sm" />
+            </label>
+            <label className="text-[10px] font-medium uppercase tracking-wide text-slate-500">
+              Merma (metros)
+              <Input type="text" inputMode="decimal" value={t.merma} onChange={(e) => setNum(i, 'merma', e.target.value)}
+                disabled={!editable || pending} placeholder="0.00" className="mt-1 h-8 text-sm" />
+            </label>
+            <label className="text-[10px] font-medium uppercase tracking-wide text-slate-500">
+              Responsable
+              <select value={t.responsable} onChange={(e) => setCampo(i, 'responsable', e.target.value)}
+                disabled={!editable || pending}
+                className="mt-1 h-8 w-full rounded-md border border-input bg-background px-2 text-sm">
+                <option value="">— Sin asignar —</option>
+                {operarios.map((o) => <option key={o.id} value={o.id}>{o.nombre}</option>)}
+              </select>
+            </label>
+          </div>
+
+          {/* Tiempos por operación */}
+          <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-3">
+            {OPERS.map(({ key, fecha, label }) => (
+              <div key={key} className="rounded-md border border-slate-100 bg-slate-50/60 p-2">
+                <p className="mb-1 text-[10px] font-medium uppercase tracking-wide text-slate-500">{label}</p>
+                <div className="flex items-center gap-1">
+                  <Input type="text" inputMode="decimal" value={t[key]} onChange={(e) => setNum(i, key, e.target.value)}
+                    disabled={!editable || pending} placeholder="0 min" className="h-8 flex-1 text-sm" />
+                  <Input type="date" value={t[fecha]} onChange={(e) => setCampo(i, fecha, e.target.value)}
+                    disabled={!editable || pending} className="h-8 w-32 text-[11px]" title={`Fecha de ${label.toLowerCase()}`} />
+                </div>
+              </div>
             ))}
-          </TableBody>
-        </Table>
-      </div>
+          </div>
+        </div>
+      ))}
       {editable && (
-        <div className="mt-3 flex justify-end">
+        <div className="flex justify-end">
           <Button variant="premium" size="sm" onClick={guardar} disabled={pending}>
             {pending ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />}
-            Guardar tiempos
+            Guardar liquidación
           </Button>
         </div>
       )}

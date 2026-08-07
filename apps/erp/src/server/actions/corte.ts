@@ -176,6 +176,11 @@ const tiempoTelaSchema = z.object({
   fecha_tendido: z.string().optional().or(z.literal('')),
   fecha_corte: z.string().optional().or(z.literal('')),
   fecha_habilitado: z.string().optional().or(z.literal('')),
+  // Liquidación por tela (mig 76): capas, metros, merma y responsable.
+  capas_tendidas: z.coerce.number().int().min(0).default(0),
+  metros_consumidos: z.coerce.number().min(0).default(0),
+  merma_metros: z.coerce.number().min(0).default(0),
+  responsable_operario_id: z.string().uuid().optional().or(z.literal('')),
 });
 export async function guardarTiemposCorte(
   corteId: string,
@@ -200,11 +205,25 @@ export async function guardarTiemposCorte(
             fecha_tendido: t.fecha_tendido || null,
             fecha_corte: t.fecha_corte || null,
             fecha_habilitado: t.fecha_habilitado || null,
+            capas_tendidas: t.capas_tendidas,
+            metros_consumidos: t.metros_consumidos,
+            merma_metros: t.merma_metros,
+            responsable_operario_id: t.responsable_operario_id || null,
           },
           { onConflict: 'corte_id,material_id' },
         );
       if (error) throw new Error(error.message);
     }
+
+    // Recomputar los TOTALES del corte (cabecera) = suma de todas las telas.
+    // Así los listados y el resumen siguen mostrando el total correcto.
+    const totalCapas = parsed.reduce((s, t) => s + Number(t.capas_tendidas || 0), 0);
+    const totalMetros = Math.round(parsed.reduce((s, t) => s + Number(t.metros_consumidos || 0), 0) * 100) / 100;
+    const totalMerma = Math.round(parsed.reduce((s, t) => s + Number(t.merma_metros || 0), 0) * 100) / 100;
+    await sbAny
+      .from('ot_corte')
+      .update({ capas_tendidas: totalCapas, metros_consumidos: totalMetros, merma_metros: totalMerma })
+      .eq('id', corteId);
     return null;
   });
   if (r.ok) await bumpPaths(`/corte/${corteId}`);

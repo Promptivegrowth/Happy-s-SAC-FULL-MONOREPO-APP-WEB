@@ -29,12 +29,10 @@ export type OtConProductos = {
 
 export function NuevoCorteForm({
   ots,
-  operarios,
   telasPorProducto = {},
   defaultOtId,
 }: {
   ots: OtConProductos[];
-  operarios: Operario[];
   /** Telas de la receta activa por producto_id (pedido del cliente 21/07/2026). */
   telasPorProducto?: Record<string, { codigo: string; nombre: string }[]>;
   defaultOtId?: string;
@@ -43,10 +41,6 @@ export function NuevoCorteForm({
   const [pending, start] = useTransition();
   const [otId, setOtId] = useState(defaultOtId ?? '');
   const [productoId, setProductoId] = useState('');
-  const [operarioId, setOperarioId] = useState('');
-  const [capas, setCapas] = useState('');
-  const [metros, setMetros] = useState('');
-  const [mermaMetros, setMermaMetros] = useState('');
   const [observacion, setObservacion] = useState('');
 
   const otSel = useMemo(() => ots.find((o) => o.id === otId) ?? null, [ots, otId]);
@@ -63,11 +57,6 @@ export function NuevoCorteForm({
   const telasDelProducto = productoEfectivo ? (telasPorProducto[productoEfectivo.id] ?? []) : [];
 
   const otOptions = ots.map((o) => ({ id: o.id, label: o.numero }));
-  const opOptions = operarios.map((o) => ({
-    id: o.id,
-    label: o.nombre || o.codigo,
-    sublabel: o.codigo,
-  }));
   const productoOptions = productosDeOt.map((p) => ({
     id: p.id,
     label: p.nombre,
@@ -86,10 +75,8 @@ export function NuevoCorteForm({
     const fd = new FormData();
     fd.set('ot_id', otId);
     fd.set('producto_id', productoEfectivo.id);
-    if (operarioId) fd.set('responsable_operario_id', operarioId);
-    fd.set('capas_tendidas', capas || '0');
-    fd.set('metros_consumidos', metros || '0');
-    fd.set('merma_metros', mermaMetros || '0');
+    // Capas, metros, merma y responsable se declaran DESPUÉS, por cada tela,
+    // en la liquidación del corte (pedido del cliente 22/07/2026).
     if (observacion) fd.set('observacion', observacion);
 
     start(async () => {
@@ -167,44 +154,10 @@ export function NuevoCorteForm({
               </div>
             )}
           </FormRow>
-          <FormRow label="Responsable (operario)">
-            <ComboboxBusqueda
-              options={opOptions}
-              value={operarioId}
-              onChange={setOperarioId}
-              placeholder="Buscar operario…"
-            />
-          </FormRow>
-          <FormRow label="Capas tendidas" hint="Cantidad de capas que se tendieron">
-            <Input
-              type="number"
-              min={0}
-              value={capas}
-              onChange={(e) => setCapas(e.target.value)}
-              placeholder="0"
-            />
-          </FormRow>
-          <FormRow label="Metros consumidos" hint="Total de tela usada en este corte">
-            <Input
-              type="number"
-              step="0.01"
-              min={0}
-              value={metros}
-              onChange={(e) => setMetros(e.target.value)}
-              placeholder="0.00"
-            />
-          </FormRow>
-          <FormRow label="Merma (metros)" hint="Tela perdida por desperdicio del trazo">
-            <Input
-              type="number"
-              step="0.01"
-              min={0}
-              value={mermaMetros}
-              onChange={(e) => setMermaMetros(e.target.value)}
-              placeholder="0.00"
-            />
-          </FormRow>
         </FormGrid>
+        <div className="rounded-md border border-sky-200 bg-sky-50/60 px-3 py-2 text-xs text-sky-800">
+          Las <strong>capas, metros, merma y responsable</strong> se declaran después, por cada <strong>tela</strong> de la receta, en la liquidación del corte. Acá solo eliges la OT.
+        </div>
         <FormRow label="Observación">
           <Textarea
             rows={2}

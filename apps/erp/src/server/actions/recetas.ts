@@ -380,6 +380,48 @@ export async function eliminarLinea(id: string): Promise<ActionResult> {
   return r;
 }
 
+/**
+ * Vacía la receta: elimina TODAS las líneas de una sola vez (pedido del cliente
+ * 22/07/2026). Respeta las tallas CONGELADAS (con OTs generadas): esas líneas se
+ * conservan y se informa cuántas quedaron. Si la receta es histórica, se bloquea.
+ */
+export async function vaciarReceta(
+  recetaId: string,
+): Promise<ActionResult<{ eliminadas: number; congeladas: number }>> {
+  const r = await runAction(async () => {
+    const { sb } = await requireEditorReceta();
+    const { data: rec } = await sb
+      .from('recetas')
+      .select('producto_id, activa')
+      .eq('id', recetaId)
+      .maybeSingle();
+    if (!rec) throw new Error('Receta no encontrada');
+    if (rec.activa === false) throw new Error(MSG_HISTORICA);
+    const pid = rec.producto_id as string;
+    const tallasCong = await tallasEnProduccionPosterior(sb, recetaId, pid);
+    const { data: lineas } = await sb
+      .from('recetas_lineas')
+      .select('id, talla')
+      .eq('receta_id', recetaId);
+    const arr = (lineas ?? []) as { id: string; talla: string }[];
+    const aEliminar = arr.filter((l) => !tallasCong.has(l.talla)).map((l) => l.id);
+    const congeladas = arr.length - aEliminar.length;
+    if (aEliminar.length === 0) {
+      if (congeladas > 0) {
+        throw new Error(
+          'Todas las líneas pertenecen a tallas congeladas (ya tienen OTs). Creá una nueva versión de la receta para modificarlas.',
+        );
+      }
+      throw new Error('La receta ya está vacía.');
+    }
+    const { error } = await sb.from('recetas_lineas').delete().in('id', aEliminar);
+    if (error) throw new Error(error.message);
+    return { eliminadas: aEliminar.length, congeladas };
+  });
+  if (r.ok) await bumpPaths('/recetas');
+  return r;
+}
+
 /** Toggle inline rápido del flag sale_a_servicio en una línea. */
 export async function toggleSaleAServicio(id: string, valor: boolean): Promise<ActionResult> {
   const r = await runAction(async () => {
