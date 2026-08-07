@@ -171,6 +171,19 @@ export async function cambiarEstadoOT(otId: string, nuevoEstado: typeof ESTADOS[
       );
     }
 
+    // No se puede CANCELAR una OT que ya tiene corte registrado (pedido del
+    // cliente 22/07/2026): si hay unidades cortadas, la tela ya se consumió.
+    if (nuevoEstado === 'CANCELADA') {
+      const { data: lineasC } = await sb.from('ot_lineas').select('cantidad_cortada').eq('ot_id', otId);
+      const cortado = ((lineasC ?? []) as { cantidad_cortada: number | null }[]).reduce((s, l) => s + Number(l.cantidad_cortada ?? 0), 0);
+      if (cortado > 0) {
+        throw new Error(
+          `No se puede cancelar: la OT ya tiene ${cortado} unidad(es) cortada(s). ` +
+          'Solo se puede cancelar una OT sin corte registrado.',
+        );
+      }
+    }
+
     const permitidos = FLOW_ESTADOS[estadoActual] ?? [];
     if (!permitidos.includes(nuevoEstado)) {
       throw new Error(

@@ -49,7 +49,7 @@ function filtrarTransiciones(allNext: string[], areas: string[]): string[] {
   });
 }
 
-export function OtAcciones({ otId, estado, almacenes, areasReceta = [], usuarioEsGerente = false, avanceBloqueo = null }: {
+export function OtAcciones({ otId, estado, almacenes, areasReceta = [], usuarioEsGerente = false, avanceBloqueo = null, tieneCorte = false }: {
   otId: string;
   estado: string;
   almacenes: { id: string; nombre: string; codigo: string }[];
@@ -59,6 +59,8 @@ export function OtAcciones({ otId, estado, almacenes, areasReceta = [], usuarioE
   usuarioEsGerente?: boolean;
   /** Si hay operaciones del área actual sin declarar, se bloquea el avance. */
   avanceBloqueo?: { nombre: string; pendientes: number; total: number; esCorte?: boolean } | null;
+  /** Si la OT ya tiene corte registrado (cortado > 0), no se puede cancelar. */
+  tieneCorte?: boolean;
 }) {
   const [pending, start] = useTransition();
   const [showCierre, setShowCierre] = useState(false);
@@ -66,7 +68,9 @@ export function OtAcciones({ otId, estado, almacenes, areasReceta = [], usuarioE
   // Operaciones sin declarar detectadas al intentar cerrar (bloquea el cierre).
   const [pendientes, setPendientes] = useState<{ n: number; resumen: string } | null>(null);
 
-  const next = filtrarTransiciones(FLOW[estado] ?? [], areasReceta);
+  // Si ya hay corte registrado, no ofrecer CANCELAR (la tela ya se consumió).
+  const next = filtrarTransiciones(FLOW[estado] ?? [], areasReceta)
+    .filter((n) => !(n === 'CANCELADA' && tieneCorte));
 
   function transicion(nuevo: string) {
     // Bloqueo de avance: no dejar pasar de proceso si el área actual tiene

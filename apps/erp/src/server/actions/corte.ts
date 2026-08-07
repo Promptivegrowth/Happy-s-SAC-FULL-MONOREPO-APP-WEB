@@ -824,11 +824,19 @@ export async function cambiarEstadoOS(osId: string, nuevoEstado: string): Promis
       );
     }
 
-    const update: { estado: string; fecha_recepcion?: string } = { estado: nuevoEstado };
+    const update: { estado: string; fecha_recepcion?: string; fecha_envio?: string } = { estado: nuevoEstado };
     if (nuevoEstado === 'RECEPCIONADA') update.fecha_recepcion = new Date().toISOString().slice(0, 10);
+    // Al DESPACHAR, la fecha de envío al taller se actualiza a la fecha real de
+    // despacho (pedido del cliente 22/07/2026): antes quedaba con la fecha de
+    // creación de la OS aunque se despachara días después.
+    if (nuevoEstado === 'DESPACHADA') update.fecha_envio = new Date().toISOString().slice(0, 10);
 
+    // Cast: fecha_envio/motivo_falla son de migraciones recientes aún no
+    // reflejadas en los tipos autogenerados.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const sbAny = sb as unknown as { from: (t: string) => any };
     // Update con WHERE en estado actual para atomicidad
-    const { error, count } = await sb
+    const { error, count } = await sbAny
       .from('ordenes_servicio')
       .update(update, { count: 'exact' })
       .eq('id', osId)

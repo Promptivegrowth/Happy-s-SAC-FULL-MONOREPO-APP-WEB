@@ -294,6 +294,7 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
           areasReceta={Array.from(new Set((procesos ?? []).map((p) => p.area?.codigo).filter((c): c is string => Boolean(c))))}
           usuarioEsGerente={usuarioEsGerente}
           avanceBloqueo={avanceBloqueo}
+          tieneCorte={totalCortado > 0}
         />
       }
     >
