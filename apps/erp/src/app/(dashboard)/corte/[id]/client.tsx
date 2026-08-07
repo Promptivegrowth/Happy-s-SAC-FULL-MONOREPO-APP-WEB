@@ -417,10 +417,14 @@ export function TiemposCorteEditor({
   );
 }
 
-export function AccionCerrarCorte({ corteId }: { corteId: string }) {
+export function AccionCerrarCorte({ corteId, tieneTiempos = true }: { corteId: string; tieneTiempos?: boolean }) {
   const [pending, start] = useTransition();
   function cerrar() {
-    if (!confirm('¿Cerrar este corte? Después no se podrán agregar tallas.')) return;
+    if (!tieneTiempos) {
+      toast.error('Antes de cerrar, registre los tiempos por tela (tendido, corte, habilitado) en la liquidación. Después de cerrar no se podrán modificar.');
+      return;
+    }
+    if (!confirm('¿Cerrar este corte? Después no se podrán modificar los tiempos ni agregar tallas.')) return;
     start(async () => {
       const r = await cerrarCorte(corteId);
       if (r.ok) toast.success('Corte cerrado');
@@ -428,7 +432,7 @@ export function AccionCerrarCorte({ corteId }: { corteId: string }) {
     });
   }
   return (
-    <Button onClick={cerrar} disabled={pending} variant="premium">
+    <Button onClick={cerrar} disabled={pending || !tieneTiempos} variant="premium" title={!tieneTiempos ? 'Registre los tiempos de corte antes de cerrar' : undefined}>
       {pending ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />}
       Cerrar corte
     </Button>

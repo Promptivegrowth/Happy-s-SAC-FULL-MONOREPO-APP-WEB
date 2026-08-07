@@ -119,6 +119,8 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
     };
   });
   const hayConsumo = consumoComparacion.some((c) => c.teorico > 0 || c.real > 0);
+  // Tiempos de corte registrados (para habilitar el cierre del corte).
+  const totalTiemposCorte = telasCorte.reduce((s, t) => s + t.tiempo_tendido_min + t.tiempo_corte_min + t.tiempo_habilitado_min, 0);
 
   // Plan de la OT para este modelo (cantidad planificada por talla) y lo que
   // ya se cortó en OTROS cortes del mismo OT/producto, para calcular el saldo
@@ -160,7 +162,7 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
       }
       actions={
         editable
-          ? <AccionCerrarCorte corteId={id} />
+          ? <AccionCerrarCorte corteId={id} tieneTiempos={totalTiemposCorte > 0} />
           : corte.estado === 'COMPLETADO'
             ? <GenerarOSDesdeCorte corteId={id} otId={ot?.id ?? ''} talleres={(talleres ?? []).map((t) => ({ ...t, codigo: t.codigo ?? '' }))} />
             : null

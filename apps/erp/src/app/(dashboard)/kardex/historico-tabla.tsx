@@ -81,6 +81,7 @@ export function HistoricoTabla({
                 const esSalida = m.tipo.startsWith('SALIDA_');
                 const fechaTxt = new Date(m.fecha).toLocaleString('es-PE', {
                   day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit',
+                  timeZone: 'America/Lima',
                 });
                 return (
                   <TableRow key={m.id}>

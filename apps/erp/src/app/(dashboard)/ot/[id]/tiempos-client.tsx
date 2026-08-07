@@ -1118,7 +1118,7 @@ function RegistroRow({ otId, registro: r, disabled }: { otId: string; registro: 
   // hay fecha de trabajo (sin fin): se muestra solo el día, sin el "→ ?" que
   // aparecía antes. Si el registro es viejo y no tiene fecha, cae a created_at.
   const fmtFechaHora = (v: string) =>
-    new Date(v).toLocaleString('es-PE', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+    new Date(v).toLocaleString('es-PE', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit', timeZone: 'America/Lima' });
   const fechaTxt = r.fecha_inicio
     ? r.fecha_fin
       ? `${fmtFechaHora(r.fecha_inicio)} → ${fmtFechaHora(r.fecha_fin)}`

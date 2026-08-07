@@ -249,7 +249,22 @@ export async function cerrarCorte(corteId: string): Promise<ActionResult<{ ot_li
   const r = await runAction(async () => {
     const { sb } = await requireUser();
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const { data, error } = await (sb as unknown as { rpc: (fn: string, args: any) => any })
+    const sbAny = sb as unknown as { from: (t: string) => any; rpc: (fn: string, args: any) => any };
+
+    // No se puede cerrar el corte sin haber registrado los TIEMPOS de la
+    // liquidación (pedido del cliente 22/07/2026): una vez cerrado no se pueden
+    // modificar, y sin tiempos la OT no deja avanzar los demás procesos.
+    const { data: tiempos } = await sbAny
+      .from('ot_corte_tiempos')
+      .select('tiempo_tendido_min, tiempo_corte_min, tiempo_habilitado_min')
+      .eq('corte_id', corteId);
+    const totalMin = ((tiempos ?? []) as { tiempo_tendido_min: number | string | null; tiempo_corte_min: number | string | null; tiempo_habilitado_min: number | string | null }[])
+      .reduce((s, t) => s + Number(t.tiempo_tendido_min ?? 0) + Number(t.tiempo_corte_min ?? 0) + Number(t.tiempo_habilitado_min ?? 0), 0);
+    if (totalMin <= 0) {
+      throw new Error('Antes de cerrar el corte, registre los tiempos por tela (tendido, corte, habilitado) en la liquidación. Una vez cerrado ya no se podrán modificar.');
+    }
+
+    const { data, error } = await sbAny
       .rpc('close_corte_atomic', { p_corte_id: corteId });
     if (error) throw new Error(error.message);
     const synced = (data as { ot_lineas_sync?: number } | null)?.ot_lineas_sync ?? 0;
