@@ -74,6 +74,10 @@ export function NuevaOSForm({
   const [campanaUnit, setCampanaUnit] = useState<string>('');
   const [tarifaInfo, setTarifaInfo] = useState<{ total: number; detalle: { talla: string; cantidad: number; tarifa: number; subtotal: number }[]; faltantes: string[] } | null>(null);
   const [calcPending, setCalcPending] = useState(false);
+  // Precio por unidad para servicios que NO son confección (bordado, estampado,
+  // ojal-botón, etc.): sin movilidad ni campaña (pedido del cliente 22/07/2026).
+  const [precioUnit, setPrecioUnit] = useState<string>('');
+  const esConfeccion = proceso === 'COSTURA';
 
   const corteSel = useMemo(() => cortes.find((c) => c.id === corteId) ?? null, [cortes, corteId]);
   const otSel = useMemo(() => ots.find((o) => o.id === otId) ?? null, [ots, otId]);
@@ -175,14 +179,16 @@ export function NuevaOSForm({
   }
 
   // Auto-calcular tarifa cuando cambia taller/proceso/tallas (con debounce).
+  // Solo para CONFECCIÓN: los otros servicios usan precio por unidad manual.
   useEffect(() => {
+    if (!esConfeccion) { setTarifaInfo(null); return; }
     if (!productoIdActual || !tallerId) return;
     const timer = setTimeout(() => {
       calcularTarifa();
     }, 600);
     return () => clearTimeout(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tallerId, proceso, corteId, otId, tallasSel.size]);
+  }, [tallerId, proceso, corteId, otId, tallasSel.size, esConfeccion]);
 
   const corteOptions = cortes.map((c) => ({
     id: c.id,
@@ -214,11 +220,20 @@ export function NuevaOSForm({
     fd.set('ot_id', otId);
     fd.set('taller_id', tallerId);
     fd.set('proceso', proceso);
-    fd.set('es_campana', esCampana ? 'on' : 'off');
-    fd.set('monto_base', montoBase || '0');
-    fd.set('movilidad_por_unidad', movilidadUnit || '0');
-    // Campaña solo si el check está activo; si no, se manda 0.
-    fd.set('campana_por_unidad', esCampana ? (campanaUnit || '0') : '0');
+    if (esConfeccion) {
+      fd.set('es_campana', esCampana ? 'on' : 'off');
+      fd.set('monto_base', montoBase || '0');
+      fd.set('movilidad_por_unidad', movilidadUnit || '0');
+      // Campaña solo si el check está activo; si no, se manda 0.
+      fd.set('campana_por_unidad', esCampana ? (campanaUnit || '0') : '0');
+    } else {
+      // Otros servicios: solo precio por unidad. Sin movilidad ni campaña.
+      const monto = Number(precioUnit || 0) * totalPrendasSeleccionadas;
+      fd.set('es_campana', 'off');
+      fd.set('monto_base', String(monto));
+      fd.set('movilidad_por_unidad', '0');
+      fd.set('campana_por_unidad', '0');
+    }
     // Mandar tallas seleccionadas siempre que haya alguna marcada. Se usan
     // tanto para filtrar las líneas del corte como para poblar las líneas de
     // la OS desde ot_lineas cuando no hay corte vinculado.
@@ -248,6 +263,23 @@ export function NuevaOSForm({
         }}
         className="space-y-6"
       >
+        {/* 1° El proceso define el formato del resto del formulario:
+            CONFECCIÓN = tarifa por talla + movilidad + campaña;
+            otros servicios = solo precio por unidad. */}
+        <FormRow label="Proceso / servicio" required hint="Elegí primero el proceso. Confección usa tarifa + movilidad; los demás servicios solo precio por unidad.">
+          <select
+            value={proceso}
+            onChange={(e) => setProceso(e.target.value)}
+            className="h-10 w-full rounded-md border-2 border-happy-300 bg-happy-50/40 px-3 text-sm font-medium"
+          >
+            {PROCESOS.map((p) => (
+              <option key={p} value={p}>
+                {p === 'COSTURA' ? 'CONFECCIÓN (COSTURA)' : p.replace('_', ' ')}
+              </option>
+            ))}
+          </select>
+        </FormRow>
+
         <FormRow
           label="Corte vinculado (opcional)"
           hint="Si elige un corte, las tallas se cargan con la cantidad CORTADA de la OT y los avíos del BOM se calculan automáticamente al guardar."
@@ -487,26 +519,13 @@ export function NuevaOSForm({
               placeholder="Buscar taller…"
             />
           </FormRow>
-          <FormRow label="Proceso" required>
-            <select
-              value={proceso}
-              onChange={(e) => setProceso(e.target.value)}
-              className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
-            >
-              {PROCESOS.map((p) => (
-                <option key={p} value={p}>
-                  {p.replace('_', ' ')}
-                </option>
-              ))}
-            </select>
-          </FormRow>
           <FormRow label="Fecha de envío al taller" hint="Día en que se manda la mercadería al taller">
             <Input name="fecha_envio" type="date" defaultValue={new Date().toISOString().slice(0, 10)} />
           </FormRow>
           <FormRow label="Fecha entrega esperada">
             <Input name="fecha_entrega_esperada" type="date" />
           </FormRow>
-          {(() => {
+          {esConfeccion && (() => {
             const tieneTarifa = !!(tarifaInfo && tarifaInfo.detalle.length > 0);
             const productoNombre = corteSel?.producto_nombre ?? '';
             return (
@@ -537,6 +556,26 @@ export function NuevaOSForm({
               </FormRow>
             );
           })()}
+          {!esConfeccion && (
+            <FormRow
+              label="Precio por unidad (S/)"
+              required
+              hint={totalPrendasSeleccionadas > 0
+                ? `Total ≈ S/ ${(Number(precioUnit || 0) * totalPrendasSeleccionadas).toFixed(2)} (${totalPrendasSeleccionadas} unid). Este servicio no lleva movilidad ni campaña.`
+                : 'Precio por prenda de este servicio. No lleva movilidad ni campaña.'}
+            >
+              <Input
+                type="number"
+                step="0.01"
+                min={0}
+                value={precioUnit}
+                onChange={(e) => setPrecioUnit(e.target.value)}
+                placeholder="Ej. 1.50"
+              />
+            </FormRow>
+          )}
+          {esConfeccion && (
+          <>
           <FormRow
             label="Movilidad por unidad (S/)"
             hint={
@@ -596,6 +635,8 @@ export function NuevaOSForm({
               title={!esCampana ? 'Active "Es campaña" para cargar el adicional' : !esGerente ? 'Solo gerencia puede cargar campaña' : undefined}
             />
           </FormRow>
+          </>
+          )}
         </FormGrid>
 
         <FormRow label="Cuidados especiales" hint="Texto que verá el taller">

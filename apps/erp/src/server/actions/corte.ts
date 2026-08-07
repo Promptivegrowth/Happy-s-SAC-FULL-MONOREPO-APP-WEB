@@ -472,22 +472,26 @@ export async function crearOS(
     });
     const { sb, userId } = await requireUser();
 
-    // CAMPAÑA solo aplica si el check "Es campaña" está en SÍ (pedido del
-    // cliente 21/07/2026). Si no es campaña, el adicional se fuerza a 0 aunque
-    // venga un valor en el campo.
-    const campanaUnit = data.es_campana ? data.campana_por_unidad : 0;
+    // La MOVILIDAD y la CAMPAÑA solo aplican al proceso de CONFECCIÓN (COSTURA).
+    // Para otros servicios (bordado, estampado, ojal-botón, etc.) el costo es
+    // solo el precio por unidad (monto_base): sin movilidad ni campaña
+    // (pedido del cliente 22/07/2026).
+    const esConfeccion = data.proceso === 'COSTURA';
+    const movUnit = esConfeccion ? data.movilidad_por_unidad : 0;
+    const campanaUnit = esConfeccion && data.es_campana ? data.campana_por_unidad : 0;
 
-    // AUTORIZACIÓN DE GERENCIA (pedido del cliente 21/07/2026): la movilidad
-    // sale S/ 0.10 por unidad en automático. Cambiar ese valor —o cargar
-    // cualquier monto de campaña— requiere que el usuario sea gerente.
-    const movModificada = Math.abs(data.movilidad_por_unidad - MOVILIDAD_DEFAULT_OS) > 0.001;
-    const campanaAplicada = campanaUnit > 0;
-    if ((movModificada || campanaAplicada) && !(await esGerente())) {
-      const que = [
-        movModificada ? `la movilidad (S/ ${data.movilidad_por_unidad.toFixed(2)} en vez de S/ ${MOVILIDAD_DEFAULT_OS.toFixed(2)})` : null,
-        campanaAplicada ? `el adicional de campaña (S/ ${campanaUnit.toFixed(2)})` : null,
-      ].filter(Boolean).join(' y ');
-      throw new Error(`Modificar ${que} requiere autorización de gerencia. Ingrese con un usuario gerente para continuar.`);
+    // AUTORIZACIÓN DE GERENCIA (solo confección): la movilidad sale S/ 0.10 por
+    // unidad en automático. Cambiar ese valor —o cargar campaña— requiere gerente.
+    if (esConfeccion) {
+      const movModificada = Math.abs(movUnit - MOVILIDAD_DEFAULT_OS) > 0.001;
+      const campanaAplicada = campanaUnit > 0;
+      if ((movModificada || campanaAplicada) && !(await esGerente())) {
+        const que = [
+          movModificada ? `la movilidad (S/ ${movUnit.toFixed(2)} en vez de S/ ${MOVILIDAD_DEFAULT_OS.toFixed(2)})` : null,
+          campanaAplicada ? `el adicional de campaña (S/ ${campanaUnit.toFixed(2)})` : null,
+        ].filter(Boolean).join(' y ');
+        throw new Error(`Modificar ${que} requiere autorización de gerencia. Ingrese con un usuario gerente para continuar.`);
+      }
     }
 
     const { data: nro } = await sb.rpc('next_correlativo', { p_clave: 'OS', p_padding: 6 });
@@ -506,9 +510,9 @@ export async function crearOS(
       // las líneas (ya conocemos las unidades efectivamente enviadas).
       adicional_movilidad: 0,
       adicional_campana: 0,
-      movilidad_por_unidad: data.movilidad_por_unidad,
+      movilidad_por_unidad: movUnit,
       campana_por_unidad: campanaUnit,
-      es_campana: data.es_campana,
+      es_campana: esConfeccion && data.es_campana,
       observaciones: data.observaciones || null,
       cuidados: data.cuidados || null,
       consideraciones: data.consideraciones || null,
@@ -549,7 +553,7 @@ export async function crearOS(
       .select('cantidad')
       .eq('os_id', row.id);
     const totalUnidades = (lineasOs ?? []).reduce((s, l) => s + Number(l.cantidad ?? 0), 0);
-    const totalMovilidad = Math.round(data.movilidad_por_unidad * totalUnidades * 100) / 100;
+    const totalMovilidad = Math.round(movUnit * totalUnidades * 100) / 100;
     const totalCampana = Math.round(campanaUnit * totalUnidades * 100) / 100;
     if (totalMovilidad > 0 || totalCampana > 0) {
       await sbAny.from('ordenes_servicio')
