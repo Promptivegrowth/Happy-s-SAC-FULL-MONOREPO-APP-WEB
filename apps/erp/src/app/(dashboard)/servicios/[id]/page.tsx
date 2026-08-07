@@ -5,7 +5,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@happy/ui/card';
 import { Badge } from '@happy/ui/badge';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@happy/ui/table';
 import { PageShell } from '@/components/page-shell';
-import { OsTransitions, RecepcionOSEditor, EditarOSEditor, ImprimirOSButton } from './client';
+import { OsTransitions, RecepcionOSEditor, EditarOSEditor, ImprimirOSButton, RetornarFallasButton, AviosDevueltosEditor } from './client';
 import { cargarEmpresaPDF } from '@/server/empresa-pdf-helper';
 import { formatDate, formatPEN } from '@happy/lib';
 
@@ -78,6 +78,7 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
   const avios = (aviosData ?? []) as unknown as AvioOS[];
   const totalUnidades = lineas.reduce((s, l) => s + Number(l.cantidad), 0);
   const totalRecep = lineas.reduce((s, l) => s + Number(l.cantidad_recepcionada ?? 0), 0);
+  const totalFallas = lineas.reduce((s, l) => s + Number(l.cantidad_fallada ?? 0), 0);
 
   const osPdf = {
     numero: os.numero,
@@ -232,6 +233,14 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
               }))}
             />
           )}
+          {totalFallas > 0 && (
+            <div className="flex items-center justify-between gap-2 border-t bg-amber-50/40 px-4 py-3">
+              <p className="text-xs text-amber-800">
+                Hay <strong>{totalFallas}</strong> prenda(s) con falla. Podés retornarlas al taller para reproceso (se crea una nueva OS de re-trabajo).
+              </p>
+              <RetornarFallasButton osId={id} totalFallas={totalFallas} disabled={os.estado === 'ANULADA'} />
+            </div>
+          )}
         </CardContent>
       </Card>
 
@@ -245,6 +254,9 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
             </Badge>
           </CardTitle>
         </CardHeader>
+        <CardHeader className="pt-0">
+          <p className="text-xs text-slate-500">Registre la cantidad de cada avío que el taller <strong>devolvió</strong> (sobrante no usado) y su observación.</p>
+        </CardHeader>
         <CardContent className="p-0">
           {avios.length === 0 ? (
             <p className="px-6 py-6 text-sm text-slate-400">
@@ -252,45 +264,19 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
               ningún material del BOM tiene marcado "va al taller".
             </p>
           ) : (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Material</TableHead>
-                  <TableHead>Categoría</TableHead>
-                  <TableHead className="text-right">Enviado</TableHead>
-                  <TableHead className="text-right">Devuelto</TableHead>
-                  <TableHead>Obs.</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {avios.map((a) => (
-                  <TableRow key={a.id}>
-                    <TableCell className="font-medium">
-                      {a.materiales?.nombre ?? '—'}
-                      {a.materiales?.codigo && (
-                        <span className="ml-2 font-mono text-[10px] text-slate-400">
-                          {a.materiales.codigo}
-                        </span>
-                      )}
-                    </TableCell>
-                    <TableCell>
-                      {a.materiales?.categoria && (
-                        <Badge variant="secondary" className="text-[10px]">
-                          {a.materiales.categoria}
-                        </Badge>
-                      )}
-                    </TableCell>
-                    <TableCell className="text-right font-mono text-sm">
-                      {Number(a.cantidad_enviada).toFixed(4)}
-                    </TableCell>
-                    <TableCell className="text-right font-mono text-sm text-emerald-600">
-                      {Number(a.cantidad_devuelta ?? 0).toFixed(4)}
-                    </TableCell>
-                    <TableCell className="text-xs text-slate-500">{a.observacion ?? ''}</TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
+            <AviosDevueltosEditor
+              osId={id}
+              disabled={os.estado === 'ANULADA' || os.estado === 'CERRADA'}
+              avios={avios.map((a) => ({
+                id: a.id,
+                material: a.materiales?.nombre ?? '—',
+                codigo: a.materiales?.codigo ?? '',
+                categoria: a.materiales?.categoria ?? '',
+                enviado: Number(a.cantidad_enviada ?? 0),
+                devuelto: Number(a.cantidad_devuelta ?? 0),
+                observacion: a.observacion ?? '',
+              }))}
+            />
           )}
         </CardContent>
       </Card>

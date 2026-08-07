@@ -793,6 +793,117 @@ export async function registrarRecepcionOS(
 }
 
 /**
+ * Registra los AVÍOS DEVUELTOS por el taller (pedido del cliente 22/07/2026):
+ * cantidad devuelta + observación por cada avío enviado. No puede superar lo
+ * enviado. Se visualiza en el reporte de "Avíos enviados" de la OS.
+ */
+const avioDevueltoSchema = z.object({
+  id: z.string().uuid(),
+  devuelto: z.coerce.number().min(0).default(0),
+  observacion: z.string().optional().or(z.literal('')),
+});
+export async function registrarAviosDevueltos(
+  osId: string,
+  avios: z.input<typeof avioDevueltoSchema>[],
+): Promise<ActionResult> {
+  const r = await runAction(async () => {
+    const parsed = avios.map((a) => avioDevueltoSchema.parse(a));
+    const { sb } = await requireUser();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const sbAny = sb as unknown as { from: (t: string) => any };
+    const { data: enviados } = await sbAny
+      .from('ordenes_servicio_avios')
+      .select('id, cantidad_enviada')
+      .eq('os_id', osId);
+    const envMap = new Map<string, number>(
+      ((enviados ?? []) as { id: string; cantidad_enviada: number }[]).map((e) => [e.id, Number(e.cantidad_enviada ?? 0)]),
+    );
+    for (const a of parsed) {
+      const env = envMap.get(a.id);
+      if (env === undefined) throw new Error('Avío no encontrado en esta OS');
+      if (a.devuelto > env + 0.0001) {
+        throw new Error(`La cantidad devuelta (${a.devuelto}) no puede superar lo enviado (${env}).`);
+      }
+      const { error } = await sbAny
+        .from('ordenes_servicio_avios')
+        .update({ cantidad_devuelta: a.devuelto, observacion: a.observacion?.trim() || null })
+        .eq('id', a.id)
+        .eq('os_id', osId);
+      if (error) throw new Error(error.message);
+    }
+    return null;
+  });
+  if (r.ok) await bumpPaths(`/servicios/${osId}`);
+  return r;
+}
+
+/**
+ * Retorna al servicio (taller) las prendas identificadas con FALLA: crea una
+ * NUEVA orden de servicio de RE-TRABAJO con las cantidades falladas por talla,
+ * al mismo taller y proceso. No re-envía avíos (es solo reproceso de mano de
+ * obra). Pedido del cliente 22/07/2026.
+ */
+export async function retornarFallasAlServicio(
+  osId: string,
+): Promise<ActionResult<{ id: string; numero: string; unidades: number }>> {
+  const r = await runAction(async () => {
+    const { sb, userId } = await requireUser();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const sbAny = sb as unknown as { from: (t: string) => any; rpc: (fn: string, args: any) => any };
+
+    const { data: os } = await sbAny
+      .from('ordenes_servicio')
+      .select('numero, taller_id, ot_id, corte_id, proceso')
+      .eq('id', osId)
+      .maybeSingle();
+    if (!os) throw new Error('OS no encontrada');
+
+    const { data: lineas } = await sbAny
+      .from('ordenes_servicio_lineas')
+      .select('producto_id, talla, cantidad_fallada')
+      .eq('os_id', osId);
+    const conFalla = ((lineas ?? []) as { producto_id: string; talla: string; cantidad_fallada: number | null }[])
+      .filter((l) => Number(l.cantidad_fallada ?? 0) > 0);
+    if (conFalla.length === 0) throw new Error('Esta OS no tiene prendas falladas para retornar.');
+
+    const { data: nro } = await sbAny.rpc('next_correlativo', { p_clave: 'OS', p_padding: 6 });
+    const hoy = new Date().toISOString().slice(0, 10);
+    const { data: row, error } = await sbAny.from('ordenes_servicio').insert({
+      numero: `OS-${nro}`,
+      corte_id: os.corte_id || null,
+      ot_id: os.ot_id,
+      taller_id: os.taller_id,
+      proceso: os.proceso,
+      fecha_envio: hoy,
+      monto_base: 0,
+      adicional_movilidad: 0,
+      adicional_campana: 0,
+      movilidad_por_unidad: 0,
+      campana_por_unidad: 0,
+      es_campana: false,
+      observaciones: `Re-trabajo de fallas de ${os.numero}`,
+      creado_por: userId,
+      estado: 'EMITIDA',
+    }).select('id').single();
+    if (error) throw new Error(error.message);
+
+    const filas = conFalla.map((l) => ({
+      os_id: row.id as string,
+      producto_id: l.producto_id,
+      talla: l.talla,
+      cantidad: Number(l.cantidad_fallada ?? 0),
+    }));
+    const { error: errL } = await sbAny.from('ordenes_servicio_lineas').insert(filas);
+    if (errL) throw new Error(errL.message);
+
+    const unidades = filas.reduce((s, f) => s + f.cantidad, 0);
+    return { id: row.id as string, numero: `OS-${nro}`, unidades };
+  });
+  if (r.ok) await bumpPaths('/servicios');
+  return r;
+}
+
+/**
  * Máquina de estados de la OS (server-side).
  * EMITIDA → DESPACHADA → EN_PROCESO → RECEPCIONADA → CERRADA
  * ANULADA es accesible desde cualquier estado activo (no desde finales).

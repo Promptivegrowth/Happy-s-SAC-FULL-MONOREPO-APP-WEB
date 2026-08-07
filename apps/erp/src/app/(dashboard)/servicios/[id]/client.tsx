@@ -7,9 +7,9 @@ import { Input } from '@happy/ui/input';
 import { Textarea } from '@happy/ui/textarea';
 import { Badge } from '@happy/ui/badge';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@happy/ui/table';
-import { Loader2, ArrowRight, Save, Pencil, X, Printer } from 'lucide-react';
+import { Loader2, ArrowRight, Save, Pencil, X, Printer, RotateCcw } from 'lucide-react';
 import { toast } from 'sonner';
-import { cambiarEstadoOS, registrarRecepcionOS, editarOS } from '@/server/actions/corte';
+import { cambiarEstadoOS, registrarRecepcionOS, editarOS, registrarAviosDevueltos, retornarFallasAlServicio } from '@/server/actions/corte';
 import { generarOSPdf, type OSPdfData } from './os-pdf';
 import type { EmpresaPDFData } from '@/server/empresa-pdf-helper';
 import { formatTallaChip } from '@happy/lib';
@@ -405,6 +405,130 @@ export function RecepcionOSEditor({
           <Button variant="premium" size="sm" onClick={guardar} disabled={pending || excede}>
             {pending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
             {esParcial ? 'Registrar entrega parcial' : 'Registrar recepción'}
+          </Button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Botón para RETORNAR al servicio las prendas falladas: crea una nueva OS de
+ * re-trabajo con las cantidades falladas (pedido del cliente 22/07/2026).
+ */
+export function RetornarFallasButton({ osId, totalFallas, disabled }: { osId: string; totalFallas: number; disabled: boolean }) {
+  const router = useRouter();
+  const [pending, start] = useTransition();
+  if (totalFallas <= 0 || disabled) return null;
+  function retornar() {
+    if (!confirm(`¿Crear una orden de servicio de re-trabajo para las ${totalFallas} prenda(s) fallada(s)? Se enviarán de nuevo al taller.`)) return;
+    start(async () => {
+      const r = await retornarFallasAlServicio(osId);
+      if (r.ok && r.data) {
+        toast.success(`Re-trabajo creado: ${r.data.numero} (${r.data.unidades} unid.)`);
+        router.push(`/servicios/${r.data.id}`);
+      } else toast.error(r.error ?? 'Error');
+    });
+  }
+  return (
+    <Button variant="outline" size="sm" onClick={retornar} disabled={pending} className="border-amber-300 text-amber-700 hover:bg-amber-50">
+      {pending ? <Loader2 className="h-4 w-4 animate-spin" /> : <RotateCcw className="h-4 w-4" />}
+      Retornar {totalFallas} falla{totalFallas === 1 ? '' : 's'} al taller
+    </Button>
+  );
+}
+
+/**
+ * Editor de AVÍOS DEVUELTOS por el taller (pedido del cliente 22/07/2026):
+ * cantidad devuelta + observación por cada avío enviado.
+ */
+type AvioRow = {
+  id: string;
+  material: string;
+  codigo: string;
+  categoria: string;
+  enviado: number;
+  devuelto: number;
+  observacion: string;
+};
+export function AviosDevueltosEditor({ osId, avios, disabled }: { osId: string; avios: AvioRow[]; disabled: boolean }) {
+  const router = useRouter();
+  const [pending, start] = useTransition();
+  const [rows, setRows] = useState<AvioRow[]>(avios);
+
+  function setDev(i: number, v: string) {
+    if (v !== '' && !/^\d*[.,]?\d*$/.test(v)) return;
+    const n = v === '' ? 0 : Number(v.replace(',', '.'));
+    setRows((prev) => prev.map((r, idx) => (idx === i ? { ...r, devuelto: Number.isFinite(n) ? n : 0 } : r)));
+  }
+  function setObs(i: number, v: string) {
+    setRows((prev) => prev.map((r, idx) => (idx === i ? { ...r, observacion: v } : r)));
+  }
+  const excede = rows.some((r) => r.devuelto > r.enviado + 0.0001);
+
+  function guardar() {
+    if (excede) return toast.error('La cantidad devuelta no puede superar lo enviado.');
+    start(async () => {
+      const r = await registrarAviosDevueltos(osId, rows.map((x) => ({ id: x.id, devuelto: x.devuelto, observacion: x.observacion })));
+      if (r.ok) { toast.success('Avíos devueltos registrados'); router.refresh(); }
+      else toast.error(r.error ?? 'Error');
+    });
+  }
+
+  return (
+    <div>
+      <Table>
+        <TableHeader>
+          <TableRow>
+            <TableHead>Material</TableHead>
+            <TableHead>Categoría</TableHead>
+            <TableHead className="text-right">Enviado</TableHead>
+            <TableHead className="text-right">Devuelto</TableHead>
+            <TableHead>Obs.</TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {rows.map((a, i) => {
+            const filaExcede = a.devuelto > a.enviado + 0.0001;
+            return (
+              <TableRow key={a.id}>
+                <TableCell className="font-medium">
+                  {a.material}
+                  {a.codigo && <span className="ml-2 font-mono text-[10px] text-slate-400">{a.codigo}</span>}
+                </TableCell>
+                <TableCell>{a.categoria && <Badge variant="secondary" className="text-[10px]">{a.categoria}</Badge>}</TableCell>
+                <TableCell className="text-right font-mono text-sm">{a.enviado.toFixed(4)}</TableCell>
+                <TableCell className="text-right">
+                  <Input
+                    type="text"
+                    inputMode="decimal"
+                    value={a.devuelto || ''}
+                    onChange={(e) => setDev(i, e.target.value)}
+                    disabled={disabled || pending}
+                    placeholder="0"
+                    className={`ml-auto h-8 w-24 text-right text-xs ${filaExcede ? 'border-danger bg-red-50' : ''}`}
+                  />
+                </TableCell>
+                <TableCell>
+                  <Input
+                    value={a.observacion}
+                    onChange={(e) => setObs(i, e.target.value)}
+                    disabled={disabled || pending}
+                    placeholder="—"
+                    className="h-8 text-xs"
+                    maxLength={200}
+                  />
+                </TableCell>
+              </TableRow>
+            );
+          })}
+        </TableBody>
+      </Table>
+      {!disabled && (
+        <div className="flex justify-end p-4">
+          <Button variant="premium" size="sm" onClick={guardar} disabled={pending || excede}>
+            {pending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+            Guardar devueltos
           </Button>
         </div>
       )}
