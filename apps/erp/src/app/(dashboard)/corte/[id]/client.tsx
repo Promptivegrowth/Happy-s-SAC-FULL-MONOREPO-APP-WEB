@@ -234,7 +234,7 @@ type TelaTiempo = {
   fecha_corte: string;
   fecha_habilitado: string;
   capas_tendidas: number;
-  metros_consumidos: number;
+  largo_pano: number;
   merma_metros: number;
   responsable_operario_id: string;
 };
@@ -251,7 +251,7 @@ type TelaRow = {
   fecha_corte: string;
   fecha_habilitado: string;
   capas: string;
-  metros: string;
+  largo: string;
   merma: string;
   responsable: string;
 };
@@ -284,13 +284,13 @@ export function TiemposCorteEditor({
       fecha_corte: t.fecha_corte ?? '',
       fecha_habilitado: t.fecha_habilitado ?? '',
       capas: t.capas_tendidas ? String(t.capas_tendidas) : '',
-      metros: t.metros_consumidos ? String(t.metros_consumidos) : '',
+      largo: t.largo_pano ? String(t.largo_pano) : '',
       merma: t.merma_metros ? String(t.merma_metros) : '',
       responsable: t.responsable_operario_id ?? '',
     })),
   );
 
-  function setNum(i: number, campo: 'tendido' | 'corte' | 'habilitado' | 'capas' | 'metros' | 'merma', v: string) {
+  function setNum(i: number, campo: 'tendido' | 'corte' | 'habilitado' | 'capas' | 'largo' | 'merma', v: string) {
     if (v !== '' && !/^\d*[.,]?\d*$/.test(v)) return; // solo números
     setRows((prev) => prev.map((r, idx) => (idx === i ? { ...r, [campo]: v } : r)));
   }
@@ -312,7 +312,7 @@ export function TiemposCorteEditor({
           fecha_corte: t.fecha_corte,
           fecha_habilitado: t.fecha_habilitado,
           capas_tendidas: Math.round(numOrCero(t.capas)),
-          metros_consumidos: numOrCero(t.metros),
+          largo_pano: numOrCero(t.largo),
           merma_metros: numOrCero(t.merma),
           responsable_operario_id: t.responsable,
         })),
@@ -331,6 +331,8 @@ export function TiemposCorteEditor({
   }
 
   const totalTiempo = (t: TelaRow) => numOrCero(t.tendido) + numOrCero(t.corte) + numOrCero(t.habilitado);
+  // Consumo real = capas × largo de paño + merma (pedido del cliente 22/07/2026).
+  const consumoReal = (t: TelaRow) => numOrCero(t.capas) * numOrCero(t.largo) + numOrCero(t.merma);
   const OPERS = [
     { key: 'tendido' as const, fecha: 'fecha_tendido' as const, label: 'Tendido' },
     { key: 'corte' as const, fecha: 'fecha_corte' as const, label: 'Corte' },
@@ -351,22 +353,31 @@ export function TiemposCorteEditor({
           </div>
 
           {/* Liquidación de tela */}
-          <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-5">
             <label className="text-[10px] font-medium uppercase tracking-wide text-slate-500">
               Capas tendidas
               <Input type="text" inputMode="numeric" value={t.capas} onChange={(e) => setNum(i, 'capas', e.target.value)}
                 disabled={!editable || pending} placeholder="0" className="mt-1 h-8 text-sm" />
             </label>
             <label className="text-[10px] font-medium uppercase tracking-wide text-slate-500">
-              Metros consumidos
-              <Input type="text" inputMode="decimal" value={t.metros} onChange={(e) => setNum(i, 'metros', e.target.value)}
+              Largo de paño (m)
+              <Input type="text" inputMode="decimal" value={t.largo} onChange={(e) => setNum(i, 'largo', e.target.value)}
                 disabled={!editable || pending} placeholder="0.00" className="mt-1 h-8 text-sm" />
             </label>
             <label className="text-[10px] font-medium uppercase tracking-wide text-slate-500">
-              Merma (metros)
+              Merma (m)
               <Input type="text" inputMode="decimal" value={t.merma} onChange={(e) => setNum(i, 'merma', e.target.value)}
                 disabled={!editable || pending} placeholder="0.00" className="mt-1 h-8 text-sm" />
             </label>
+            <div className="text-[10px] font-medium uppercase tracking-wide text-slate-500">
+              Consumo real (m)
+              <div
+                className="mt-1 flex h-8 items-center rounded-md border border-emerald-200 bg-emerald-50/60 px-2 font-mono text-sm font-semibold text-emerald-700"
+                title="Capas × largo de paño + merma"
+              >
+                {consumoReal(t).toFixed(2)}
+              </div>
+            </div>
             <label className="text-[10px] font-medium uppercase tracking-wide text-slate-500">
               Responsable
               <select value={t.responsable} onChange={(e) => setCampo(i, 'responsable', e.target.value)}

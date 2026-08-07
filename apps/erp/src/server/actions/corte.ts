@@ -178,7 +178,9 @@ const tiempoTelaSchema = z.object({
   fecha_habilitado: z.string().optional().or(z.literal('')),
   // Liquidación por tela (mig 76): capas, metros, merma y responsable.
   capas_tendidas: z.coerce.number().int().min(0).default(0),
-  metros_consumidos: z.coerce.number().min(0).default(0),
+  // Largo de paño (metros de un solo tendido). El consumo real total se calcula:
+  // metros_consumidos = capas × largo_pano + merma (pedido del cliente 22/07/2026).
+  largo_pano: z.coerce.number().min(0).default(0),
   merma_metros: z.coerce.number().min(0).default(0),
   responsable_operario_id: z.string().uuid().optional().or(z.literal('')),
 });
@@ -191,6 +193,9 @@ export async function guardarTiemposCorte(
     const { sb } = await requireUser();
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const sbAny = sb as unknown as { from: (t: string) => any };
+    // Consumo real por tela = capas × largo de paño + merma.
+    const consumoReal = (t: (typeof parsed)[number]) =>
+      Math.round((Number(t.capas_tendidas || 0) * Number(t.largo_pano || 0) + Number(t.merma_metros || 0)) * 100) / 100;
     for (const t of parsed) {
       const { error } = await sbAny
         .from('ot_corte_tiempos')
@@ -206,8 +211,9 @@ export async function guardarTiemposCorte(
             fecha_corte: t.fecha_corte || null,
             fecha_habilitado: t.fecha_habilitado || null,
             capas_tendidas: t.capas_tendidas,
-            metros_consumidos: t.metros_consumidos,
+            largo_pano: t.largo_pano,
             merma_metros: t.merma_metros,
+            metros_consumidos: consumoReal(t),
             responsable_operario_id: t.responsable_operario_id || null,
           },
           { onConflict: 'corte_id,material_id' },
@@ -218,7 +224,7 @@ export async function guardarTiemposCorte(
     // Recomputar los TOTALES del corte (cabecera) = suma de todas las telas.
     // Así los listados y el resumen siguen mostrando el total correcto.
     const totalCapas = parsed.reduce((s, t) => s + Number(t.capas_tendidas || 0), 0);
-    const totalMetros = Math.round(parsed.reduce((s, t) => s + Number(t.metros_consumidos || 0), 0) * 100) / 100;
+    const totalMetros = Math.round(parsed.reduce((s, t) => s + consumoReal(t), 0) * 100) / 100;
     const totalMerma = Math.round(parsed.reduce((s, t) => s + Number(t.merma_metros || 0), 0) * 100) / 100;
     await sbAny
       .from('ot_corte')

@@ -354,50 +354,64 @@ export async function generarOTsDelPlan(planId: string): Promise<ActionResult<{ 
       );
     }
 
+    // RECLAMO ATÓMICO (fix 22/07/2026 — "duplica dos veces la OT"): antes se
+    // marcaba EN_EJECUCION recién AL FINAL, así que dos requests simultáneos
+    // (doble-click) leían APROBADO y generaban las OTs dos veces. Ahora
+    // marcamos EN_EJECUCION ANTES de generar, condicionado a que siga APROBADO:
+    // el segundo request no cambia ninguna fila (count 0) y aborta.
+    const { count: reclamado } = await sb
+      .from('plan_maestro')
+      .update({ estado: 'EN_EJECUCION' }, { count: 'exact' })
+      .eq('id', planId)
+      .eq('estado', 'APROBADO');
+    if (!reclamado || reclamado === 0) {
+      throw new Error('Las OTs de este plan ya se están generando o ya fueron generadas. No se duplican.');
+    }
+
     // Almacén de producción default
     const { data: alm } = await sb.from('almacenes').select('id').eq('codigo', 'ALM-SB').maybeSingle();
 
     let count = 0;
-    for (const [productoId, items] of porProducto) {
-      const { data: nro } = await sb.rpc('generar_numero_ot');
-      const { data: ot, error: errOt } = await sb.from('ot').insert({
-        numero: nro as string,
-        plan_id: planId,
-        campana_id: items[0]!.campana_id ?? null,
-        es_campana: items[0]!.campana_id !== null,
-        estado: 'PLANIFICADA',
-        almacen_produccion: alm?.id ?? null,
-        responsable_usuario_id: userId,
-        prioridad: Math.min(...items.map((i) => i.prioridad ?? 100)),
-        observacion: `Generada desde plan ${planId.slice(0, 8)}`,
-      }).select('id').single();
-      if (errOt) throw new Error(errOt.message);
+    try {
+      for (const [productoId, items] of porProducto) {
+        const { data: nro } = await sb.rpc('generar_numero_ot');
+        const { data: ot, error: errOt } = await sb.from('ot').insert({
+          numero: nro as string,
+          plan_id: planId,
+          campana_id: items[0]!.campana_id ?? null,
+          es_campana: items[0]!.campana_id !== null,
+          estado: 'PLANIFICADA',
+          almacen_produccion: alm?.id ?? null,
+          responsable_usuario_id: userId,
+          prioridad: Math.min(...items.map((i) => i.prioridad ?? 100)),
+          observacion: `Generada desde plan ${planId.slice(0, 8)}`,
+        }).select('id').single();
+        if (errOt) throw new Error(errOt.message);
 
-      const ot_lineas = items.map((i) => ({
-        ot_id: ot.id,
-        producto_id: productoId,
-        talla: i.talla,
-        cantidad_planificada: i.cantidad_planificada,
-      }));
-      await sb.from('ot_lineas').insert(ot_lineas);
+        const ot_lineas = items.map((i) => ({
+          ot_id: ot.id,
+          producto_id: productoId,
+          talla: i.talla,
+          cantidad_planificada: i.cantidad_planificada,
+        }));
+        await sb.from('ot_lineas').insert(ot_lineas);
 
-      // Evento
-      await sb.from('ot_eventos').insert({
-        ot_id: ot.id,
-        tipo: 'CREACION',
-        estado_nuevo: 'PLANIFICADA',
-        usuario_id: userId,
-        detalle: `Generada desde plan maestro`,
-      });
-      count++;
+        // Evento
+        await sb.from('ot_eventos').insert({
+          ot_id: ot.id,
+          tipo: 'CREACION',
+          estado_nuevo: 'PLANIFICADA',
+          usuario_id: userId,
+          detalle: `Generada desde plan maestro`,
+        });
+        count++;
+      }
+    } catch (e) {
+      // Si falla la generación, devolvemos el plan a APROBADO para poder reintentar.
+      await sb.from('plan_maestro').update({ estado: 'APROBADO' }).eq('id', planId);
+      throw e;
     }
 
-    // Marcar plan como EN_EJECUCION solo si sigue APROBADO (atomicidad).
-    await sb
-      .from('plan_maestro')
-      .update({ estado: 'EN_EJECUCION' })
-      .eq('id', planId)
-      .eq('estado', 'APROBADO');
     return { otsCreadas: count };
   });
   if (r.ok) await bumpPaths(`/plan-maestro/${planId}`, '/ot');
