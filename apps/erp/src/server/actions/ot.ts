@@ -380,30 +380,38 @@ export async function declararProduccion(
  * declarado en la OT. Se usa para bloquear el cierre (pedido del cliente
  * 21/07/2026: "que no permita cerrar si faltan declarar procesos").
  *
- * Reglas:
- *  - Solo procesos activos y NO tercerizados (los tercerizados se controlan
- *    por órdenes de servicio, no por registros de tiempo).
+ * Reglas (actualizadas 22/07/2026):
+ *  - NO cuentan los procesos tercerizados (van por orden de servicio).
+ *  - NO cuentan los procesos del área de CORTE (se declaran en la orden de
+ *    corte / liquidación, no en registros de tiempo de la OT).
+ *  - NO cuentan los procesos cubiertos por una ORDEN DE SERVICIO de esta OT
+ *    (el servicio ya fue enviado/declarado al taller).
  *  - Una operación cuenta como "declarada" si tiene al menos 1 registro para
- *    esa talla (no se exige cubrir el 100% de unidades).
- *  - Solo tallas con cantidad_cortada > 0.
+ *    esa talla. Solo tallas con cantidad_cortada > 0.
  */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 async function procesosPendientesDeOT(sbAny: { from: (t: string) => any }, otId: string) {
-  const [{ data: lineas }, { data: regs }] = await Promise.all([
+  const [{ data: lineas }, { data: regs }, { data: osRows }] = await Promise.all([
     sbAny.from('ot_lineas').select('producto_id, talla, cantidad_cortada').eq('ot_id', otId),
     sbAny.from('ot_registros_tiempo').select('proceso_id, talla').eq('ot_id', otId),
+    sbAny.from('ordenes_servicio').select('proceso').eq('ot_id', otId).neq('estado', 'ANULADA'),
   ]);
   const lineasArr = (lineas ?? []) as { producto_id: string; talla: string; cantidad_cortada: number | null }[];
   const prodIds = Array.from(new Set(lineasArr.map((l) => l.producto_id)));
   if (prodIds.length === 0) return [] as { operacion: string; talla: string }[];
 
+  // Procesos que ya tienen una OS (servicio enviado al taller) — no se exigen
+  // por registro de tiempo en la OT.
+  const procesosConOS = new Set(((osRows ?? []) as { proceso: string | null }[]).map((o) => String(o.proceso ?? '')));
+
   const { data: procs } = await sbAny
     .from('productos_procesos')
-    .select('id, producto_id, proceso, descripcion_operativa, es_tercerizado')
+    .select('id, producto_id, proceso, descripcion_operativa, es_tercerizado, areas_produccion(codigo)')
     .in('producto_id', prodIds)
     .eq('activo', true);
   const procsArr = (procs ?? []) as {
     id: string; producto_id: string; proceso: string; descripcion_operativa: string | null; es_tercerizado: boolean;
+    areas_produccion: { codigo: string } | null;
   }[];
 
   const declarado = new Set(
@@ -413,6 +421,8 @@ async function procesosPendientesDeOT(sbAny: { from: (t: string) => any }, otId:
   const pendientes: { operacion: string; talla: string }[] = [];
   for (const p of procsArr) {
     if (p.es_tercerizado) continue;
+    if (p.areas_produccion?.codigo === 'CORTE') continue; // corte se declara en la orden de corte
+    if (procesosConOS.has(p.proceso)) continue; // servicio cubierto por una OS
     const nombre = (p.descripcion_operativa ?? '').trim() || p.proceso.replace(/_/g, ' ');
     for (const l of lineasArr) {
       if (l.producto_id !== p.producto_id) continue;
