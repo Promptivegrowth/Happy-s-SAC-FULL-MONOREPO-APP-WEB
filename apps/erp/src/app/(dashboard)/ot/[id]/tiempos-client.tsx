@@ -331,6 +331,7 @@ export function TiemposCostoTab({ otId, procesos, lineas, registros, operarios, 
             procesos={procesosProducto}
             registros={registrosProducto}
             unidades={unidadesGlobal}
+            corteResumen={corteResumen}
           />
         </CardContent>
       </Card>
@@ -471,14 +472,30 @@ function StatsAvance({
   );
 }
 
-/** Tabla "Resumen por operación" — reutilizable (global o por talla). */
+/** Tabla "Resumen por operación" — reutilizable (global o por talla).
+ *  Para las operaciones del área de CORTE, el tiempo se toma de la LIQUIDACIÓN
+ *  del corte (no de registros de la OT), sumando por tipo de operación. */
 function ResumenOperacionesTabla({
-  procesos, registros, unidades,
+  procesos, registros, unidades, corteResumen,
 }: {
   procesos: Proceso[];
   registros: RegistroTiempo[];
   unidades: number;
+  corteResumen?: CorteResumen;
 }) {
+  // Totales de la liquidación de corte por tipo de operación.
+  const corteTot = { tendido: 0, corte: 0, habilitado: 0 };
+  for (const t of corteResumen?.telas ?? []) {
+    corteTot.tendido += t.tendido; corteTot.corte += t.corte; corteTot.habilitado += t.habilitado;
+  }
+  const corteMinDeOp = (p: Proceso): number | null => {
+    if (p.area?.codigo !== 'CORTE') return null;
+    const n = nombreOperacion(p).toUpperCase();
+    if (n.includes('TENDIDO')) return corteTot.tendido;
+    if (n.includes('HABILIT')) return corteTot.habilitado;
+    if (n.includes('CORTE')) return corteTot.corte;
+    return null;
+  };
   return (
     <Table>
       <TableHeader>
@@ -499,11 +516,15 @@ function ResumenOperacionesTabla({
           const std = Number(p.tiempo_estandar_min ?? 0);
           const vmin = Number(p.area?.valor_minuto ?? 0);
           const regs = registros.filter((r) => r.proceso_id === p.id);
-          const totalRegistrado = regs.reduce((s, r) => s + Number(r.tiempo_total_min), 0);
+          // El tiempo de las operaciones de CORTE viene de la liquidación del corte.
+          const corteMin = corteMinDeOp(p);
+          const inyectadoCorte = corteMin !== null;
+          const totalRegistrado = inyectadoCorte ? (corteMin ?? 0) : regs.reduce((s, r) => s + Number(r.tiempo_total_min), 0);
           const unidadesProcOp = regs.reduce((s, r) => s + Number(r.unidades_procesadas ?? 0), 0);
           const denominador = unidadesProcOp > 0 ? unidadesProcOp : unidades;
           const realPorUnidad = denominador > 0 ? totalRegistrado / denominador : 0;
           const tiempoUsado = realPorUnidad > 0 ? realPorUnidad : std;
+          const hayDato = inyectadoCorte ? totalRegistrado > 0 : regs.length > 0;
           const parcial = unidadesProcOp > 0 && unidadesProcOp < unidades;
           const pct = unidades > 0 ? Math.min(100, Math.round((unidadesProcOp / unidades) * 100)) : 0;
           const completo = unidadesProcOp >= unidades && unidades > 0;
@@ -514,7 +535,7 @@ function ResumenOperacionesTabla({
               <TableCell className="text-xs"><Badge variant="outline" className="text-[10px]">{p.area?.codigo ?? '—'}</Badge></TableCell>
               <TableCell className="text-right font-mono text-xs">{std.toFixed(2)}</TableCell>
               <TableCell className="text-right font-mono text-xs">
-                {regs.length > 0 ? totalRegistrado.toFixed(2) : <span className="text-slate-300">—</span>}
+                {hayDato ? totalRegistrado.toFixed(2) : <span className="text-slate-300">—</span>}
               </TableCell>
               <TableCell>
                 {unidades === 0 ? (

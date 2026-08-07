@@ -171,15 +171,20 @@ export async function cambiarEstadoOT(otId: string, nuevoEstado: typeof ESTADOS[
       );
     }
 
-    // No se puede CANCELAR una OT que ya tiene corte registrado (pedido del
-    // cliente 22/07/2026): si hay unidades cortadas, la tela ya se consumió.
+    // No se puede CANCELAR una OT que ya tiene trabajo registrado (pedido del
+    // cliente 22/07/2026): corte declarado o cualquier proceso/tiempo registrado.
     if (nuevoEstado === 'CANCELADA') {
       const { data: lineasC } = await sb.from('ot_lineas').select('cantidad_cortada').eq('ot_id', otId);
       const cortado = ((lineasC ?? []) as { cantidad_cortada: number | null }[]).reduce((s, l) => s + Number(l.cantidad_cortada ?? 0), 0);
-      if (cortado > 0) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const sbAnyC = sb as unknown as { from: (t: string) => any };
+      const { count: regs } = await sbAnyC.from('ot_registros_tiempo').select('id', { count: 'exact', head: true }).eq('ot_id', otId);
+      if (cortado > 0 || (regs ?? 0) > 0) {
         throw new Error(
-          `No se puede cancelar: la OT ya tiene ${cortado} unidad(es) cortada(s). ` +
-          'Solo se puede cancelar una OT sin corte registrado.',
+          `No se puede cancelar: la OT ya tiene trabajo registrado` +
+          `${cortado > 0 ? ` (${cortado} unidad(es) cortada(s))` : ''}` +
+          `${(regs ?? 0) > 0 ? ` y ${regs} registro(s) de proceso/tiempo` : ''}. ` +
+          'Solo se puede cancelar una OT sin corte ni procesos declarados.',
         );
       }
     }
@@ -566,6 +571,65 @@ const registroTiempoSchema = z.object({
   notas: z.string().max(500).optional().nullable(),
 });
 
+/**
+ * Auto-avanza el estado de la OT según lo REALMENTE declarado (pedido del
+ * cliente 22/07/2026: "el botón de estado debe actualizarse solo de acuerdo a
+ * los registros de proceso y tiempos"). Solo avanza hacia adelante y nunca a
+ * COMPLETADA/CANCELADA (esos son manuales). Mapea el área de las operaciones
+ * declaradas — y el corte declarado — al estado correspondiente.
+ */
+const ORDEN_ESTADOS_OT = ['BORRADOR','PLANIFICADA','EN_CORTE','EN_HABILITADO','EN_SERVICIO','EN_DECORADO','EN_CONTROL_CALIDAD'] as const;
+function estadoDeArea(cod: string): EstadoOT {
+  if (cod === 'CORTE') return 'EN_CORTE';
+  if (cod === 'COSTURA') return 'EN_SERVICIO';
+  if (['BORDADO','ESTAMPADO','SUBLIMADO','DECORADO','PLISADO'].includes(cod)) return 'EN_DECORADO';
+  if (['ACABADO','PLANCHADO'].includes(cod)) return 'EN_CONTROL_CALIDAD';
+  return 'PLANIFICADA';
+}
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export async function autoAvanzarEstadoOT(sbAny: { from: (t: string) => any }, otId: string): Promise<void> {
+  const { data: ot } = await sbAny.from('ot').select('estado').eq('id', otId).maybeSingle();
+  if (!ot) return;
+  const estadoActual = ot.estado as EstadoOT;
+  // No tocar estados finales ni CC (a partir de CC el avance es manual: cierre).
+  if (['COMPLETADA', 'CANCELADA', 'EN_CONTROL_CALIDAD'].includes(estadoActual)) return;
+
+  const idxEstado = (e: string) => (ORDEN_ESTADOS_OT as readonly string[]).indexOf(e);
+  let objetivoIdx = idxEstado(estadoActual);
+  if (objetivoIdx < 0) return;
+
+  // Corte declarado (cantidad_cortada > 0) → al menos EN_CORTE.
+  const { data: lineas } = await sbAny.from('ot_lineas').select('cantidad_cortada').eq('ot_id', otId);
+  const cortado = ((lineas ?? []) as { cantidad_cortada: number | null }[]).reduce((s, l) => s + Number(l.cantidad_cortada ?? 0), 0);
+  if (cortado > 0) objetivoIdx = Math.max(objetivoIdx, idxEstado('EN_CORTE'));
+
+  // Áreas de las operaciones con tiempo declarado.
+  const { data: regs } = await sbAny.from('ot_registros_tiempo').select('proceso_id').eq('ot_id', otId);
+  const procesoIds = Array.from(new Set(((regs ?? []) as { proceso_id: string }[]).map((r) => r.proceso_id)));
+  if (procesoIds.length > 0) {
+    const { data: procs } = await sbAny
+      .from('productos_procesos')
+      .select('id, areas_produccion(codigo)')
+      .in('id', procesoIds);
+    for (const p of (procs ?? []) as { areas_produccion: { codigo: string } | null }[]) {
+      const cod = p.areas_produccion?.codigo;
+      if (cod) objetivoIdx = Math.max(objetivoIdx, idxEstado(estadoDeArea(cod)));
+    }
+  }
+
+  const objetivo = ORDEN_ESTADOS_OT[objetivoIdx];
+  if (objetivo && objetivo !== estadoActual) {
+    await sbAny.from('ot').update({ estado: objetivo }).eq('id', otId);
+    await sbAny.from('ot_eventos').insert({
+      ot_id: otId,
+      tipo: 'ESTADO_CAMBIO',
+      estado_anterior: estadoActual,
+      estado_nuevo: objetivo,
+      detalle: 'Estado actualizado automáticamente según las declaraciones de proceso/tiempo',
+    });
+  }
+}
+
 export async function crearRegistroTiempoOT(
   otId: string,
   input: z.input<typeof registroTiempoSchema>,
@@ -660,6 +724,9 @@ export async function crearRegistroTiempoOT(
       .select('id')
       .single();
     if (error) throw new Error(error.message);
+
+    // Auto-avanzar el estado de la OT según lo declarado (forward-only).
+    await autoAvanzarEstadoOT(sbAny, otId);
     return { id: row.id as string };
   });
   if (r.ok) await bumpPaths(`/ot/${otId}`);

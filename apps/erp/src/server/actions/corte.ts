@@ -2,6 +2,7 @@
 
 import { z } from 'zod';
 import { runAction, requireUser, bumpPaths, esGerente, type ActionResult } from './_helpers';
+import { autoAvanzarEstadoOT } from './ot';
 import { formatTallaChip } from '@happy/lib';
 
 const TALLAS = ['T0','T2','T4','T6','T8','T10','T12','T14','T16','TS','TAD', 'TU'] as const;
@@ -136,6 +137,8 @@ export async function agregarLineaCorte(_prev: unknown, fd: FormData): Promise<A
       .maybeSingle();
     if (corteInfo?.ot_id && corteInfo?.producto_id) {
       await rpcClient.rpc('sync_ot_cortada', { p_ot_id: corteInfo.ot_id, p_producto_id: corteInfo.producto_id });
+      // Con corte declarado, avanzar el estado de la OT a EN_CORTE si estaba antes.
+      await autoAvanzarEstadoOT(rpcClient, corteInfo.ot_id as string);
     }
 
     // Registrar la autorización (auditoría). Se guarda como nota en la
