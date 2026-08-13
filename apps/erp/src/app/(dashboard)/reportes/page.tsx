@@ -87,8 +87,8 @@ const REPORTES: ReporteCard[] = [
   },
   {
     href: '/reportes/costeo-comparativo',
-    titulo: 'Cotización vs Costo Real',
-    descripcion: 'Comparativo por OT: costo teórico (receta + tarifas) vs real (kardex + talleres). Detecta desviaciones.',
+    titulo: 'Costo Receta vs Real',
+    descripcion: 'Comparativo por OT: costo estándar de la receta (materiales BOM + tarifas de servicio) vs lo realmente gastado (kardex + talleres). Detecta desviaciones.',
     icono: Scale,
     categoria: 'Producción',
     badge: 'Nuevo',

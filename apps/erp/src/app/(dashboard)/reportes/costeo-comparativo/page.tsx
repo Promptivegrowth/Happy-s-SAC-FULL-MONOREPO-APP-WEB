@@ -9,9 +9,9 @@ import { PageShell } from '@/components/page-shell';
 import { ExportButtons } from '@/components/reportes/export-buttons';
 import { formatDate, formatPEN } from '@happy/lib';
 import { reporteCosteoComparativo } from '@/server/actions/reportes-produccion';
-import { hoy, inicioDeMes } from '@/server/actions/reportes-helpers';
+import { hoy, inicioDeMes, inicioDeSemana } from '@/server/actions/reportes-helpers';
 
-export const metadata = { title: 'Cotización vs Costo Real' };
+export const metadata = { title: 'Costo Receta vs Real' };
 export const dynamic = 'force-dynamic';
 
 type SP = { desde?: string; hasta?: string };
@@ -21,11 +21,19 @@ export default async function Page({ searchParams }: { searchParams: Promise<SP>
   const desde = sp.desde || inicioDeMes();
   const hasta = sp.hasta || hoy();
 
+  const HOY = hoy();
+  const presets = [
+    { label: 'Hoy', desde: HOY, hasta: HOY },
+    { label: 'Esta semana', desde: inicioDeSemana(), hasta: HOY },
+    { label: 'Este mes', desde: inicioDeMes(), hasta: HOY },
+  ];
+  const presetActivo = (p: { desde: string; hasta: string }) => p.desde === desde && p.hasta === hasta;
+
   const resultado = await reporteCosteoComparativo({ desde, hasta });
   const { metricas, rows } = resultado;
 
   const exportPayload = {
-    titulo: 'Costeo comparativo — Cotizado vs Real',
+    titulo: 'Costo Receta vs Real',
     subtitulo: `Del ${formatDate(desde)} al ${formatDate(hasta)}`,
     filtros: [`Período: ${formatDate(desde)} - ${formatDate(hasta)}`],
     cols: [
@@ -33,10 +41,10 @@ export default async function Page({ searchParams }: { searchParams: Promise<SP>
       { header: 'Producto', key: 'producto_nombre', width: 28 },
       { header: 'Cierre', key: 'fecha_cierre', formato: 'fecha' as const, width: 12 },
       { header: 'Unidades', key: 'unidades_terminadas', formato: 'numero' as const, width: 10 },
-      { header: 'Cot. mat.', key: 'cotizado_materiales', formato: 'moneda' as const, width: 14 },
-      { header: 'Cot. serv.', key: 'cotizado_servicios', formato: 'moneda' as const, width: 14 },
-      { header: 'Cot. total', key: 'cotizado_total', formato: 'moneda' as const, width: 14 },
-      { header: 'Cot. unit.', key: 'cotizado_unitario', formato: 'moneda' as const, width: 14 },
+      { header: 'Receta mat.', key: 'cotizado_materiales', formato: 'moneda' as const, width: 14 },
+      { header: 'Receta serv.', key: 'cotizado_servicios', formato: 'moneda' as const, width: 14 },
+      { header: 'Receta total', key: 'cotizado_total', formato: 'moneda' as const, width: 14 },
+      { header: 'Receta unit.', key: 'cotizado_unitario', formato: 'moneda' as const, width: 14 },
       { header: 'Real mat.', key: 'real_materiales', formato: 'moneda' as const, width: 14 },
       { header: 'Real serv.', key: 'real_servicios', formato: 'moneda' as const, width: 14 },
       { header: 'Real total', key: 'real_total', formato: 'moneda' as const, width: 14 },
@@ -52,10 +60,25 @@ export default async function Page({ searchParams }: { searchParams: Promise<SP>
 
   return (
     <PageShell
-      title="Cotización vs Costo Real"
-      description={`Comparativo por OT · ${formatDate(desde)} al ${formatDate(hasta)}`}
+      title="Costo Receta vs Real"
+      description={`Costo estándar de la receta (materiales + servicios) vs lo realmente gastado, por OT · ${formatDate(desde)} al ${formatDate(hasta)}`}
       actions={<ExportButtons payload={exportPayload} />}
     >
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="text-[11px] font-medium uppercase tracking-wider text-slate-500">Período:</span>
+        {presets.map((p) => (
+          <Link
+            key={p.label}
+            href={`/reportes/costeo-comparativo?desde=${p.desde}&hasta=${p.hasta}`}
+            className={`rounded-full border px-3 py-1 text-xs font-medium transition ${
+              presetActivo(p) ? 'border-happy-500 bg-happy-500 text-white' : 'border-slate-200 bg-white text-slate-600 hover:border-happy-300'
+            }`}
+          >
+            {p.label}
+          </Link>
+        ))}
+      </div>
+
       <form className="flex flex-wrap items-end gap-2 rounded-lg border border-dashed border-slate-200 p-3" method="get">
         <div>
           <label className="mb-1 block text-[10px] font-medium uppercase tracking-wider text-slate-500">Desde</label>
@@ -78,9 +101,9 @@ export default async function Page({ searchParams }: { searchParams: Promise<SP>
           </p>
         </Card>
         <Card className="p-4">
-          <p className="text-xs text-slate-500">Total cotizado (teórico)</p>
+          <p className="text-xs text-slate-500">Total receta (estándar)</p>
           <p className="mt-1 font-display text-2xl font-semibold text-corp-900">{formatPEN(metricas.cotizado_total)}</p>
-          <p className="mt-0.5 text-[10px] text-slate-500">receta + tarifas</p>
+          <p className="mt-0.5 text-[10px] text-slate-500">materiales BOM + tarifas de servicio</p>
         </Card>
         <Card className="p-4">
           <p className="text-xs text-slate-500">Total real</p>
@@ -128,9 +151,9 @@ export default async function Page({ searchParams }: { searchParams: Promise<SP>
                   <TableHead>OT</TableHead>
                   <TableHead>Producto</TableHead>
                   <TableHead className="text-right">Unid.</TableHead>
-                  <TableHead className="text-right">Cot. unit.</TableHead>
+                  <TableHead className="text-right">Receta unit.</TableHead>
                   <TableHead className="text-right">Real unit.</TableHead>
-                  <TableHead className="text-right">Cot. total</TableHead>
+                  <TableHead className="text-right">Receta total</TableHead>
                   <TableHead className="text-right">Real total</TableHead>
                   <TableHead className="text-right">Diferencia</TableHead>
                   <TableHead className="text-right">% Desv.</TableHead>
