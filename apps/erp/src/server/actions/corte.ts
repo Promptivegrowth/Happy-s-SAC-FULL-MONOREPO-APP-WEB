@@ -94,6 +94,15 @@ export async function agregarLineaCorte(_prev: unknown, fd: FormData): Promise<A
     });
     const { sb, userId } = await requireUser();
 
+    // No se puede ingresar más cantidades a cortar en un corte ya CERRADO o
+    // ANULADO (pedido del cliente 22/07/2026).
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const sbEstado = sb as unknown as { from: (t: string) => any };
+    const { data: corteEstado } = await sbEstado.from('ot_corte').select('estado').eq('id', data.corte_id).maybeSingle();
+    if (corteEstado?.estado === 'COMPLETADO' || corteEstado?.estado === 'ANULADO') {
+      throw new Error('Este corte ya está cerrado: no se pueden ingresar más cantidades a cortar. Cree un corte nuevo si necesita cortar más.');
+    }
+
     // AUTORIZACIÓN DE GERENCIA (pedido del cliente 21/07/2026): si la cantidad
     // REAL declarada difiere de la TEÓRICA (la del plan), hace falta que un
     // gerente lo autorice con motivo, y queda registrado. Igualar o dejar la

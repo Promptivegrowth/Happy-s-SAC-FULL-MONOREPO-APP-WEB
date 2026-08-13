@@ -521,13 +521,16 @@ function ResumenOperacionesTabla({
           const inyectadoCorte = corteMin !== null;
           const totalRegistrado = inyectadoCorte ? (corteMin ?? 0) : regs.reduce((s, r) => s + Number(r.tiempo_total_min), 0);
           const unidadesProcOp = regs.reduce((s, r) => s + Number(r.unidades_procesadas ?? 0), 0);
-          const denominador = unidadesProcOp > 0 ? unidadesProcOp : unidades;
+          // El corte procesa TODAS las unidades cortadas: si la operación de corte
+          // tiene tiempo, su avance es del 100% (pedido del cliente 22/07/2026).
+          const unidadesEff = inyectadoCorte && totalRegistrado > 0 ? unidades : unidadesProcOp;
+          const denominador = unidadesEff > 0 ? unidadesEff : unidades;
           const realPorUnidad = denominador > 0 ? totalRegistrado / denominador : 0;
           const tiempoUsado = realPorUnidad > 0 ? realPorUnidad : std;
           const hayDato = inyectadoCorte ? totalRegistrado > 0 : regs.length > 0;
-          const parcial = unidadesProcOp > 0 && unidadesProcOp < unidades;
-          const pct = unidades > 0 ? Math.min(100, Math.round((unidadesProcOp / unidades) * 100)) : 0;
-          const completo = unidadesProcOp >= unidades && unidades > 0;
+          const parcial = unidadesEff > 0 && unidadesEff < unidades;
+          const pct = unidades > 0 ? Math.min(100, Math.round((unidadesEff / unidades) * 100)) : 0;
+          const completo = unidadesEff >= unidades && unidades > 0;
           return (
             <TableRow key={p.id}>
               <TableCell className="text-center text-xs text-slate-500">{p.orden}</TableCell>
@@ -540,15 +543,15 @@ function ResumenOperacionesTabla({
               <TableCell>
                 {unidades === 0 ? (
                   <span className="text-[10px] text-slate-400">sin corte</span>
-                ) : unidadesProcOp === 0 ? (
+                ) : unidadesEff === 0 ? (
                   <div className="flex flex-col gap-0.5">
                     <span className="font-mono text-[10px] text-slate-400">0 / {unidades}</span>
                     <div className="h-1 w-20 rounded-full bg-slate-100" />
                   </div>
                 ) : (
-                  <div className="flex flex-col gap-0.5" title={`Procesadas: ${unidadesProcOp} de ${unidades} cortadas`}>
+                  <div className="flex flex-col gap-0.5" title={`Procesadas: ${unidadesEff} de ${unidades} cortadas`}>
                     <span className={`font-mono text-[10px] ${completo ? 'text-emerald-700' : 'text-corp-900'}`}>
-                      {unidadesProcOp} / {unidades}
+                      {unidadesEff} / {unidades}
                       <span className={`ml-1 font-semibold ${completo ? 'text-emerald-700' : 'text-amber-700'}`}>
                         {pct}%
                       </span>
