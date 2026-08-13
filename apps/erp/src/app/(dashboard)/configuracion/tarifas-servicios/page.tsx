@@ -25,7 +25,9 @@ type Tarifa = {
   productos: { codigo: string; nombre: string } | null;
 };
 
-export default async function Page() {
+export default async function Page({ searchParams }: { searchParams: Promise<{ proceso?: string }> }) {
+  const sp = await searchParams;
+  const filtroProceso = sp.proceso || '';
   const sb = await createClient();
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -38,7 +40,12 @@ export default async function Page() {
       .order('producto_id', { nullsFirst: true }),
     sb.from('productos').select('id, codigo, nombre').eq('activo', true).order('nombre').limit(2000),
   ]);
-  const tarifas = (tarifasData ?? []) as Tarifa[];
+  const todas = (tarifasData ?? []) as Tarifa[];
+  const procesos = Array.from(new Set(todas.map((t) => t.proceso).filter(Boolean))) as string[];
+  procesos.sort();
+  const tarifas = filtroProceso
+    ? todas.filter((t) => (filtroProceso === '__SIN__' ? !t.proceso : t.proceso === filtroProceso))
+    : todas;
 
   return (
     <PageShell
@@ -80,6 +87,30 @@ export default async function Page() {
           (ej. COSTURA = S/ 4.50 para todos los productos y tallas) y agregá excepciones después.
         </p>
       </div>
+
+      {procesos.length > 0 && (
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-[11px] font-medium uppercase tracking-wider text-slate-500">Filtrar por proceso:</span>
+          <Link
+            href="/configuracion/tarifas-servicios"
+            className={`rounded-full border px-3 py-1 text-xs font-medium transition ${!filtroProceso ? 'border-happy-500 bg-happy-500 text-white' : 'border-slate-200 bg-white text-slate-600 hover:border-happy-300'}`}
+          >
+            Todas ({todas.length})
+          </Link>
+          {procesos.map((pr) => {
+            const n = todas.filter((t) => t.proceso === pr).length;
+            return (
+              <Link
+                key={pr}
+                href={`/configuracion/tarifas-servicios?proceso=${encodeURIComponent(pr)}`}
+                className={`rounded-full border px-3 py-1 text-xs font-medium transition ${filtroProceso === pr ? 'border-happy-500 bg-happy-500 text-white' : 'border-slate-200 bg-white text-slate-600 hover:border-happy-300'}`}
+              >
+                {pr.replace('_', ' ')} ({n})
+              </Link>
+            );
+          })}
+        </div>
+      )}
 
       {tarifas.length === 0 ? (
         <EmptyState
