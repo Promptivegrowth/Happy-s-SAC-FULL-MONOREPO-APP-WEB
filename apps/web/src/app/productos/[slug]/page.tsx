@@ -133,7 +133,7 @@ export default async function ProductoDetallePage({ params }: { params: Promise<
           .eq('publicado', true)
           .eq('productos.categoria_id', prod.categoria_id)
           .neq('producto_id', prod.id)
-          .limit(8)
+          .limit(12)
       : Promise.resolve({ data: [] as never[] }),
     // Stock SOLO del almacén La Quinta (regla de negocio confirmada
     // 2026-07-10/12). OJO: NO consultar stock_actual/almacenes directo —
@@ -475,8 +475,10 @@ export default async function ProductoDetallePage({ params }: { params: Promise<
           <h2 className="mb-8 text-center font-display text-2xl font-semibold text-corp-900">
             También podría interesarte
           </h2>
+          {/* Mostrar hasta 12 relacionados (pedido cliente 2026-08-13: antes
+              solo salían 4). Se acomodan en filas de 4 en desktop. */}
           <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-4">
-            {relacionados.slice(0, 4).map((r, i) => (
+            {relacionados.slice(0, 12).map((r, i) => (
               <ProductCard key={i} p={r} />
             ))}
           </div>
