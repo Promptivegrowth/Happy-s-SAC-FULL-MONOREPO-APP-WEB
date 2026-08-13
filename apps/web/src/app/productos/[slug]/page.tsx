@@ -452,19 +452,22 @@ export default async function ProductoDetallePage({ params }: { params: Promise<
 
           <EnvioTimeline />
 
+          {/* Descripción larga — reubicada (pedido cliente 2026-08-13): antes iba
+              a todo el ancho debajo del grid, dejando un gran espacio en blanco
+              al lado de la galería. Ahora vive en la columna derecha, junto a
+              las imágenes, para aprovechar ese espacio. */}
+          {pub.descripcion_larga && (
+            <div className="border-t pt-6">
+              <h2 className="mb-4 font-display text-2xl font-semibold text-corp-900">Descripción</h2>
+              <DescripcionFormateada texto={pub.descripcion_larga} />
+            </div>
+          )}
+
           {/* Bloque "Envío rápido / Pago seguro / Cambios fáciles / Calidad
               premium" removido por pedido del cliente (post-2026-07-08).
               Se consideró información redundante con TrustBadges + EnvioTimeline. */}
         </div>
       </div>
-
-      {/* Descripción larga — con formato automático (secciones, alertas, párrafos) */}
-      {pub.descripcion_larga && (
-        <section className="mt-16 max-w-3xl border-t pt-12">
-          <h2 className="mb-5 font-display text-2xl font-semibold text-corp-900">Descripción</h2>
-          <DescripcionFormateada texto={pub.descripcion_larga} />
-        </section>
-      )}
 
       {/* Productos relacionados */}
       {relacionados.length > 0 && (
