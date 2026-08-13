@@ -290,6 +290,13 @@ export function TiemposCorteEditor({
     })),
   );
 
+  // Firma de los datos para saber si hay cambios SIN GUARDAR: si no hay cambios
+  // respecto a lo guardado, el botón "Guardar liquidación" se desactiva.
+  const sigOf = (rs: TelaRow[]) =>
+    JSON.stringify(rs.map((r) => [r.material_id, r.tendido, r.corte, r.habilitado, r.fecha_tendido, r.fecha_corte, r.fecha_habilitado, r.capas, r.largo, r.merma, r.responsable]));
+  const [savedSig, setSavedSig] = useState(() => sigOf(rows));
+  const dirty = sigOf(rows) !== savedSig;
+
   function setNum(i: number, campo: 'tendido' | 'corte' | 'habilitado' | 'capas' | 'largo' | 'merma', v: string) {
     if (v !== '' && !/^\d*[.,]?\d*$/.test(v)) return; // solo números
     setRows((prev) => prev.map((r, idx) => (idx === i ? { ...r, [campo]: v } : r)));
@@ -317,7 +324,7 @@ export function TiemposCorteEditor({
           responsable_operario_id: t.responsable,
         })),
       );
-      if (r.ok) { toast.success('Liquidación guardada'); router.refresh(); }
+      if (r.ok) { toast.success('Liquidación guardada'); setSavedSig(sigOf(rows)); router.refresh(); }
       else toast.error(r.error ?? 'Error');
     });
   }
@@ -406,8 +413,9 @@ export function TiemposCorteEditor({
         </div>
       ))}
       {editable && (
-        <div className="flex justify-end">
-          <Button variant="premium" size="sm" onClick={guardar} disabled={pending}>
+        <div className="flex items-center justify-end gap-2">
+          {!dirty && <span className="text-[11px] text-emerald-600">✓ Guardado</span>}
+          <Button variant="premium" size="sm" onClick={guardar} disabled={pending || !dirty} title={!dirty ? 'No hay cambios sin guardar' : undefined}>
             {pending ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />}
             Guardar liquidación
           </Button>

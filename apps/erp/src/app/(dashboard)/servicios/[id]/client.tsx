@@ -265,6 +265,13 @@ export function RecepcionOSEditor({
   const [rows, setRows] = useState<LineaRecep[]>(lineas);
   const [motivoFalla, setMotivoFalla] = useState(motivoFallaInicial);
 
+  // Firma para detectar cambios sin guardar: si no cambió nada respecto a lo ya
+  // registrado, el botón "Registrar recepción" queda desactivado.
+  const sigOf = (rs: LineaRecep[], fecha: string, motivo: string) =>
+    JSON.stringify([fecha, motivo ?? '', rs.map((r) => [r.id, r.recepcionada, r.fallada])]);
+  const [savedSig, setSavedSig] = useState(() => sigOf(rows, fechaRetorno, motivoFalla ?? ''));
+  const dirty = sigOf(rows, fechaRetorno, motivoFalla ?? '') !== savedSig;
+
   function setVal(i: number, campo: 'recepcionada' | 'fallada', v: string) {
     const n = v === '' ? 0 : Math.max(0, Math.floor(Number(v)));
     setRows((prev) => prev.map((r, idx) => (idx === i ? { ...r, [campo]: Number.isFinite(n) ? n : 0 } : r)));
@@ -301,6 +308,7 @@ export function RecepcionOSEditor({
             ? `Recepción parcial registrada (${totalProcesado} de ${totalEnv}). Puede registrar el resto al siguiente retorno.`
             : 'Recepción completa registrada — OS marcada como RECEPCIONADA',
         );
+        setSavedSig(sigOf(rows, fechaRetorno, motivoFalla ?? ''));
         router.refresh();
       } else toast.error(r.error ?? 'Error');
     });
@@ -401,8 +409,9 @@ export function RecepcionOSEditor({
         </div>
       )}
       {!disabled && (
-        <div className="flex justify-end p-4">
-          <Button variant="premium" size="sm" onClick={guardar} disabled={pending || excede}>
+        <div className="flex items-center justify-end gap-2 p-4">
+          {!dirty && totalProcesado > 0 && <span className="text-[11px] text-emerald-600">✓ Registrado</span>}
+          <Button variant="premium" size="sm" onClick={guardar} disabled={pending || excede || !dirty} title={!dirty ? 'No hay cambios sin registrar' : undefined}>
             {pending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
             {esParcial ? 'Registrar entrega parcial' : 'Registrar recepción'}
           </Button>
