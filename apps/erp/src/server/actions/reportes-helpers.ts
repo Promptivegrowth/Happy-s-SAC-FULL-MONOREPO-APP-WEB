@@ -68,6 +68,15 @@ export function hoy(): string {
   return new Date().toISOString().slice(0, 10);
 }
 
+/** Lunes de la semana actual (para el filtro rápido "Esta semana"). */
+export function inicioDeSemana(d: Date = new Date()): string {
+  const base = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+  const dia = base.getDay(); // 0=domingo … 6=sábado
+  const restar = dia === 0 ? 6 : dia - 1; // llevar a lunes
+  base.setDate(base.getDate() - restar);
+  return base.toISOString().slice(0, 10);
+}
+
 export function rangoAnterior(desde: string, hasta: string): { desde: string; hasta: string } {
   const d1 = new Date(desde);
   const d2 = new Date(hasta);

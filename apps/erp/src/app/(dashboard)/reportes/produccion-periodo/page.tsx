@@ -9,7 +9,7 @@ import { PageShell } from '@/components/page-shell';
 import { ExportButtons } from '@/components/reportes/export-buttons';
 import { formatDate, formatPEN } from '@happy/lib';
 import { reporteProduccionPeriodo } from '@/server/actions/reportes-produccion';
-import { hoy, inicioDeMes } from '@/server/actions/reportes-helpers';
+import { hoy, inicioDeMes, inicioDeSemana } from '@/server/actions/reportes-helpers';
 
 export const metadata = { title: 'Producción por período' };
 export const dynamic = 'force-dynamic';
@@ -20,6 +20,15 @@ export default async function Page({ searchParams }: { searchParams: Promise<SP>
   const sp = await searchParams;
   const desde = sp.desde || inicioDeMes();
   const hasta = sp.hasta || hoy();
+
+  // Atajos de período (día / semana / mes) — pedido del cliente 22/07/2026.
+  const HOY = hoy();
+  const presets = [
+    { label: 'Hoy', desde: HOY, hasta: HOY },
+    { label: 'Esta semana', desde: inicioDeSemana(), hasta: HOY },
+    { label: 'Este mes', desde: inicioDeMes(), hasta: HOY },
+  ];
+  const presetActivo = (p: { desde: string; hasta: string }) => p.desde === desde && p.hasta === hasta;
 
   const resultado = await reporteProduccionPeriodo({ desde, hasta });
   const { metricas, por_mes, por_ot } = resultado;
@@ -52,6 +61,24 @@ export default async function Page({ searchParams }: { searchParams: Promise<SP>
       description={`Del ${formatDate(desde)} al ${formatDate(hasta)} · ${metricas.cantidad_ots} OTs cerradas`}
       actions={<ExportButtons payload={exportPayload} />}
     >
+      {/* Atajos rápidos de período */}
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="text-[11px] font-medium uppercase tracking-wider text-slate-500">Período:</span>
+        {presets.map((p) => (
+          <Link
+            key={p.label}
+            href={`/reportes/produccion-periodo?desde=${p.desde}&hasta=${p.hasta}`}
+            className={`rounded-full border px-3 py-1 text-xs font-medium transition ${
+              presetActivo(p)
+                ? 'border-happy-500 bg-happy-500 text-white'
+                : 'border-slate-200 bg-white text-slate-600 hover:border-happy-300'
+            }`}
+          >
+            {p.label}
+          </Link>
+        ))}
+      </div>
+
       <form className="flex flex-wrap items-end gap-2 rounded-lg border border-dashed border-slate-200 p-3" method="get">
         <div>
           <label className="mb-1 block text-[10px] font-medium uppercase tracking-wider text-slate-500">Desde</label>
