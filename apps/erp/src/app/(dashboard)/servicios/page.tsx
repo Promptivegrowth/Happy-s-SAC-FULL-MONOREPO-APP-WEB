@@ -26,7 +26,9 @@ export default async function Page() {
   const sb = await createClient();
   const { data } = await sb.from('ordenes_servicio')
     .select('id, numero, proceso, fecha_emision, fecha_entrega_esperada, monto_total, estado, talleres(nombre), ot(numero)')
-    .order('fecha_emision', { ascending: false }).limit(100);
+    // Última OS generada arriba: el número es correlativo (OS-0000NN), así que
+    // ordenar por número descendente pone la más reciente primero.
+    .order('numero', { ascending: false }).limit(100);
 
   return (
     <PageShell

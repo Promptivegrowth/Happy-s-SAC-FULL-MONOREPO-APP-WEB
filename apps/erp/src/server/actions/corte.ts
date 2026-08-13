@@ -404,23 +404,20 @@ async function generarAviosOS(
   const tallasNecesarias = [...cantPorTalla.keys()] as ('T0' | 'T2' | 'T4' | 'T6' | 'T8' | 'T10' | 'T12' | 'T14' | 'T16' | 'TS' | 'TAD' | 'TU')[];
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const sbAny = sb as unknown as { from: (t: string) => any };
+  // Filtro por SERVICIO DESTINO (pedido del cliente 22/07/2026): la OS de OJAL
+  // BOTÓN jala solo los materiales marcados "va al serv. botón" (los botones);
+  // los demás servicios (confección incluida) jalan los "va al taller de conf."
+  const esOjalBoton = proceso === 'OJAL_BOTON';
+  const flagServicio = esOjalBoton ? 'sale_a_ojal_boton' : 'sale_a_servicio';
   const { data: lineasReceta } = await sbAny
     .from('recetas_lineas')
-    .select('material_id, talla, cantidad, cantidad_almacen, proceso_servicio')
+    .select('material_id, talla, cantidad, cantidad_almacen')
     .eq('receta_id', receta.id)
-    .eq('sale_a_servicio', true)
+    .eq(flagServicio, true)
     .in('talla', tallasNecesarias);
 
-  // Filtrar por SERVICIO DESTINO (pedido del cliente 22/07/2026): para
-  // confección (COSTURA) viajan los avíos generales (proceso_servicio nulo o
-  // COSTURA); para otros servicios (ej. OJAL_BOTON) solo los materiales
-  // asignados específicamente a ese servicio (ej. los botones).
-  const esConfeccion = proceso === 'COSTURA';
   const aviosMap = new Map<string, number>();
-  for (const lr of (lineasReceta ?? []) as { material_id: string; talla: string; cantidad: number; cantidad_almacen: number | null; proceso_servicio: string | null }[]) {
-    const dest = lr.proceso_servicio || null;
-    const aplica = esConfeccion ? (dest === null || dest === 'COSTURA') : dest === proceso;
-    if (!aplica) continue;
+  for (const lr of (lineasReceta ?? []) as { material_id: string; talla: string; cantidad: number; cantidad_almacen: number | null }[]) {
     const cantUnidades = cantPorTalla.get(lr.talla as string) ?? 0;
     if (cantUnidades <= 0) continue;
     const cantAlTaller = Math.max(0, Number(lr.cantidad) - Number(lr.cantidad_almacen ?? 0));
