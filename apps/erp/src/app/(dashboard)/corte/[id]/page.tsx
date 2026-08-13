@@ -228,7 +228,11 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
               </TableHeader>
               <TableBody>
                 {consumoComparacion.map((c) => {
-                  const pct = c.teorico > 0 ? (c.diferencia / c.teorico) * 100 : null;
+                  // Si aún NO se registró el consumo real de esta tela (liquidación
+                  // pendiente), no se calcula la diferencia — así no aparece un
+                  // negativo enorme desde el inicio (pedido del cliente 22/07/2026).
+                  const realRegistrado = c.real > 0;
+                  const pct = realRegistrado && c.teorico > 0 ? (c.diferencia / c.teorico) * 100 : null;
                   const exceso = c.diferencia > 0.001;
                   return (
                     <TableRow key={c.material_id}>
@@ -237,13 +241,24 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
                         <div className="font-mono text-[10px] text-slate-400">{c.codigo}</div>
                       </TableCell>
                       <TableCell className="text-right font-mono text-sm">{c.teorico.toFixed(2)}</TableCell>
-                      <TableCell className="text-right font-mono text-sm">{c.real.toFixed(2)}</TableCell>
-                      <TableCell className={`text-right font-mono text-sm font-semibold ${exceso ? 'text-danger' : c.diferencia < -0.001 ? 'text-emerald-600' : 'text-slate-500'}`}>
-                        {c.diferencia > 0 ? '+' : ''}{c.diferencia.toFixed(2)}
+                      <TableCell className="text-right font-mono text-sm">
+                        {realRegistrado ? c.real.toFixed(2) : <span className="text-[10px] uppercase text-amber-600">pendiente</span>}
                       </TableCell>
-                      <TableCell className="text-right font-mono text-xs text-slate-500">
-                        {pct === null ? '—' : `${pct > 0 ? '+' : ''}${pct.toFixed(1)}%`}
-                      </TableCell>
+                      {realRegistrado ? (
+                        <>
+                          <TableCell className={`text-right font-mono text-sm font-semibold ${exceso ? 'text-danger' : c.diferencia < -0.001 ? 'text-emerald-600' : 'text-slate-500'}`}>
+                            {c.diferencia > 0 ? '+' : ''}{c.diferencia.toFixed(2)}
+                          </TableCell>
+                          <TableCell className="text-right font-mono text-xs text-slate-500">
+                            {pct === null ? '—' : `${pct > 0 ? '+' : ''}${pct.toFixed(1)}%`}
+                          </TableCell>
+                        </>
+                      ) : (
+                        <>
+                          <TableCell className="text-right text-slate-300">—</TableCell>
+                          <TableCell className="text-right text-slate-300">—</TableCell>
+                        </>
+                      )}
                     </TableRow>
                   );
                 })}

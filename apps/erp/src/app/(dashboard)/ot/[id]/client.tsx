@@ -321,26 +321,41 @@ export function AgregarLineaOTForm({
   otId,
   productos,
   productoIdDefault,
+  estado = 'BORRADOR',
+  esGerente = false,
 }: {
   otId: string;
   productos: ProductoOpcion[];
   /** Producto a pre-seleccionar (típicamente el único producto que ya está en la OT). */
   productoIdDefault?: string;
+  /** Estado de la OT: si no es BORRADOR, agregar tallas requiere gerencia + motivo. */
+  estado?: string;
+  esGerente?: boolean;
 }) {
   const [pending, start] = useTransition();
   const [productoId, setProductoId] = useState(productoIdDefault ?? '');
   const [talla, setTalla] = useState<(typeof TALLAS_OPCIONES)[number]>('T8');
   const [cantidad, setCantidad] = useState<number>(1);
+  const [motivo, setMotivo] = useState('');
+  // Agregar tallas a una OT ya planificada es una excepción: requiere gerencia + motivo.
+  const requiereAutorizacion = estado !== 'BORRADOR';
 
   function submit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     if (!productoId) return toast.error('Selecciona un producto');
     if (cantidad < 1) return toast.error('La cantidad debe ser ≥ 1');
+    if (requiereAutorizacion && !esGerente) {
+      return toast.error('Agregar una talla a una OT ya planificada requiere autorización de gerencia.');
+    }
+    if (requiereAutorizacion && !motivo.trim()) {
+      return toast.error('Indique el motivo para agregar esta talla.');
+    }
 
     const fd = new FormData();
     fd.append('producto_id', productoId);
     fd.append('talla', talla);
     fd.append('cantidad_planificada', String(cantidad));
+    if (motivo.trim()) fd.append('motivo', motivo.trim());
 
     start(async () => {
       const r = await agregarLineaOT(otId, null, fd);
@@ -351,6 +366,7 @@ export function AgregarLineaOTForm({
         // agregando tallas sin volver a elegir el producto.
         if (!productoIdDefault) setProductoId('');
         setCantidad(1);
+        setMotivo('');
       } else {
         toast.error(r.error ?? 'Error al agregar línea');
       }
@@ -430,7 +446,24 @@ export function AgregarLineaOTForm({
           required
         />
       </div>
-      <Button type="submit" variant="premium" size="sm" disabled={pending}>
+      {requiereAutorizacion && (
+        <div className="min-w-[220px] flex-1">
+          <label className="mb-1 block text-[11px] font-medium uppercase tracking-wide text-slate-500">
+            Motivo <span className="text-danger">*</span>
+            <span className="ml-1 font-normal text-amber-600">— requiere gerencia (OT ya planificada)</span>
+          </label>
+          <Input
+            value={motivo}
+            onChange={(e) => setMotivo(e.target.value)}
+            placeholder="Ej. pedido adicional del cliente, reposición por falla…"
+            className="h-9"
+            maxLength={200}
+            disabled={!esGerente}
+            title={!esGerente ? 'Solo gerencia puede agregar tallas a una OT planificada' : undefined}
+          />
+        </div>
+      )}
+      <Button type="submit" variant="premium" size="sm" disabled={pending || (requiereAutorizacion && !esGerente)}>
         {pending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Plus className="h-3.5 w-3.5" />}
         Agregar
       </Button>

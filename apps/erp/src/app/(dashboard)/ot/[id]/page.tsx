@@ -348,7 +348,7 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
             </CardHeader>
             <CardContent className={puedeEditarLineas ? 'space-y-4' : 'p-0'}>
               {puedeEditarLineas && (
-                <AgregarLineaOTForm otId={id} productos={productos ?? []} productoIdDefault={productoIdDefault} />
+                <AgregarLineaOTForm otId={id} productos={productos ?? []} productoIdDefault={productoIdDefault} estado={ot.estado} esGerente={usuarioEsGerente} />
               )}
               {(lineas ?? []).length === 0 ? (
                 <div className="px-6 py-10 text-center text-sm text-slate-400">

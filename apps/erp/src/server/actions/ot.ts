@@ -31,6 +31,7 @@ const agregarLineaSchema = z.object({
   producto_id: z.string().uuid(),
   talla: z.enum(TALLAS),
   cantidad_planificada: z.coerce.number().int().min(1),
+  motivo: z.string().optional().or(z.literal('')),
 });
 
 export async function agregarLineaOT(otId: string, _prev: unknown, fd: FormData): Promise<ActionResult> {
@@ -39,14 +40,27 @@ export async function agregarLineaOT(otId: string, _prev: unknown, fd: FormData)
       producto_id: fd.get('producto_id'),
       talla: fd.get('talla'),
       cantidad_planificada: fd.get('cantidad_planificada'),
+      motivo: fd.get('motivo') || '',
     });
-    const { sb } = await requireUser();
+    const { sb, userId } = await requireUser();
 
     // Verificar que la OT no esté cerrada.
     const { data: ot } = await sb.from('ot').select('estado').eq('id', otId).single();
     if (!ot) throw new Error('OT no encontrada');
     if (ot.estado === 'COMPLETADA' || ot.estado === 'CANCELADA') {
       throw new Error('No se pueden agregar líneas a una OT cerrada');
+    }
+
+    // AUTORIZACIÓN DE GERENCIA (pedido del cliente 22/07/2026): agregar tallas a
+    // una OT que ya salió de BORRADOR (ya está planificada / en producción) es
+    // una excepción al plan — requiere gerente y un motivo, y queda en bitácora.
+    if (ot.estado !== 'BORRADOR') {
+      if (!(await esGerente())) {
+        throw new Error('Agregar una talla a una OT ya planificada requiere autorización de gerencia.');
+      }
+      if (!(data.motivo ?? '').trim()) {
+        throw new Error('Indique el motivo para agregar esta talla a la OT.');
+      }
     }
 
     // Regla de negocio: una OT corresponde a UN solo producto. Si ya tiene
@@ -73,6 +87,16 @@ export async function agregarLineaOT(otId: string, _prev: unknown, fd: FormData)
     if (error) {
       if (error.code === '23505') throw new Error('Ya existe una línea con ese producto y talla');
       throw new Error(error.message);
+    }
+
+    // Registrar en bitácora la talla agregada fuera del plan (con motivo).
+    if (ot.estado !== 'BORRADOR') {
+      await sb.from('ot_eventos').insert({
+        ot_id: otId,
+        tipo: 'AUTORIZACION_CANTIDAD',
+        usuario_id: userId,
+        detalle: `Talla ${formatTallaChip(data.talla)} agregada (${data.cantidad_planificada} u) con autorización de gerencia. Motivo: ${(data.motivo ?? '').trim()}`,
+      });
     }
     return null;
   });
