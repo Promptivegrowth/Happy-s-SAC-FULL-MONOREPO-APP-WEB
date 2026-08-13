@@ -13,6 +13,7 @@ import { toast } from 'sonner';
 import { ComboboxBusqueda } from '../../corte/nuevo/form-client';
 import { crearOS } from '@/server/actions/corte';
 import { calcularMontoSugeridoOS } from '@/server/actions/tarifas-talleres';
+import { precioUnitarioServicio } from '@/server/actions/tarifas-servicios';
 import { formatTallaChip } from '@happy/lib';
 
 type CorteOption = {
@@ -189,6 +190,21 @@ export function NuevaOSForm({
     return () => clearTimeout(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tallerId, proceso, corteId, otId, tallasSel.size, esConfeccion]);
+
+  // Servicios (NO confección): autocompletar el precio por unidad desde la tabla
+  // de tarifas del modelo (ej. ojal botón por modelo). El usuario puede editarlo.
+  useEffect(() => {
+    if (esConfeccion || !productoIdActual || !proceso) return;
+    let vivo = true;
+    precioUnitarioServicio(productoIdActual, proceso).then((r) => {
+      if (vivo && r.ok && r.data && r.data.precio != null) {
+        setPrecioUnit(String(r.data.precio));
+        toast.success(`Tarifa del modelo: S/ ${r.data.precio.toFixed(2)} por unidad`);
+      }
+    });
+    return () => { vivo = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [productoIdActual, proceso, esConfeccion]);
 
   const corteOptions = cortes.map((c) => ({
     id: c.id,

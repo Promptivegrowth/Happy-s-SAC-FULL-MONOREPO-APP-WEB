@@ -537,13 +537,19 @@ export async function actualizarLineaReceta(
     cantidad_almacen: number;
     sale_a_servicio: boolean;
     observacion: string;
+    /** Servicio destino al tercerizar (ej. OJAL_BOTON). '' / null = general. */
+    proceso_servicio: string | null;
   }>,
 ): Promise<ActionResult> {
   const r = await runAction(async () => {
     // chequeo de versionado: bloquear si el producto está en producción
     const { sb } = await requireEditorReceta();
     await bloquearSiLineaEnProduccion(sb, id);
-    const { error } = await sb.from('recetas_lineas').update(patch).eq('id', id);
+    // Normalizar proceso_servicio '' → null.
+    const patchNorm = { ...patch } as Record<string, unknown>;
+    if ('proceso_servicio' in patchNorm) patchNorm.proceso_servicio = (patchNorm.proceso_servicio || null);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { error } = await (sb as unknown as { from: (t: string) => any }).from('recetas_lineas').update(patchNorm).eq('id', id);
     if (error) throw new Error(error.message);
     return null;
   });

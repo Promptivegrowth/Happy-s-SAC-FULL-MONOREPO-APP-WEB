@@ -87,8 +87,22 @@ type Linea = {
   cantidad_almacen: number | null;
   unidad_id: string | null;
   observacion: string | null;
+  proceso_servicio?: string | null;
   materiales?: { codigo: string; nombre: string; categoria: string; precio_unitario: number | null; factor_conversion?: number | null } | null;
 };
+
+// Servicios tercerizados a los que puede ir un material (además de la confección
+// general). Para OJAL_BOTON, por ejemplo, solo se envían los botones.
+const SERVICIOS_DESTINO = [
+  { value: '', label: 'General (confección)' },
+  { value: 'OJAL_BOTON', label: 'Ojal botón' },
+  { value: 'BORDADO', label: 'Bordado' },
+  { value: 'ESTAMPADO', label: 'Estampado' },
+  { value: 'SUBLIMADO', label: 'Sublimado' },
+  { value: 'PLISADO', label: 'Plisado' },
+  { value: 'DECORADO', label: 'Decorado' },
+  { value: 'ACABADO', label: 'Acabado' },
+] as const;
 type Unidad = { id: string; codigo: string; nombre: string };
 type Producto = { id: string; codigo: string; nombre: string };
 type Area = { id: string; codigo: string; nombre: string; valor_minuto: number | null };
@@ -812,6 +826,7 @@ function RecetaTabla({
         <TableHead className="text-right">Cantidad</TableHead>
         <TableHead className="text-right">Costo total</TableHead>
         <TableHead>✂️ Va al taller</TableHead>
+        <TableHead>Servicio</TableHead>
         <TableHead className="text-right">Queda en alm.</TableHead>
         <TableHead></TableHead>
       </TableRow></TableHeader>
@@ -869,6 +884,21 @@ function RecetaTabla({
                     {l.sale_a_servicio ? 'Sí' : 'No'}
                   </span>
                 </label>
+              </TableCell>
+              <TableCell>
+                {l.sale_a_servicio ? (
+                  <select
+                    value={l.proceso_servicio ?? ''}
+                    onChange={(e) => actualizarCampo(l.id, { proceso_servicio: e.target.value || null })}
+                    disabled={congelada}
+                    className="h-8 rounded-md border border-input bg-background px-2 text-xs"
+                    title="A qué servicio va este material al tercerizar. Ej. los botones van solo a Ojal botón."
+                  >
+                    {SERVICIOS_DESTINO.map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}
+                  </select>
+                ) : (
+                  <span className="text-xs text-slate-400">—</span>
+                )}
               </TableCell>
               <TableCell className="text-right">
                 {l.sale_a_servicio ? (

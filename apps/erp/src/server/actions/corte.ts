@@ -325,6 +325,7 @@ async function poblarLineasYAviosOS(
   osId: string,
   corteId: string,
   tallasFiltro?: string[],
+  proceso = 'COSTURA',
 ): Promise<{ lineas: number; avios: number }> {
   // 1) El corte aporta el vínculo producto/OT y dispara el cálculo de avíos
   //    del BOM. Las CANTIDADES salen de la OT (ot_lineas.cantidad_cortada),
@@ -369,7 +370,7 @@ async function poblarLineasYAviosOS(
   // 3) Calcular avíos del BOM (receta activa × cantidad por talla).
   const cantPorTalla = new Map<string, number>();
   for (const l of lineasCorte) cantPorTalla.set(l.talla, l.cantidad);
-  const avios = await generarAviosOS(sb, osId, productoId, cantPorTalla);
+  const avios = await generarAviosOS(sb, osId, productoId, cantPorTalla, proceso);
 
   return { lineas: filasLineas.length, avios };
 }
@@ -389,6 +390,7 @@ async function generarAviosOS(
   osId: string,
   productoId: string,
   cantPorTalla: Map<string, number>,
+  proceso = 'COSTURA',
 ): Promise<number> {
   if (cantPorTalla.size === 0) return 0;
   const { data: receta } = await sb
@@ -400,15 +402,25 @@ async function generarAviosOS(
   if (!receta) return 0;
 
   const tallasNecesarias = [...cantPorTalla.keys()] as ('T0' | 'T2' | 'T4' | 'T6' | 'T8' | 'T10' | 'T12' | 'T14' | 'T16' | 'TS' | 'TAD' | 'TU')[];
-  const { data: lineasReceta } = await sb
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const sbAny = sb as unknown as { from: (t: string) => any };
+  const { data: lineasReceta } = await sbAny
     .from('recetas_lineas')
-    .select('material_id, talla, cantidad, cantidad_almacen')
+    .select('material_id, talla, cantidad, cantidad_almacen, proceso_servicio')
     .eq('receta_id', receta.id)
     .eq('sale_a_servicio', true)
     .in('talla', tallasNecesarias);
 
+  // Filtrar por SERVICIO DESTINO (pedido del cliente 22/07/2026): para
+  // confección (COSTURA) viajan los avíos generales (proceso_servicio nulo o
+  // COSTURA); para otros servicios (ej. OJAL_BOTON) solo los materiales
+  // asignados específicamente a ese servicio (ej. los botones).
+  const esConfeccion = proceso === 'COSTURA';
   const aviosMap = new Map<string, number>();
-  for (const lr of lineasReceta ?? []) {
+  for (const lr of (lineasReceta ?? []) as { material_id: string; talla: string; cantidad: number; cantidad_almacen: number | null; proceso_servicio: string | null }[]) {
+    const dest = lr.proceso_servicio || null;
+    const aplica = esConfeccion ? (dest === null || dest === 'COSTURA') : dest === proceso;
+    if (!aplica) continue;
     const cantUnidades = cantPorTalla.get(lr.talla as string) ?? 0;
     if (cantUnidades <= 0) continue;
     const cantAlTaller = Math.max(0, Number(lr.cantidad) - Number(lr.cantidad_almacen ?? 0));
@@ -441,6 +453,7 @@ async function poblarLineasOSDesdeOT(
   osId: string,
   otId: string,
   tallasFiltro?: string[],
+  proceso = 'COSTURA',
 ): Promise<{ lineas: number; avios: number }> {
   const { data: lineasOt, error: errL } = await sb
     .from('ot_lineas')
@@ -470,7 +483,7 @@ async function poblarLineasOSDesdeOT(
   }
   let avios = 0;
   for (const [productoId, cantPorTalla] of porProducto) {
-    avios += await generarAviosOS(sb, osId, productoId, cantPorTalla);
+    avios += await generarAviosOS(sb, osId, productoId, cantPorTalla, proceso);
   }
   return { lineas: candidatas.length, avios };
 }
@@ -560,6 +573,7 @@ export async function crearOS(
           row.id as string,
           data.corte_id,
           tallasFiltro.length > 0 ? tallasFiltro : undefined,
+          data.proceso,
         );
       } catch (e) {
         await sb.from('ordenes_servicio').delete().eq('id', row.id);
@@ -567,7 +581,7 @@ export async function crearOS(
       }
     } else if (data.ot_id && tallasFiltro.length > 0) {
       try {
-        extras = await poblarLineasOSDesdeOT(sb, row.id as string, data.ot_id, tallasFiltro);
+        extras = await poblarLineasOSDesdeOT(sb, row.id as string, data.ot_id, tallasFiltro, data.proceso);
       } catch (e) {
         await sb.from('ordenes_servicio').delete().eq('id', row.id);
         throw new Error(`No se pudieron poblar líneas desde OT: ${(e as Error).message}`);
@@ -608,6 +622,12 @@ async function recomputarAviosYTotalesOS(
   sb: Awaited<ReturnType<typeof requireUser>>['sb'],
   osId: string,
 ): Promise<void> {
+  // Proceso de la OS (para filtrar los avíos por servicio destino).
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const sbProc = sb as unknown as { from: (t: string) => any };
+  const { data: osProc } = await sbProc.from('ordenes_servicio').select('proceso').eq('id', osId).maybeSingle();
+  const procesoOS = (osProc?.proceso as string) || 'COSTURA';
+
   // 1) Líneas actuales agrupadas por producto/talla
   const { data: lineas } = await sb
     .from('ordenes_servicio_lineas')
@@ -624,10 +644,10 @@ async function recomputarAviosYTotalesOS(
     porProducto.set(l.producto_id, m);
   }
 
-  // 2) Regenerar avíos: borrar y recalcular desde la receta
+  // 2) Regenerar avíos: borrar y recalcular desde la receta (según el proceso).
   await sb.from('ordenes_servicio_avios').delete().eq('os_id', osId);
   for (const [productoId, cantPorTalla] of porProducto) {
-    await generarAviosOS(sb, osId, productoId, cantPorTalla);
+    await generarAviosOS(sb, osId, productoId, cantPorTalla, procesoOS);
   }
 
   // 3) Recomponer totales de adicionales con los por-unidad actuales

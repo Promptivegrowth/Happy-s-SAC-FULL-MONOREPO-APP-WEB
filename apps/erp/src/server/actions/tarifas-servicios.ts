@@ -167,3 +167,35 @@ export async function consultarTarifaServicio(
     especificidad: f.length === 0 ? 'tarifa genérica' : `match por ${f.join('+')} (score ${winner.score})`,
   };
 }
+
+/**
+ * Precio por unidad de un SERVICIO (no confección) para un producto/modelo.
+ * Lee la tarifa activa de tarifas_servicios para (proceso, producto). Devuelve
+ * el precio por unidad o null si no hay tarifa cargada. Usado por la Orden de
+ * Servicio para autocompletar el "Precio por unidad" (ej. ojal botón por modelo,
+ * pedido del cliente 22/07/2026).
+ */
+export async function precioUnitarioServicio(
+  productoId: string,
+  proceso: string,
+): Promise<ActionResult<{ precio: number | null }>> {
+  return runAction(async () => {
+    if (!productoId || !proceso) return { precio: null };
+    const { sb } = await requireUser();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const sbAny = sb as unknown as { from: (t: string) => any };
+    const hoy = new Date().toISOString().slice(0, 10);
+    const { data } = await sbAny
+      .from('tarifas_servicios')
+      .select('precio_unitario, producto_id, talla, vigente_desde, vigente_hasta')
+      .eq('proceso', proceso);
+    const filas = ((data ?? []) as { precio_unitario: number; producto_id: string | null; talla: string | null; vigente_desde: string | null; vigente_hasta: string | null }[])
+      .filter((r) => (!r.vigente_desde || r.vigente_desde <= hoy) && (!r.vigente_hasta || r.vigente_hasta >= hoy));
+    // Preferir la tarifa específica del producto (talla null = por modelo); si no,
+    // una genérica del proceso (producto null).
+    const delModelo = filas.find((r) => r.producto_id === productoId && !r.talla);
+    const generica = filas.find((r) => !r.producto_id && !r.talla);
+    const winner = delModelo ?? generica ?? null;
+    return { precio: winner ? Number(winner.precio_unitario) : null };
+  });
+}
