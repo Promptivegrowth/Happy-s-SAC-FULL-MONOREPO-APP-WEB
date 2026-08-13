@@ -431,18 +431,22 @@ export default async function ProductoDetallePage({ params }: { params: Promise<
             })}
             stockTotal={stockTotal}
             agotado={agotado}
+            // Tabla de medidas reubicada (pedido cliente 2026-08-13): antes iba
+            // debajo de los botones; ahora se renderiza junto al selector de
+            // tallas, al lado del botón "¿Cómo medirme?".
+            slotTablaMedidas={
+              medidasFilas.length > 0 ? (
+                <TablaMedidas
+                  medidas={medidasFilas}
+                  // Orden lógico de tallas (2, 4, 6… S, AD) — sin ordenar salían
+                  // como vinieran de la BD: "10, 12, 14, 2, 4, 6, 8".
+                  tallas={Array.from(new Set(prod.productos_variantes.map((v) => v.talla))).sort(
+                    (a, b) => ordenTalla(a) - ordenTalla(b),
+                  )}
+                />
+              ) : null
+            }
           />
-
-          {medidasFilas.length > 0 && (
-            <TablaMedidas
-              medidas={medidasFilas}
-              // Orden lógico de tallas (2, 4, 6… S, AD) — sin ordenar salían
-              // como vinieran de la BD: "10, 12, 14, 2, 4, 6, 8".
-              tallas={Array.from(new Set(prod.productos_variantes.map((v) => v.talla))).sort(
-                (a, b) => ordenTalla(a) - ordenTalla(b),
-              )}
-            />
-          )}
 
           <TrustBadges />
 

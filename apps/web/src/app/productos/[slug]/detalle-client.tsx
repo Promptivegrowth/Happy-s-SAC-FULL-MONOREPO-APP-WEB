@@ -9,6 +9,7 @@ import { useCart, type CartItem } from '@/store/cart';
 import { toast } from 'sonner';
 import { WHATSAPP_NUMERO } from '@/lib/contacto';
 import { formatTallaChip } from '@happy/lib';
+import { ComoMedirme } from '@/components/como-medirme';
 
 // Umbrales para escalón de precio en la WEB pública (post-2026-07-08):
 //  - Desde 6 unidades → precio mayorista
@@ -41,6 +42,7 @@ export function ProductoDetalleClient({
   descuentoPorcentaje = 0,
   stockTotal,
   agotado,
+  slotTablaMedidas,
 }: {
   productoId: string;
   nombre: string;
@@ -51,6 +53,9 @@ export function ProductoDetalleClient({
   descuentoPorcentaje?: number;
   stockTotal: number;
   agotado: boolean;
+  /** Botón "Tabla de medidas" (se arma server-side con los datos de la ficha).
+   *  Se renderiza junto al selector de tallas, al lado de "¿Cómo medirme?". */
+  slotTablaMedidas?: React.ReactNode;
 }) {
   const router = useRouter();
   const add = useCart((s) => s.add);
@@ -282,6 +287,14 @@ ${esConsulta ? '¿Me das más información?' : '¿Cómo procedo con la compra?'}
               </button>
             );
           })}
+        </div>
+
+        {/* Guías de medidas — junto al selector de tallas (pedido cliente
+            2026-08-13): "Tabla de medidas" reubicada aquí + botón "¿Cómo
+            medirme?" con la guía visual de cómo tomar las medidas. */}
+        <div className="mt-3 flex flex-wrap items-center gap-2">
+          {slotTablaMedidas}
+          <ComoMedirme />
         </div>
       </div>
 
