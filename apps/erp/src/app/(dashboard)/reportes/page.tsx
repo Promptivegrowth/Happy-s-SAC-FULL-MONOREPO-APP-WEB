@@ -11,6 +11,8 @@ import {
   History,
   Factory,
   Scale,
+  Clock,
+  Route,
   type LucideIcon,
 } from 'lucide-react';
 import { PageShell } from '@/components/page-shell';
@@ -90,6 +92,22 @@ const REPORTES: ReporteCard[] = [
     titulo: 'Costo Receta vs Real',
     descripcion: 'Comparativo por OT: costo estándar de la receta (materiales BOM + tarifas de servicio) vs lo realmente gastado (kardex + talleres). Detecta desviaciones.',
     icono: Scale,
+    categoria: 'Producción',
+    badge: 'Nuevo',
+  },
+  {
+    href: '/reportes/tiempo-receta-real',
+    titulo: 'Tiempo Receta vs Real',
+    descripcion: 'Tiempo estándar de la receta vs tiempo real declarado en producción (incluye corte), por OT. Detecta operaciones más lentas de lo previsto.',
+    icono: Clock,
+    categoria: 'Producción',
+    badge: 'Nuevo',
+  },
+  {
+    href: '/reportes/trazabilidad-modelo',
+    titulo: 'Trazabilidad producción → venta',
+    descripcion: 'Por modelo y talla: cuánto se produjo, se vendió y queda en stock. Sigue el flujo de la producción hasta la venta.',
+    icono: Route,
     categoria: 'Producción',
     badge: 'Nuevo',
   },
