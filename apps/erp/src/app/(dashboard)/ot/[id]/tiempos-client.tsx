@@ -733,6 +733,11 @@ function OperacionBlock({
   const [openForm, setOpenForm] = useState(false);
   const totalMin = registros.reduce((s, r) => s + Number(r.tiempo_total_min), 0);
   const totalUnid = registros.reduce((s, r) => s + Number(r.unidades_procesadas ?? 0), 0);
+  // Operación COMPLETA: todas las tallas cortadas ya tienen todas sus unidades
+  // registradas (pedido del cliente 22/07/2026: no mostrar "Registrar" si ya se
+  // registró todo). No aplica al área de corte (las unidades son opcionales).
+  const tallasConCorte = tallasDisponibles.filter((t) => t.cortada > 0);
+  const completo = !esAreaCorte && tallasConCorte.length > 0 && tallasConCorte.every((t) => t.yaRegistrado >= t.cortada);
   return (
     <div className="rounded-md border border-slate-200 bg-white p-2">
       <div className="flex items-center justify-between gap-2">
@@ -771,10 +776,16 @@ function OperacionBlock({
           )}
         </div>
         {!disabled && !esperandoTaller && (
-          <Button variant="outline" size="sm" onClick={() => setOpenForm((o) => !o)} className="h-7 gap-1 px-2 text-xs">
-            {openForm ? <X className="h-3 w-3" /> : <Plus className="h-3 w-3" />}
-            {openForm ? 'Cerrar' : 'Registrar'}
-          </Button>
+          completo && !openForm ? (
+            <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2 py-1 text-[10px] font-semibold text-emerald-700" title="Todas las unidades cortadas ya fueron registradas">
+              ✓ Completo
+            </span>
+          ) : (
+            <Button variant="outline" size="sm" onClick={() => setOpenForm((o) => !o)} className="h-7 gap-1 px-2 text-xs">
+              {openForm ? <X className="h-3 w-3" /> : <Plus className="h-3 w-3" />}
+              {openForm ? 'Cerrar' : 'Registrar'}
+            </Button>
+          )
         )}
       </div>
 

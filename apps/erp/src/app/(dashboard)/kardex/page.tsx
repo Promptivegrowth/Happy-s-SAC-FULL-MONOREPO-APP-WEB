@@ -226,6 +226,7 @@ function MovimientoRow({ m }: { m: KardexMov }) {
 
   const fechaTxt = new Date(m.fecha).toLocaleString('es-PE', {
     day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit',
+    timeZone: 'America/Lima',
   });
 
   let itemLink: string | null = null;
