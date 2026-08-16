@@ -174,6 +174,137 @@ const movimientoBatchSchema = z.object({
   })).min(1, 'Agregá al menos una línea'),
 });
 
+// ============================================================================
+// MATERIALES (telas, avíos, insumos) — stock en almacén de materia prima
+// ============================================================================
+//
+// El stock de material vive en stock_actual.material_id (mismo esquema que las
+// variantes) y el trigger tg_actualizar_stock lo mantiene. Faltaba la capa de
+// aplicación para moverlo. Pedido del cliente 2026-08-16: hacer funcionar el
+// Almacén de Materia Prima con ingresos, compras, devoluciones y salidas.
+
+const movimientoMaterialSchema = z.object({
+  almacen_id: z.string().uuid('Almacén inválido'),
+  material_id: z.string().uuid('Material inválido'),
+  tipo: z.enum([
+    'ENTRADA_COMPRA',            // compra recibida (normalmente vía recepción de OC)
+    'ENTRADA_DEVOLUCION_TALLER', // material/avío que regresa de producción o servicio
+    'ENTRADA_AJUSTE',            // ingreso por conteo/corrección
+    'SALIDA_PRODUCCION',         // consumo en producción interna
+    'SALIDA_TALLER_SERVICIO',    // avíos/insumos enviados a un taller/servicio
+    'SALIDA_AJUSTE',             // salida por conteo/corrección
+    'SALIDA_MERMA',              // material dado de baja
+  ]),
+  cantidad: z.coerce.number().positive('La cantidad debe ser > 0'),
+  observacion: z.string().max(500).optional().or(z.literal('')),
+});
+
+async function requireGerenteInv(sb: Awaited<ReturnType<typeof requireUser>>['sb'], userId: string) {
+  const { data: roles } = await sb.from('usuarios_roles').select('rol').eq('usuario_id', userId);
+  const esGerente = (roles ?? []).some((r) => (r as { rol: string }).rol === 'gerente');
+  if (!esGerente) {
+    throw new Error('Solo el gerente puede registrar movimientos manuales de stock. Pedile a alguien con ese rol que lo haga.');
+  }
+}
+
+/**
+ * Registra un movimiento manual de stock de MATERIAL (entrada o salida). El
+ * signo lo define el prefijo del tipo (ENTRADA_/SALIDA_). Restringido a gerente.
+ * Cubre los flujos que el cliente pidió operar a mano: ingresos, devoluciones de
+ * producción/servicio y salidas por producción/servicio. Las compras normales
+ * siguen entrando por Recepciones de OC (que ya generan ENTRADA_COMPRA).
+ */
+export async function registrarMovimientoMaterial(
+  input: z.input<typeof movimientoMaterialSchema>,
+): Promise<ActionResult<{ tipo: string; cantidad: number }>> {
+  const r = await runAction(async () => {
+    const data = movimientoMaterialSchema.parse(input);
+    const { sb, userId } = await requireUser();
+    await requireGerenteInv(sb, userId);
+
+    // Para salidas, no permitir dejar el stock negativo.
+    if (data.tipo.startsWith('SALIDA')) {
+      const { data: actualRow } = await sb
+        .from('stock_actual')
+        .select('cantidad')
+        .eq('almacen_id', data.almacen_id)
+        .eq('material_id', data.material_id)
+        .is('material_lote_id', null)
+        .maybeSingle();
+      const disponible = Number(actualRow?.cantidad ?? 0);
+      if (data.cantidad > disponible) {
+        throw new Error(`No hay stock suficiente: disponible ${disponible}, se intentó sacar ${data.cantidad}.`);
+      }
+    }
+
+    const { error } = await sb.from('kardex_movimientos').insert({
+      tipo: data.tipo,
+      almacen_id: data.almacen_id,
+      material_id: data.material_id,
+      cantidad: data.cantidad,
+      referencia_tipo: 'AJUSTE',
+      usuario_id: userId,
+      observacion: data.observacion?.trim() || null,
+    });
+    if (error) throw new Error(error.message);
+    return { tipo: data.tipo, cantidad: data.cantidad };
+  });
+  if (r.ok) await bumpPaths('/inventario', '/materiales');
+  return r;
+}
+
+/**
+ * Ajusta el stock de un MATERIAL en un almacén al valor exacto indicado
+ * (conteo físico). Calcula el delta y genera ENTRADA/SALIDA_AJUSTE. Gerente.
+ */
+const ajustarMaterialSchema = z.object({
+  almacen_id: z.string().uuid('Almacén inválido'),
+  material_id: z.string().uuid('Material inválido'),
+  cantidad_nueva: z.coerce.number().min(0, 'La cantidad no puede ser negativa'),
+  observacion: z.string().max(500).optional().or(z.literal('')),
+});
+
+export async function ajustarStockMaterial(
+  input: z.input<typeof ajustarMaterialSchema>,
+): Promise<ActionResult<{ delta: number; cantidad_final: number }>> {
+  const r = await runAction(async () => {
+    const data = ajustarMaterialSchema.parse(input);
+    const { sb, userId } = await requireUser();
+    await requireGerenteInv(sb, userId);
+
+    const { data: actualRow } = await sb
+      .from('stock_actual')
+      .select('cantidad')
+      .eq('almacen_id', data.almacen_id)
+      .eq('material_id', data.material_id)
+      .is('material_lote_id', null)
+      .maybeSingle();
+    const cantidadActual = Number(actualRow?.cantidad ?? 0);
+    const delta = data.cantidad_nueva - cantidadActual;
+    if (delta === 0) return { delta: 0, cantidad_final: cantidadActual };
+
+    const tipo = delta > 0 ? 'ENTRADA_AJUSTE' : 'SALIDA_AJUSTE';
+    const obs = [
+      `Ajuste de stock de material (${cantidadActual} → ${data.cantidad_nueva})`,
+      data.observacion?.trim() || null,
+    ].filter(Boolean).join(' · ');
+
+    const { error } = await sb.from('kardex_movimientos').insert({
+      tipo,
+      almacen_id: data.almacen_id,
+      material_id: data.material_id,
+      cantidad: Math.abs(delta),
+      referencia_tipo: 'AJUSTE',
+      usuario_id: userId,
+      observacion: obs,
+    });
+    if (error) throw new Error(error.message);
+    return { delta, cantidad_final: data.cantidad_nueva };
+  });
+  if (r.ok) await bumpPaths('/inventario', '/materiales');
+  return r;
+}
+
 export async function registrarMovimientoStockBatch(
   input: z.input<typeof movimientoBatchSchema>,
 ): Promise<ActionResult<{ insertados: number; errores: Array<{ variante_id: string; error: string }> }>> {

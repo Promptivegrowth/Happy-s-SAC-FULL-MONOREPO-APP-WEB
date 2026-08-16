@@ -15,6 +15,7 @@ import { Boxes, AlertTriangle, History } from 'lucide-react';
 import { AjustarStockButton } from './ajustar-stock-client';
 import { NuevoMovimientoButton } from './nuevo-movimiento-client';
 import { MovimientoMasivoButton } from './movimiento-masivo-client';
+import { MovimientoMaterialButton, AjustarMaterialButton } from './material-stock-client';
 
 export const metadata = { title: 'Inventario' };
 export const dynamic = 'force-dynamic';
@@ -142,23 +143,15 @@ export default async function InventarioPage({ searchParams }: { searchParams: P
         ))}
       </div>
 
-      {/* Si el cliente filtra por un almacén tipo MATERIA_PRIMA, redirigimos
-          la consulta al módulo de Materiales (donde sí se ven insumos). */}
+      {/* Si el almacén seleccionado es de MATERIA_PRIMA, mostramos el stock de
+          MATERIALES (telas, avíos, insumos) desde v_stock_material. */}
       {(() => {
         const almSel = almacenes.find((a) => a.id === sp.almacen);
         if (almSel && (almSel as { tipo: string }).tipo === 'MATERIA_PRIMA') {
           return (
-            <div className="rounded-lg border border-amber-300 bg-amber-50 p-6 text-center">
-              <p className="text-sm font-medium text-amber-800">
-                <strong>{almSel.nombre}</strong> es un almacén de insumos y materiales.
-              </p>
-              <p className="mt-1 text-xs text-amber-700">
-                Esta pantalla muestra stock de productos terminados (prendas). Para ver materiales (telas, avíos, hilos) usá el módulo dedicado.
-              </p>
-              <Link href="/materiales" className="mt-3 inline-block rounded-md bg-amber-600 px-4 py-2 text-xs font-medium text-white hover:bg-amber-700">
-                Ir a Materiales →
-              </Link>
-            </div>
+            <Suspense key={`mat-${tableKey}`} fallback={<TableSkeleton rows={10} cols={5} />}>
+              <MaterialStockTable almacenId={sp.almacen!} q={sp.q} vista={sp.vista} />
+            </Suspense>
           );
         }
         return (
@@ -168,6 +161,118 @@ export default async function InventarioPage({ searchParams }: { searchParams: P
         );
       })()}
     </PageShell>
+  );
+}
+
+// ── Stock de MATERIALES (telas, avíos, insumos) por almacén ─────────────────
+type FilaMaterial = {
+  material_id: string;
+  material_codigo: string;
+  material_nombre: string;
+  categoria: string;
+  unidad: string | null;
+  cantidad: number;
+  stock_minimo: number | null;
+};
+
+async function MaterialStockTable({ almacenId, q, vista }: { almacenId: string; q?: string; vista?: string }) {
+  const sb = await createClient();
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const sbAny = sb as unknown as { from: (t: string) => any };
+
+  const [{ data: stockRaw }, { data: almRow }, { data: matsRaw }] = await Promise.all([
+    sbAny.from('v_stock_material').select('*').eq('almacen_id', almacenId),
+    sb.from('almacenes').select('id, nombre, codigo').eq('id', almacenId).single(),
+    sb.from('materiales').select('id, codigo, nombre, categoria').eq('activo', true).order('nombre').limit(3000),
+  ]);
+
+  const almacenNombre = (almRow as { nombre: string } | null)?.nombre ?? 'Materia prima';
+  const materiales = ((matsRaw ?? []) as { id: string; codigo: string; nombre: string; categoria: string }[]);
+
+  let filas = ((stockRaw ?? []) as unknown as FilaMaterial[]).map((f) => ({
+    ...f,
+    cantidad: Number(f.cantidad ?? 0),
+    stock_minimo: f.stock_minimo == null ? null : Number(f.stock_minimo),
+  }));
+
+  const qNorm = q ? normalizarTexto(q.split('·')[0]?.trim() ?? q) : '';
+  if (qNorm) {
+    const tokens = qNorm.split(/\s+/).filter(Boolean);
+    filas = filas.filter((f) => {
+      const hay = normalizarTexto(`${f.material_codigo} ${f.material_nombre} ${f.categoria}`);
+      return tokens.every((t) => hay.includes(t));
+    });
+  }
+  if (vista === 'conStock') filas = filas.filter((f) => f.cantidad > 0);
+  if (vista === 'bajo') filas = filas.filter((f) => (f.stock_minimo ?? 0) > 0 && f.cantidad <= (f.stock_minimo ?? 0));
+  filas.sort((a, b) => b.cantidad - a.cantidad || a.material_nombre.localeCompare(b.material_nombre, 'es'));
+
+  const almacenParaModal = [{ id: almacenId, nombre: almacenNombre, codigo: (almRow as { codigo: string } | null)?.codigo ?? '' }];
+
+  return (
+    <Card>
+      <CardContent className="p-0">
+        <div className="flex items-center justify-between gap-2 border-b bg-slate-50/60 p-3">
+          <p className="text-sm font-semibold text-corp-900">Materiales en {almacenNombre}</p>
+          <MovimientoMaterialButton almacenes={almacenParaModal} materiales={materiales} almacenPreseleccionado={almacenId} />
+        </div>
+        {filas.length === 0 ? (
+          <EmptyState
+            icon={<Boxes className="h-6 w-6" />}
+            title="Sin stock de materiales"
+            description={qNorm ? `Sin coincidencias para "${qNorm}".` : 'Aún no hay stock registrado en este almacén. Las compras entran por Recepciones de OC, o registrá un movimiento con el botón de arriba.'}
+          />
+        ) : (
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Código</TableHead>
+                <TableHead>Material</TableHead>
+                <TableHead>Categoría</TableHead>
+                <TableHead>Unidad</TableHead>
+                <TableHead className="text-right">Stock</TableHead>
+                <TableHead className="text-right">Acciones</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {filas.slice(0, 500).map((f) => {
+                const bajo = (f.stock_minimo ?? 0) > 0 && f.cantidad <= (f.stock_minimo ?? 0);
+                const cero = f.cantidad === 0;
+                return (
+                  <TableRow key={f.material_id} className={cero ? 'opacity-60' : ''}>
+                    <TableCell className="font-mono text-xs text-slate-500">{f.material_codigo}</TableCell>
+                    <TableCell className="font-medium">{f.material_nombre}</TableCell>
+                    <TableCell><Badge variant="secondary" className="text-[10px]">{f.categoria}</Badge></TableCell>
+                    <TableCell className="text-xs text-slate-500">{f.unidad ?? '—'}</TableCell>
+                    <TableCell className="text-right">
+                      <span className={`font-semibold ${cero ? 'text-slate-400' : bajo ? 'text-amber-600' : 'text-corp-900'}`}>
+                        {formatNumber(f.cantidad)}
+                      </span>
+                      {bajo && <AlertTriangle className="ml-1 inline h-3 w-3 text-amber-500" />}
+                    </TableCell>
+                    <TableCell className="text-right">
+                      <div className="flex items-center justify-end gap-1">
+                        <Link href={`/kardex/material/${f.material_id}`} title="Ver historial de movimientos">
+                          <Button variant="ghost" size="sm" className="h-7 px-2"><History className="h-3.5 w-3.5 text-slate-500" /></Button>
+                        </Link>
+                        <AjustarMaterialButton
+                          almacenId={almacenId}
+                          almacenNombre={almacenNombre}
+                          materialId={f.material_id}
+                          materialCodigo={f.material_codigo}
+                          materialNombre={f.material_nombre}
+                          cantidadActual={f.cantidad}
+                        />
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                );
+              })}
+            </TableBody>
+          </Table>
+        )}
+      </CardContent>
+    </Card>
   );
 }
 
