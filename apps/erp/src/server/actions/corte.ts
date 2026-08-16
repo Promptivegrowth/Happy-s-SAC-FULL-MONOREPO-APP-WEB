@@ -196,6 +196,72 @@ const tiempoTelaSchema = z.object({
   merma_metros: z.coerce.number().min(0).default(0),
   responsable_operario_id: z.string().uuid().optional().or(z.literal('')),
 });
+// ============================================================================
+// Consumo de material (stock) enganchado a los flujos de producción
+// ============================================================================
+// Modelo confirmado por el cliente (2026-08-16): la TELA se descuenta al cerrar
+// el corte (consumo real: capas × largo + merma) y los AVÍOS al despachar la OS
+// al taller; los avíos devueltos reingresan. Todos los hooks son BEST-EFFORT
+// (envueltos en try/catch por el llamador) e IDEMPOTENTES: nunca bloquean el
+// cierre del corte ni el despacho de la OS. Si no hay stock cargado, el stock
+// puede quedar negativo (señal de que faltan cargar compras), pero el flujo de
+// producción no se detiene.
+
+/* eslint-disable @typescript-eslint/no-explicit-any */
+async function almacenMateriaPrimaId(sbAny: { from: (t: string) => any }): Promise<string | null> {
+  const { data } = await sbAny
+    .from('almacenes')
+    .select('id, codigo')
+    .eq('tipo', 'MATERIA_PRIMA')
+    .eq('activo', true)
+    .order('codigo')
+    .limit(1);
+  return (data ?? [])[0]?.id ?? null;
+}
+
+/** Descuenta del almacén de MP el consumo real de tela de un corte cerrado. */
+async function descontarTelaDeCorte(sbAny: { from: (t: string) => any }, corteId: string, userId: string): Promise<void> {
+  const { data: ya } = await sbAny
+    .from('kardex_movimientos').select('id')
+    .eq('referencia_tipo', 'CORTE').eq('referencia_id', corteId).eq('tipo', 'SALIDA_PRODUCCION').limit(1);
+  if ((ya ?? []).length > 0) return; // ya se descontó
+  const almId = await almacenMateriaPrimaId(sbAny);
+  if (!almId) return;
+  const { data: corte } = await sbAny.from('ot_corte').select('numero').eq('id', corteId).maybeSingle();
+  const { data: telas } = await sbAny
+    .from('ot_corte_tiempos').select('material_id, metros_consumidos').eq('corte_id', corteId);
+  const rows = ((telas ?? []) as { material_id: string | null; metros_consumidos: number | string | null }[])
+    .filter((t) => t.material_id && Number(t.metros_consumidos ?? 0) > 0)
+    .map((t) => ({
+      tipo: 'SALIDA_PRODUCCION', almacen_id: almId, material_id: t.material_id,
+      cantidad: Number(t.metros_consumidos), referencia_tipo: 'CORTE', referencia_id: corteId,
+      usuario_id: userId, observacion: `Consumo de tela por corte ${corte?.numero ?? ''}`.trim(),
+    }));
+  if (rows.length > 0) await sbAny.from('kardex_movimientos').insert(rows);
+}
+
+/** Descuenta del almacén de MP los avíos enviados al taller al despachar la OS. */
+async function descontarAviosOS(sbAny: { from: (t: string) => any }, osId: string, userId: string): Promise<void> {
+  const { data: ya } = await sbAny
+    .from('kardex_movimientos').select('id')
+    .eq('referencia_tipo', 'OS').eq('referencia_id', osId).eq('tipo', 'SALIDA_TALLER_SERVICIO').limit(1);
+  if ((ya ?? []).length > 0) return;
+  const almId = await almacenMateriaPrimaId(sbAny);
+  if (!almId) return;
+  const { data: os } = await sbAny.from('ordenes_servicio').select('numero').eq('id', osId).maybeSingle();
+  const { data: avios } = await sbAny
+    .from('ordenes_servicio_avios').select('material_id, cantidad_enviada').eq('os_id', osId);
+  const rows = ((avios ?? []) as { material_id: string | null; cantidad_enviada: number | string | null }[])
+    .filter((a) => a.material_id && Number(a.cantidad_enviada ?? 0) > 0)
+    .map((a) => ({
+      tipo: 'SALIDA_TALLER_SERVICIO', almacen_id: almId, material_id: a.material_id,
+      cantidad: Number(a.cantidad_enviada), referencia_tipo: 'OS', referencia_id: osId,
+      usuario_id: userId, observacion: `Avíos enviados al taller · OS ${os?.numero ?? ''}`.trim(),
+    }));
+  if (rows.length > 0) await sbAny.from('kardex_movimientos').insert(rows);
+}
+/* eslint-enable @typescript-eslint/no-explicit-any */
+
 export async function guardarTiemposCorte(
   corteId: string,
   tiempos: z.input<typeof tiempoTelaSchema>[],
@@ -256,7 +322,7 @@ export async function guardarTiemposCorte(
  */
 export async function cerrarCorte(corteId: string): Promise<ActionResult<{ ot_lineas_sync: number }>> {
   const r = await runAction(async () => {
-    const { sb } = await requireUser();
+    const { sb, userId } = await requireUser();
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const sbAny = sb as unknown as { from: (t: string) => any; rpc: (fn: string, args: any) => any };
 
@@ -277,6 +343,11 @@ export async function cerrarCorte(corteId: string): Promise<ActionResult<{ ot_li
       .rpc('close_corte_atomic', { p_corte_id: corteId });
     if (error) throw new Error(error.message);
     const synced = (data as { ot_lineas_sync?: number } | null)?.ot_lineas_sync ?? 0;
+
+    // Descontar la tela consumida del almacén de materia prima (SALIDA_PRODUCCION).
+    // Best-effort: si algo falla, NO revierte el cierre del corte.
+    try { await descontarTelaDeCorte(sbAny, corteId, userId); } catch { /* no bloquea el cierre */ }
+
     return { ot_lineas_sync: synced };
   });
   if (r.ok) await bumpPaths(`/corte/${corteId}`, '/corte', '/ot');
@@ -895,15 +966,22 @@ export async function registrarAviosDevueltos(
 ): Promise<ActionResult> {
   const r = await runAction(async () => {
     const parsed = avios.map((a) => avioDevueltoSchema.parse(a));
-    const { sb } = await requireUser();
+    const { sb, userId } = await requireUser();
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const sbAny = sb as unknown as { from: (t: string) => any };
     const { data: enviados } = await sbAny
       .from('ordenes_servicio_avios')
-      .select('id, cantidad_enviada')
+      .select('id, material_id, cantidad_enviada, cantidad_devuelta')
       .eq('os_id', osId);
+    type AvioRow = { id: string; material_id: string | null; cantidad_enviada: number; cantidad_devuelta: number | null };
     const envMap = new Map<string, number>(
-      ((enviados ?? []) as { id: string; cantidad_enviada: number }[]).map((e) => [e.id, Number(e.cantidad_enviada ?? 0)]),
+      ((enviados ?? []) as AvioRow[]).map((e) => [e.id, Number(e.cantidad_enviada ?? 0)]),
+    );
+    const prevDevMap = new Map<string, number>(
+      ((enviados ?? []) as AvioRow[]).map((e) => [e.id, Number(e.cantidad_devuelta ?? 0)]),
+    );
+    const matMap = new Map<string, string | null>(
+      ((enviados ?? []) as AvioRow[]).map((e) => [e.id, e.material_id]),
     );
     for (const a of parsed) {
       const env = envMap.get(a.id);
@@ -918,6 +996,34 @@ export async function registrarAviosDevueltos(
         .eq('os_id', osId);
       if (error) throw new Error(error.message);
     }
+
+    // Reingresar al almacén de MP el DELTA de avíos devueltos (solo lo nuevo que
+    // volvió desde la última vez). Best-effort: no bloquea el registro.
+    try {
+      const almId = await almacenMateriaPrimaId(sbAny);
+      if (almId) {
+        const { data: os } = await sbAny.from('ordenes_servicio').select('numero').eq('id', osId).maybeSingle();
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const movs: any[] = [];
+        for (const a of parsed) {
+          const materialId = matMap.get(a.id);
+          const delta = Number(a.devuelto) - Number(prevDevMap.get(a.id) ?? 0);
+          if (!materialId || Math.abs(delta) < 0.0001) continue;
+          movs.push({
+            tipo: delta > 0 ? 'ENTRADA_DEVOLUCION_TALLER' : 'SALIDA_AJUSTE',
+            almacen_id: almId,
+            material_id: materialId,
+            cantidad: Math.abs(delta),
+            referencia_tipo: 'OS',
+            referencia_id: osId,
+            usuario_id: userId,
+            observacion: `${delta > 0 ? 'Avíos devueltos del taller' : 'Corrección avíos devueltos'} · OS ${os?.numero ?? ''}`.trim(),
+          });
+        }
+        if (movs.length > 0) await sbAny.from('kardex_movimientos').insert(movs);
+      }
+    } catch { /* no bloquea el registro de la devolución */ }
+
     return null;
   });
   if (r.ok) await bumpPaths(`/servicios/${osId}`);
@@ -1009,7 +1115,7 @@ const FLOW_OS: Record<string, string[]> = {
 
 export async function cambiarEstadoOS(osId: string, nuevoEstado: string): Promise<ActionResult> {
   const r = await runAction(async () => {
-    const { sb } = await requireUser();
+    const { sb, userId } = await requireUser();
     const { data: actual } = await sb.from('ordenes_servicio').select('estado').eq('id', osId).single();
     if (!actual) throw new Error('OS no encontrada');
 
@@ -1042,6 +1148,12 @@ export async function cambiarEstadoOS(osId: string, nuevoEstado: string): Promis
     if (error) throw new Error(error.message);
     if ((count ?? 0) === 0) {
       throw new Error('La OS cambió de estado mientras procesabas. Recargá la página.');
+    }
+
+    // Al DESPACHAR al taller, descontar los avíos enviados del almacén de MP
+    // (SALIDA_TALLER_SERVICIO). Best-effort: no revierte el cambio de estado.
+    if (nuevoEstado === 'DESPACHADA') {
+      try { await descontarAviosOS(sbAny, osId, userId); } catch { /* no bloquea el despacho */ }
     }
     return null;
   });
