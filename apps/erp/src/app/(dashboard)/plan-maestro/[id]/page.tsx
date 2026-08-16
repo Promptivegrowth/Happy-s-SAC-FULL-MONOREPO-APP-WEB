@@ -10,6 +10,7 @@ import { PageShell } from '@/components/page-shell';
 import { esGerente } from '@/server/actions/_helpers';
 import { LineasEditor, AccionesPlan } from './client';
 import { DescargarPdfButton } from './descargar-pdf-button';
+import { cargarEmpresaPDF } from '@/server/empresa-pdf-helper';
 import { formatDate, formatNumber , formatTallaChip } from '@happy/lib';
 import { Factory, AlertTriangle, FileWarning, FlaskConical } from 'lucide-react';
 
@@ -70,11 +71,41 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
   // Solo gerencia aprueba el plan (pedido 21/07/2026). El server revalida.
   const usuarioEsGerente = await esGerente();
 
+  // PDF del plan (cabecera + líneas + explosión). Empresa para el membrete.
+  const empresa = await cargarEmpresaPDF();
+  const lineasPdf = lineas.map((l) => ({
+    producto_codigo: l.productos?.codigo ?? '',
+    producto_nombre: l.productos?.nombre ?? '—',
+    talla: l.talla,
+    cantidad: Number(l.cantidad_planificada ?? 0),
+    prioridad: l.prioridad,
+  }));
+  const pdfPlanButton = (
+    <DescargarPdfButton
+      planCodigo={plan.codigo ?? '-'}
+      semana={plan.semana ?? null}
+      anio={plan.anio ?? null}
+      estado={plan.estado ?? 'BORRADOR'}
+      fechaInicio={plan.fecha_inicio ?? null}
+      fechaFin={plan.fecha_fin ?? null}
+      totalLineas={lineas.length}
+      totalUnidades={totalUnidades}
+      materiales={(explosion ?? []) as Parameters<typeof DescargarPdfButton>[0]['materiales']}
+      lineasProductos={lineasPdf}
+      empresa={empresa}
+    />
+  );
+
   return (
     <PageShell
       title={`Plan ${plan.codigo}`}
       description={`Semana ${plan.semana ?? '-'}/${plan.anio ?? '-'} · ${formatDate(plan.fecha_inicio)} a ${formatDate(plan.fecha_fin)}`}
-      actions={<AccionesPlan planId={id} estado={plan.estado ?? 'BORRADOR'} hayLineas={lineas.length > 0} lineasSinReceta={lineasSinReceta.length} usuarioEsGerente={usuarioEsGerente} />}
+      actions={
+        <div className="flex items-center gap-2">
+          {pdfPlanButton}
+          <AccionesPlan planId={id} estado={plan.estado ?? 'BORRADOR'} hayLineas={lineas.length > 0} lineasSinReceta={lineasSinReceta.length} usuarioEsGerente={usuarioEsGerente} />
+        </div>
+      }
     >
       {codigoCorrupto && (
         <div className="flex items-start gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
@@ -178,18 +209,7 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
                     </span>
                   )}
                 </CardTitle>
-                <DescargarPdfButton
-                  planCodigo={plan.codigo ?? '-'}
-                  totalLineas={lineas.length}
-                  totalUnidades={totalUnidades}
-                  materiales={(explosion ?? []) as Parameters<typeof DescargarPdfButton>[0]['materiales']}
-                  lineasProductos={lineas.map((l) => ({
-                    producto_codigo: l.productos?.codigo ?? '',
-                    producto_nombre: l.productos?.nombre ?? '—',
-                    talla: l.talla,
-                    cantidad: Number(l.cantidad_planificada ?? 0),
-                  }))}
-                />
+                {pdfPlanButton}
               </CardHeader>
               <CardContent className="p-0">
                 {!explosion || (explosion as unknown[]).length === 0 ? (

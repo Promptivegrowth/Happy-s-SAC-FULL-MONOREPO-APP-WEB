@@ -8,7 +8,9 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { History } from 'lucide-react';
 import { PageShell } from '@/components/page-shell';
 import { RecetaEditor } from './editor-client';
+import { RecetaPdfButton } from './receta-pdf-button';
 import { obtenerTallasCongeladas } from '@/server/actions/recetas';
+import { cargarEmpresaPDF } from '@/server/empresa-pdf-helper';
 import { formatTallaChip } from '@happy/lib';
 
 export const dynamic = 'force-dynamic';
@@ -73,12 +75,54 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
     .select('id', { count: 'exact', head: true })
     .eq('producto_id', prod.id);
 
+  // Datos para el PDF de la receta (materiales + procesos). Empresa para el
+  // membrete brandeado. Pedido cliente 2026-08-16.
+  const empresa = await cargarEmpresaPDF();
+  const versionMateriales = (receta.version as string) ?? 'v1.0';
+  const versionProcesos = ((procesos ?? [])[0]?.version as string | undefined) ?? 'v1.0';
+  const recetaPdfData = {
+    producto: prod.nombre,
+    codigo: prod.codigo,
+    versionMateriales,
+    versionProcesos,
+    activa: Boolean(receta.activa),
+    materiales: (lineas ?? []).map((l) => {
+      const mat = (l as unknown as { materiales: { codigo: string; nombre: string; categoria: string; precio_unitario: number | null; factor_conversion: number | null } | null }).materiales;
+      const precio = Number(mat?.precio_unitario ?? 0);
+      const factor = Number(mat?.factor_conversion ?? 1) || 1;
+      return {
+        talla: l.talla as string,
+        material: mat?.nombre ?? '(material eliminado)',
+        codigo: mat?.codigo ?? '—',
+        categoria: mat?.categoria ?? '—',
+        cantidad: Number(l.cantidad ?? 0),
+        costo: (precio / factor) * Number(l.cantidad ?? 0),
+        saleAServicio: Boolean((l as unknown as { sale_a_servicio: boolean | null }).sale_a_servicio),
+        saleAOjalBoton: Boolean((l as unknown as { sale_a_ojal_boton: boolean | null }).sale_a_ojal_boton),
+      };
+    }),
+    procesos: ((procesos ?? []) as unknown as Array<{ proceso: string; orden: number | null; talla: string | null; tiempo_estandar_min: number | null; es_tercerizado: boolean | null; areas_produccion: { nombre: string; valor_minuto: number | null } | null }>).map((p) => {
+      const tiempo = Number(p.tiempo_estandar_min ?? 0);
+      const vm = Number(p.areas_produccion?.valor_minuto ?? 0);
+      return {
+        orden: Number(p.orden ?? 0),
+        proceso: p.proceso,
+        area: p.areas_produccion?.nombre ?? '',
+        talla: p.talla,
+        tiempoMin: tiempo,
+        costo: tiempo * vm,
+        esTercerizado: Boolean(p.es_tercerizado),
+      };
+    }),
+  };
+
   return (
     <PageShell
       title={`Receta: ${prod.nombre}`}
       description={`Versión ${receta.version} · ${prod.codigo}`}
       actions={
         <div className="flex items-center gap-2">
+          <RecetaPdfButton data={recetaPdfData} empresa={empresa} />
           <Link href={`/recetas/${id}/historial`}>
             <Button variant="outline" className="gap-1">
               <History className="h-4 w-4" /> Historial de versiones
