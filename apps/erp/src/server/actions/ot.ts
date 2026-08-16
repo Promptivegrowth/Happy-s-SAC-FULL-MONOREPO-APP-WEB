@@ -112,6 +112,22 @@ export async function eliminarLineaOT(otId: string, lineaId: string): Promise<Ac
     if (ot.estado === 'COMPLETADA' || ot.estado === 'CANCELADA') {
       throw new Error('No se pueden modificar líneas de una OT cerrada');
     }
+    // No se puede eliminar una línea que ya tiene corte declarado: borrarla
+    // dejaría stock cortado sin trazabilidad y descuadraría el consumo real
+    // (pedido cliente 2026-08-16). Primero hay que revertir el corte.
+    const { data: linea } = await sb
+      .from('ot_lineas')
+      .select('talla, cantidad_cortada')
+      .eq('id', lineaId)
+      .maybeSingle();
+    const cortada = Number((linea as { cantidad_cortada: number | null } | null)?.cantidad_cortada ?? 0);
+    if (cortada > 0) {
+      const talla = (linea as { talla: string } | null)?.talla ?? '';
+      throw new Error(
+        `No se puede eliminar la talla ${formatTallaChip(talla)}: ya tiene ${cortada} unidad(es) cortada(s). ` +
+        'Anula o corrige el corte de esa talla antes de eliminar la línea.',
+      );
+    }
     const { error } = await sb.from('ot_lineas').delete().eq('id', lineaId);
     if (error) throw new Error(error.message);
     return null;

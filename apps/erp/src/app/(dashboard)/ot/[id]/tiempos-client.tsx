@@ -377,6 +377,7 @@ export function TiemposCostoTab({ otId, procesos, lineas, registros, operarios, 
             procesos={procesosTalla}
             registros={registrosTalla}
             unidades={unidades}
+            marcarCortePorUnidades
           />
         </CardContent>
       </Card>
@@ -476,12 +477,17 @@ function StatsAvance({
  *  Para las operaciones del área de CORTE, el tiempo se toma de la LIQUIDACIÓN
  *  del corte (no de registros de la OT), sumando por tipo de operación. */
 function ResumenOperacionesTabla({
-  procesos, registros, unidades, corteResumen,
+  procesos, registros, unidades, corteResumen, marcarCortePorUnidades = false,
 }: {
   procesos: Proceso[];
   registros: RegistroTiempo[];
   unidades: number;
   corteResumen?: CorteResumen;
+  /** Vista POR TALLA: el corte no se registra por talla, pero si la talla ya se
+   *  cortó (unidades > 0) sus operaciones de área CORTE están 100% avanzadas
+   *  (pedido cliente 2026-08-16). El tiempo/costo queda en blanco (se liquida
+   *  globalmente en la orden de corte). */
+  marcarCortePorUnidades?: boolean;
 }) {
   // Totales de la liquidación de corte por tipo de operación.
   const corteTot = { tendido: 0, corte: 0, habilitado: 0 };
@@ -523,7 +529,13 @@ function ResumenOperacionesTabla({
           const unidadesProcOp = regs.reduce((s, r) => s + Number(r.unidades_procesadas ?? 0), 0);
           // El corte procesa TODAS las unidades cortadas: si la operación de corte
           // tiene tiempo, su avance es del 100% (pedido del cliente 22/07/2026).
-          const unidadesEff = inyectadoCorte && totalRegistrado > 0 ? unidades : unidadesProcOp;
+          // En la vista POR TALLA no hay tiempo de corte por talla, pero si la
+          // talla ya se cortó (unidades > 0) el corte de esa talla está completo.
+          const esCorteArea = p.area?.codigo === 'CORTE';
+          const corteCompletoPorTalla = marcarCortePorUnidades && esCorteArea && unidades > 0;
+          const unidadesEff = (inyectadoCorte && totalRegistrado > 0) || corteCompletoPorTalla
+            ? unidades
+            : unidadesProcOp;
           const denominador = unidadesEff > 0 ? unidadesEff : unidades;
           const realPorUnidad = denominador > 0 ? totalRegistrado / denominador : 0;
           const tiempoUsado = realPorUnidad > 0 ? realPorUnidad : std;

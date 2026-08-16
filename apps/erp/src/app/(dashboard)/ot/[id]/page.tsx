@@ -404,7 +404,10 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
                             )}
                           </TableCell>
                           <TableCell className="text-right">
-                            <EliminarLineaOT otId={id} lineaId={l.id} disabled={!puedeEditarLineas} />
+                            {/* No se puede eliminar una talla ya cortada (pedido
+                                cliente 2026-08-16): el botón se oculta y el server
+                                también lo rechaza. */}
+                            <EliminarLineaOT otId={id} lineaId={l.id} disabled={!puedeEditarLineas || cortada > 0} />
                           </TableCell>
                         </TableRow>
                       );
