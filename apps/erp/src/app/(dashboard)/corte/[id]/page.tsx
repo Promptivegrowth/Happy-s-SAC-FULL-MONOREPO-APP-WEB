@@ -32,6 +32,10 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
   const ot = (corte as unknown as { ot?: { numero: string; id: string } | null }).ot;
   const prod = (corte as unknown as { productos?: { codigo: string; nombre: string } | null }).productos;
   const editable = corte.estado !== 'COMPLETADO' && corte.estado !== 'ANULADO';
+  // Fecha de hoy en hora de Lima (YYYY-MM-DD) para prellenar los date pickers de
+  // la liquidación (pedido cliente 2026-08-16). Se calcula en el server y se pasa
+  // como prop para evitar mismatch de hidratación por timezone del navegador.
+  const hoyISO = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Lima' });
   const usuarioEsGerente = await esGerente();
 
   // Telas de la receta activa del modelo + tiempos ya guardados (mig 69).
@@ -200,7 +204,7 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
           </p>
         </CardHeader>
         <CardContent className="p-0">
-          <TiemposCorteEditor corteId={id} telas={telasCorte} editable={editable} operarios={operariosCorte} />
+          <TiemposCorteEditor corteId={id} telas={telasCorte} editable={editable} operarios={operariosCorte} hoyISO={hoyISO} />
         </CardContent>
       </Card>
 

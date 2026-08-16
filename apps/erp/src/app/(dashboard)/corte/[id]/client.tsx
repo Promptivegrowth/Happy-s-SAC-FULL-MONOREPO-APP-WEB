@@ -264,11 +264,14 @@ export function TiemposCorteEditor({
   telas,
   editable,
   operarios = [],
+  hoyISO = '',
 }: {
   corteId: string;
   telas: TelaTiempo[];
   editable: boolean;
   operarios?: { id: string; nombre: string }[];
+  /** Fecha de hoy (YYYY-MM-DD, hora Lima) para prellenar los date pickers. */
+  hoyISO?: string;
 }) {
   const router = useRouter();
   const [pending, start] = useTransition();
@@ -280,9 +283,10 @@ export function TiemposCorteEditor({
       tendido: t.tiempo_tendido_min ? String(t.tiempo_tendido_min) : '',
       corte: t.tiempo_corte_min ? String(t.tiempo_corte_min) : '',
       habilitado: t.tiempo_habilitado_min ? String(t.tiempo_habilitado_min) : '',
-      fecha_tendido: t.fecha_tendido ?? '',
-      fecha_corte: t.fecha_corte ?? '',
-      fecha_habilitado: t.fecha_habilitado ?? '',
+      // Fecha por defecto = hoy si aún no hay una guardada (editable por el usuario).
+      fecha_tendido: t.fecha_tendido || hoyISO,
+      fecha_corte: t.fecha_corte || hoyISO,
+      fecha_habilitado: t.fecha_habilitado || hoyISO,
       capas: t.capas_tendidas ? String(t.capas_tendidas) : '',
       largo: t.largo_pano ? String(t.largo_pano) : '',
       merma: t.merma_metros ? String(t.merma_metros) : '',
