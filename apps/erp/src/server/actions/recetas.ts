@@ -967,6 +967,169 @@ export async function versionarProcesosProducto(
   return r;
 }
 
+// ============================================================================
+// Historial de versiones (solo lectura)
+// ============================================================================
+//
+// Cliente pidió (2026-08-16): poder ver el historial de versiones anteriores
+// de la receta, tanto de MATERIALES como de PROCESOS. Los datos ya existen:
+//  - Materiales: cada versión es una fila en `recetas` (activa=false = vieja).
+//  - Procesos: viven en `productos_procesos` con `version`+`activo` (activo=false
+//    = versión anterior). Estas versiones de procesos NO tenían ninguna UI antes.
+// Esta acción arma ambos historiales para una vista de solo-lectura por producto.
+
+export type HistorialLineaMaterial = {
+  talla: string;
+  materialCodigo: string;
+  materialNombre: string;
+  categoria: string;
+  cantidad: number;
+  costo: number;
+  saleAServicio: boolean;
+  saleAOjalBoton: boolean;
+};
+export type HistorialVersionMateriales = {
+  recetaId: string;
+  version: string;
+  activa: boolean;
+  createdAt: string | null;
+  notas: string | null;
+  totalLineas: number;
+  costoTotal: number;
+  lineas: HistorialLineaMaterial[];
+};
+export type HistorialOperacion = {
+  proceso: string;
+  area: string | null;
+  talla: string | null;
+  orden: number;
+  tiempoEstandarMin: number;
+  esTercerizado: boolean;
+  observacion: string | null;
+};
+export type HistorialVersionProcesos = {
+  version: string;
+  activo: boolean;
+  totalOperaciones: number;
+  tiempoTotalMin: number;
+  operaciones: HistorialOperacion[];
+};
+export type HistorialReceta = {
+  materiales: HistorialVersionMateriales[];
+  procesos: HistorialVersionProcesos[];
+};
+
+/** Extrae el entero de un string de versión ("v2.0" → 2) para ordenar. */
+function numeroVersion(v: string): number {
+  const m = /v?(\d+)/i.exec(v ?? '');
+  return m ? Number(m[1]) : 0;
+}
+
+export async function historialVersionesReceta(productoId: string): Promise<HistorialReceta> {
+  const { sb } = await requireUser();
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const sbAny = sb as unknown as { from: (t: string) => any };
+
+  // --- MATERIALES: todas las versiones (recetas) del producto ---
+  const { data: recetasRaw } = await sb
+    .from('recetas')
+    .select('id, version, activa, created_at, notas')
+    .eq('producto_id', productoId);
+  const recetas = (recetasRaw ?? []) as {
+    id: string; version: string; activa: boolean; created_at: string | null; notas: string | null;
+  }[];
+  const recetaIds = recetas.map((r) => r.id);
+
+  const lineasPorReceta = new Map<string, HistorialLineaMaterial[]>();
+  const costoPorReceta = new Map<string, number>();
+  if (recetaIds.length > 0) {
+    const { data: lineasRaw } = await sbAny
+      .from('recetas_lineas')
+      .select('receta_id, talla, cantidad, sale_a_servicio, sale_a_ojal_boton, materiales(codigo, nombre, categoria, precio_unitario, factor_conversion)')
+      .in('receta_id', recetaIds)
+      .order('talla')
+      .order('orden');
+    type LR = {
+      receta_id: string; talla: string; cantidad: number | string | null;
+      sale_a_servicio: boolean | null; sale_a_ojal_boton: boolean | null;
+      materiales: { codigo: string; nombre: string; categoria: string; precio_unitario: number | string | null; factor_conversion: number | string | null } | null;
+    };
+    for (const l of (lineasRaw ?? []) as LR[]) {
+      const m = l.materiales;
+      const precio = Number(m?.precio_unitario ?? 0);
+      const factor = Number(m?.factor_conversion ?? 1) || 1;
+      const costo = (precio / factor) * Number(l.cantidad ?? 0);
+      const fila: HistorialLineaMaterial = {
+        talla: l.talla,
+        materialCodigo: m?.codigo ?? '—',
+        materialNombre: m?.nombre ?? '(material eliminado)',
+        categoria: m?.categoria ?? '—',
+        cantidad: Number(l.cantidad ?? 0),
+        costo,
+        saleAServicio: Boolean(l.sale_a_servicio),
+        saleAOjalBoton: Boolean(l.sale_a_ojal_boton),
+      };
+      const arr = lineasPorReceta.get(l.receta_id) ?? [];
+      arr.push(fila);
+      lineasPorReceta.set(l.receta_id, arr);
+      costoPorReceta.set(l.receta_id, (costoPorReceta.get(l.receta_id) ?? 0) + costo);
+    }
+  }
+
+  const materiales: HistorialVersionMateriales[] = recetas
+    .map((r) => ({
+      recetaId: r.id,
+      version: r.version,
+      activa: r.activa,
+      createdAt: r.created_at,
+      notas: r.notas,
+      totalLineas: (lineasPorReceta.get(r.id) ?? []).length,
+      costoTotal: Math.round((costoPorReceta.get(r.id) ?? 0) * 100) / 100,
+      lineas: lineasPorReceta.get(r.id) ?? [],
+    }))
+    // Más nuevas primero (por número de versión; desempate por fecha).
+    .sort((a, b) => numeroVersion(b.version) - numeroVersion(a.version)
+      || (b.createdAt ?? '').localeCompare(a.createdAt ?? ''));
+
+  // --- PROCESOS: todas las versiones (activas + históricas) ---
+  const { data: procRaw } = await sbAny
+    .from('productos_procesos')
+    .select('proceso, talla, orden, tiempo_estandar_min, es_tercerizado, observacion, version, activo, areas_produccion(nombre)')
+    .eq('producto_id', productoId)
+    .order('orden');
+  type PR = {
+    proceso: string; talla: string | null; orden: number | null;
+    tiempo_estandar_min: number | string | null; es_tercerizado: boolean | null;
+    observacion: string | null; version: string | null; activo: boolean | null;
+    areas_produccion: { nombre: string } | null;
+  };
+  const procPorVersion = new Map<string, HistorialVersionProcesos>();
+  for (const p of (procRaw ?? []) as PR[]) {
+    const ver = p.version ?? 'v1.0';
+    const cur = procPorVersion.get(ver) ?? {
+      version: ver, activo: false, totalOperaciones: 0, tiempoTotalMin: 0, operaciones: [],
+    };
+    cur.operaciones.push({
+      proceso: p.proceso,
+      area: p.areas_produccion?.nombre ?? null,
+      talla: p.talla,
+      orden: Number(p.orden ?? 0),
+      tiempoEstandarMin: Number(p.tiempo_estandar_min ?? 0),
+      esTercerizado: Boolean(p.es_tercerizado),
+      observacion: p.observacion,
+    });
+    cur.totalOperaciones += 1;
+    cur.tiempoTotalMin += Number(p.tiempo_estandar_min ?? 0);
+    if (p.activo) cur.activo = true;
+    procPorVersion.set(ver, cur);
+  }
+  const procesos: HistorialVersionProcesos[] = [...procPorVersion.values()]
+    .map((v) => ({ ...v, tiempoTotalMin: Math.round(v.tiempoTotalMin * 100) / 100 }))
+    .sort((a, b) => numeroVersion(b.version) - numeroVersion(a.version));
+
+  return { materiales, procesos };
+}
+
 /**
  * Indica si una receta puede editarse libremente. Devuelve el motivo del
  * bloqueo si no se puede (para mostrar en UI).

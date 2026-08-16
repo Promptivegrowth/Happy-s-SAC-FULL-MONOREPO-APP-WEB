@@ -5,6 +5,7 @@ import { Badge } from '@happy/ui/badge';
 import { Card } from '@happy/ui/card';
 import { Button } from '@happy/ui/button';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@happy/ui/table';
+import { History } from 'lucide-react';
 import { PageShell } from '@/components/page-shell';
 import { RecetaEditor } from './editor-client';
 import { obtenerTallasCongeladas } from '@/server/actions/recetas';
@@ -77,9 +78,16 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
       title={`Receta: ${prod.nombre}`}
       description={`Versión ${receta.version} · ${prod.codigo}`}
       actions={
-        <Link href={`/productos/${prod.id}`}>
-          <Button variant="outline">Ver producto</Button>
-        </Link>
+        <div className="flex items-center gap-2">
+          <Link href={`/recetas/${id}/historial`}>
+            <Button variant="outline" className="gap-1">
+              <History className="h-4 w-4" /> Historial de versiones
+            </Button>
+          </Link>
+          <Link href={`/productos/${prod.id}`}>
+            <Button variant="outline">Ver producto</Button>
+          </Link>
+        </div>
       }
     >
       <div className="grid gap-3 sm:grid-cols-4">
