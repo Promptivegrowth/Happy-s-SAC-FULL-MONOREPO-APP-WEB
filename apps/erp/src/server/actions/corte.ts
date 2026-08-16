@@ -508,6 +508,9 @@ export async function crearOS(
       consideraciones: fd.get('consideraciones') || '',
     });
     const { sb, userId } = await requireUser();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const sbAny = sb as unknown as { from: (t: string) => any };
+    const esGteFlag = await esGerente();
 
     // La MOVILIDAD y la CAMPAÑA solo aplican al proceso de CONFECCIÓN (COSTURA).
     // Para otros servicios (bordado, estampado, ojal-botón, etc.) el costo es
@@ -522,7 +525,7 @@ export async function crearOS(
     if (esConfeccion) {
       const movModificada = Math.abs(movUnit - MOVILIDAD_DEFAULT_OS) > 0.001;
       const campanaAplicada = campanaUnit > 0;
-      if ((movModificada || campanaAplicada) && !(await esGerente())) {
+      if ((movModificada || campanaAplicada) && !esGteFlag) {
         const que = [
           movModificada ? `la movilidad (S/ ${movUnit.toFixed(2)} en vez de S/ ${MOVILIDAD_DEFAULT_OS.toFixed(2)})` : null,
           campanaAplicada ? `el adicional de campaña (S/ ${campanaUnit.toFixed(2)})` : null,
@@ -531,9 +534,38 @@ export async function crearOS(
       }
     }
 
+    // AUTORIZACIÓN DE GERENCIA (servicios NO confección): el precio por unidad
+    // sale del tarifario del modelo. Solo gerencia puede fijar/override un precio
+    // distinto (pedido cliente 2026-08-16). Para no-gerentes recalculamos el
+    // monto_base con el precio del tarifario × unidades, ignorando lo enviado; si
+    // no hay tarifa cargada, no se puede crear la OS.
+    let precioServAutoritativo: number | null = null;
+    if (!esConfeccion && !esGteFlag) {
+      let prodId: string | null = null;
+      if (data.corte_id) {
+        const { data: c } = await sb.from('ot_corte').select('producto_id').eq('id', data.corte_id).maybeSingle();
+        prodId = (c?.producto_id as string) ?? null;
+      } else if (data.ot_id) {
+        const { data: ol } = await sb.from('ot_lineas').select('producto_id').eq('ot_id', data.ot_id).limit(1).maybeSingle();
+        prodId = (ol?.producto_id as string) ?? null;
+      }
+      const hoyISO = new Date().toISOString().slice(0, 10);
+      const { data: tar } = await sbAny
+        .from('tarifas_servicios')
+        .select('precio_unitario, producto_id, talla, vigente_desde, vigente_hasta')
+        .eq('proceso', data.proceso);
+      const filas = ((tar ?? []) as { precio_unitario: number; producto_id: string | null; talla: string | null; vigente_desde: string | null; vigente_hasta: string | null }[])
+        .filter((r) => (!r.vigente_desde || r.vigente_desde <= hoyISO) && (!r.vigente_hasta || r.vigente_hasta >= hoyISO));
+      const delModelo = prodId ? filas.find((r) => r.producto_id === prodId && !r.talla) : undefined;
+      const generica = filas.find((r) => !r.producto_id && !r.talla);
+      const winner = delModelo ?? generica ?? null;
+      if (!winner) {
+        throw new Error('No hay tarifa configurada para este servicio/modelo. Pídele a gerencia que la cargue en Configuración → Tarifas de servicios, o que cree la OS con el precio.');
+      }
+      precioServAutoritativo = Number(winner.precio_unitario);
+    }
+
     const { data: nro } = await sb.rpc('next_correlativo', { p_clave: 'OS', p_padding: 6 });
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const sbAny = sb as unknown as { from: (t: string) => any };
     const { data: row, error } = await sbAny.from('ordenes_servicio').insert({
       numero: `OS-${nro}`,
       corte_id: data.corte_id || null,
@@ -597,6 +629,13 @@ export async function crearOS(
       await sbAny.from('ordenes_servicio')
         .update({ adicional_movilidad: totalMovilidad, adicional_campana: totalCampana })
         .eq('id', row.id);
+    }
+
+    // Servicio no confección + usuario NO gerente: el monto_base se fija con el
+    // precio del tarifario × unidades enviadas (ignora cualquier override).
+    if (!esConfeccion && !esGteFlag && precioServAutoritativo != null) {
+      const montoAuto = Math.round(precioServAutoritativo * totalUnidades * 100) / 100;
+      await sbAny.from('ordenes_servicio').update({ monto_base: montoAuto }).eq('id', row.id);
     }
 
     return { id: row.id as string, ...extras };

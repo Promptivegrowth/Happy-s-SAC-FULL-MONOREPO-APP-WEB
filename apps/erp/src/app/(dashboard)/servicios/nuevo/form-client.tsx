@@ -14,7 +14,7 @@ import { ComboboxBusqueda } from '../../corte/nuevo/form-client';
 import { crearOS } from '@/server/actions/corte';
 import { calcularMontoSugeridoOS } from '@/server/actions/tarifas-talleres';
 import { precioUnitarioServicio } from '@/server/actions/tarifas-servicios';
-import { formatTallaChip } from '@happy/lib';
+import { formatTallaChip, ordenTalla } from '@happy/lib';
 
 type CorteOption = {
   id: string;
@@ -88,14 +88,14 @@ export function NuevaOSForm({
       return corteSel.lineas
         .filter((l) => Number(l.cantidad_real ?? 0) > 0)
         .map((l) => ({ talla: l.talla, cantidad: Number(l.cantidad_real ?? 0) }))
-        .sort((a, b) => a.talla.localeCompare(b.talla));
+        .sort((a, b) => ordenTalla(a.talla) - ordenTalla(b.talla));
     }
     if (otSel) {
       // Si la OT ya tiene cortado declarado, usamos cortada. Sino, planificada.
       return otSel.lineas
         .map((l) => ({ talla: l.talla, cantidad: l.cantidad_cortada > 0 ? l.cantidad_cortada : l.cantidad_planificada }))
         .filter((l) => l.cantidad > 0)
-        .sort((a, b) => a.talla.localeCompare(b.talla));
+        .sort((a, b) => ordenTalla(a.talla) - ordenTalla(b.talla));
     }
     return [];
   }, [corteSel, otSel]);
@@ -225,7 +225,7 @@ export function NuevaOSForm({
   // Líneas para el preview (corte o, en su defecto, OT directa)
   const lineasPreview = (corteSel?.lineas ?? [])
     .filter((l) => Number(l.cantidad_real ?? 0) > 0)
-    .sort((a, b) => a.talla.localeCompare(b.talla));
+    .sort((a, b) => ordenTalla(a.talla) - ordenTalla(b.talla));
   const totalPrendasSeleccionadas = lineasFuente
     .filter((l) => tallasSel.has(l.talla))
     .reduce((s, l) => s + l.cantidad, 0);
@@ -562,11 +562,11 @@ export function NuevaOSForm({
                   step="0.01"
                   min={0}
                   value={montoBase}
-                  onChange={(e) => !tieneTarifa && setMontoBase(e.target.value)}
-                  readOnly={tieneTarifa}
-                  disabled={tieneTarifa}
-                  className={tieneTarifa ? 'bg-slate-50 text-slate-700 cursor-not-allowed' : ''}
-                  title={tieneTarifa ? 'Auto-calculado desde la tabla de tarifas del taller' : 'Sin tarifa configurada — ingresá monto manual'}
+                  onChange={(e) => !tieneTarifa && esGerente && setMontoBase(e.target.value)}
+                  readOnly={tieneTarifa || !esGerente}
+                  disabled={tieneTarifa || !esGerente}
+                  className={(tieneTarifa || !esGerente) ? 'bg-slate-50 text-slate-700 cursor-not-allowed' : ''}
+                  title={tieneTarifa ? 'Auto-calculado desde la tabla de tarifas del taller' : !esGerente ? 'Solo gerencia puede fijar el monto manualmente' : 'Sin tarifa configurada — ingresá monto manual'}
                   placeholder={tieneTarifa ? undefined : 'Ej. 150.00'}
                 />
               </FormRow>
@@ -576,17 +576,25 @@ export function NuevaOSForm({
             <FormRow
               label="Precio por unidad (S/)"
               required
-              hint={totalPrendasSeleccionadas > 0
-                ? `Total ≈ S/ ${(Number(precioUnit || 0) * totalPrendasSeleccionadas).toFixed(2)} (${totalPrendasSeleccionadas} unid). Este servicio no lleva movilidad ni campaña.`
-                : 'Precio por prenda de este servicio. No lleva movilidad ni campaña.'}
+              hint={
+                !esGerente
+                  ? '🔒 Precio tomado del tarifario del modelo. Modificarlo requiere autorización de gerencia.'
+                  : totalPrendasSeleccionadas > 0
+                    ? `Total ≈ S/ ${(Number(precioUnit || 0) * totalPrendasSeleccionadas).toFixed(2)} (${totalPrendasSeleccionadas} unid). Este servicio no lleva movilidad ni campaña.`
+                    : 'Precio por prenda de este servicio. No lleva movilidad ni campaña.'
+              }
             >
               <Input
                 type="number"
                 step="0.01"
                 min={0}
                 value={precioUnit}
-                onChange={(e) => setPrecioUnit(e.target.value)}
+                onChange={(e) => esGerente && setPrecioUnit(e.target.value)}
                 placeholder="Ej. 1.50"
+                readOnly={!esGerente}
+                disabled={!esGerente}
+                className={!esGerente ? 'bg-slate-50 text-slate-700 cursor-not-allowed' : ''}
+                title={!esGerente ? 'Solo gerencia puede modificar el precio' : undefined}
               />
             </FormRow>
           )}
