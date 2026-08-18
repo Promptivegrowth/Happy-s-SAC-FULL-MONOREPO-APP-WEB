@@ -199,11 +199,16 @@ const movimientoMaterialSchema = z.object({
   observacion: z.string().max(500).optional().or(z.literal('')),
 });
 
-async function requireGerenteInv(sb: Awaited<ReturnType<typeof requireUser>>['sb'], userId: string) {
+// Registrar/ajustar stock de MATERIAL es una operación de ALMACÉN: la hacen el
+// almacenero (compras recibidas, ingresos), el jefe de producción o el gerente.
+// (Antes estaba restringido solo a gerente y el almacenero no podía registrar
+// compras ni ingresos — reporte del cliente 2026-08-18.)
+const ROLES_ALMACEN_MATERIAL = ['gerente', 'jefe_produccion', 'almacenero'];
+async function requireAlmacenMaterial(sb: Awaited<ReturnType<typeof requireUser>>['sb'], userId: string) {
   const { data: roles } = await sb.from('usuarios_roles').select('rol').eq('usuario_id', userId);
-  const esGerente = (roles ?? []).some((r) => (r as { rol: string }).rol === 'gerente');
-  if (!esGerente) {
-    throw new Error('Solo el gerente puede registrar movimientos manuales de stock. Pedile a alguien con ese rol que lo haga.');
+  const permitido = (roles ?? []).some((r) => ROLES_ALMACEN_MATERIAL.includes((r as { rol: string }).rol));
+  if (!permitido) {
+    throw new Error('Necesitas rol de almacenero, jefe de producción o gerente para registrar movimientos de material.');
   }
 }
 
@@ -220,7 +225,7 @@ export async function registrarMovimientoMaterial(
   const r = await runAction(async () => {
     const data = movimientoMaterialSchema.parse(input);
     const { sb, userId } = await requireUser();
-    await requireGerenteInv(sb, userId);
+    await requireAlmacenMaterial(sb, userId);
 
     // Para salidas, no permitir dejar el stock negativo.
     if (data.tipo.startsWith('SALIDA')) {
@@ -270,7 +275,7 @@ export async function ajustarStockMaterial(
   const r = await runAction(async () => {
     const data = ajustarMaterialSchema.parse(input);
     const { sb, userId } = await requireUser();
-    await requireGerenteInv(sb, userId);
+    await requireAlmacenMaterial(sb, userId);
 
     const { data: actualRow } = await sb
       .from('stock_actual')
