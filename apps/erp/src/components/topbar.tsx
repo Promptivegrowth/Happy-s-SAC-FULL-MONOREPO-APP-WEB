@@ -1,6 +1,6 @@
 'use client';
 
-import { Bell, LogOut, User } from 'lucide-react';
+import { LogOut, User } from 'lucide-react';
 import { Button } from '@happy/ui/button';
 import { Badge } from '@happy/ui/badge';
 import { Logo } from '@happy/ui/logo';
@@ -8,8 +8,15 @@ import { createClient } from '@happy/db/browser';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { toast } from 'sonner';
+import { NotificationsBell } from './notifications-bell';
+import type { NotificacionUI } from '@/server/actions/notificaciones';
 
-export function Topbar({ nombre, email, roles }: { nombre: string; email: string; roles: string[] }) {
+export function Topbar({
+  nombre, email, roles, notificaciones = [], noLeidas = 0,
+}: {
+  nombre: string; email: string; roles: string[];
+  notificaciones?: NotificacionUI[]; noLeidas?: number;
+}) {
   const router = useRouter();
   async function logout() {
     const sb = createClient();
@@ -34,9 +41,7 @@ export function Topbar({ nombre, email, roles }: { nombre: string; email: string
             <Badge key={r} variant="secondary" className="text-[10px] uppercase">{r.replace('_', ' ')}</Badge>
           ))}
         </div>
-        <Button variant="ghost" size="icon" title="Notificaciones">
-          <Bell className="h-4 w-4" />
-        </Button>
+        <NotificationsBell items={notificaciones} noLeidas={noLeidas} />
         <div className="flex items-center gap-2 border-l pl-3 text-sm">
           <div className="flex h-8 w-8 items-center justify-center rounded-full bg-corp-100 text-corp-700">
             <User className="h-4 w-4" />

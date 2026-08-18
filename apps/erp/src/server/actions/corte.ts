@@ -556,6 +556,80 @@ async function poblarLineasOSDesdeOT(
   return { lineas: candidatas.length, avios };
 }
 
+/**
+ * Núcleo de creación de la OS (sin gate de gerencia): inserta la orden, puebla
+ * líneas/avíos y recalcula totales. Se usa tanto desde crearOS (gerente directo)
+ * como desde aprobarSolicitudOS (al aprobar una solicitud). `precioServAutoritativo`
+ * fuerza el monto_base de servicios no-confección cuando aplica (no-gerente).
+ */
+async function insertarOSCore(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  sb: any,
+  creadoPor: string,
+  data: z.infer<typeof osSchema>,
+  tallasFiltro: string[],
+  precioServAutoritativo: number | null,
+): Promise<{ id: string; lineas: number; avios: number }> {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const sbAny = sb as unknown as { from: (t: string) => any };
+  const esConfeccion = data.proceso === 'COSTURA';
+  const movUnit = esConfeccion ? data.movilidad_por_unidad : 0;
+  const campanaUnit = esConfeccion && data.es_campana ? data.campana_por_unidad : 0;
+
+  const { data: nro } = await sb.rpc('next_correlativo', { p_clave: 'OS', p_padding: 6 });
+  const { data: row, error } = await sbAny.from('ordenes_servicio').insert({
+    numero: `OS-${nro}`,
+    corte_id: data.corte_id || null,
+    ot_id: data.ot_id,
+    taller_id: data.taller_id,
+    proceso: data.proceso,
+    fecha_envio: data.fecha_envio || null,
+    fecha_entrega_esperada: data.fecha_entrega_esperada || null,
+    monto_base: data.monto_base,
+    adicional_movilidad: 0,
+    adicional_campana: 0,
+    movilidad_por_unidad: movUnit,
+    campana_por_unidad: campanaUnit,
+    es_campana: esConfeccion && data.es_campana,
+    observaciones: data.observaciones || null,
+    cuidados: data.cuidados || null,
+    consideraciones: data.consideraciones || null,
+    creado_por: creadoPor,
+    estado: 'EMITIDA',
+  }).select('id').single();
+  if (error) throw new Error(error.message);
+
+  let extras = { lineas: 0, avios: 0 };
+  if (data.corte_id) {
+    try {
+      extras = await poblarLineasYAviosOS(sb, row.id as string, data.corte_id, tallasFiltro.length > 0 ? tallasFiltro : undefined, data.proceso);
+    } catch (e) {
+      await sb.from('ordenes_servicio').delete().eq('id', row.id);
+      throw new Error(`No se pudieron poblar líneas/avíos: ${(e as Error).message}`);
+    }
+  } else if (data.ot_id && tallasFiltro.length > 0) {
+    try {
+      extras = await poblarLineasOSDesdeOT(sb, row.id as string, data.ot_id, tallasFiltro, data.proceso);
+    } catch (e) {
+      await sb.from('ordenes_servicio').delete().eq('id', row.id);
+      throw new Error(`No se pudieron poblar líneas desde OT: ${(e as Error).message}`);
+    }
+  }
+
+  const { data: lineasOs } = await sb.from('ordenes_servicio_lineas').select('cantidad').eq('os_id', row.id);
+  const totalUnidades = (lineasOs ?? []).reduce((s: number, l: { cantidad: number | null }) => s + Number(l.cantidad ?? 0), 0);
+  const totalMovilidad = Math.round(movUnit * totalUnidades * 100) / 100;
+  const totalCampana = Math.round(campanaUnit * totalUnidades * 100) / 100;
+  if (totalMovilidad > 0 || totalCampana > 0) {
+    await sbAny.from('ordenes_servicio').update({ adicional_movilidad: totalMovilidad, adicional_campana: totalCampana }).eq('id', row.id);
+  }
+  if (!esConfeccion && precioServAutoritativo != null) {
+    const montoAuto = Math.round(precioServAutoritativo * totalUnidades * 100) / 100;
+    await sbAny.from('ordenes_servicio').update({ monto_base: montoAuto }).eq('id', row.id);
+  }
+  return { id: row.id as string, ...extras };
+}
+
 export async function crearOS(
   _prev: unknown,
   fd: FormData,
@@ -636,86 +710,165 @@ export async function crearOS(
       precioServAutoritativo = Number(winner.precio_unitario);
     }
 
-    const { data: nro } = await sb.rpc('next_correlativo', { p_clave: 'OS', p_padding: 6 });
-    const { data: row, error } = await sbAny.from('ordenes_servicio').insert({
-      numero: `OS-${nro}`,
-      corte_id: data.corte_id || null,
-      ot_id: data.ot_id,
-      taller_id: data.taller_id,
-      proceso: data.proceso,
-      fecha_envio: data.fecha_envio || null,
-      fecha_entrega_esperada: data.fecha_entrega_esperada || null,
-      monto_base: data.monto_base,
-      // Inicialmente dejamos los totales en 0 — se recalculan tras poblar
-      // las líneas (ya conocemos las unidades efectivamente enviadas).
-      adicional_movilidad: 0,
-      adicional_campana: 0,
-      movilidad_por_unidad: movUnit,
-      campana_por_unidad: campanaUnit,
-      es_campana: esConfeccion && data.es_campana,
-      observaciones: data.observaciones || null,
-      cuidados: data.cuidados || null,
-      consideraciones: data.consideraciones || null,
-      creado_por: userId,
-      estado: 'EMITIDA',
-    }).select('id').single();
-    if (error) throw new Error(error.message);
-
-    // Poblar líneas:
-    //   - Si hay corte_id → líneas + avíos del BOM (flujo completo).
-    //   - Sino → líneas desde ot_lineas con filtro de tallas (sin avíos).
-    let extras = { lineas: 0, avios: 0 };
     const tallasFiltro = fd.getAll('tallas_seleccionadas').map((v) => String(v)).filter(Boolean);
-    if (data.corte_id) {
-      try {
-        extras = await poblarLineasYAviosOS(
-          sb,
-          row.id as string,
-          data.corte_id,
-          tallasFiltro.length > 0 ? tallasFiltro : undefined,
-          data.proceso,
-        );
-      } catch (e) {
-        await sb.from('ordenes_servicio').delete().eq('id', row.id);
-        throw new Error(`No se pudieron poblar líneas/avíos: ${(e as Error).message}`);
-      }
-    } else if (data.ot_id && tallasFiltro.length > 0) {
-      try {
-        extras = await poblarLineasOSDesdeOT(sb, row.id as string, data.ot_id, tallasFiltro, data.proceso);
-      } catch (e) {
-        await sb.from('ordenes_servicio').delete().eq('id', row.id);
-        throw new Error(`No se pudieron poblar líneas desde OT: ${(e as Error).message}`);
-      }
-    }
-
-    // Recalcular adicionales totales en función de las unidades enviadas.
-    const { data: lineasOs } = await sb
-      .from('ordenes_servicio_lineas')
-      .select('cantidad')
-      .eq('os_id', row.id);
-    const totalUnidades = (lineasOs ?? []).reduce((s, l) => s + Number(l.cantidad ?? 0), 0);
-    const totalMovilidad = Math.round(movUnit * totalUnidades * 100) / 100;
-    const totalCampana = Math.round(campanaUnit * totalUnidades * 100) / 100;
-    if (totalMovilidad > 0 || totalCampana > 0) {
-      await sbAny.from('ordenes_servicio')
-        .update({ adicional_movilidad: totalMovilidad, adicional_campana: totalCampana })
-        .eq('id', row.id);
-    }
-
-    // Servicio no confección + usuario NO gerente: el monto_base se fija con el
-    // precio del tarifario × unidades enviadas (ignora cualquier override).
-    if (!esConfeccion && !esGteFlag && precioServAutoritativo != null) {
-      const montoAuto = Math.round(precioServAutoritativo * totalUnidades * 100) / 100;
-      await sbAny.from('ordenes_servicio').update({ monto_base: montoAuto }).eq('id', row.id);
-    }
-
-    return { id: row.id as string, ...extras };
+    return await insertarOSCore(sb, userId, data, tallasFiltro, precioServAutoritativo);
   });
   // Sin redirect server-side: el cliente navega después de mostrar el toast
   // con el resumen (líneas + avíos cargados). Patrón consistente con
   // crearCorte y eliminarTaller — evita que el redirect interrumpa el
   // useTransition antes de que el toast se renderice.
   if (r.ok) await bumpPaths('/servicios');
+  return r;
+}
+
+// ============================================================================
+// SOLICITUDES DE APROBACIÓN DE OS (campaña / movilidad) — flujo diferido
+// ============================================================================
+// Pedido del cliente 2026-08-17: un no-gerente puede ingresar el precio de
+// campaña/movilidad, pero en vez de crear la OS envía una SOLICITUD. Gerencia
+// recibe una notificación; al aprobar, la OS se genera automáticamente.
+
+/** Un no-gerente envía una solicitud para crear una OS con campaña/movilidad. */
+export async function solicitarAprobacionOS(
+  _prev: unknown,
+  fd: FormData,
+): Promise<ActionResult<{ id: string }>> {
+  const r = await runAction(async () => {
+    const data = osSchema.parse({
+      corte_id: fd.get('corte_id') || '',
+      ot_id: fd.get('ot_id'),
+      taller_id: fd.get('taller_id'),
+      proceso: fd.get('proceso') || 'COSTURA',
+      fecha_envio: fd.get('fecha_envio') || '',
+      fecha_entrega_esperada: fd.get('fecha_entrega_esperada') || '',
+      monto_base: fd.get('monto_base') || 0,
+      movilidad_por_unidad: (fd.get('movilidad_por_unidad') as string) || String(MOVILIDAD_DEFAULT_OS),
+      campana_por_unidad: fd.get('campana_por_unidad') || 0,
+      es_campana: fd.get('es_campana') === 'on',
+      observaciones: fd.get('observaciones') || '',
+      cuidados: fd.get('cuidados') || '',
+      consideraciones: fd.get('consideraciones') || '',
+    });
+    const motivo = ((fd.get('motivo_solicitud') as string) || '').trim();
+    const tallasFiltro = fd.getAll('tallas_seleccionadas').map((v) => String(v)).filter(Boolean);
+    const { sb, userId } = await requireUser();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const sbAny = sb as unknown as { from: (t: string) => any };
+
+    const payload = { ...data, tallas_seleccionadas: tallasFiltro };
+    const { data: sol, error } = await sbAny.from('solicitudes_os').insert({
+      estado: 'PENDIENTE',
+      solicitante_id: userId,
+      ot_id: data.ot_id,
+      taller_id: data.taller_id,
+      proceso: data.proceso,
+      monto_base: data.monto_base,
+      movilidad_por_unidad: data.movilidad_por_unidad,
+      campana_por_unidad: data.campana_por_unidad,
+      es_campana: data.es_campana,
+      payload,
+      motivo_solicitud: motivo || null,
+    }).select('id').single();
+    if (error) throw new Error(error.message);
+
+    // Notificar a gerencia (fan-out por usuario para leído individual)
+    const { data: gerentes } = await sbAny.from('usuarios_roles').select('usuario_id').eq('rol', 'gerente');
+    const ids = [...new Set(((gerentes ?? []) as { usuario_id: string }[]).map((g) => g.usuario_id))];
+    const { data: perfil } = await sbAny.from('perfiles').select('nombre_completo').eq('id', userId).maybeSingle();
+    const solicitante = (perfil as { nombre_completo?: string } | null)?.nombre_completo ?? 'Un usuario';
+    const detalle = data.es_campana
+      ? `campaña S/ ${Number(data.campana_por_unidad).toFixed(2)} por unidad`
+      : `movilidad S/ ${Number(data.movilidad_por_unidad).toFixed(2)} por unidad`;
+    if (ids.length > 0) {
+      await sbAny.from('notificaciones').insert(ids.map((uid) => ({
+        destinatario_usuario_id: uid,
+        tipo: 'APROBACION_OS',
+        titulo: 'Nueva solicitud de OS por aprobar',
+        mensaje: `${solicitante} solicita crear una OS con ${detalle}${motivo ? ` · ${motivo}` : ''}.`,
+        enlace: '/servicios/solicitudes',
+        meta: { solicitud_id: sol.id },
+      })));
+    }
+    return { id: sol.id as string };
+  });
+  if (r.ok) await bumpPaths('/servicios', '/servicios/solicitudes');
+  return r;
+}
+
+/** Gerencia aprueba una solicitud: genera la OS automáticamente y avisa. */
+export async function aprobarSolicitudOS(solicitudId: string): Promise<ActionResult<{ osId: string }>> {
+  const r = await runAction(async () => {
+    const { sb, userId } = await requireUser();
+    if (!(await esGerente())) throw new Error('Solo gerencia puede aprobar solicitudes.');
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const sbAny = sb as unknown as { from: (t: string) => any };
+
+    const { data: sol } = await sbAny.from('solicitudes_os').select('*').eq('id', solicitudId).maybeSingle();
+    if (!sol) throw new Error('Solicitud no encontrada');
+    if (sol.estado !== 'PENDIENTE') throw new Error(`La solicitud ya está ${String(sol.estado).toLowerCase()}.`);
+
+    const payload = sol.payload as z.input<typeof osSchema> & { tallas_seleccionadas?: string[] };
+    const data = osSchema.parse(payload);
+    const tallas = (payload.tallas_seleccionadas ?? []) as string[];
+
+    // Crear la OS con los valores solicitados (ya autorizados por gerencia).
+    const res = await insertarOSCore(sb, (sol.solicitante_id as string) ?? userId, data, tallas, null);
+
+    // Marcar aprobada de forma atómica (evita doble aprobación).
+    const { count } = await sbAny.from('solicitudes_os')
+      .update({ estado: 'APROBADA', aprobador_id: userId, os_generada_id: res.id, resuelto_en: new Date().toISOString() }, { count: 'exact' })
+      .eq('id', solicitudId).eq('estado', 'PENDIENTE');
+    if ((count ?? 0) === 0) {
+      await sbAny.from('ordenes_servicio').delete().eq('id', res.id);
+      throw new Error('La solicitud fue resuelta por otra persona. Recargá la página.');
+    }
+
+    if (sol.solicitante_id) {
+      await sbAny.from('notificaciones').insert({
+        destinatario_usuario_id: sol.solicitante_id,
+        tipo: 'APROBACION_OS',
+        titulo: 'Tu solicitud de OS fue aprobada ✅',
+        mensaje: 'Gerencia aprobó la solicitud y la orden de servicio se generó automáticamente.',
+        enlace: `/servicios/${res.id}`,
+        meta: { solicitud_id: solicitudId, os_id: res.id },
+      });
+    }
+    return { osId: res.id };
+  });
+  if (r.ok) await bumpPaths('/servicios', '/servicios/solicitudes');
+  return r;
+}
+
+/** Gerencia rechaza una solicitud y avisa al solicitante. */
+export async function rechazarSolicitudOS(solicitudId: string, motivo: string): Promise<ActionResult> {
+  const r = await runAction(async () => {
+    const { sb, userId } = await requireUser();
+    if (!(await esGerente())) throw new Error('Solo gerencia puede rechazar solicitudes.');
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const sbAny = sb as unknown as { from: (t: string) => any };
+
+    const { data: sol } = await sbAny.from('solicitudes_os').select('solicitante_id, estado').eq('id', solicitudId).maybeSingle();
+    if (!sol) throw new Error('Solicitud no encontrada');
+    if (sol.estado !== 'PENDIENTE') throw new Error(`La solicitud ya está ${String(sol.estado).toLowerCase()}.`);
+
+    const { error } = await sbAny.from('solicitudes_os')
+      .update({ estado: 'RECHAZADA', aprobador_id: userId, motivo_rechazo: motivo?.trim() || null, resuelto_en: new Date().toISOString() })
+      .eq('id', solicitudId).eq('estado', 'PENDIENTE');
+    if (error) throw new Error(error.message);
+
+    if (sol.solicitante_id) {
+      await sbAny.from('notificaciones').insert({
+        destinatario_usuario_id: sol.solicitante_id,
+        tipo: 'APROBACION_OS',
+        titulo: 'Tu solicitud de OS fue rechazada',
+        mensaje: motivo?.trim() ? `Motivo: ${motivo.trim()}` : 'La solicitud fue rechazada por gerencia.',
+        enlace: '/servicios/solicitudes',
+        meta: { solicitud_id: solicitudId },
+      });
+    }
+    return null;
+  });
+  if (r.ok) await bumpPaths('/servicios/solicitudes');
   return r;
 }
 

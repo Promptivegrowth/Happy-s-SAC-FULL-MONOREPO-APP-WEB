@@ -11,7 +11,7 @@ import { FormGrid, FormRow } from '@happy/ui/form-row';
 import { Loader2, Scissors, Package, Calculator, Sparkles } from 'lucide-react';
 import { toast } from 'sonner';
 import { ComboboxBusqueda } from '../../corte/nuevo/form-client';
-import { crearOS } from '@/server/actions/corte';
+import { crearOS, solicitarAprobacionOS } from '@/server/actions/corte';
 import { calcularMontoSugeridoOS } from '@/server/actions/tarifas-talleres';
 import { precioUnitarioServicio } from '@/server/actions/tarifas-servicios';
 import { formatTallaChip, ordenTalla } from '@happy/lib';
@@ -79,6 +79,11 @@ export function NuevaOSForm({
   // ojal-botón, etc.): sin movilidad ni campaña (pedido del cliente 22/07/2026).
   const [precioUnit, setPrecioUnit] = useState<string>('');
   const esConfeccion = proceso === 'COSTURA';
+  // Un no-gerente que fija movilidad distinta al default o carga campaña NO crea
+  // la OS directo: envía una solicitud de aprobación a gerencia (pedido 2026-08-17).
+  const movModificada = esConfeccion && Math.abs(Number(movilidadUnit || 0) - Number(MOVILIDAD_DEFAULT)) > 0.001;
+  const campanaAplicada = esConfeccion && esCampana && Number(campanaUnit || 0) > 0;
+  const requiereAprobacion = !esGerente && (movModificada || campanaAplicada);
 
   const corteSel = useMemo(() => cortes.find((c) => c.id === corteId) ?? null, [cortes, corteId]);
   const otSel = useMemo(() => ots.find((o) => o.id === otId) ?? null, [ots, otId]);
@@ -258,6 +263,18 @@ export function NuevaOSForm({
       for (const t of tallasSel) fd.append('tallas_seleccionadas', t);
     }
     start(async () => {
+      if (requiereAprobacion) {
+        // No-gerente con campaña/movilidad especial: en vez de crear la OS, se
+        // envía una solicitud a gerencia (pedido cliente 2026-08-17).
+        const r = await solicitarAprobacionOS(null, fd);
+        if (r.ok) {
+          toast.success('Solicitud enviada a gerencia. Se te avisará cuando la aprueben.');
+          router.push('/servicios');
+        } else {
+          toast.error(r.error ?? 'No se pudo enviar la solicitud');
+        }
+        return;
+      }
       const r = await crearOS(null, fd);
       if (r.ok && r.data) {
         toast.success(
@@ -605,7 +622,9 @@ export function NuevaOSForm({
             hint={
               esGerente
                 ? (totalPrendasSeleccionadas > 0 ? `Default S/ 0.10. Total movilidad ≈ S/ ${(Number(movilidadUnit || 0) * totalPrendasSeleccionadas).toFixed(2)} (${totalPrendasSeleccionadas} unid)` : 'Sale S/ 0.10 por unidad en automático — como gerente puede modificarlo')
-                : '🔒 Fijo en S/ 0.10 por unidad. Modificarlo requiere autorización de gerencia.'
+                : movModificada
+                  ? '⚠️ Cambiaste el default (S/ 0.10). Al no ser gerente, se enviará una SOLICITUD de aprobación a gerencia.'
+                  : 'Default S/ 0.10 por unidad. Si lo cambias, se enviará a gerencia para aprobación.'
             }
           >
             <Input
@@ -615,10 +634,6 @@ export function NuevaOSForm({
               value={movilidadUnit}
               onChange={(e) => setMovilidadUnit(e.target.value)}
               placeholder="0.10"
-              readOnly={!esGerente}
-              disabled={!esGerente}
-              className={!esGerente ? 'bg-slate-50 text-slate-700 cursor-not-allowed' : ''}
-              title={!esGerente ? 'Solo gerencia puede modificar la movilidad' : undefined}
             />
           </FormRow>
           <FormRow label="Es campaña">
@@ -643,7 +658,7 @@ export function NuevaOSForm({
                 ? 'Solo se puede cargar campaña si "Es campaña" está en Sí.'
                 : esGerente
                   ? (totalPrendasSeleccionadas > 0 ? `Total campaña ≈ S/ ${(Number(campanaUnit || 0) * totalPrendasSeleccionadas).toFixed(2)}` : 'S/ extra por unidad de campaña')
-                  : '🔒 Cargar un adicional de campaña requiere autorización de gerencia.'
+                  : '⚠️ Al no ser gerente, cargar campaña envía una SOLICITUD de aprobación a gerencia (no crea la OS directo).'
             }
           >
             <Input
@@ -653,10 +668,10 @@ export function NuevaOSForm({
               value={campanaUnit}
               onChange={(e) => setCampanaUnit(e.target.value)}
               placeholder="0.00"
-              readOnly={!esGerente || !esCampana}
-              disabled={!esGerente || !esCampana}
-              className={(!esGerente || !esCampana) ? 'bg-slate-50 text-slate-700 cursor-not-allowed' : ''}
-              title={!esCampana ? 'Active "Es campaña" para cargar el adicional' : !esGerente ? 'Solo gerencia puede cargar campaña' : undefined}
+              readOnly={!esCampana}
+              disabled={!esCampana}
+              className={!esCampana ? 'bg-slate-50 text-slate-700 cursor-not-allowed' : ''}
+              title={!esCampana ? 'Active "Es campaña" para cargar el adicional' : undefined}
             />
           </FormRow>
           </>
@@ -685,8 +700,10 @@ export function NuevaOSForm({
           <Button type="submit" variant="premium" size="lg" disabled={pending || !otId || !tallerId}>
             {pending ? (
               <>
-                <Loader2 className="h-4 w-4 animate-spin" /> Creando…
+                <Loader2 className="h-4 w-4 animate-spin" /> {requiereAprobacion ? 'Enviando…' : 'Creando…'}
               </>
+            ) : requiereAprobacion ? (
+              'Enviar solicitud de aprobación'
             ) : (
               'Crear OS'
             )}

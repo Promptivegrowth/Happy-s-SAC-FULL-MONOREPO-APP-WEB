@@ -6,7 +6,7 @@ import { Card, CardContent } from '@happy/ui/card';
 import { EmptyState } from '@happy/ui/empty-state';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@happy/ui/table';
 import { PageShell } from '@/components/page-shell';
-import { Plus, Wrench, Eye } from 'lucide-react';
+import { Plus, Wrench, Eye, Inbox } from 'lucide-react';
 import { formatDate, formatPEN } from '@happy/lib';
 
 export const metadata = { title: 'Órdenes de Servicio' };
@@ -24,17 +24,34 @@ const COLOR: Record<string, 'success' | 'warning' | 'secondary' | 'destructive' 
 
 export default async function Page() {
   const sb = await createClient();
-  const { data } = await sb.from('ordenes_servicio')
-    .select('id, numero, proceso, fecha_emision, fecha_entrega_esperada, monto_total, estado, talleres(nombre), ot(numero)')
-    // Última OS generada arriba: el número es correlativo (OS-0000NN), así que
-    // ordenar por número descendente pone la más reciente primero.
-    .order('numero', { ascending: false }).limit(100);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const sbAny = sb as unknown as { from: (t: string) => any };
+  const [{ data }, { count: pendientes }] = await Promise.all([
+    sb.from('ordenes_servicio')
+      .select('id, numero, proceso, fecha_emision, fecha_entrega_esperada, monto_total, estado, talleres(nombre), ot(numero)')
+      // Última OS generada arriba: el número es correlativo (OS-0000NN), así que
+      // ordenar por número descendente pone la más reciente primero.
+      .order('numero', { ascending: false }).limit(100),
+    sbAny.from('solicitudes_os').select('id', { count: 'exact', head: true }).eq('estado', 'PENDIENTE'),
+  ]);
 
   return (
     <PageShell
       title="Órdenes de Servicio"
       description="Trabajo enviado a talleres externos: confección, bordado, estampado, etc."
-      actions={<Link href="/servicios/nuevo"><Button variant="premium"><Plus className="h-4 w-4" /> Nueva OS</Button></Link>}
+      actions={
+        <div className="flex items-center gap-2">
+          <Link href="/servicios/solicitudes">
+            <Button variant="outline" className="gap-1">
+              <Inbox className="h-4 w-4" /> Solicitudes
+              {(pendientes ?? 0) > 0 && (
+                <span className="ml-1 flex h-5 min-w-5 items-center justify-center rounded-full bg-danger px-1 text-[10px] font-bold text-white">{pendientes}</span>
+              )}
+            </Button>
+          </Link>
+          <Link href="/servicios/nuevo"><Button variant="premium"><Plus className="h-4 w-4" /> Nueva OS</Button></Link>
+        </div>
+      }
     >
       {(data ?? []).length === 0 ? (
         <EmptyState
