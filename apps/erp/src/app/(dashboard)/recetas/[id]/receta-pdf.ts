@@ -16,6 +16,8 @@ export type RecetaPdfData = {
   versionMateriales: string;
   versionProcesos: string;
   activa: boolean;
+  /** Fecha de creación de la receta (ISO). Se muestra como "Emitido". */
+  creadaEn: string | null;
   materiales: {
     talla: string;
     material: string;
@@ -116,8 +118,12 @@ export async function generarRecetaPdf(data: RecetaPdfData, empresa: EmpresaPDFD
   labelValor('Producto:', data.producto, M + 2, y + 6);
   labelValor('Código:', data.codigo, M + boxW * 0.62, y + 6);
   labelValor('Estado:', data.activa ? 'Activa (vigente)' : 'Histórica', M + 2, y + 12);
-  const fechaGen = new Date().toLocaleDateString('es-PE', { day: '2-digit', month: '2-digit', year: 'numeric' });
-  labelValor('Emitido:', fechaGen, M + boxW * 0.62, y + 12);
+  // "Emitido" = fecha de CREACIÓN de la receta (no la fecha de impresión).
+  const fechaCreada = data.creadaEn
+    ? new Date(data.creadaEn.length <= 10 ? `${data.creadaEn}T12:00:00` : data.creadaEn)
+        .toLocaleDateString('es-PE', { day: '2-digit', month: '2-digit', year: 'numeric' })
+    : '—';
+  labelValor('Emitido:', fechaCreada, M + boxW * 0.62, y + 12);
 
   y += blockH + 5;
 
@@ -230,18 +236,48 @@ export async function generarRecetaPdf(data: RecetaPdfData, empresa: EmpresaPDFD
     y = doc.lastAutoTable.finalY + 4;
   }
 
-  // ─── Resumen de costo total ───────────────────────────────────────────────
-  if (y > pageH - 30) { doc.addPage(); y = M; }
-  doc.setDrawColor(...AZUL);
-  doc.setFillColor(241, 245, 249);
-  doc.rect(M, y, boxW, 9, 'FD');
-  doc.setFont('helvetica', 'bold');
-  doc.setFontSize(9);
-  doc.setTextColor(...AZUL);
-  doc.text(
-    `COSTO ESTÁNDAR: materiales ${fmtPEN(costoMatTotal)}  +  mano de obra ${fmtPEN(costoMOTotal)}  =  ${fmtPEN(costoMatTotal + costoMOTotal)}`,
-    pageW / 2, y + 6, { align: 'center' },
-  );
+  // ─── Resumen de costo POR TALLA ───────────────────────────────────────────
+  // Costo estándar de UNA prenda de cada talla = materiales de esa talla +
+  // mano de obra (procesos de esa talla + procesos que aplican a todas).
+  const matPorTalla = new Map<string, number>();
+  for (const m of data.materiales) matPorTalla.set(m.talla, (matPorTalla.get(m.talla) ?? 0) + m.costo);
+  let moGeneral = 0;
+  const moPorTalla = new Map<string, number>();
+  for (const p of data.procesos) {
+    if (p.talla) moPorTalla.set(p.talla, (moPorTalla.get(p.talla) ?? 0) + p.costo);
+    else moGeneral += p.costo; // proceso sin talla = aplica a todas
+  }
+  const tallasResumen = [...new Set([...matPorTalla.keys(), ...moPorTalla.keys()])]
+    .sort((a, b) => ordenTalla(a) - ordenTalla(b));
+
+  if (tallasResumen.length > 0) {
+    if (y > pageH - 40) { doc.addPage(); y = M; }
+    doc.setTextColor(...AZUL);
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(9);
+    doc.text('RESUMEN DE COSTO POR TALLA', M, y);
+    y += 2;
+    autoTable(doc, {
+      startY: y,
+      margin: { left: M, right: M },
+      head: [['Talla', 'Materiales', 'Mano de obra', 'Costo por prenda']],
+      body: tallasResumen.map((t) => {
+        const mat = matPorTalla.get(t) ?? 0;
+        const mo = moGeneral + (moPorTalla.get(t) ?? 0);
+        return [formatTallaChip(t), fmtPEN(mat), fmtPEN(mo), fmtPEN(mat + mo)];
+      }),
+      headStyles: { fillColor: AZUL, textColor: 255, fontSize: 7.5, halign: 'center' },
+      bodyStyles: { fontSize: 8, cellPadding: 1.4 },
+      columnStyles: {
+        0: { cellWidth: 24, halign: 'center', fontStyle: 'bold' },
+        1: { halign: 'right' },
+        2: { halign: 'right' },
+        3: { halign: 'right', fontStyle: 'bold', textColor: [...AZUL] },
+      },
+      theme: 'striped',
+      alternateRowStyles: { fillColor: [248, 250, 252] },
+    });
+  }
 
   // ─── Footer en todas las páginas ──────────────────────────────────────────
   const total = doc.internal.getNumberOfPages();

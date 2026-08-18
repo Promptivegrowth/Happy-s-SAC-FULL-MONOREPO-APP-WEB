@@ -86,6 +86,7 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
     versionMateriales,
     versionProcesos,
     activa: Boolean(receta.activa),
+    creadaEn: (receta.created_at as string | null) ?? null,
     materiales: (lineas ?? []).map((l) => {
       const mat = (l as unknown as { materiales: { codigo: string; nombre: string; categoria: string; precio_unitario: number | null; factor_conversion: number | null } | null }).materiales;
       const precio = Number(mat?.precio_unitario ?? 0);
