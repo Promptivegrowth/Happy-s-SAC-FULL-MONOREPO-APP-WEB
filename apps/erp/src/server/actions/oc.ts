@@ -159,35 +159,49 @@ export async function listarUnidades(): Promise<UnidadOpt[]> {
 export async function buscarMaterialesParaOC(q: string): Promise<MaterialOpt[]> {
   const { sb } = await requireUser();
   if (!q || q.length < 2) return [];
-  // Traemos todos los activos (cap 500) y filtramos client-side por código/nombre.
-  // No usamos .or() con campos de tabla relacionada — Supabase los ignora.
+  // Búsqueda SERVER-SIDE por código o nombre (ilike) sobre TODOS los materiales.
+  // Antes se traían solo los primeros 500 por orden alfabético y se filtraba en
+  // cliente: con 747+ materiales, los que quedaban después del puesto 500 nunca
+  // aparecían (bug reportado 2026-08-17). codigo/nombre son de la misma tabla,
+  // así que .or() con ilike sí funciona.
+  const like = `%${q.replace(/[,()%]/g, ' ').trim()}%`;
   const { data } = await sb
     .from('materiales')
-    .select('id, codigo, nombre, unidad_compra_id, precio_unitario, unidades_medida:unidades_medida!unidad_compra_id(codigo)')
+    .select(
+      'id, codigo, nombre, unidad_compra_id, unidad_consumo_id, precio_unitario, ' +
+      'unidad_compra:unidades_medida!unidad_compra_id(codigo), ' +
+      'unidad_consumo:unidades_medida!unidad_consumo_id(codigo)',
+    )
     .eq('activo', true)
+    .or(`codigo.ilike.${like},nombre.ilike.${like}`)
     .order('nombre')
-    .limit(500);
+    .limit(30);
   type Row = {
     id: string;
     codigo: string;
     nombre: string;
     unidad_compra_id: string | null;
+    unidad_consumo_id: string | null;
     precio_unitario: number;
-    unidades_medida: { codigo: string } | null;
+    unidad_compra: { codigo: string } | null;
+    unidad_consumo: { codigo: string } | null;
   };
-  const qq = q.toLowerCase();
-  return ((data ?? []) as unknown as Row[])
-    .filter((r) => r.codigo.toLowerCase().includes(qq) || r.nombre.toLowerCase().includes(qq))
-    .filter((r) => r.unidad_compra_id) // sin unidad no se puede usar en OC
-    .slice(0, 20)
-    .map((r) => ({
+  const out: MaterialOpt[] = [];
+  for (const r of ((data ?? []) as unknown as Row[])) {
+    // Fallback: si no tiene unidad de compra, se usa la de consumo (así no se
+    // esconden materiales que solo tienen unidad de consumo cargada).
+    const unidadId = r.unidad_compra_id ?? r.unidad_consumo_id;
+    if (!unidadId) continue; // necesita alguna unidad para la OC
+    out.push({
       id: r.id,
       codigo: r.codigo,
       nombre: r.nombre,
-      unidad_id: r.unidad_compra_id!,
-      unidad_codigo: r.unidades_medida?.codigo ?? '',
+      unidad_id: unidadId,
+      unidad_codigo: r.unidad_compra?.codigo ?? r.unidad_consumo?.codigo ?? '',
       precio_referencial: Number(r.precio_unitario),
-    }));
+    });
+  }
+  return out;
 }
 
 // ---------- Crear / Editar / Obtener ----------
@@ -299,7 +313,7 @@ export async function obtenerOC(id: string): Promise<OCDetalle | null> {
        almacen_destino, moneda, tipo_cambio, sub_total, igv, total,
        condicion_pago, adelanto, saldo, observacion, importacion_id,
        solicitada_por, aprobada_por, aprobada_en,
-       proveedores!inner(razon_social, ruc),
+       proveedores!inner(razon_social, numero_documento),
        almacenes(codigo, nombre)`,
     )
     .eq('id', id)
@@ -356,7 +370,7 @@ export async function obtenerOC(id: string): Promise<OCDetalle | null> {
     solicitada_por: string | null;
     aprobada_por: string | null;
     aprobada_en: string | null;
-    proveedores: { razon_social: string; ruc: string | null };
+    proveedores: { razon_social: string; numero_documento: string | null };
     almacenes: { codigo: string; nombre: string } | null;
   };
 
@@ -367,7 +381,7 @@ export async function obtenerOC(id: string): Promise<OCDetalle | null> {
     estado: c.estado,
     proveedor_id: c.proveedor_id,
     proveedor_razon_social: c.proveedores.razon_social,
-    proveedor_ruc: c.proveedores.ruc,
+    proveedor_ruc: c.proveedores.numero_documento,
     fecha: c.fecha,
     fecha_entrega_esperada: c.fecha_entrega_esperada,
     almacen_destino: c.almacen_destino,

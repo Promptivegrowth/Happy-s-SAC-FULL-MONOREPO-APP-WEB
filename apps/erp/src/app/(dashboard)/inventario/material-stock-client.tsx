@@ -13,7 +13,7 @@ import { toast } from 'sonner';
 import { registrarMovimientoMaterial, ajustarStockMaterial } from '@/server/actions/inventario';
 
 type Almacen = { id: string; nombre: string; codigo: string };
-type Material = { id: string; codigo: string; nombre: string; categoria: string };
+type Material = { id: string; codigo: string; nombre: string; categoria: string; unidad?: string };
 
 // Tipos de movimiento de material. El signo lo define el prefijo ENTRADA_/SALIDA_.
 const TIPOS_MATERIAL = [
@@ -104,9 +104,12 @@ export function MovimientoMaterialButton({
                   materialesFiltrados.map((m) => (
                     <button key={m.id} type="button"
                       onClick={() => { setMaterialId(m.id); setSearch(`${m.nombre}`); }}
-                      className={`flex w-full items-center justify-between border-b px-3 py-2 text-left text-xs transition hover:bg-happy-50 ${materialId === m.id ? 'bg-happy-100 font-semibold' : ''}`}>
-                      <span><span className="font-mono text-slate-500">{m.codigo}</span> · {m.nombre}</span>
-                      <span className="rounded bg-slate-100 px-2 py-0.5">{m.categoria}</span>
+                      className={`flex w-full items-center justify-between gap-2 border-b px-3 py-2 text-left text-xs transition hover:bg-happy-50 ${materialId === m.id ? 'bg-happy-100 font-semibold' : ''}`}>
+                      <span className="min-w-0 truncate"><span className="font-mono text-slate-500">{m.codigo}</span> · {m.nombre}</span>
+                      <span className="flex shrink-0 items-center gap-1">
+                        {m.unidad && <span className="rounded bg-corp-100 px-1.5 py-0.5 text-corp-700">{m.unidad}</span>}
+                        <span className="rounded bg-slate-100 px-2 py-0.5">{m.categoria}</span>
+                      </span>
                     </button>
                   ))
                 )}
@@ -123,7 +126,9 @@ export function MovimientoMaterialButton({
                 </select>
               </div>
               <div className="space-y-1.5">
-                <Label htmlFor="mat-cantidad">Cantidad</Label>
+                <Label htmlFor="mat-cantidad">
+                  Cantidad{seleccionado?.unidad ? <span className="ml-1 font-normal text-corp-600">({seleccionado.unidad})</span> : ''}
+                </Label>
                 <Input id="mat-cantidad" type="number" min={0} step="0.0001" value={cantidad}
                   onChange={(e) => setCantidad(e.target.value)} disabled={pending} placeholder="0" />
               </div>

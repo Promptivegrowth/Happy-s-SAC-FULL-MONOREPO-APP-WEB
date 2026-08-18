@@ -183,11 +183,14 @@ async function MaterialStockTable({ almacenId, q, vista }: { almacenId: string; 
   const [{ data: stockRaw }, { data: almRow }, { data: matsRaw }] = await Promise.all([
     sbAny.from('v_stock_material').select('*').eq('almacen_id', almacenId),
     sb.from('almacenes').select('id, nombre, codigo').eq('id', almacenId).single(),
-    sb.from('materiales').select('id, codigo, nombre, categoria').eq('activo', true).order('nombre').limit(3000),
+    sbAny.from('materiales')
+      .select('id, codigo, nombre, categoria, unidad_consumo:unidades_medida!unidad_consumo_id(codigo)')
+      .eq('activo', true).order('nombre').limit(3000),
   ]);
 
   const almacenNombre = (almRow as { nombre: string } | null)?.nombre ?? 'Materia prima';
-  const materiales = ((matsRaw ?? []) as { id: string; codigo: string; nombre: string; categoria: string }[]);
+  const materiales = ((matsRaw ?? []) as { id: string; codigo: string; nombre: string; categoria: string; unidad_consumo: { codigo: string } | null }[])
+    .map((m) => ({ id: m.id, codigo: m.codigo, nombre: m.nombre, categoria: m.categoria, unidad: m.unidad_consumo?.codigo ?? '' }));
 
   let filas = ((stockRaw ?? []) as unknown as FilaMaterial[]).map((f) => ({
     ...f,
