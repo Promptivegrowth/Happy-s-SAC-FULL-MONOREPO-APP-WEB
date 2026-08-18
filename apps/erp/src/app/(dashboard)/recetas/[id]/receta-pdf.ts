@@ -47,7 +47,20 @@ function fmtPEN(n: number): string {
   return `S/ ${Number(n ?? 0).toFixed(2)}`;
 }
 
-export async function generarRecetaPdf(data: RecetaPdfData, empresa: EmpresaPDFData | null = null): Promise<void> {
+export async function generarRecetaPdf(
+  dataFull: RecetaPdfData,
+  empresa: EmpresaPDFData | null = null,
+  tallaFiltro?: string,
+): Promise<void> {
+  // Si se pide una talla puntual, filtrar materiales (de esa talla) y procesos
+  // (de esa talla + los que aplican a todas). Pedido cliente 2026-08-17.
+  const data: RecetaPdfData = tallaFiltro
+    ? {
+        ...dataFull,
+        materiales: dataFull.materiales.filter((m) => m.talla === tallaFiltro),
+        procesos: dataFull.procesos.filter((p) => p.talla === tallaFiltro || !p.talla),
+      }
+    : dataFull;
   const [{ jsPDF }, autoTableMod] = await Promise.all([
     import('jspdf'),
     import('jspdf-autotable'),
@@ -117,6 +130,7 @@ export async function generarRecetaPdf(data: RecetaPdfData, empresa: EmpresaPDFD
   };
   labelValor('Producto:', data.producto, M + 2, y + 6);
   labelValor('Código:', data.codigo, M + boxW * 0.62, y + 6);
+  if (tallaFiltro) labelValor('Talla:', formatTallaChip(tallaFiltro), M + boxW * 0.86, y + 6);
   labelValor('Estado:', data.activa ? 'Activa (vigente)' : 'Histórica', M + 2, y + 12);
   // "Emitido" = fecha de CREACIÓN de la receta (no la fecha de impresión).
   const fechaCreada = data.creadaEn
@@ -292,6 +306,7 @@ export async function generarRecetaPdf(data: RecetaPdfData, empresa: EmpresaPDFD
     );
   }
 
-  const nombreArch = `${data.codigo || data.producto}`.replace(/[^A-Za-z0-9_-]/g, '_');
+  const sufTalla = tallaFiltro ? `-talla-${formatTallaChip(tallaFiltro)}` : '';
+  const nombreArch = `${data.codigo || data.producto}${sufTalla}`.replace(/[^A-Za-z0-9_-]/g, '_');
   doc.save(`receta-${nombreArch}.pdf`);
 }
