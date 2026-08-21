@@ -984,7 +984,7 @@ export function PosTerminal({
   }, [grupoOpen, colorSelId]);
 
   return (
-    <div className="grid h-screen grid-cols-1 lg:grid-cols-[1fr_720px]">
+    <div className="grid h-screen grid-cols-1 overflow-x-hidden lg:grid-cols-[minmax(0,1fr)_600px] xl:grid-cols-[minmax(0,1fr)_680px] 2xl:grid-cols-[minmax(0,1fr)_720px]">
       {/* IZQUIERDA — Búsqueda + carrito */}
       <section className="flex h-screen flex-col bg-white">
         <header className="border-b p-4">
