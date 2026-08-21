@@ -60,7 +60,9 @@ export function TallerForm({ initial }: { initial?: Taller }) {
   const [doc, setDoc] = useState(initial?.numero_documento ?? '');
   const [nombre, setNombre] = useState(initial?.nombre ?? '');
   const [direccion, setDireccion] = useState(initial?.direccion ?? '');
-  const tipoDoc = initial?.tipo_documento ?? 'RUC';
+  // Reactivo: si el select no actualiza este estado, SunatLookup nunca cambia de
+  // RUC→DNI y el botón "Consultar" queda inhabilitado (DNI 8 díg. vs RUC 11).
+  const [tipoDoc, setTipoDoc] = useState(initial?.tipo_documento ?? 'RUC');
 
   function toggleEsp(v: string) {
     setEspecialidades((arr) => arr.includes(v) ? arr.filter((x) => x !== v) : [...arr, v]);
@@ -80,7 +82,7 @@ export function TallerForm({ initial }: { initial?: Taller }) {
             <Input name="codigo" defaultValue={initial?.codigo ?? ''} maxLength={20} placeholder={initial?.codigo ? 'TAL-001' : 'Se autogenera'} />
           </FormRow>
           <FormRow label="Tipo doc" hint="Opcional si no formaliza">
-            <select name="tipo_documento" defaultValue={tipoDoc} className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm">
+            <select name="tipo_documento" value={tipoDoc} onChange={(e) => setTipoDoc(e.target.value)} className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm">
               <option value="">—</option>
               <option value="RUC">RUC</option>
               <option value="DNI">DNI</option>

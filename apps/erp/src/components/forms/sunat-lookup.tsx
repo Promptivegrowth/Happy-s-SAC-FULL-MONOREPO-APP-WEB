@@ -64,7 +64,13 @@ export function SunatLookup({ tipo, defaultValue = '', onResult, name, required 
         placeholder={tipo === 'dni' ? '12345678' : '20123456789'}
         required={required}
       />
-      <Button type="button" variant="corp" onClick={consultar} disabled={loading || valor.length !== maxLen}>
+      <Button
+        type="button"
+        variant="corp"
+        onClick={consultar}
+        disabled={loading}
+        title={valor.length !== maxLen ? `Ingresa ${maxLen} dígitos (${tipo.toUpperCase()})` : `Consultar ${tipo.toUpperCase()} en línea`}
+      >
         {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
         <span className="hidden sm:inline">Consultar</span>
       </Button>
