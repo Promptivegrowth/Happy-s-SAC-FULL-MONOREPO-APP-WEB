@@ -988,7 +988,9 @@ export function PosTerminal({
       {/* IZQUIERDA — Búsqueda + carrito */}
       <section className="flex h-screen flex-col bg-white">
         <header className="border-b p-4">
-          <div className="mb-3 flex items-center gap-2">
+          {/* flex-wrap: en pantallas/zoom chicos los botones (Gastos, Adelantos,
+              Cerrar caja, Salir) pasan a una segunda línea en vez de cortarse. */}
+          <div className="mb-3 flex flex-wrap items-center gap-2">
             <div className="flex h-9 items-center rounded-md border bg-slate-50 px-2 text-sm">
               <span className="mr-1.5 h-1.5 w-1.5 rounded-full bg-emerald-500" />
               <span className="font-medium text-corp-900">{sesionActiva?.caja_nombre ?? cajaActual?.nombre ?? '—'}</span>
