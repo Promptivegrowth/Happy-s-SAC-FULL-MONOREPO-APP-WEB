@@ -148,8 +148,22 @@ export async function generarRecetaPdf(
   doc.text('MATERIALES (BOM)', M, y);
   y += 2;
 
+  // Orden pedido por el cliente (2026-08-23): por talla, y dentro de cada talla
+  // agrupados por CATEGORÍA — primero TELAS, luego AVÍOS, insumos y empaque —
+  // y alfabético dentro de cada categoría.
+  const rankCategoria = (c: string): number => {
+    const up = (c ?? '').toUpperCase();
+    if (up === 'TELA') return 0;
+    if (up === 'AVIO') return 1;
+    if (up === 'INSUMO') return 2;
+    if (up === 'EMPAQUE') return 3;
+    return 9;
+  };
   const matsOrden = [...data.materiales].sort(
-    (a, b) => ordenTalla(a.talla) - ordenTalla(b.talla) || a.material.localeCompare(b.material, 'es'),
+    (a, b) =>
+      ordenTalla(a.talla) - ordenTalla(b.talla) ||
+      rankCategoria(a.categoria) - rankCategoria(b.categoria) ||
+      a.material.localeCompare(b.material, 'es'),
   );
   const costoMatTotal = matsOrden.reduce((s, m) => s + m.costo, 0);
 

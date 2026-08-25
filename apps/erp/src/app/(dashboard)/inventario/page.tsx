@@ -16,6 +16,7 @@ import { AjustarStockButton } from './ajustar-stock-client';
 import { NuevoMovimientoButton } from './nuevo-movimiento-client';
 import { MovimientoMasivoButton } from './movimiento-masivo-client';
 import { MovimientoMaterialButton, AjustarMaterialButton } from './material-stock-client';
+import { ExportarInventarioButton } from './exportar-inventario-button';
 
 export const metadata = { title: 'Inventario' };
 export const dynamic = 'force-dynamic';
@@ -106,6 +107,7 @@ export default async function InventarioPage({ searchParams }: { searchParams: P
       description="Vista consolidada de inventario por almacén y SKU."
       actions={
         <div className="flex items-center gap-2">
+          <ExportarInventarioButton almacenId={sp.almacen} />
           <NuevoMovimientoButton almacenes={almacenes} variantes={variantesParaModal} />
           <MovimientoMasivoButton almacenes={almacenes} variantes={variantesParaModal} />
           <Link href="/inventario/alertas">
