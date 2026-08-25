@@ -10,6 +10,7 @@ import { esGerente } from '@/server/actions/_helpers';
 import { OtAcciones, OtNotaForm, AgregarLineaOTForm, EliminarLineaOT } from './client';
 import { TiemposCostoTab } from './tiempos-client';
 import { EstadoBanner } from './estado-banner';
+import { OtTimeline } from './ot-timeline';
 import { formatDate, formatDateTime, formatNumber , formatTallaChip } from '@happy/lib';
 import { Calendar, AlertTriangle, User, ShieldCheck, Scissors, Clock } from 'lucide-react';
 
@@ -299,6 +300,10 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
       }
     >
       <EstadoBanner estado={ot.estado} />
+
+      {/* Línea de tiempo del avance de la OT (planificación → materiales → corte
+          → confección/servicio → decorado → control de calidad → almacén). */}
+      <OtTimeline estado={ot.estado} />
 
       {/* Semáforo de AVANCE REAL por área (derivado de las declaraciones de
           tiempo). Avanza solo a medida que se declaran las operaciones. */}
