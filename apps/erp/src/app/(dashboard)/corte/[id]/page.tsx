@@ -125,6 +125,12 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
   const hayConsumo = consumoComparacion.some((c) => c.teorico > 0 || c.real > 0);
   // Tiempos de corte registrados (para habilitar el cierre del corte).
   const totalTiemposCorte = telasCorte.reduce((s, t) => s + t.tiempo_tendido_min + t.tiempo_corte_min + t.tiempo_habilitado_min, 0);
+  // ¿La cantidad real difiere de la teórica del plan? Si sí, cerrar requiere
+  // autorización de gerencia (pedido cliente 2026-08-24).
+  const hayDiferenciaCorte = (lineas ?? []).some(
+    (l) => l.cantidad_real != null && Number(l.cantidad_real) !== Number(l.cantidad_teorica ?? 0),
+  );
+  const autorizacionEstado = (corte as unknown as { autorizacion_estado?: string | null }).autorizacion_estado ?? null;
 
   // Plan de la OT para este modelo (cantidad planificada por talla) y lo que
   // ya se cortó en OTROS cortes del mismo OT/producto, para calcular el saldo
@@ -166,7 +172,7 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
       }
       actions={
         editable
-          ? <AccionCerrarCorte corteId={id} tieneTiempos={totalTiemposCorte > 0} />
+          ? <AccionCerrarCorte corteId={id} tieneTiempos={totalTiemposCorte > 0} hayDiferencia={hayDiferenciaCorte} esGerente={usuarioEsGerente} autorizacionEstado={autorizacionEstado} />
           : corte.estado === 'COMPLETADO'
             ? <GenerarOSDesdeCorte corteId={id} otId={ot?.id ?? ''} talleres={(talleres ?? []).map((t) => ({ ...t, codigo: t.codigo ?? '' }))} />
             : null

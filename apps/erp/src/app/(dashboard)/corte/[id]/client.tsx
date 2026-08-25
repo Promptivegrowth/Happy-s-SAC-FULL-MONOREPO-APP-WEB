@@ -10,7 +10,7 @@ import { FormGrid, FormRow } from '@happy/ui/form-row';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@happy/ui/table';
 import { Plus, Loader2, CheckCircle2, Wrench } from 'lucide-react';
 import { toast } from 'sonner';
-import { agregarLineaCorte, cerrarCorte, crearOS, guardarTiemposCorte } from '@/server/actions/corte';
+import { agregarLineaCorte, cerrarCorte, crearOS, guardarTiemposCorte, solicitarAutorizacionCorte } from '@/server/actions/corte';
 import { formatTallaChip } from '@happy/lib';
 
 const TALLAS = ['T0','T2','T4','T6','T8','T10','T12','T14','T16','TS','TAD', 'TU'] as const;
@@ -49,11 +49,11 @@ export function LineasCorteEditor({
   const [cantReal, setCantReal] = useState('');
   const [motivo, setMotivo] = useState('');
 
-  // ¿La real difiere de la teórica? → requiere gerencia + motivo.
+  // ¿La real difiere de la teórica? Se PERMITE ingresarla; la autorización de
+  // gerencia se pide al CERRAR el corte (pedido cliente 2026-08-24).
   const realNum = cantReal.trim() === '' ? null : Number(cantReal);
   const teoNum = Number(cantTeorica) || 0;
   const difiereReal = realNum != null && realNum !== teoNum;
-  const requiereAutorizacion = difiereReal && !usuarioEsGerente;
 
   const tallasUsadas = useMemo(() => new Set(lineas.map((l) => l.talla)), [lineas]);
   // Tallas disponibles: las que están en el plan de la OT y no fueron usadas
@@ -85,12 +85,6 @@ export function LineasCorteEditor({
   function submit() {
     if (!tallaSel) return toast.error('Elija una talla');
     if (!cantTeorica || Number(cantTeorica) <= 0) return toast.error('Ingrese la cantidad teórica');
-    if (requiereAutorizacion) {
-      return toast.error(`La cantidad real (${realNum}) difiere de la teórica (${teoNum}). Requiere autorización de gerencia.`);
-    }
-    if (difiereReal && !motivo.trim()) {
-      return toast.error('Indique el motivo de la diferencia entre la real y la teórica.');
-    }
     const fd = new FormData();
     fd.set('corte_id', corteId);
     fd.set('talla', tallaSel);
@@ -100,7 +94,7 @@ export function LineasCorteEditor({
     start(async () => {
       const r = await agregarLineaCorte(null, fd);
       if (r.ok) {
-        toast.success(difiereReal ? 'Línea agregada — autorización registrada' : 'Línea agregada');
+        toast.success(difiereReal ? 'Línea agregada — al cerrar se pedirá autorización de gerencia' : 'Línea agregada');
         setOpen(false);
         setMotivo('');
         router.refresh();
@@ -156,23 +150,22 @@ export function LineasCorteEditor({
           </FormGrid>
 
           {difiereReal && (
-            requiereAutorizacion ? (
-              <div className="mt-3 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-800">
-                <strong>Requiere autorización de gerencia:</strong> la cantidad real ({realNum}) difiere de la teórica del plan ({teoNum}).
-                Solicite a gerencia que registre esta liquidación.
+            <div className="mt-3 space-y-2">
+              <div className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                La cantidad real ({realNum}) difiere de la teórica del plan ({teoNum}). Puedes registrarla igual;
+                {!usuarioEsGerente
+                  ? ' al CERRAR el corte se enviará una solicitud de autorización a gerencia.'
+                  : ' como gerencia, al cerrar el corte quedará autorizado.'}
               </div>
-            ) : (
-              <div className="mt-3">
-                <FormRow label={`Motivo de la diferencia (teórica ${teoNum} → real ${realNum})`} required>
-                  <Input
-                    value={motivo}
-                    onChange={(e) => setMotivo(e.target.value)}
-                    placeholder="Ej: falla de tela, se cortó de más para cubrir merma…"
-                    maxLength={200}
-                  />
-                </FormRow>
-              </div>
-            )
+              <FormRow label={`Motivo de la diferencia (opcional)`}>
+                <Input
+                  value={motivo}
+                  onChange={(e) => setMotivo(e.target.value)}
+                  placeholder="Ej: falla de tela, se cortó de menos por merma…"
+                  maxLength={200}
+                />
+              </FormRow>
+            </div>
           )}
 
           <div className="mt-3 flex justify-end gap-2">
@@ -429,8 +422,25 @@ export function TiemposCorteEditor({
   );
 }
 
-export function AccionCerrarCorte({ corteId, tieneTiempos = true }: { corteId: string; tieneTiempos?: boolean }) {
+export function AccionCerrarCorte({
+  corteId,
+  tieneTiempos = true,
+  hayDiferencia = false,
+  esGerente = false,
+  autorizacionEstado = null,
+}: {
+  corteId: string;
+  tieneTiempos?: boolean;
+  /** La cantidad real difiere de la programada → cerrar requiere gerencia. */
+  hayDiferencia?: boolean;
+  esGerente?: boolean;
+  autorizacionEstado?: string | null;
+}) {
   const [pending, start] = useTransition();
+
+  // Un no-gerente con diferencias (y sin autorización previa) NO cierra: solicita.
+  const requiereSolicitud = hayDiferencia && !esGerente && autorizacionEstado !== 'AUTORIZADA';
+
   function cerrar() {
     if (!tieneTiempos) {
       toast.error('Antes de cerrar, registre los tiempos por tela (tendido, corte, habilitado) en la liquidación. Después de cerrar no se podrán modificar.');
@@ -443,8 +453,35 @@ export function AccionCerrarCorte({ corteId, tieneTiempos = true }: { corteId: s
       else toast.error(r.error ?? 'Error');
     });
   }
+
+  function solicitar() {
+    const motivo = prompt('Motivo de la diferencia (se enviará a gerencia para autorizar el cierre):');
+    if (motivo === null) return;
+    start(async () => {
+      const r = await solicitarAutorizacionCorte(corteId, motivo);
+      if (r.ok) toast.success('Solicitud enviada a gerencia. Te avisaremos cuando autoricen el cierre.');
+      else toast.error(r.error ?? 'No se pudo enviar la solicitud');
+    });
+  }
+
+  if (requiereSolicitud) {
+    if (autorizacionEstado === 'PENDIENTE') {
+      return (
+        <Button variant="outline" disabled title="Gerencia debe autorizar el cierre">
+          <Loader2 className="h-4 w-4" /> Autorización solicitada
+        </Button>
+      );
+    }
+    return (
+      <Button onClick={solicitar} disabled={pending || !tieneTiempos} variant="premium" title={!tieneTiempos ? 'Registre los tiempos antes de solicitar' : 'La cantidad difiere de lo programado — enviar a gerencia'}>
+        {pending ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />}
+        Solicitar autorización de cierre
+      </Button>
+    );
+  }
+
   return (
-    <Button onClick={cerrar} disabled={pending || !tieneTiempos} variant="premium" title={!tieneTiempos ? 'Registre los tiempos de corte antes de cerrar' : undefined}>
+    <Button onClick={cerrar} disabled={pending || !tieneTiempos} variant="premium" title={!tieneTiempos ? 'Registre los tiempos de corte antes de cerrar' : hayDiferencia ? 'Cierre con diferencia (autorizado por gerencia)' : undefined}>
       {pending ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />}
       Cerrar corte
     </Button>

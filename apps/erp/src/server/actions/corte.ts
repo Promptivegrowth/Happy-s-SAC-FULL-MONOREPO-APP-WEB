@@ -103,24 +103,12 @@ export async function agregarLineaCorte(_prev: unknown, fd: FormData): Promise<A
       throw new Error('Este corte ya está cerrado: no se pueden ingresar más cantidades a cortar. Cree un corte nuevo si necesita cortar más.');
     }
 
-    // AUTORIZACIÓN DE GERENCIA (pedido del cliente 21/07/2026): si la cantidad
-    // REAL declarada difiere de la TEÓRICA (la del plan), hace falta que un
-    // gerente lo autorice con motivo, y queda registrado. Igualar o dejar la
-    // real vacía no pide nada.
+    // Se PERMITE ingresar la cantidad real aunque difiera de la teórica del plan
+    // (pedido cliente 2026-08-24). La autorización de gerencia ya NO se pide al
+    // ingresar la línea: si al final hay diferencias, el CIERRE del corte exige
+    // una solicitud de autorización a gerencia (ver cerrarCorte / solicitar-
+    // AutorizacionCorte).
     const real = data.cantidad_real === '' ? null : Number(data.cantidad_real);
-    const difiere = real != null && real !== data.cantidad_teorica;
-    const motivoLimpio = (data.motivo ?? '').trim();
-    if (difiere) {
-      if (!(await esGerente())) {
-        throw new Error(
-          `La cantidad real (${real}) difiere de la teórica del plan (${data.cantidad_teorica}). ` +
-          `Este cambio requiere autorización de gerencia.`,
-        );
-      }
-      if (!motivoLimpio) {
-        throw new Error('Indique el motivo de la diferencia entre la cantidad real y la teórica.');
-      }
-    }
 
     // merma por talla quedó deprecada — la merma del corte se carga en metros
     // a nivel cabecera (ot_corte.merma_metros). Insertamos 0 para no romper
@@ -150,23 +138,7 @@ export async function agregarLineaCorte(_prev: unknown, fd: FormData): Promise<A
       await autoAvanzarEstadoOT(rpcClient, corteInfo.ot_id as string);
     }
 
-    // Registrar la autorización (auditoría). Se guarda como nota en la
-    // observación del corte con marca de fecha; no hay tabla de eventos de
-    // corte, así que dejamos rastro acá.
-    if (difiere) {
-      const fecha = new Date().toLocaleDateString('es-PE', { day: '2-digit', month: '2-digit', year: 'numeric' });
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const sbAny = sb as unknown as { from: (t: string) => any };
-      const { data: corteRow } = await sbAny.from('ot_corte').select('observacion').eq('id', data.corte_id).maybeSingle();
-      const nota =
-        `[${fecha}] Talla ${formatTallaChip(data.talla)}: real ${real} vs teórica ${data.cantidad_teorica} ` +
-        `(dif ${(real ?? 0) - data.cantidad_teorica >= 0 ? '+' : ''}${(real ?? 0) - data.cantidad_teorica}) — ` +
-        `autorizado por gerencia. Motivo: ${motivoLimpio}`;
-      await sbAny.from('ot_corte').update({
-        observacion: corteRow?.observacion ? `${corteRow.observacion}\n${nota}` : nota,
-      }).eq('id', data.corte_id);
-      void userId;
-    }
+    void userId;
     return null;
   });
   if (r.ok) await bumpPaths(`/corte/${fd.get('corte_id')}`, '/ot');
@@ -320,37 +292,126 @@ export async function guardarTiemposCorte(
  * (función close_corte_atomic — migración 32).
  * Si algo falla, ROLLBACK total — ninguna línea queda actualizada parcial.
  */
+/** Diferencias entre lo real cortado y lo teórico del plan, por talla. */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function corteDiferencias(sbAny: { from: (t: string) => any }, corteId: string) {
+  const { data: lineas } = await sbAny
+    .from('ot_corte_lineas').select('talla, cantidad_teorica, cantidad_real').eq('corte_id', corteId);
+  const resumen: { talla: string; teorica: number; real: number; dif: number }[] = [];
+  for (const l of (lineas ?? []) as { talla: string; cantidad_teorica: number | null; cantidad_real: number | null }[]) {
+    if (l.cantidad_real == null) continue;
+    const teo = Number(l.cantidad_teorica ?? 0);
+    const real = Number(l.cantidad_real);
+    if (real !== teo) resumen.push({ talla: l.talla, teorica: teo, real, dif: real - teo });
+  }
+  return { hayDif: resumen.length > 0, resumen };
+}
+
+/** Ejecuta el cierre atómico del corte (tiempos + close_corte_atomic + tela). */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function ejecutarCierreCorte(sbAny: { from: (t: string) => any; rpc: (fn: string, args: any) => any }, corteId: string, userId: string): Promise<number> {
+  const { data: tiempos } = await sbAny
+    .from('ot_corte_tiempos')
+    .select('tiempo_tendido_min, tiempo_corte_min, tiempo_habilitado_min')
+    .eq('corte_id', corteId);
+  const totalMin = ((tiempos ?? []) as { tiempo_tendido_min: number | string | null; tiempo_corte_min: number | string | null; tiempo_habilitado_min: number | string | null }[])
+    .reduce((s, t) => s + Number(t.tiempo_tendido_min ?? 0) + Number(t.tiempo_corte_min ?? 0) + Number(t.tiempo_habilitado_min ?? 0), 0);
+  if (totalMin <= 0) {
+    throw new Error('Antes de cerrar el corte, registre los tiempos por tela (tendido, corte, habilitado) en la liquidación. Una vez cerrado ya no se podrán modificar.');
+  }
+  const { data, error } = await sbAny.rpc('close_corte_atomic', { p_corte_id: corteId });
+  if (error) throw new Error(error.message);
+  const synced = (data as { ot_lineas_sync?: number } | null)?.ot_lineas_sync ?? 0;
+  // Descontar la tela consumida (best-effort, no revierte el cierre).
+  try { await descontarTelaDeCorte(sbAny, corteId, userId); } catch { /* no bloquea */ }
+  return synced;
+}
+
 export async function cerrarCorte(corteId: string): Promise<ActionResult<{ ot_lineas_sync: number }>> {
   const r = await runAction(async () => {
     const { sb, userId } = await requireUser();
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const sbAny = sb as unknown as { from: (t: string) => any; rpc: (fn: string, args: any) => any };
 
-    // No se puede cerrar el corte sin haber registrado los TIEMPOS de la
-    // liquidación (pedido del cliente 22/07/2026): una vez cerrado no se pueden
-    // modificar, y sin tiempos la OT no deja avanzar los demás procesos.
-    const { data: tiempos } = await sbAny
-      .from('ot_corte_tiempos')
-      .select('tiempo_tendido_min, tiempo_corte_min, tiempo_habilitado_min')
-      .eq('corte_id', corteId);
-    const totalMin = ((tiempos ?? []) as { tiempo_tendido_min: number | string | null; tiempo_corte_min: number | string | null; tiempo_habilitado_min: number | string | null }[])
-      .reduce((s, t) => s + Number(t.tiempo_tendido_min ?? 0) + Number(t.tiempo_corte_min ?? 0) + Number(t.tiempo_habilitado_min ?? 0), 0);
-    if (totalMin <= 0) {
-      throw new Error('Antes de cerrar el corte, registre los tiempos por tela (tendido, corte, habilitado) en la liquidación. Una vez cerrado ya no se podrán modificar.');
+    const gte = await esGerente();
+    const { data: corteRow } = await sbAny
+      .from('ot_corte').select('numero, autorizacion_estado, autorizacion_solicitada_por').eq('id', corteId).maybeSingle();
+    const yaAutorizado = corteRow?.autorizacion_estado === 'AUTORIZADA';
+    const { hayDif } = await corteDiferencias(sbAny, corteId);
+
+    // Si la cantidad real difiere de la programada, cerrar requiere autorización
+    // de gerencia. Un no-gerente NO puede cerrar: debe enviar la solicitud
+    // (pedido cliente 2026-08-24). Un gerente cierra y autoriza en el acto.
+    if (hayDif && !gte && !yaAutorizado) {
+      throw new Error('La cantidad cortada difiere de la programada. No puedes cerrar el corte: usá "Solicitar autorización de cierre" para enviarlo a gerencia.');
     }
 
-    const { data, error } = await sbAny
-      .rpc('close_corte_atomic', { p_corte_id: corteId });
-    if (error) throw new Error(error.message);
-    const synced = (data as { ot_lineas_sync?: number } | null)?.ot_lineas_sync ?? 0;
+    const synced = await ejecutarCierreCorte(sbAny, corteId, userId);
 
-    // Descontar la tela consumida del almacén de materia prima (SALIDA_PRODUCCION).
-    // Best-effort: si algo falla, NO revierte el cierre del corte.
-    try { await descontarTelaDeCorte(sbAny, corteId, userId); } catch { /* no bloquea el cierre */ }
-
+    // Al cerrar con diferencias, queda autorizado. Si venía de una solicitud,
+    // avisar al solicitante que gerencia lo autorizó/cerró.
+    if (hayDif) {
+      await sbAny.from('ot_corte').update({ autorizacion_estado: 'AUTORIZADA' }).eq('id', corteId);
+      const solicitante = corteRow?.autorizacion_solicitada_por as string | null;
+      if (solicitante && solicitante !== userId) {
+        await sbAny.from('notificaciones').insert({
+          destinatario_usuario_id: solicitante,
+          tipo: 'AUTORIZACION_CORTE',
+          titulo: 'Cierre de corte autorizado ✅',
+          mensaje: `Gerencia autorizó y cerró el corte ${corteRow?.numero ?? ''}.`,
+          enlace: `/corte/${corteId}`,
+          meta: { corte_id: corteId },
+        });
+      }
+    }
     return { ot_lineas_sync: synced };
   });
   if (r.ok) await bumpPaths(`/corte/${corteId}`, '/corte', '/ot');
+  return r;
+}
+
+/**
+ * Un no-gerente envía a gerencia la solicitud de autorización para CERRAR un
+ * corte cuya cantidad real difiere de la programada (pedido cliente 2026-08-24).
+ * Marca el corte como PENDIENTE y notifica a gerencia (que cierra desde el corte).
+ */
+export async function solicitarAutorizacionCorte(corteId: string, motivo: string): Promise<ActionResult> {
+  const r = await runAction(async () => {
+    const { sb, userId } = await requireUser();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const sbAny = sb as unknown as { from: (t: string) => any };
+
+    const { data: corte } = await sbAny.from('ot_corte').select('numero, estado').eq('id', corteId).maybeSingle();
+    if (!corte) throw new Error('Corte no encontrado');
+    if (corte.estado === 'COMPLETADO' || corte.estado === 'ANULADO') throw new Error('El corte ya está cerrado.');
+    const { hayDif, resumen } = await corteDiferencias(sbAny, corteId);
+    if (!hayDif) throw new Error('No hay diferencias con lo programado: puedes cerrar el corte normalmente.');
+
+    await sbAny.from('ot_corte').update({
+      autorizacion_estado: 'PENDIENTE',
+      autorizacion_solicitada_por: userId,
+      autorizacion_motivo: motivo?.trim() || null,
+    }).eq('id', corteId);
+
+    // Notificar a gerencia (fan-out por usuario).
+    const { data: gerentes } = await sbAny.from('usuarios_roles').select('usuario_id').eq('rol', 'gerente');
+    const ids = [...new Set(((gerentes ?? []) as { usuario_id: string }[]).map((g) => g.usuario_id))];
+    const { data: perfil } = await sbAny.from('perfiles').select('nombre_completo').eq('id', userId).maybeSingle();
+    const solicitante = (perfil as { nombre_completo?: string } | null)?.nombre_completo ?? 'Un usuario';
+    const dif = resumen.map((d) => `T${d.talla.replace(/^T/i, '')}: ${d.real}/${d.teorica}`).join(', ');
+    if (ids.length > 0) {
+      await sbAny.from('notificaciones').insert(ids.map((uid) => ({
+        destinatario_usuario_id: uid,
+        tipo: 'AUTORIZACION_CORTE',
+        titulo: 'Autorización de cierre de corte',
+        mensaje: `${solicitante} pide cerrar el corte ${corte.numero} con diferencias (${dif})${motivo?.trim() ? ` · ${motivo.trim()}` : ''}.`,
+        enlace: `/corte/${corteId}`,
+        meta: { corte_id: corteId },
+      })));
+    }
+    return null;
+  });
+  if (r.ok) await bumpPaths(`/corte/${corteId}`);
   return r;
 }
 
@@ -795,8 +856,15 @@ export async function solicitarAprobacionOS(
   return r;
 }
 
-/** Gerencia aprueba una solicitud: genera la OS automáticamente y avisa. */
-export async function aprobarSolicitudOS(solicitudId: string): Promise<ActionResult<{ osId: string }>> {
+/**
+ * Gerencia aprueba una solicitud: genera la OS automáticamente y avisa.
+ * `override` permite a gerencia EDITAR el monto (campaña/movilidad) al aprobar
+ * — p. ej. subir la campaña de 0.60 a 0.90 (pedido cliente 2026-08-24).
+ */
+export async function aprobarSolicitudOS(
+  solicitudId: string,
+  override?: { campana_por_unidad?: number; movilidad_por_unidad?: number },
+): Promise<ActionResult<{ osId: string }>> {
   const r = await runAction(async () => {
     const { sb, userId } = await requireUser();
     if (!(await esGerente())) throw new Error('Solo gerencia puede aprobar solicitudes.');
@@ -808,15 +876,27 @@ export async function aprobarSolicitudOS(solicitudId: string): Promise<ActionRes
     if (sol.estado !== 'PENDIENTE') throw new Error(`La solicitud ya está ${String(sol.estado).toLowerCase()}.`);
 
     const payload = sol.payload as z.input<typeof osSchema> & { tallas_seleccionadas?: string[] };
+    // Gerencia puede ajustar el monto al aprobar.
+    if (override?.campana_por_unidad != null && Number.isFinite(override.campana_por_unidad)) {
+      payload.campana_por_unidad = override.campana_por_unidad;
+    }
+    if (override?.movilidad_por_unidad != null && Number.isFinite(override.movilidad_por_unidad)) {
+      payload.movilidad_por_unidad = override.movilidad_por_unidad;
+    }
     const data = osSchema.parse(payload);
     const tallas = (payload.tallas_seleccionadas ?? []) as string[];
 
     // Crear la OS con los valores solicitados (ya autorizados por gerencia).
     const res = await insertarOSCore(sb, (sol.solicitante_id as string) ?? userId, data, tallas, null);
 
-    // Marcar aprobada de forma atómica (evita doble aprobación).
+    // Marcar aprobada de forma atómica (evita doble aprobación). Se guarda el
+    // monto final (por si gerencia lo editó al aprobar).
     const { count } = await sbAny.from('solicitudes_os')
-      .update({ estado: 'APROBADA', aprobador_id: userId, os_generada_id: res.id, resuelto_en: new Date().toISOString() }, { count: 'exact' })
+      .update({
+        estado: 'APROBADA', aprobador_id: userId, os_generada_id: res.id, resuelto_en: new Date().toISOString(),
+        campana_por_unidad: Number(data.campana_por_unidad ?? 0),
+        movilidad_por_unidad: Number(data.movilidad_por_unidad ?? 0),
+      }, { count: 'exact' })
       .eq('id', solicitudId).eq('estado', 'PENDIENTE');
     if ((count ?? 0) === 0) {
       await sbAny.from('ordenes_servicio').delete().eq('id', res.id);

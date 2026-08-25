@@ -118,7 +118,12 @@ export default async function Page() {
                       {gerente && (
                         <TableCell className="text-right">
                           {s.estado === 'PENDIENTE'
-                            ? <AprobarRechazarSolicitud solicitudId={s.id} />
+                            ? <AprobarRechazarSolicitud
+                                solicitudId={s.id}
+                                esCampana={Boolean(s.es_campana)}
+                                campanaUnit={Number(s.campana_por_unidad ?? 0)}
+                                movilidadUnit={Number(s.movilidad_por_unidad ?? 0)}
+                              />
                             : <span className="text-[10px] text-slate-400">{s.resuelto_en ? formatDateTime(s.resuelto_en) : ''}</span>}
                         </TableCell>
                       )}
