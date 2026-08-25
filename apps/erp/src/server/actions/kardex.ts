@@ -25,10 +25,12 @@ const listarSchema = z.object({
   entidad: z.enum(['VARIANTE', 'MATERIAL', '']).optional().or(z.literal('')),
   variante_id: z.string().uuid().optional().or(z.literal('')),
   material_id: z.string().uuid().optional().or(z.literal('')),
+  /** Búsqueda de texto por producto / talla (SKU) / material (pedido 2026-08-24). */
+  q: z.string().optional().or(z.literal('')),
   desde: z.string().optional().or(z.literal('')),
   hasta: z.string().optional().or(z.literal('')),
   pagina: z.coerce.number().int().min(1).default(1),
-  por_pagina: z.coerce.number().int().min(10).max(200).default(50),
+  por_pagina: z.coerce.number().int().min(10).max(500).default(50),
 });
 
 export type KardexFiltros = z.input<typeof listarSchema>;
@@ -77,6 +79,33 @@ export async function listarKardex(
     if (data.material_id) q = q.eq('material_id', data.material_id);
     if (data.entidad === 'VARIANTE') q = q.not('variante_id', 'is', null);
     if (data.entidad === 'MATERIAL') q = q.not('material_id', 'is', null);
+
+    // Búsqueda por producto / talla (SKU) / material: resolvemos los ids que
+    // matchean y filtramos el kardex por ellos.
+    if (data.q && data.q.trim().length >= 2) {
+      const term = data.q.trim().replace(/[,()%]/g, ' ');
+      const like = `%${term}%`;
+      let varIds: string[] = [];
+      let matIds: string[] = [];
+      if (data.entidad !== 'MATERIAL') {
+        const { data: prods } = await sb.from('productos').select('id').ilike('nombre', like).limit(500);
+        const prodIds = ((prods ?? []) as { id: string }[]).map((p) => p.id);
+        let vq = sb.from('productos_variantes').select('id').limit(2000);
+        vq = prodIds.length > 0 ? vq.or(`sku.ilike.${like},producto_id.in.(${prodIds.join(',')})`) : vq.ilike('sku', like);
+        const { data: vars } = await vq;
+        varIds = ((vars ?? []) as { id: string }[]).map((v) => v.id);
+      }
+      if (data.entidad !== 'VARIANTE') {
+        const { data: mats } = await sb.from('materiales').select('id').or(`codigo.ilike.${like},nombre.ilike.${like}`).limit(1000);
+        matIds = ((mats ?? []) as { id: string }[]).map((m) => m.id);
+      }
+      const ors: string[] = [];
+      if (varIds.length > 0) ors.push(`variante_id.in.(${varIds.join(',')})`);
+      if (matIds.length > 0) ors.push(`material_id.in.(${matIds.join(',')})`);
+      if (ors.length === 0) q = q.eq('id', -1); // sin coincidencias → vacío
+      else q = q.or(ors.join(','));
+    }
+
     if (data.desde) q = q.gte('fecha', `${data.desde}T00:00:00`);
     if (data.hasta) q = q.lte('fecha', `${data.hasta}T23:59:59`);
 

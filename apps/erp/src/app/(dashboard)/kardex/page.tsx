@@ -10,6 +10,7 @@ import { PageShell } from '@/components/page-shell';
 import { TableSkeleton } from '@/components/skeletons';
 import { listarKardex, listarAlmacenes, type KardexMov } from '@/server/actions/kardex';
 import { formatTallaChip } from '@happy/lib';
+import { ExportarKardexButton } from './exportar-kardex-button';
 
 export const metadata = { title: 'Kardex' };
 export const dynamic = 'force-dynamic';
@@ -18,6 +19,7 @@ type SP = {
   almacen?: string;
   tipo?: string;
   entidad?: string;
+  q?: string;
   desde?: string;
   hasta?: string;
   pagina?: string;
@@ -35,15 +37,34 @@ export default async function KardexPage({ searchParams }: { searchParams: Promi
   const resAlms = await listarAlmacenes();
   const almacenes = resAlms.ok ? (resAlms.data ?? []) : [];
 
-  const tableKey = `${sp.almacen ?? ''}|${sp.tipo ?? ''}|${sp.entidad ?? ''}|${sp.desde ?? ''}|${sp.hasta ?? ''}|${sp.pagina ?? '1'}`;
+  const tableKey = `${sp.almacen ?? ''}|${sp.tipo ?? ''}|${sp.entidad ?? ''}|${sp.q ?? ''}|${sp.desde ?? ''}|${sp.hasta ?? ''}|${sp.pagina ?? '1'}`;
+  const filtrosExport = {
+    almacen_id: sp.almacen ?? '',
+    tipo: (sp.tipo ?? '') as never,
+    entidad: (sp.entidad ?? '') as 'VARIANTE' | 'MATERIAL' | '',
+    q: sp.q ?? '',
+    desde: sp.desde ?? '',
+    hasta: sp.hasta ?? '',
+  };
 
   return (
     <PageShell
       title="Kardex"
       description="Movimientos de inventario por almacén — entradas, salidas, traslados, ajustes."
+      actions={<ExportarKardexButton filtros={filtrosExport} />}
     >
       <Card className="p-4">
         <form className="grid gap-3 sm:grid-cols-2 lg:grid-cols-6">
+          <label className="flex flex-col gap-1 sm:col-span-2 lg:col-span-3">
+            <span className="text-xs font-medium text-slate-500">Buscar producto / talla / material</span>
+            <input
+              type="text"
+              name="q"
+              defaultValue={sp.q ?? ''}
+              placeholder="Ej. Marina, PFM0002, AC0002, sermat…"
+              className="h-9 rounded-md border border-input bg-white px-2 text-sm"
+            />
+          </label>
           <label className="flex flex-col gap-1">
             <span className="text-xs font-medium text-slate-500">Almacén</span>
             <select
@@ -124,12 +145,13 @@ export default async function KardexPage({ searchParams }: { searchParams: Promi
   );
 }
 
-async function KardexTabla({ almacen, tipo, entidad, desde, hasta, pagina }: SP) {
+async function KardexTabla({ almacen, tipo, entidad, q, desde, hasta, pagina }: SP) {
   const p = Number(pagina ?? 1) || 1;
   const res = await listarKardex({
     almacen_id: (almacen ?? '') as string,
     tipo: (tipo ?? '') as never,
     entidad: (entidad ?? '') as 'VARIANTE' | 'MATERIAL' | '',
+    q: q ?? '',
     desde: desde ?? '',
     hasta: hasta ?? '',
     pagina: p,
@@ -213,7 +235,7 @@ async function KardexTabla({ almacen, tipo, entidad, desde, hasta, pagina }: SP)
       <Paginador
         pagina={p}
         totalPaginas={totalPaginas}
-        baseSp={{ almacen, tipo, entidad, desde, hasta }}
+        baseSp={{ almacen, tipo, entidad, q, desde, hasta }}
       />
     </div>
   );
@@ -321,6 +343,7 @@ function Paginador({
     if (baseSp.almacen) sp2.set('almacen', baseSp.almacen);
     if (baseSp.tipo) sp2.set('tipo', baseSp.tipo);
     if (baseSp.entidad) sp2.set('entidad', baseSp.entidad);
+    if (baseSp.q) sp2.set('q', baseSp.q);
     if (baseSp.desde) sp2.set('desde', baseSp.desde);
     if (baseSp.hasta) sp2.set('hasta', baseSp.hasta);
     sp2.set('pagina', String(p));
