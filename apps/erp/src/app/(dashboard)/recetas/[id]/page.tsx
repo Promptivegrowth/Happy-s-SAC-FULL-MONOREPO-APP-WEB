@@ -8,7 +8,6 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { History } from 'lucide-react';
 import { PageShell } from '@/components/page-shell';
 import { RecetaEditor } from './editor-client';
-import { RecetaPdfButton } from './receta-pdf-button';
 import { obtenerTallasCongeladas } from '@/server/actions/recetas';
 import { cargarEmpresaPDF } from '@/server/empresa-pdf-helper';
 import { formatTallaChip } from '@happy/lib';
@@ -123,7 +122,6 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
       description={`Versión ${receta.version} · ${prod.codigo}`}
       actions={
         <div className="flex items-center gap-2">
-          <RecetaPdfButton data={recetaPdfData} empresa={empresa} />
           <Link href={`/recetas/${id}/historial`}>
             <Button variant="outline" className="gap-1">
               <History className="h-4 w-4" /> Historial de versiones
@@ -175,6 +173,8 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
         cantidadOts={cantidadOts ?? 0}
         versionMateriales={(receta.version as string) ?? 'v1.0'}
         versionProcesos={((procesos ?? [])[0]?.version as string | undefined) ?? 'v1.0'}
+        empresaPdf={empresa}
+        pdfData={recetaPdfData}
       />
     </PageShell>
   );

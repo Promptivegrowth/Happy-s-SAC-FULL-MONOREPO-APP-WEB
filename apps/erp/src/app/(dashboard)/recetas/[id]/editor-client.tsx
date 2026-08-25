@@ -14,6 +14,9 @@ import { Plus, Trash2, Loader2, Search, X, Copy, Scissors, Clock, ListOrdered, G
 import { toast } from 'sonner';
 import { NuevaAreaInlineModal, type AreaCreada } from '@/components/forms/nueva-area-inline-modal';
 import { formatTallaChip } from '@happy/lib';
+import { RecetaPdfButton } from './receta-pdf-button';
+import type { RecetaPdfData } from './receta-pdf';
+import type { EmpresaPDFData } from '@/server/empresa-pdf-helper';
 import {
   DndContext,
   closestCenter,
@@ -128,6 +131,8 @@ export function RecetaEditor({
   cantidadOts = 0,
   versionMateriales = 'v1.0',
   versionProcesos = 'v1.0',
+  empresaPdf = null,
+  pdfData,
 }: {
   recetaId: string;
   productoId: string;
@@ -148,6 +153,9 @@ export function RecetaEditor({
   cantidadOts?: number;
   versionMateriales?: string;
   versionProcesos?: string;
+  /** Datos para el botón "Descargar PDF" (respeta el filtro de talla del editor). */
+  empresaPdf?: EmpresaPDFData | null;
+  pdfData?: RecetaPdfData;
 }) {
   const tallasCongSet = new Set(tallasCongeladas);
   const hayAlgunaCongelada = tallasCongSet.size > 0;
@@ -184,6 +192,8 @@ export function RecetaEditor({
             productos={productos}
             tallasCongeladas={tallasCongSet}
             esHistorica={esHistorica}
+            empresaPdf={empresaPdf}
+            pdfData={pdfData}
           />
         </TabsContent>
 
@@ -327,6 +337,8 @@ function BomEditor({
   productos,
   tallasCongeladas = new Set(),
   esHistorica = false,
+  empresaPdf = null,
+  pdfData,
 }: {
   recetaId: string;
   productoId: string;
@@ -338,6 +350,8 @@ function BomEditor({
   tallasCongeladas?: Set<string>;
   /** Si true, es histórica → todo bloqueado, sin botones de versionar. */
   esHistorica?: boolean;
+  empresaPdf?: EmpresaPDFData | null;
+  pdfData?: RecetaPdfData;
 }) {
   const todasCongeladas = esHistorica || tallasCongeladas.size >= TALLAS.length;
   // El editor "global" se considera bloqueado solo si TODAS las tallas están congeladas
@@ -508,6 +522,11 @@ function BomEditor({
             );
           })}
           <div className="ml-auto flex items-center gap-2">
+            {pdfData && (
+              // Respeta el filtro de talla: si hay una talla seleccionada, el
+              // PDF sale solo de esa talla (pedido cliente 2026-08-23).
+              <RecetaPdfButton data={pdfData} empresa={empresaPdf} tallaFiltro={filtroTalla} />
+            )}
             <Button
               variant="outline"
               size="sm"
