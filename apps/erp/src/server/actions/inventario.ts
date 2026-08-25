@@ -24,6 +24,7 @@ export async function ajustarStock(
   const r = await runAction(async () => {
     const data = ajustarSchema.parse(input);
     const { sb, userId } = await requireUser();
+    await requireGerenteAjuste(sb, userId);
 
     // Stock actual (puede no existir todavía → trato como 0)
     const { data: actualRow } = await sb
@@ -212,6 +213,19 @@ async function requireAlmacenMaterial(sb: Awaited<ReturnType<typeof requireUser>
   }
 }
 
+// AJUSTE de inventario = corrección manual de stock. Es sensible (cambia el
+// inventario sin una transacción real de compra/venta/producción), así que solo
+// gerencia puede hacerlo (pedido cliente 2026-08-24). Los movimientos reales de
+// logística/producción (traslado, ingreso por producción, compra recibida,
+// devolución, salida a servicio) siguen su propio flujo/rol.
+async function requireGerenteAjuste(sb: Awaited<ReturnType<typeof requireUser>>['sb'], userId: string) {
+  const { data: roles } = await sb.from('usuarios_roles').select('rol').eq('usuario_id', userId);
+  const esGte = (roles ?? []).some((r) => (r as { rol: string }).rol === 'gerente');
+  if (!esGte) {
+    throw new Error('El ajuste de inventario solo lo puede hacer gerencia (o con permiso de gerencia).');
+  }
+}
+
 /**
  * Registra un movimiento manual de stock de MATERIAL (entrada o salida). El
  * signo lo define el prefijo del tipo (ENTRADA_/SALIDA_). Restringido a gerente.
@@ -225,7 +239,12 @@ export async function registrarMovimientoMaterial(
   const r = await runAction(async () => {
     const data = movimientoMaterialSchema.parse(input);
     const { sb, userId } = await requireUser();
-    await requireAlmacenMaterial(sb, userId);
+    // Los AJUSTE (entrada/salida de ajuste) son corrección de inventario → solo
+    // gerencia. Los movimientos reales (compra, devolución, salida a producción/
+    // servicio, merma) los puede hacer el almacén.
+    const esAjuste = data.tipo === 'ENTRADA_AJUSTE' || data.tipo === 'SALIDA_AJUSTE';
+    if (esAjuste) await requireGerenteAjuste(sb, userId);
+    else await requireAlmacenMaterial(sb, userId);
 
     // Para salidas, no permitir dejar el stock negativo.
     if (data.tipo.startsWith('SALIDA')) {
@@ -275,7 +294,7 @@ export async function ajustarStockMaterial(
   const r = await runAction(async () => {
     const data = ajustarMaterialSchema.parse(input);
     const { sb, userId } = await requireUser();
-    await requireAlmacenMaterial(sb, userId);
+    await requireGerenteAjuste(sb, userId); // corregir cantidad = ajuste → solo gerencia
 
     const { data: actualRow } = await sb
       .from('stock_actual')

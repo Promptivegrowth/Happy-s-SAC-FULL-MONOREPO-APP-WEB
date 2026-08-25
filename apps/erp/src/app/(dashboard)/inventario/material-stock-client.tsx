@@ -30,11 +30,18 @@ export function MovimientoMaterialButton({
   almacenes,
   materiales,
   almacenPreseleccionado,
+  permitirAjuste = false,
 }: {
   almacenes: Almacen[];
   materiales: Material[];
   almacenPreseleccionado?: string;
+  /** Los tipos de AJUSTE solo se muestran a gerencia (pedido cliente 2026-08-24). */
+  permitirAjuste?: boolean;
 }) {
+  // Sin permiso de gerencia, se ocultan las opciones de ajuste (entrada/salida).
+  const tiposDisponibles = permitirAjuste
+    ? TIPOS_MATERIAL
+    : TIPOS_MATERIAL.filter((t) => t.value !== 'ENTRADA_AJUSTE' && t.value !== 'SALIDA_AJUSTE');
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [pending, start] = useTransition();
@@ -138,7 +145,7 @@ export function MovimientoMaterialButton({
               <Label htmlFor="mat-tipo">Tipo de movimiento</Label>
               <select id="mat-tipo" value={tipo} onChange={(e) => setTipo(e.target.value as typeof tipo)} disabled={pending}
                 className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm">
-                {TIPOS_MATERIAL.map((t) => <option key={t.value} value={t.value}>{t.label}</option>)}
+                {tiposDisponibles.map((t) => <option key={t.value} value={t.value}>{t.label}</option>)}
               </select>
             </div>
 

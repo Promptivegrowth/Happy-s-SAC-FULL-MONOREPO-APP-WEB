@@ -17,6 +17,7 @@ import { NuevoMovimientoButton } from './nuevo-movimiento-client';
 import { MovimientoMasivoButton } from './movimiento-masivo-client';
 import { MovimientoMaterialButton, AjustarMaterialButton } from './material-stock-client';
 import { ExportarInventarioButton } from './exportar-inventario-button';
+import { esGerente } from '@/server/actions/_helpers';
 
 export const metadata = { title: 'Inventario' };
 export const dynamic = 'force-dynamic';
@@ -26,6 +27,9 @@ type SP = { q?: string; almacen?: string; vista?: string };
 export default async function InventarioPage({ searchParams }: { searchParams: Promise<SP> }) {
   const sp = await searchParams;
   const sb = await createClient();
+  // Los AJUSTES de inventario solo los hace gerencia (pedido cliente 2026-08-24):
+  // ocultamos los botones de ajuste a quien no sea gerente.
+  const gerente = await esGerente();
 
   // Datos para filtros: almacenes activos + index de variantes para autocomplete
   const [{ data: almacenesData }, { data: variantesIndex }] = await Promise.all([
@@ -108,8 +112,8 @@ export default async function InventarioPage({ searchParams }: { searchParams: P
       actions={
         <div className="flex items-center gap-2">
           <ExportarInventarioButton almacenId={sp.almacen} />
-          <NuevoMovimientoButton almacenes={almacenes} variantes={variantesParaModal} />
-          <MovimientoMasivoButton almacenes={almacenes} variantes={variantesParaModal} />
+          {gerente && <NuevoMovimientoButton almacenes={almacenes} variantes={variantesParaModal} />}
+          {gerente && <MovimientoMasivoButton almacenes={almacenes} variantes={variantesParaModal} />}
           <Link href="/inventario/alertas">
             <Button variant="outline" className="gap-2">
               <AlertTriangle className="h-4 w-4 text-amber-500" /> Ver alertas
@@ -152,13 +156,13 @@ export default async function InventarioPage({ searchParams }: { searchParams: P
         if (almSel && (almSel as { tipo: string }).tipo === 'MATERIA_PRIMA') {
           return (
             <Suspense key={`mat-${tableKey}`} fallback={<TableSkeleton rows={10} cols={5} />}>
-              <MaterialStockTable almacenId={sp.almacen!} q={sp.q} vista={sp.vista} />
+              <MaterialStockTable almacenId={sp.almacen!} q={sp.q} vista={sp.vista} gerente={gerente} />
             </Suspense>
           );
         }
         return (
           <Suspense key={tableKey} fallback={<TableSkeleton rows={10} cols={5} />}>
-            <InventarioTable {...sp} />
+            <InventarioTable {...sp} gerente={gerente} />
           </Suspense>
         );
       })()}
@@ -177,7 +181,7 @@ type FilaMaterial = {
   stock_minimo: number | null;
 };
 
-async function MaterialStockTable({ almacenId, q, vista }: { almacenId: string; q?: string; vista?: string }) {
+async function MaterialStockTable({ almacenId, q, vista, gerente }: { almacenId: string; q?: string; vista?: string; gerente?: boolean }) {
   const sb = await createClient();
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const sbAny = sb as unknown as { from: (t: string) => any };
@@ -219,7 +223,7 @@ async function MaterialStockTable({ almacenId, q, vista }: { almacenId: string; 
       <CardContent className="p-0">
         <div className="flex items-center justify-between gap-2 border-b bg-slate-50/60 p-3">
           <p className="text-sm font-semibold text-corp-900">Materiales en {almacenNombre}</p>
-          <MovimientoMaterialButton almacenes={almacenParaModal} materiales={materiales} almacenPreseleccionado={almacenId} />
+          <MovimientoMaterialButton almacenes={almacenParaModal} materiales={materiales} almacenPreseleccionado={almacenId} permitirAjuste={gerente} />
         </div>
         {filas.length === 0 ? (
           <EmptyState
@@ -260,14 +264,16 @@ async function MaterialStockTable({ almacenId, q, vista }: { almacenId: string; 
                         <Link href={`/kardex/material/${f.material_id}`} title="Ver historial de movimientos">
                           <Button variant="ghost" size="sm" className="h-7 px-2"><History className="h-3.5 w-3.5 text-slate-500" /></Button>
                         </Link>
-                        <AjustarMaterialButton
-                          almacenId={almacenId}
-                          almacenNombre={almacenNombre}
-                          materialId={f.material_id}
-                          materialCodigo={f.material_codigo}
-                          materialNombre={f.material_nombre}
-                          cantidadActual={f.cantidad}
-                        />
+                        {gerente && (
+                          <AjustarMaterialButton
+                            almacenId={almacenId}
+                            almacenNombre={almacenNombre}
+                            materialId={f.material_id}
+                            materialCodigo={f.material_codigo}
+                            materialNombre={f.material_nombre}
+                            cantidadActual={f.cantidad}
+                          />
+                        )}
                       </div>
                     </TableCell>
                   </TableRow>
@@ -295,7 +301,7 @@ type Fila = {
   umbral: number;
 };
 
-async function InventarioTable({ q, almacen, vista }: SP) {
+async function InventarioTable({ q, almacen, vista, gerente }: SP & { gerente?: boolean }) {
   const sb = await createClient();
 
   // Estrategia (default = mostrar todo, incluso variantes en 0)
@@ -527,15 +533,17 @@ async function InventarioTable({ q, almacen, vista }: SP) {
                           <History className="h-3.5 w-3.5 text-slate-500" />
                         </Button>
                       </Link>
-                      <AjustarStockButton
-                        almacenId={f.almacen_id}
-                        almacenNombre={f.almacen_nombre}
-                        varianteId={f.variante_id}
-                        sku={f.sku}
-                        productoNombre={f.producto_nombre}
-                        talla={f.talla}
-                        cantidadActual={f.cantidad}
-                      />
+                      {gerente && (
+                        <AjustarStockButton
+                          almacenId={f.almacen_id}
+                          almacenNombre={f.almacen_nombre}
+                          varianteId={f.variante_id}
+                          sku={f.sku}
+                          productoNombre={f.producto_nombre}
+                          talla={f.talla}
+                          cantidadActual={f.cantidad}
+                        />
+                      )}
                     </div>
                   </TableCell>
                 </TableRow>
