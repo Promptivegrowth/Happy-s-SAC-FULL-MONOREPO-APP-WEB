@@ -55,6 +55,19 @@ export async function crearCorte(_prev: unknown, fd: FormData): Promise<ActionRe
       productoId = productos[0]!;
     }
 
+    // No se puede crear un corte si la OT ya no tiene SALDO pendiente por cortar
+    // (pedido cliente 2026-08-27): saldo = planificado − cortado por talla.
+    const { data: lineasPlan } = await sb
+      .from('ot_lineas')
+      .select('cantidad_planificada, cantidad_cortada')
+      .eq('ot_id', data.ot_id)
+      .eq('producto_id', productoId);
+    const saldoTotal = ((lineasPlan ?? []) as { cantidad_planificada: number | null; cantidad_cortada: number | null }[])
+      .reduce((s, l) => s + Math.max(0, Number(l.cantidad_planificada ?? 0) - Number(l.cantidad_cortada ?? 0)), 0);
+    if (saldoTotal <= 0) {
+      throw new Error('Esta OT ya está completamente cortada (sin saldo pendiente): no se puede crear otro corte.');
+    }
+
     const { data: nro } = await sb.rpc('next_correlativo', { p_clave: 'CORTE', p_padding: 6 });
     const { data: row, error } = await sb.from('ot_corte').insert({
       numero: `COR-${nro}`,

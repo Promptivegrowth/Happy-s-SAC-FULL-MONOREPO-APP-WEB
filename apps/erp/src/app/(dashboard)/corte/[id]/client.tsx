@@ -55,19 +55,21 @@ export function LineasCorteEditor({
   const teoNum = Number(cantTeorica) || 0;
   const difiereReal = realNum != null && realNum !== teoNum;
 
-  const tallasUsadas = useMemo(() => new Set(lineas.map((l) => l.talla)), [lineas]);
-  // Tallas disponibles: las que están en el plan de la OT y no fueron usadas
-  // todavía en este corte. Si la OT no tiene plan (caso raro), caemos a la
-  // lista completa de tallas para no bloquear.
-  const tallasDelPlan = Object.keys(planPorTalla);
-  const disponibles = (tallasDelPlan.length > 0 ? tallasDelPlan : (TALLAS as readonly string[]))
-    .filter((t) => !tallasUsadas.has(t));
-
   function saldoDe(t: string): number {
     const plan = planPorTalla[t] ?? 0;
     const otros = cortadoOtrosPorTalla[t] ?? 0;
     return Math.max(0, plan - otros);
   }
+
+  const tallasUsadas = useMemo(() => new Set(lineas.map((l) => l.talla)), [lineas]);
+  // Tallas disponibles: las del plan de la OT que NO fueron usadas en este corte
+  // y que aún tienen SALDO pendiente por cortar (pedido cliente 2026-08-27: si el
+  // saldo es 0 no se debe poder cortar más). Sin plan (caso raro) caemos a todas.
+  const tallasDelPlan = Object.keys(planPorTalla);
+  const disponibles = tallasDelPlan.length > 0
+    ? tallasDelPlan.filter((t) => !tallasUsadas.has(t) && saldoDe(t) > 0)
+    : (TALLAS as readonly string[]).filter((t) => !tallasUsadas.has(t));
+  const hayPlan = tallasDelPlan.length > 0;
 
   function abrir() {
     const primeraTalla = disponibles[0] ?? '';
@@ -84,6 +86,9 @@ export function LineasCorteEditor({
 
   function submit() {
     if (!tallaSel) return toast.error('Elija una talla');
+    if (hayPlan && saldoDe(tallaSel) <= 0) {
+      return toast.error(`La talla ${formatTallaChip(tallaSel)} ya no tiene saldo pendiente por cortar en el plan.`);
+    }
     if (!cantTeorica || Number(cantTeorica) <= 0) return toast.error('Ingrese la cantidad teórica');
     const fd = new FormData();
     fd.set('corte_id', corteId);
@@ -129,12 +134,15 @@ export function LineasCorteEditor({
                 ))}
               </select>
             </FormRow>
-            <FormRow label="Cant. teórica" required hint="Auto-completa con el saldo del plan">
+            <FormRow label="Cant. teórica" required hint="Es el saldo del plan — no se puede modificar">
               <Input
                 type="number"
                 min={1}
                 value={cantTeorica}
-                onChange={(e) => setCantTeorica(e.target.value)}
+                readOnly
+                disabled
+                className="bg-slate-50 text-slate-700 cursor-not-allowed"
+                title="La cantidad teórica es el saldo pendiente del plan y no se edita"
               />
             </FormRow>
             <FormRow label="Cant. real" hint="Cuánto efectivamente salió del corte (si ya lo sabe)">
@@ -180,7 +188,9 @@ export function LineasCorteEditor({
         <div className="px-4 pt-4">
           <Button variant="premium" size="sm" onClick={abrir} disabled={disponibles.length === 0}>
             <Plus className="h-4 w-4" />
-            {disponibles.length === 0 ? 'Todas las tallas del plan ya cargadas' : 'Agregar talla'}
+            {disponibles.length === 0
+              ? (hayPlan ? 'No hay saldo pendiente por cortar' : 'Todas las tallas ya cargadas')
+              : 'Agregar talla'}
           </Button>
         </div>
       )}
