@@ -104,6 +104,27 @@ export default async function Page() {
     };
   });
 
+  // Cobertura de OS existentes: qué tallas ya tienen OS (no anulada) por
+  // (ot_id, proceso). Sirve para NO ofrecer de nuevo tallas ya enviadas al mismo
+  // proceso (pedido cliente 2026-08-27).
+  const allOtIds = Array.from(new Set([...corteOtIds, ...ots.map((o) => o.id)].filter(Boolean)));
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const sbAny = sb as unknown as { from: (t: string) => any };
+  const coberturaOS: Record<string, string[]> = {};
+  if (allOtIds.length > 0) {
+    const { data: osExist } = await sbAny
+      .from('ordenes_servicio')
+      .select('ot_id, proceso, estado, ordenes_servicio_lineas(talla)')
+      .in('ot_id', allOtIds)
+      .neq('estado', 'ANULADA');
+    for (const os of (osExist ?? []) as { ot_id: string; proceso: string; ordenes_servicio_lineas: { talla: string }[] }[]) {
+      const key = `${os.ot_id}::${os.proceso}`;
+      const set = new Set(coberturaOS[key] ?? []);
+      for (const l of os.ordenes_servicio_lineas ?? []) set.add(l.talla);
+      coberturaOS[key] = [...set];
+    }
+  }
+
   return (
     <PageShell
       title="Nueva Orden de Servicio"
@@ -112,6 +133,7 @@ export default async function Page() {
       <NuevaOSForm
         cortes={cortes}
         ots={ots}
+        coberturaOS={coberturaOS}
         esGerente={gerente}
         talleres={(talleres ?? []).map((t) => ({
           id: t.id as string,

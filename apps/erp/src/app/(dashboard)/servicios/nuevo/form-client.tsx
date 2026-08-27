@@ -56,11 +56,14 @@ export function NuevaOSForm({
   ots,
   talleres,
   esGerente,
+  coberturaOS = {},
 }: {
   cortes: CorteOption[];
   ots: OT[];
   talleres: Taller[];
   esGerente: boolean;
+  /** Tallas ya cubiertas por una OS existente, por `${ot_id}::${proceso}`. */
+  coberturaOS?: Record<string, string[]>;
 }) {
   const router = useRouter();
   const [pending, start] = useTransition();
@@ -87,11 +90,17 @@ export function NuevaOSForm({
 
   const corteSel = useMemo(() => cortes.find((c) => c.id === corteId) ?? null, [cortes, corteId]);
   const otSel = useMemo(() => ots.find((o) => o.id === otId) ?? null, [ots, otId]);
+  // Tallas que YA tienen una OS de este mismo proceso (no se ofrecen de nuevo).
+  const tallasCubiertas = useMemo(
+    () => new Set(coberturaOS[`${otId}::${proceso}`] ?? []),
+    [coberturaOS, otId, proceso],
+  );
   // Líneas a usar para tallas seleccionables. Prioridad: corte (si está) sino OT.
+  // Se excluyen las tallas ya enviadas al mismo proceso en otra OS.
   const lineasFuente: { talla: string; cantidad: number }[] = useMemo(() => {
     if (corteSel) {
       return corteSel.lineas
-        .filter((l) => Number(l.cantidad_real ?? 0) > 0)
+        .filter((l) => Number(l.cantidad_real ?? 0) > 0 && !tallasCubiertas.has(l.talla))
         .map((l) => ({ talla: l.talla, cantidad: Number(l.cantidad_real ?? 0) }))
         .sort((a, b) => ordenTalla(a.talla) - ordenTalla(b.talla));
     }
@@ -99,11 +108,11 @@ export function NuevaOSForm({
       // Si la OT ya tiene cortado declarado, usamos cortada. Sino, planificada.
       return otSel.lineas
         .map((l) => ({ talla: l.talla, cantidad: l.cantidad_cortada > 0 ? l.cantidad_cortada : l.cantidad_planificada }))
-        .filter((l) => l.cantidad > 0)
+        .filter((l) => l.cantidad > 0 && !tallasCubiertas.has(l.talla))
         .sort((a, b) => ordenTalla(a.talla) - ordenTalla(b.talla));
     }
     return [];
-  }, [corteSel, otSel]);
+  }, [corteSel, otSel, tallasCubiertas]);
   const productoIdActual = corteSel?.producto_id ?? otSel?.producto_id ?? '';
   const productoNombreActual = corteSel?.producto_nombre ?? otSel?.producto_nombre ?? '';
 
@@ -227,13 +236,31 @@ export function NuevaOSForm({
     sublabel: t.codigo,
   }));
 
-  // Líneas para el preview (corte o, en su defecto, OT directa)
+  // Líneas para el preview (corte o, en su defecto, OT directa). Se excluyen las
+  // tallas ya cubiertas por otra OS del mismo proceso.
   const lineasPreview = (corteSel?.lineas ?? [])
-    .filter((l) => Number(l.cantidad_real ?? 0) > 0)
+    .filter((l) => Number(l.cantidad_real ?? 0) > 0 && !tallasCubiertas.has(l.talla))
     .sort((a, b) => ordenTalla(a.talla) - ordenTalla(b.talla));
   const totalPrendasSeleccionadas = lineasFuente
     .filter((l) => tallasSel.has(l.talla))
     .reduce((s, l) => s + l.cantidad, 0);
+  // ¿La fuente (corte/OT) tenía tallas pero TODAS ya están cubiertas por OS de
+  // este proceso? Entonces no queda nada por enviar (pedido cliente 2026-08-27).
+  const fuenteTotalTallas = corteSel
+    ? corteSel.lineas.filter((l) => Number(l.cantidad_real ?? 0) > 0).length
+    : otSel
+      ? otSel.lineas.filter((l) => (l.cantidad_cortada > 0 ? l.cantidad_cortada : l.cantidad_planificada) > 0).length
+      : 0;
+  const todasCubiertas = (corteSel != null || otSel != null) && fuenteTotalTallas > 0 && lineasFuente.length === 0;
+
+  // Al cambiar de proceso/OT, quitar de la selección las tallas ya cubiertas.
+  useEffect(() => {
+    if (tallasCubiertas.size === 0) return;
+    setTallasSel((prev) => {
+      const next = new Set([...prev].filter((t) => !tallasCubiertas.has(t)));
+      return next.size === prev.size ? prev : next;
+    });
+  }, [tallasCubiertas]);
 
   function submit(formEl: HTMLFormElement) {
     const fd = new FormData(formEl);
@@ -688,6 +715,12 @@ export function NuevaOSForm({
           <Textarea name="observaciones" rows={2} />
         </FormRow>
 
+        {todasCubiertas && (
+          <div className="rounded-md border border-amber-300 bg-amber-50 px-4 py-2 text-sm text-amber-800">
+            ⚠️ Todas las tallas de esta OT ya tienen una orden de servicio de <strong>{proceso === 'COSTURA' ? 'confección' : proceso.replace('_', ' ').toLowerCase()}</strong>. No hay tallas disponibles para enviar de nuevo a este proceso.
+          </div>
+        )}
+
         <div className="flex justify-end gap-2">
           <Button
             type="button"
@@ -697,7 +730,7 @@ export function NuevaOSForm({
           >
             Cancelar
           </Button>
-          <Button type="submit" variant="premium" size="lg" disabled={pending || !otId || !tallerId}>
+          <Button type="submit" variant="premium" size="lg" disabled={pending || !otId || !tallerId || todasCubiertas || tallasSel.size === 0}>
             {pending ? (
               <>
                 <Loader2 className="h-4 w-4 animate-spin" /> {requiereAprobacion ? 'Enviando…' : 'Creando…'}

@@ -4,29 +4,25 @@ import { Card } from '@happy/ui/card';
 import { ArrowLeft } from 'lucide-react';
 import { PageShell } from '@/components/page-shell';
 import { listarAlmacenes } from '@/server/actions/kardex';
-import {
-  listarVariantesParaTraslado,
-  listarMaterialesParaTraslado,
-} from '@/server/actions/traslados';
+import { listarVariantesParaTraslado } from '@/server/actions/traslados';
 import { NuevoTrasladoForm } from './form-client';
 
 export const metadata = { title: 'Nuevo traslado' };
 export const dynamic = 'force-dynamic';
 
 export default async function NuevoTrasladoPage() {
-  const [resAlms, resVars, resMats] = await Promise.all([
+  const [resAlms, resVars] = await Promise.all([
     listarAlmacenes(),
     listarVariantesParaTraslado(),
-    listarMaterialesParaTraslado(),
   ]);
   // Excluir MATERIA_PRIMA: los traslados entre almacenes son de productos
-  // terminados / materiales, no se hacen contra MP (ahí van telas al comprar,
-  // no se transfieren a tiendas). Cliente lo pidió explícito.
+  // terminados, no se hacen contra MP. Cliente lo pidió explícito.
   const almacenes = resAlms.ok
     ? (resAlms.data ?? []).filter((a) => a.tipo !== 'MATERIA_PRIMA')
     : [];
   const variantes = resVars.ok ? (resVars.data ?? []) : [];
-  const materiales = resMats.ok ? (resMats.data ?? []) : [];
+  // Los traslados NO manejan materiales (pedido cliente 2026-08-27).
+  const materiales: never[] = [];
 
   return (
     <PageShell
@@ -51,6 +47,7 @@ export default async function NuevoTrasladoPage() {
           almacenes={almacenes}
           variantes={variantes}
           materiales={materiales}
+          sinMateriales
         />
       )}
     </PageShell>

@@ -772,6 +772,29 @@ export async function crearOS(
     }
 
     const tallasFiltro = fd.getAll('tallas_seleccionadas').map((v) => String(v)).filter(Boolean);
+
+    // No se puede generar OS para tallas que ya tienen OS del MISMO proceso en
+    // la misma OT (pedido cliente 2026-08-27). Se valida contra OS no anuladas.
+    if (data.ot_id && tallasFiltro.length > 0) {
+      const { data: osExist } = await sbAny
+        .from('ordenes_servicio')
+        .select('proceso, estado, ordenes_servicio_lineas(talla)')
+        .eq('ot_id', data.ot_id)
+        .eq('proceso', data.proceso)
+        .neq('estado', 'ANULADA');
+      const cubiertas = new Set<string>();
+      for (const os of (osExist ?? []) as { ordenes_servicio_lineas: { talla: string }[] }[]) {
+        for (const l of os.ordenes_servicio_lineas ?? []) cubiertas.add(l.talla);
+      }
+      const repetidas = tallasFiltro.filter((t) => cubiertas.has(t));
+      if (repetidas.length > 0) {
+        throw new Error(
+          `Estas tallas ya tienen una OS de este proceso: ${repetidas.map((t) => formatTallaChip(t)).join(', ')}. ` +
+          'Quítalas de la selección — no se puede enviar dos veces la misma talla al mismo proceso.',
+        );
+      }
+    }
+
     return await insertarOSCore(sb, userId, data, tallasFiltro, precioServAutoritativo);
   });
   // Sin redirect server-side: el cliente navega después de mostrar el toast

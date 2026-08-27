@@ -42,10 +42,13 @@ export function NuevoTrasladoForm({
   almacenes,
   variantes,
   materiales,
+  sinMateriales = false,
 }: {
   almacenes: Almacen[];
   variantes: VarianteItem[];
   materiales: MaterialItem[];
+  /** Si true, los traslados NO manejan materiales (pedido cliente 2026-08-27). */
+  sinMateriales?: boolean;
 }) {
   const router = useRouter();
   const [pending, start] = useTransition();
@@ -709,10 +712,10 @@ export function NuevoTrasladoForm({
                               });
                             }}
                             className="h-8 w-full rounded-md border border-input bg-white px-2 text-xs"
-                            disabled={pending}
+                            disabled={pending || sinMateriales}
                           >
                             <option value="VARIANTE">Producto</option>
-                            <option value="MATERIAL">Material</option>
+                            {!sinMateriales && <option value="MATERIAL">Material</option>}
                           </select>
                         </TableCell>
                         <TableCell>
