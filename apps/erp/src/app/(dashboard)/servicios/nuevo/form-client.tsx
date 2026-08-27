@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState, useTransition } from 'react';
+import { useEffect, useMemo, useRef, useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
 import { Card } from '@happy/ui/card';
 import { Input } from '@happy/ui/input';
@@ -67,6 +67,7 @@ export function NuevaOSForm({
 }) {
   const router = useRouter();
   const [pending, start] = useTransition();
+  const formRef = useRef<HTMLFormElement>(null);
   const [corteId, setCorteId] = useState<string>('');
   const [otId, setOtId] = useState<string>('');
   const [tallerId, setTallerId] = useState<string>('');
@@ -262,7 +263,7 @@ export function NuevaOSForm({
     });
   }, [tallasCubiertas]);
 
-  function submit(formEl: HTMLFormElement) {
+  function submit(formEl: HTMLFormElement, opts?: { tallasOverride?: string[]; motivo?: string; forzarSolicitud?: boolean }) {
     const fd = new FormData(formEl);
     fd.set('corte_id', corteId);
     fd.set('ot_id', otId);
@@ -282,15 +283,17 @@ export function NuevaOSForm({
       fd.set('movilidad_por_unidad', '0');
       fd.set('campana_por_unidad', '0');
     }
-    // Mandar tallas seleccionadas siempre que haya alguna marcada. Se usan
-    // tanto para filtrar las líneas del corte como para poblar las líneas de
-    // la OS desde ot_lineas cuando no hay corte vinculado.
-    if (tallasSel.size > 0) {
+    // Tallas: normalmente las seleccionadas; en re-generación, las que se
+    // pasan por override (las ya cubiertas que se re-envían con autorización).
+    const tallasFinal = opts?.tallasOverride ?? [...tallasSel];
+    if (tallasFinal.length > 0) {
       fd.delete('tallas_seleccionadas');
-      for (const t of tallasSel) fd.append('tallas_seleccionadas', t);
+      for (const t of tallasFinal) fd.append('tallas_seleccionadas', t);
     }
+    if (opts?.motivo) fd.set('motivo_solicitud', opts.motivo);
+    const debeSolicitar = requiereAprobacion || Boolean(opts?.forzarSolicitud);
     start(async () => {
-      if (requiereAprobacion) {
+      if (debeSolicitar) {
         // No-gerente con campaña/movilidad especial: en vez de crear la OS, se
         // envía una solicitud a gerencia (pedido cliente 2026-08-17).
         const r = await solicitarAprobacionOS(null, fd);
@@ -317,6 +320,7 @@ export function NuevaOSForm({
   return (
     <Card className="max-w-3xl p-6">
       <form
+        ref={formRef}
         onSubmit={(e) => {
           e.preventDefault();
           submit(e.currentTarget);
@@ -716,8 +720,25 @@ export function NuevaOSForm({
         </FormRow>
 
         {todasCubiertas && (
-          <div className="rounded-md border border-amber-300 bg-amber-50 px-4 py-2 text-sm text-amber-800">
-            ⚠️ Todas las tallas de esta OT ya tienen una orden de servicio de <strong>{proceso === 'COSTURA' ? 'confección' : proceso.replace('_', ' ').toLowerCase()}</strong>. No hay tallas disponibles para enviar de nuevo a este proceso.
+          <div className="space-y-2 rounded-md border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+            <p>
+              ⚠️ Todas las tallas de esta OT ya tienen una orden de servicio de <strong>{proceso === 'COSTURA' ? 'confección' : proceso.replace('_', ' ').toLowerCase()}</strong>. No hay tallas disponibles para enviar de nuevo a este proceso.
+            </p>
+            <Button
+              type="button"
+              variant={esGerente ? 'premium' : 'outline'}
+              size="sm"
+              disabled={pending || !tallerId}
+              title={!tallerId ? 'Elige un taller primero' : undefined}
+              onClick={() => {
+                if (!formRef.current) return;
+                const tallas = [...tallasCubiertas];
+                const motivo = `Re-generar OS: todas las tallas ya tienen OS de ${proceso === 'COSTURA' ? 'confección' : proceso.replace('_', ' ').toLowerCase()} (${tallas.map((t) => formatTallaChip(t)).join(', ')}).`;
+                submit(formRef.current, { tallasOverride: tallas, motivo, forzarSolicitud: !esGerente });
+              }}
+            >
+              {esGerente ? 'Re-generar OS (autorizado por gerencia)' : 'Solicitar autorización a gerencia para re-generar'}
+            </Button>
           </div>
         )}
 

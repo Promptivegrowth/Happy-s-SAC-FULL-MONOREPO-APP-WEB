@@ -775,7 +775,9 @@ export async function crearOS(
 
     // No se puede generar OS para tallas que ya tienen OS del MISMO proceso en
     // la misma OT (pedido cliente 2026-08-27). Se valida contra OS no anuladas.
-    if (data.ot_id && tallasFiltro.length > 0) {
+    // Gerencia SÍ puede re-generar (autoriza en el acto o al aprobar una
+    // solicitud); por eso el candado solo aplica a no-gerentes.
+    if (data.ot_id && tallasFiltro.length > 0 && !esGteFlag) {
       const { data: osExist } = await sbAny
         .from('ordenes_servicio')
         .select('proceso, estado, ordenes_servicio_lineas(talla)')
