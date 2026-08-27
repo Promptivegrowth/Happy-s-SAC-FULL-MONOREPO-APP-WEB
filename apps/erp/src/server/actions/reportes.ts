@@ -956,6 +956,12 @@ export type StockValorizadoRow = {
   costo_unitario: number;
   valor_total: number;
   categoria: string;
+  /** Unidad de compra (materiales). */
+  unidad?: string;
+  /** Precio de venta público (variantes / PT). */
+  precio_venta?: number;
+  /** Valor a precio de venta = cantidad × precio_venta (variantes). */
+  valor_venta?: number;
 };
 
 export type ReporteStockValorizadoResult = {
@@ -1005,6 +1011,7 @@ export async function reporteStockValorizado(
           sku: string;
           talla: string;
           costo: number;
+          precio_venta: number;
           producto_nombre: string;
           categoria: string;
         }
@@ -1014,7 +1021,7 @@ export async function reporteStockValorizado(
         const { data: vs } = await sb
           .from('productos_variantes')
           .select(
-            'id, sku, talla, precio_costo_estandar, producto:producto_id(nombre, categoria:categoria_id(codigo))',
+            'id, sku, talla, precio_costo_estandar, precio_publico, producto:producto_id(nombre, categoria:categoria_id(codigo))',
           )
           .in('id', ids);
         for (const v of (vs ?? []) as {
@@ -1022,12 +1029,14 @@ export async function reporteStockValorizado(
           sku: string;
           talla: string;
           precio_costo_estandar: string | number | null;
+          precio_publico: string | number | null;
           producto: { nombre: string; categoria: { codigo: string } | null } | null;
         }[]) {
           varMap.set(v.id, {
             sku: v.sku,
             talla: v.talla,
             costo: Number(v.precio_costo_estandar ?? 0),
+            precio_venta: Number(v.precio_publico ?? 0),
             producto_nombre: v.producto?.nombre ?? '—',
             categoria: v.producto?.categoria?.codigo ?? '—',
           });
@@ -1052,6 +1061,8 @@ export async function reporteStockValorizado(
           costo_unitario: costo,
           valor_total: valor,
           categoria: v.categoria,
+          precio_venta: v.precio_venta,
+          valor_venta: Math.round(cant * v.precio_venta * 100) / 100,
         });
       }
     }
@@ -1078,13 +1089,13 @@ export async function reporteStockValorizado(
       const CHUNK = 500;
       const matMap = new Map<
         string,
-        { codigo: string; nombre: string; costo: number; categoria: string }
+        { codigo: string; nombre: string; costo: number; categoria: string; unidad: string }
       >();
       for (let i = 0; i < matIds.length; i += CHUNK) {
         const ids = matIds.slice(i, i + CHUNK);
         const { data: ms } = await sb
           .from('materiales')
-          .select('id, codigo, nombre, categoria, precio_unitario, factor_conversion')
+          .select('id, codigo, nombre, categoria, precio_unitario, factor_conversion, unidad_compra:unidades_medida!unidad_compra_id(codigo)')
           .in('id', ids);
         for (const m of (ms ?? []) as {
           id: string;
@@ -1093,6 +1104,7 @@ export async function reporteStockValorizado(
           categoria: string;
           precio_unitario: string | number | null;
           factor_conversion: string | number | null;
+          unidad_compra: { codigo: string } | null;
         }[]) {
           // Precio por unidad de consumo = precio_unitario / factor_conversion
           const precio = Number(m.precio_unitario ?? 0);
@@ -1102,6 +1114,7 @@ export async function reporteStockValorizado(
             nombre: m.nombre,
             costo: precio / factor,
             categoria: String(m.categoria),
+            unidad: m.unidad_compra?.codigo ?? '',
           });
         }
       }
@@ -1122,6 +1135,7 @@ export async function reporteStockValorizado(
           costo_unitario: m.costo,
           valor_total: valor,
           categoria: m.categoria,
+          unidad: m.unidad,
         });
       }
     }

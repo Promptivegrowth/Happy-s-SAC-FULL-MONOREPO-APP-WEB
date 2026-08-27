@@ -58,11 +58,14 @@ export async function exportarInventarioExcel(
     { header: 'Tipo', key: 'tipo', width: 12 },
     { header: 'Código / SKU', key: 'codigo', width: 16 },
     { header: 'Descripción', key: 'nombre', width: 40 },
-    { header: 'Detalle', key: 'detalle', width: 16 },
+    { header: 'Talla', key: 'detalle', width: 10 },
     { header: 'Categoría', key: 'categoria', width: 14 },
+    { header: 'Unidad compra', key: 'unidad', width: 14 },
     { header: 'Stock', key: 'cantidad', width: 12 },
     { header: 'Costo unit.', key: 'costo_unitario', width: 14 },
-    { header: 'Valor total', key: 'valor_total', width: 16 },
+    { header: 'Valor costo', key: 'valor_total', width: 16 },
+    { header: 'Precio venta', key: 'precio_venta', width: 14 },
+    { header: 'Valor venta', key: 'valor_venta', width: 16 },
   ];
 
   const agregarHoja = (nombre: string, filas: StockValorizadoRow[]) => {
@@ -101,23 +104,29 @@ export async function exportarInventarioExcel(
     );
     let idx = 5;
     for (const r of ordenadas) {
+      const esVar = r.tipo === 'VARIANTE';
       const row = ws.getRow(idx++);
       row.getCell(1).value = r.almacen;
-      row.getCell(2).value = r.tipo === 'VARIANTE' ? 'Producto' : 'Material';
+      row.getCell(2).value = esVar ? 'Producto' : 'Material';
       row.getCell(3).value = r.codigo;
       row.getCell(4).value = r.nombre;
-      row.getCell(5).value = r.detalle;
+      row.getCell(5).value = esVar ? (r.detalle || '') : ''; // talla (solo variantes)
       row.getCell(6).value = r.categoria;
-      row.getCell(7).value = Number(r.cantidad); row.getCell(7).numFmt = '#,##0.####';
-      row.getCell(8).value = Number(r.costo_unitario); row.getCell(8).numFmt = '"S/ "#,##0.00';
-      row.getCell(9).value = Number(r.valor_total); row.getCell(9).numFmt = '"S/ "#,##0.00';
+      row.getCell(7).value = esVar ? '' : (r.unidad ?? ''); // unidad de compra (solo materiales)
+      row.getCell(8).value = Number(r.cantidad); row.getCell(8).numFmt = '#,##0.####';
+      row.getCell(9).value = Number(r.costo_unitario); row.getCell(9).numFmt = '"S/ "#,##0.00';
+      row.getCell(10).value = Number(r.valor_total); row.getCell(10).numFmt = '"S/ "#,##0.00';
+      // Precio/valor de venta: solo productos terminados (variantes).
+      row.getCell(11).value = esVar ? Number(r.precio_venta ?? 0) : null; row.getCell(11).numFmt = '"S/ "#,##0.00';
+      row.getCell(12).value = esVar ? Number(r.valor_venta ?? 0) : null; row.getCell(12).numFmt = '"S/ "#,##0.00';
       if (idx % 2 === 0) row.eachCell((c) => { c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF8FAFC' } }; });
     }
     // Totales
     const totalRow = ws.getRow(idx);
     totalRow.getCell(4).value = 'TOTAL';
-    totalRow.getCell(7).value = ordenadas.reduce((s, r) => s + Number(r.cantidad || 0), 0); totalRow.getCell(7).numFmt = '#,##0.####';
-    totalRow.getCell(9).value = ordenadas.reduce((s, r) => s + Number(r.valor_total || 0), 0); totalRow.getCell(9).numFmt = '"S/ "#,##0.00';
+    totalRow.getCell(8).value = ordenadas.reduce((s, r) => s + Number(r.cantidad || 0), 0); totalRow.getCell(8).numFmt = '#,##0.####';
+    totalRow.getCell(10).value = ordenadas.reduce((s, r) => s + Number(r.valor_total || 0), 0); totalRow.getCell(10).numFmt = '"S/ "#,##0.00';
+    totalRow.getCell(12).value = ordenadas.reduce((s, r) => s + Number(r.valor_venta || 0), 0); totalRow.getCell(12).numFmt = '"S/ "#,##0.00';
     totalRow.font = { bold: true };
     ws.autoFilter = { from: { row: 4, column: 1 }, to: { row: 4, column: COLS.length } };
   };
