@@ -35,6 +35,8 @@ export type TransaccionRow = {
   metodos: string[];
   comprobante: { tipo: string; numero_completo: string } | null;
   estado: string;
+  /** Ruta del PDF guardado (bucket privado) para re-imprimir/descargar. */
+  comprobante_pdf_path: string | null;
 };
 
 // ----------------------------------------------------------------------------

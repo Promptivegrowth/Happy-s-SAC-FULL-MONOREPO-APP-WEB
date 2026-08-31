@@ -14,12 +14,14 @@ import { Card } from '@happy/ui/card';
 import { Button } from '@happy/ui/button';
 import { Badge } from '@happy/ui/badge';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@happy/ui/table';
-import { X, Loader2, History, Send, Clock, User, Users, Banknote, Receipt as ReceiptIcon } from 'lucide-react';
+import { X, Loader2, History, Send, Clock, User, Users, Banknote, Receipt as ReceiptIcon, FileText, Search } from 'lucide-react';
 import { formatPEN, formatDateTime } from '@happy/lib';
+import { toast } from 'sonner';
 import {
   obtenerHistorialSesion,
   obtenerSesionActiva,
   listarCierresParcialesSesion,
+  firmarUrlComprobantePos,
 } from '@/server/actions/caja';
 import type { TransaccionRow, SesionCajaDTO, BalanceCajaDTO } from '@/server/actions/caja-helpers';
 import { construirMensajeWhatsApp, abrirWhatsApp } from './whatsapp-helper';
@@ -35,9 +37,14 @@ type CierreParcial = {
 };
 
 export function HistorialModal({ onClose, empresaNombre }: { onClose: () => void; empresaNombre: string }) {
+  const hoyISO = new Date().toISOString().slice(0, 10);
   const [rows, setRows] = useState<TransaccionRow[]>([]);
   const [loading, setLoading] = useState(true);
-  const [alcance, setAlcance] = useState<'SESION' | 'DIA'>('SESION');
+  const [alcance, setAlcance] = useState<'SESION' | 'DIA' | 'RANGO'>('SESION');
+  const [desde, setDesde] = useState(hoyISO);
+  const [hasta, setHasta] = useState(hoyISO);
+  const [buscarTick, setBuscarTick] = useState(0);
+  const [pdfLoadingId, setPdfLoadingId] = useState<string | null>(null);
   const [sesion, setSesion] = useState<SesionCajaDTO | null>(null);
   const [balance, setBalance] = useState<BalanceCajaDTO | null>(null);
   const [cierresParciales, setCierresParciales] = useState<CierreParcial[]>([]);
@@ -55,14 +62,39 @@ export function HistorialModal({ onClose, empresaNombre }: { onClose: () => void
     setLoading(true);
     (async () => {
       try {
-        setRows(await obtenerHistorialSesion(alcance));
+        setRows(
+          await obtenerHistorialSesion(
+            alcance,
+            alcance === 'RANGO' ? { desde, hasta } : undefined,
+          ),
+        );
       } finally {
         setLoading(false);
       }
     })();
-  }, [alcance]);
+    // El fetch por RANGO se dispara con el botón "Buscar" (buscarTick), no al
+    // teclear las fechas.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [alcance, buscarTick]);
 
   const total = rows.reduce((s, r) => s + r.total, 0);
+
+  async function abrirPdf(r: TransaccionRow) {
+    if (!r.comprobante_pdf_path) return;
+    setPdfLoadingId(r.venta_id);
+    try {
+      const res = await firmarUrlComprobantePos(r.comprobante_pdf_path);
+      if (res.ok) {
+        window.open(res.url, '_blank', 'noopener,noreferrer');
+      } else {
+        toast.error(res.error);
+      }
+    } catch (e) {
+      toast.error((e as Error).message);
+    } finally {
+      setPdfLoadingId(null);
+    }
+  }
 
   function enviarWA(r: TransaccionRow) {
     if (!r.cliente_telefono) return;
@@ -85,7 +117,7 @@ export function HistorialModal({ onClose, empresaNombre }: { onClose: () => void
           <div className="flex items-center gap-2">
             <History className="h-5 w-5 text-happy-600" />
             <h2 className="font-display text-lg font-semibold text-corp-900">
-              {alcance === 'SESION' ? 'Historial de la sesión' : 'Ventas del día'}
+              {alcance === 'SESION' ? 'Historial de la sesión' : alcance === 'RANGO' ? 'Búsqueda por fecha' : 'Ventas del día'}
             </h2>
             <Badge variant="outline" className="ml-2 text-[10px]">
               {rows.length} transacc{rows.length === 1 ? 'ión' : 'iones'}
@@ -125,7 +157,48 @@ export function HistorialModal({ onClose, empresaNombre }: { onClose: () => void
           >
             Hoy completo (todas las sesiones de la caja)
           </button>
+          <button
+            type="button"
+            onClick={() => setAlcance('RANGO')}
+            className={`rounded-md px-3 py-1 text-xs font-medium transition ${
+              alcance === 'RANGO'
+                ? 'bg-white text-happy-700 shadow-sm ring-1 ring-slate-200'
+                : 'text-slate-500 hover:text-slate-700'
+            }`}
+          >
+            Buscar por fecha
+          </button>
         </div>
+
+        {/* Búsqueda por rango de fechas */}
+        {alcance === 'RANGO' && (
+          <div className="flex flex-wrap items-end gap-2 border-b border-slate-200 bg-slate-50/50 px-5 py-2.5">
+            <label className="flex flex-col text-[10px] font-medium text-slate-500">
+              Desde
+              <input
+                type="date"
+                value={desde}
+                max={hasta}
+                onChange={(e) => setDesde(e.target.value)}
+                className="mt-0.5 rounded-md border border-slate-300 px-2 py-1 text-xs text-corp-900"
+              />
+            </label>
+            <label className="flex flex-col text-[10px] font-medium text-slate-500">
+              Hasta
+              <input
+                type="date"
+                value={hasta}
+                min={desde}
+                max={hoyISO}
+                onChange={(e) => setHasta(e.target.value)}
+                className="mt-0.5 rounded-md border border-slate-300 px-2 py-1 text-xs text-corp-900"
+              />
+            </label>
+            <Button size="sm" onClick={() => setBuscarTick((n) => n + 1)} disabled={loading}>
+              <Search className="h-3.5 w-3.5" /> Buscar
+            </Button>
+          </div>
+        )}
 
         {/* Info de la sesión activa (apertura + cajero + caja + monto) */}
         {sesion && (
@@ -235,26 +308,32 @@ export function HistorialModal({ onClose, empresaNombre }: { onClose: () => void
           )}
           {!loading && rows.length === 0 && (
             <div className="py-10 text-center text-sm text-slate-500">
-              Todavía no hay transacciones en esta sesión.
+              {alcance === 'RANGO'
+                ? 'No hay ventas en el rango de fechas seleccionado.'
+                : alcance === 'DIA'
+                  ? 'No hay ventas registradas hoy en esta caja.'
+                  : 'Todavía no hay transacciones en esta sesión.'}
             </div>
           )}
           {!loading && rows.length > 0 && (
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>Hora</TableHead>
+                  <TableHead>{alcance === 'SESION' ? 'Hora' : 'Fecha'}</TableHead>
                   <TableHead>Comprobante</TableHead>
                   <TableHead>Cliente</TableHead>
                   <TableHead>Métodos</TableHead>
                   <TableHead className="text-right">Total</TableHead>
-                  <TableHead className="w-12"></TableHead>
+                  <TableHead className="w-24 text-right">Acciones</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {rows.map((r) => (
                   <TableRow key={r.venta_id} className={r.estado === 'ANULADA' ? 'opacity-50' : ''}>
                     <TableCell className="font-mono text-xs">
-                      {new Date(r.fecha).toLocaleTimeString('es-PE', { hour: '2-digit', minute: '2-digit' })}
+                      {alcance === 'SESION'
+                        ? new Date(r.fecha).toLocaleTimeString('es-PE', { hour: '2-digit', minute: '2-digit' })
+                        : formatDateTime(r.fecha)}
                     </TableCell>
                     <TableCell>
                       <div className="text-sm font-medium text-corp-900">
@@ -281,16 +360,33 @@ export function HistorialModal({ onClose, empresaNombre }: { onClose: () => void
                       {formatPEN(r.total)}
                     </TableCell>
                     <TableCell>
-                      {r.cliente_telefono && r.estado !== 'ANULADA' && (
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => enviarWA(r)}
-                          title={`Enviar a ${r.cliente_telefono}`}
-                        >
-                          <Send className="h-3.5 w-3.5 text-emerald-600" />
-                        </Button>
-                      )}
+                      <div className="flex items-center justify-end gap-1">
+                        {r.comprobante_pdf_path && (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => abrirPdf(r)}
+                            disabled={pdfLoadingId === r.venta_id}
+                            title="Ver / imprimir / descargar PDF"
+                          >
+                            {pdfLoadingId === r.venta_id ? (
+                              <Loader2 className="h-3.5 w-3.5 animate-spin text-happy-600" />
+                            ) : (
+                              <FileText className="h-3.5 w-3.5 text-happy-600" />
+                            )}
+                          </Button>
+                        )}
+                        {r.cliente_telefono && r.estado !== 'ANULADA' && (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => enviarWA(r)}
+                            title={`Enviar a ${r.cliente_telefono}`}
+                          >
+                            <Send className="h-3.5 w-3.5 text-emerald-600" />
+                          </Button>
+                        )}
+                      </div>
                     </TableCell>
                   </TableRow>
                 ))}

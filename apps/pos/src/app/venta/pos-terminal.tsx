@@ -22,7 +22,7 @@ function coincideBusqueda(q: string, hay: string): boolean {
 // del carrito ahora abre CotizacionModal en vez de wa.me directo. Ver
 // mensaje formateado inline en el modal.
 import { registrarVenta } from '@/server/actions/venta';
-import { emitirComprobante, obtenerSesionActiva } from '@/server/actions/caja';
+import { emitirComprobante, guardarPdfComprobante, obtenerSesionActiva } from '@/server/actions/caja';
 import { aplicarAdelantoAVenta, obtenerSaldoCliente } from '@/server/actions/adelantos';
 import { cerrarSesionUsuario } from '@/server/actions/auth';
 import { buscarClientesPOS, crearClienteRapidoPOS, type ClienteRow } from '@/server/actions/clientes';
@@ -834,6 +834,28 @@ export function PosTerminal({
         const filename = `${payload.tipo.toLowerCase()}_${numeroComprobante.replace(/[^A-Za-z0-9_-]/g, '_')}.pdf`;
         abrirPDF(blob, filename);
 
+        // 3.5) Guardar el PDF dentro del sistema (bucket privado) para poder
+        //      consultarlo desde cualquier PC vía el ERP. Best-effort: la venta
+        //      y el comprobante ya quedaron registrados aunque esto falle.
+        try {
+          const base64 = await new Promise<string>((resolve, reject) => {
+            const fr = new FileReader();
+            fr.onload = () => resolve((fr.result as string).split(',')[1] ?? '');
+            fr.onerror = () => reject(new Error('No se pudo leer el PDF'));
+            fr.readAsDataURL(blob);
+          });
+          if (base64) {
+            void guardarPdfComprobante({
+              venta_id: r.venta_id,
+              comprobante_id: emitido.id || null,
+              filename,
+              base64,
+            });
+          }
+        } catch {
+          /* no bloquear la venta si falla el guardado del PDF */
+        }
+
         // 4) Modal WhatsApp post-pago (2026-07-12) — cliente pidió que al
         //    dar clic PAGAR se muestre una ventana para ingresar el número
         //    de WhatsApp del comprador y enviarle el comprobante con el
@@ -1485,7 +1507,7 @@ export function PosTerminal({
               )}
               {carrito.length > 0 && (
                 <span className="rounded-full bg-happy-100 px-2 py-0.5 text-[10px] font-bold text-happy-700">
-                  {carrito.length} {carrito.length === 1 ? 'ítem' : 'ítems'} · {formatPEN(total)}
+                  {totalItemsCarrito} {totalItemsCarrito === 1 ? 'disfraz' : 'disfraces'} · {carrito.length} {carrito.length === 1 ? 'línea' : 'líneas'} · {formatPEN(total)}
                 </span>
               )}
             </div>

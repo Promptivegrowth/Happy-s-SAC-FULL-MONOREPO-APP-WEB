@@ -7,6 +7,7 @@ import { Button } from '@happy/ui/button';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@happy/ui/table';
 import { PageShell } from '@/components/page-shell';
 import { EmitirSunatButton } from './client';
+import { VerComprobanteButton } from '../../ventas/ver-comprobante-button';
 import { formatDateTime, formatPEN } from '@happy/lib';
 import { Download } from 'lucide-react';
 
@@ -31,6 +32,18 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
   ]);
   if (!comp) notFound();
 
+  // PDF guardado dentro del sistema (bucket privado) para acceso desde cualquier
+  // PC. Se guarda por venta (ver POS `guardarPdfComprobante`).
+  let pdfInternoPath: string | null = null;
+  if (comp.venta_id) {
+    const { data: venta } = await (sb as unknown as { from: (t: string) => any })
+      .from('ventas')
+      .select('comprobante_pdf_path')
+      .eq('id', comp.venta_id)
+      .single();
+    pdfInternoPath = venta?.comprobante_pdf_path ?? null;
+  }
+
   return (
     <PageShell
       title={comp.numero_completo ?? `${comp.serie}-${comp.numero}`}
@@ -41,9 +54,10 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
       }
       actions={
         <div className="flex gap-2">
+          {pdfInternoPath && <VerComprobanteButton path={pdfInternoPath} label="Descargar PDF" size="default" />}
           {comp.pdf_url && (
             <a href={comp.pdf_url} target="_blank" rel="noopener noreferrer">
-              <Button variant="outline"><Download className="h-4 w-4" /> PDF</Button>
+              <Button variant="outline"><Download className="h-4 w-4" /> PDF SUNAT</Button>
             </a>
           )}
           {comp.estado !== 'ACEPTADO' && comp.estado !== 'ANULADO' && (

@@ -296,7 +296,8 @@ async function calcularBalanceInterno(
 // no deben exportar tipos, rompe el bundle del cliente)
 
 export async function obtenerHistorialSesion(
-  alcance: 'SESION' | 'DIA' = 'SESION',
+  alcance: 'SESION' | 'DIA' | 'RANGO' = 'SESION',
+  rango?: { desde?: string | null; hasta?: string | null },
 ): Promise<import('./caja-helpers').TransaccionRow[]> {
   const sb = await createClient();
   const { data: { user } } = await sb.auth.getUser();
@@ -309,11 +310,15 @@ export async function obtenerHistorialSesion(
     return [];
   }
 
-  // Filtro: por sesión actual (default) o por día completo en esta caja
-  let ventasQ = sb
+  // `comprobante_pdf_path` es columna nueva (mig 85) aún no reflejada en los
+  // tipos generados → cast puntual para evitar el SelectQueryError.
+  const sbF = sb as unknown as { from: (t: string) => any };
+
+  // Filtro: por sesión actual (default), día completo o rango de fechas
+  let ventasQ = sbF
     .from('ventas')
     .select(
-      'id, numero, fecha, total, estado, nombre_cliente_rapido, documento_cliente, ' +
+      'id, numero, fecha, total, estado, nombre_cliente_rapido, documento_cliente, comprobante_pdf_path, ' +
         'cliente:cliente_id(razon_social, nombres, apellido_paterno, apellido_materno, telefono)',
     )
     .order('fecha', { ascending: false })
@@ -328,6 +333,14 @@ export async function obtenerHistorialSesion(
       .maybeSingle();
     if (!sesion) return [];
     ventasQ = ventasQ.eq('caja_sesion_id', sesion.id);
+  } else if (alcance === 'RANGO') {
+    // Búsqueda por fecha: rango [desde, hasta] (inclusive) en esta caja.
+    const hoy = new Date();
+    const baseDesde = rango?.desde || hoy.toISOString().slice(0, 10);
+    const baseHasta = rango?.hasta || baseDesde;
+    const inicio = new Date(`${baseDesde}T00:00:00`).toISOString();
+    const fin = new Date(`${baseHasta}T23:59:59`).toISOString();
+    ventasQ = ventasQ.eq('caja_id', caja.id).gte('fecha', inicio).lte('fecha', fin);
   } else {
     // Día completo: hoy 00:00 a 23:59:59, todas las ventas de esta caja
     const hoy = new Date();
@@ -349,6 +362,7 @@ export async function obtenerHistorialSesion(
     estado: string;
     nombre_cliente_rapido: string | null;
     documento_cliente: string | null;
+    comprobante_pdf_path: string | null;
     cliente: {
       razon_social: string | null;
       nombres: string | null;
@@ -406,8 +420,32 @@ export async function obtenerHistorialSesion(
       metodos: Array.from(new Set(pagosPorVenta.get(v.id) ?? [])),
       comprobante: compPorVenta.get(v.id) ?? null,
       estado: v.estado,
+      comprobante_pdf_path: v.comprobante_pdf_path ?? null,
     };
   });
+}
+
+// ============================================================================
+// URL FIRMADA DEL PDF DEL COMPROBANTE (para re-imprimir/descargar en el POS)
+// ============================================================================
+
+export async function firmarUrlComprobantePos(
+  path: string,
+): Promise<{ ok: true; url: string } | { ok: false; error: string }> {
+  try {
+    if (!path) return { ok: false, error: 'Sin comprobante guardado' };
+    const sb = await createClient();
+    await requireUser(sb);
+    const { data, error } = await sb.storage
+      .from('comprobantes')
+      .createSignedUrl(path, 60 * 30);
+    if (error || !data?.signedUrl) {
+      return { ok: false, error: error?.message ?? 'No se pudo generar el enlace' };
+    }
+    return { ok: true, url: data.signedUrl };
+  } catch (e) {
+    return { ok: false, error: (e as Error).message };
+  }
 }
 
 const cerrarSchema = z.object({
@@ -1153,6 +1191,57 @@ export async function emitirComprobante(input: z.infer<typeof emitirSchema>): Pr
   // user no se usa más, pero requerirlo asegura la sesión
   void user;
   return { id: comprobanteId, numero_completo: numeroCompleto, pdf_data: pdfData };
+}
+
+// ============================================================================
+// GUARDAR PDF DEL COMPROBANTE (accesible desde cualquier PC)
+// ============================================================================
+//
+// El PDF se genera en el navegador del POS (jsPDF) y hasta ahora sólo se
+// descargaba en el disco local del cajero. Pedido cliente 2026-08-30: que los
+// comprobantes (notas, boletas, facturas) queden guardados dentro del sistema
+// para consultarlos desde cualquier PC. Aquí subimos el PDF al bucket privado
+// `comprobantes` y guardamos su ruta en la venta; el ERP genera una URL firmada
+// para verlo/descargarlo. Es best-effort: si falla, la venta ya está registrada.
+
+const guardarPdfSchema = z.object({
+  venta_id: z.string().uuid(),
+  comprobante_id: z.string().uuid().nullable().optional(),
+  filename: z.string().min(1).max(120),
+  base64: z.string().min(1),
+});
+
+export async function guardarPdfComprobante(
+  input: z.infer<typeof guardarPdfSchema>,
+): Promise<{ ok: true; path: string } | { ok: false; error: string }> {
+  try {
+    const data = guardarPdfSchema.parse(input);
+    const sb = await createClient();
+    await requireUser(sb);
+
+    const buf = Buffer.from(data.base64, 'base64');
+    if (buf.length === 0) return { ok: false, error: 'PDF vacío' };
+    if (buf.length > 5 * 1024 * 1024) return { ok: false, error: 'PDF excede 5MB' };
+
+    const safeName = data.filename.replace(/[^a-z0-9._-]/gi, '_').slice(0, 120);
+    const path = `ventas/${data.venta_id}/${safeName}`;
+
+    const { error: upErr } = await sb.storage
+      .from('comprobantes')
+      .upload(path, buf, { contentType: 'application/pdf', upsert: true });
+    if (upErr) return { ok: false, error: upErr.message };
+
+    const sbAny = sb as unknown as { from: (t: string) => any };
+    await sbAny.from('ventas').update({ comprobante_pdf_path: path }).eq('id', data.venta_id);
+    // Nota: `comprobantes.pdf_url` se reserva para la URL SUNAT/PSE real (href
+    // directo). El acceso a este PDF interno se resuelve por `venta.comprobante_pdf_path`
+    // con URL firmada (bucket privado).
+    void data.comprobante_id;
+
+    return { ok: true, path };
+  } catch (e) {
+    return { ok: false, error: (e as Error).message };
+  }
 }
 
 // ============================================================================

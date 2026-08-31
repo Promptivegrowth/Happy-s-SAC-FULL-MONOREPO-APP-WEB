@@ -4,15 +4,21 @@ import { Card, CardContent } from '@happy/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@happy/ui/table';
 import { PageShell } from '@/components/page-shell';
 import { formatDateTime, formatPEN } from '@happy/lib';
+import { VerComprobanteButton } from './ver-comprobante-button';
 
 export const metadata = { title: 'Ventas' };
 export const dynamic = 'force-dynamic';
 
 export default async function VentasPage() {
   const sb = await createClient();
-  const { data } = await sb.from('ventas')
-    .select('id, numero, canal, fecha, total, estado, almacenes(nombre), clientes(razon_social, nombres, apellido_paterno)')
-    .order('fecha', { ascending: false }).limit(200);
+  // `comprobante_pdf_path` es columna nueva (mig 85) aún no reflejada en los
+  // tipos generados → cast puntual para evitar el SelectQueryError.
+  const sbAny = sb as unknown as { from: (t: string) => any };
+  const { data } = await sbAny.from('ventas')
+    .select('id, numero, canal, fecha, total, estado, comprobante_pdf_path, almacenes(nombre), clientes(razon_social, nombres, apellido_paterno)')
+    .order('fecha', { ascending: false }).limit(200) as {
+      data: Array<{ id: string; numero: string; canal: string; fecha: string; total: number; estado: string; comprobante_pdf_path: string | null }> | null;
+    };
 
   return (
     <PageShell
@@ -26,9 +32,10 @@ export default async function VentasPage() {
               <TableHead>N°</TableHead><TableHead>Fecha</TableHead><TableHead>Canal</TableHead>
               <TableHead>Tienda/Almacén</TableHead><TableHead>Cliente</TableHead>
               <TableHead className="text-right">Total</TableHead><TableHead>Estado</TableHead>
+              <TableHead className="text-right">Comprobante</TableHead>
             </TableRow></TableHeader>
             <TableBody>
-              {(data ?? []).length === 0 && <TableRow><TableCell colSpan={7} className="py-10 text-center text-sm text-slate-500">Sin ventas registradas.</TableCell></TableRow>}
+              {(data ?? []).length === 0 && <TableRow><TableCell colSpan={8} className="py-10 text-center text-sm text-slate-500">Sin ventas registradas.</TableCell></TableRow>}
               {data?.map((v) => {
                 const a = (v as unknown as { almacenes?: { nombre: string } }).almacenes;
                 const c = (v as unknown as { clientes?: { razon_social?: string; nombres?: string; apellido_paterno?: string } }).clientes;
@@ -42,6 +49,9 @@ export default async function VentasPage() {
                     <TableCell className="text-sm">{cliente}</TableCell>
                     <TableCell className="text-right font-medium">{formatPEN(Number(v.total))}</TableCell>
                     <TableCell><Badge variant={v.estado === 'COMPLETADA' ? 'success' : v.estado === 'ANULADA' ? 'destructive' : 'warning'}>{v.estado}</Badge></TableCell>
+                    <TableCell className="text-right">
+                      <VerComprobanteButton path={(v as unknown as { comprobante_pdf_path?: string | null }).comprobante_pdf_path} />
+                    </TableCell>
                   </TableRow>
                 );
               })}
