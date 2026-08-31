@@ -22,9 +22,12 @@ import {
   obtenerSesionActiva,
   listarCierresParcialesSesion,
   firmarUrlComprobantePos,
+  obtenerPdfDataVenta,
+  guardarPdfComprobante,
 } from '@/server/actions/caja';
 import type { TransaccionRow, SesionCajaDTO, BalanceCajaDTO } from '@/server/actions/caja-helpers';
 import { construirMensajeWhatsApp, abrirWhatsApp } from './whatsapp-helper';
+import { generarTicket } from './comprobante-pdf';
 
 type CierreParcial = {
   id: string;
@@ -80,14 +83,50 @@ export function HistorialModal({ onClose, empresaNombre }: { onClose: () => void
   const total = rows.reduce((s, r) => s + r.total, 0);
 
   async function abrirPdf(r: TransaccionRow) {
-    if (!r.comprobante_pdf_path) return;
     setPdfLoadingId(r.venta_id);
     try {
-      const res = await firmarUrlComprobantePos(r.comprobante_pdf_path);
-      if (res.ok) {
-        window.open(res.url, '_blank', 'noopener,noreferrer');
-      } else {
-        toast.error(res.error);
+      // 1) Si ya está guardado en el sistema → URL firmada directa.
+      if (r.comprobante_pdf_path) {
+        const res = await firmarUrlComprobantePos(r.comprobante_pdf_path);
+        if (res.ok) window.open(res.url, '_blank', 'noopener,noreferrer');
+        else toast.error(res.error);
+        return;
+      }
+
+      // 2) Retroactivo: reconstruir el PDF desde la BD, abrirlo y cachearlo
+      //    para que también quede accesible desde el ERP a futuro.
+      const data = await obtenerPdfDataVenta(r.venta_id);
+      if (!data.ok) {
+        toast.error(data.error);
+        return;
+      }
+      const blob = await generarTicket(data.pdf_data);
+      const url = URL.createObjectURL(blob);
+      window.open(url, '_blank', 'noopener,noreferrer');
+      setTimeout(() => URL.revokeObjectURL(url), 60_000);
+
+      // Cachear (best-effort): subir el PDF y marcar la fila como guardada.
+      try {
+        const base64 = await new Promise<string>((resolve, reject) => {
+          const fr = new FileReader();
+          fr.onload = () => resolve((fr.result as string).split(',')[1] ?? '');
+          fr.onerror = () => reject(new Error('No se pudo leer el PDF'));
+          fr.readAsDataURL(blob);
+        });
+        const filename = `${data.tipo.toLowerCase()}_${data.numero.replace(/[^A-Za-z0-9_-]/g, '_')}.pdf`;
+        const guardado = await guardarPdfComprobante({
+          venta_id: r.venta_id,
+          comprobante_id: null,
+          filename,
+          base64,
+        });
+        if (guardado.ok) {
+          setRows((prev) =>
+            prev.map((x) => (x.venta_id === r.venta_id ? { ...x, comprobante_pdf_path: guardado.path } : x)),
+          );
+        }
+      } catch {
+        /* si el cacheo falla, el PDF igual se abrió */
       }
     } catch (e) {
       toast.error((e as Error).message);
@@ -361,21 +400,19 @@ export function HistorialModal({ onClose, empresaNombre }: { onClose: () => void
                     </TableCell>
                     <TableCell>
                       <div className="flex items-center justify-end gap-1">
-                        {r.comprobante_pdf_path && (
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => abrirPdf(r)}
-                            disabled={pdfLoadingId === r.venta_id}
-                            title="Ver / imprimir / descargar PDF"
-                          >
-                            {pdfLoadingId === r.venta_id ? (
-                              <Loader2 className="h-3.5 w-3.5 animate-spin text-happy-600" />
-                            ) : (
-                              <FileText className="h-3.5 w-3.5 text-happy-600" />
-                            )}
-                          </Button>
-                        )}
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => abrirPdf(r)}
+                          disabled={pdfLoadingId === r.venta_id}
+                          title={r.comprobante_pdf_path ? 'Ver / imprimir / descargar PDF' : 'Generar PDF (imprimir / descargar)'}
+                        >
+                          {pdfLoadingId === r.venta_id ? (
+                            <Loader2 className="h-3.5 w-3.5 animate-spin text-happy-600" />
+                          ) : (
+                            <FileText className="h-3.5 w-3.5 text-happy-600" />
+                          )}
+                        </Button>
                         {r.cliente_telefono && r.estado !== 'ANULADA' && (
                           <Button
                             variant="ghost"

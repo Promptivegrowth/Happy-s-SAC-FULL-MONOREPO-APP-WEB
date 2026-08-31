@@ -448,6 +448,152 @@ export async function firmarUrlComprobantePos(
   }
 }
 
+// ============================================================================
+// RECONSTRUIR pdf_data DE UNA VENTA YA EMITIDA (regeneración retroactiva)
+// ============================================================================
+//
+// Para las ventas anteriores al archivado automático (o cuya subida falló) el
+// PDF no está guardado. Como TODOS los datos están en la BD, reconstruimos el
+// `pdf_data` sin emitir nada nuevo, para regenerar el PDF en el cliente y luego
+// cachearlo con `guardarPdfComprobante`. Pedido cliente 2026-08-30.
+
+export async function obtenerPdfDataVenta(
+  venta_id: string,
+): Promise<
+  | { ok: true; tipo: import('./caja-helpers').TipoComprobantePOS; numero: string; pdf_data: ComprobantePDFData }
+  | { ok: false; error: string }
+> {
+  try {
+    const sb = await createClient();
+    await requireUser(sb);
+
+    const { data: venta, error: errV } = await sb
+      .from('ventas')
+      .select(
+        'id, numero, fecha, sub_total, igv, total, nombre_cliente_rapido, documento_cliente, tipo_documento_cliente, cliente_id, vendedor_usuario_id',
+      )
+      .eq('id', venta_id)
+      .single();
+    if (errV || !venta) return { ok: false, error: 'Venta no encontrada' };
+
+    // Comprobante fiscal (boleta/factura). Si no hay → NOTA_VENTA.
+    const { data: comp } = await sb
+      .from('comprobantes')
+      .select('tipo, numero_completo, fecha_emision, razon_social_cliente, numero_documento_cliente, tipo_documento_cliente, direccion_cliente')
+      .eq('venta_id', venta_id)
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    let vendedorNombre = 'Vendedor';
+    if (venta.vendedor_usuario_id) {
+      const { data: p } = await sb
+        .from('perfiles')
+        .select('nombre_completo')
+        .eq('id', venta.vendedor_usuario_id)
+        .maybeSingle();
+      if (p?.nombre_completo) vendedorNombre = p.nombre_completo;
+    }
+
+    const { data: lineas } = await sb
+      .from('ventas_lineas')
+      .select('cantidad, precio_unitario, descuento_monto, variantes:variante_id ( sku, talla, productos:producto_id ( nombre, codigo ) )')
+      .eq('venta_id', venta_id);
+
+    const { data: pagosVenta } = await sb
+      .from('ventas_pagos')
+      .select('metodo, monto')
+      .eq('venta_id', venta_id);
+
+    const { data: empresaRaw } = await sb
+      .from('empresa')
+      .select('razon_social, nombre_comercial, ruc, direccion_fiscal, telefono, email, logo_url, igv_porcentaje')
+      .maybeSingle();
+
+    // Cliente snapshot (del comprobante si existe; si no, de la venta rápida)
+    let clienteNombre = comp?.razon_social_cliente ?? venta.nombre_cliente_rapido ?? null;
+    let clienteDoc = comp?.numero_documento_cliente ?? venta.documento_cliente ?? null;
+    let clienteTipoDoc = comp?.tipo_documento_cliente ?? venta.tipo_documento_cliente ?? null;
+    const clienteDir = comp?.direccion_cliente ?? null;
+    if (!clienteNombre && venta.cliente_id) {
+      const { data: cli } = await sb
+        .from('clientes')
+        .select('razon_social, nombres, apellido_paterno, apellido_materno, numero_documento, tipo_documento')
+        .eq('id', venta.cliente_id)
+        .maybeSingle();
+      if (cli) {
+        clienteNombre =
+          cli.razon_social ||
+          [cli.nombres, cli.apellido_paterno, cli.apellido_materno].filter(Boolean).join(' ').trim() ||
+          null;
+        clienteDoc = clienteDoc ?? cli.numero_documento ?? null;
+        clienteTipoDoc = clienteTipoDoc ?? cli.tipo_documento ?? null;
+      }
+    }
+
+    type MaybeOne<T> = T | T[] | null;
+    const pickOne = <T,>(v: MaybeOne<T>): T | null => (Array.isArray(v) ? v[0] ?? null : v ?? null);
+    type LineaRaw = {
+      cantidad: number; precio_unitario: number; descuento_monto: number | null;
+      variantes: MaybeOne<{ sku: string; talla: string; productos: MaybeOne<{ nombre: string; codigo: string }> }>;
+    };
+    const items = ((lineas ?? []) as unknown as LineaRaw[]).map((l) => {
+      const variante = pickOne(l.variantes);
+      const producto = variante ? pickOne(variante.productos) : null;
+      const desc = Number(l.descuento_monto ?? 0);
+      return {
+        descripcion: producto?.nombre
+          ? `${producto.nombre} (${formatTallaChip(variante?.talla)})`
+          : variante?.sku ?? 'Item',
+        cantidad: l.cantidad,
+        precio_unitario: Number(l.precio_unitario),
+        sub_total: l.cantidad * Number(l.precio_unitario) - desc,
+      };
+    });
+
+    const igvPorc = Number(empresaRaw?.igv_porcentaje ?? 18);
+    const tipo = (comp?.tipo ?? 'NOTA_VENTA') as import('./caja-helpers').TipoComprobantePOS;
+    const numero = comp?.numero_completo ?? venta.numero;
+
+    const pdf_data: ComprobantePDFData = {
+      empresa: {
+        razon_social: empresaRaw?.razon_social ?? 'HAPPY SAC',
+        nombre_comercial: empresaRaw?.nombre_comercial ?? null,
+        ruc: empresaRaw?.ruc ?? '',
+        direccion_fiscal: empresaRaw?.direccion_fiscal ?? null,
+        telefono: empresaRaw?.telefono ?? null,
+        email: empresaRaw?.email ?? null,
+        logo_url: empresaRaw?.logo_url ?? null,
+        igv_porcentaje: igvPorc,
+      },
+      comprobante: {
+        tipo,
+        numero_completo: numero,
+        fecha: comp?.fecha_emision ?? venta.fecha,
+        igv_porcentaje: igvPorc,
+      },
+      cliente: {
+        tipo_documento: clienteTipoDoc,
+        numero_documento: clienteDoc,
+        nombre_o_razon_social: clienteNombre || 'CLIENTE VARIOS',
+        direccion: clienteDir,
+      },
+      items,
+      totales: {
+        sub_total: Number(venta.sub_total ?? 0),
+        igv: Number(venta.igv ?? 0),
+        total: Number(venta.total ?? 0),
+      },
+      pagos: (pagosVenta ?? []).map((p) => ({ metodo: String(p.metodo), monto: Number(p.monto ?? 0) })),
+      vendedor: vendedorNombre,
+    };
+
+    return { ok: true, tipo, numero, pdf_data };
+  } catch (e) {
+    return { ok: false, error: (e as Error).message };
+  }
+}
+
 const cerrarSchema = z.object({
   monto_contado_efectivo: z.number().min(0),
   observacion: z.string().max(500).optional().nullable(),
