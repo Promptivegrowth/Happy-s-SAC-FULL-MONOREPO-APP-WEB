@@ -41,6 +41,25 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
   if (!ot) notFound();
   const puedeEditarLineas = !['COMPLETADA', 'CANCELADA'].includes(ot.estado);
 
+  // Fechas de cada etapa para la línea de tiempo (del primer evento de cada
+  // estado). Alineado a las etapas de OtTimeline.
+  const fechaPorEstado: Record<string, string> = {};
+  for (const e of (eventos ?? []) as { estado_nuevo: string | null; fecha: string | null }[]) {
+    if (e.estado_nuevo && e.fecha) {
+      const prev = fechaPorEstado[e.estado_nuevo];
+      if (!prev || e.fecha < prev) fechaPorEstado[e.estado_nuevo] = e.fecha;
+    }
+  }
+  const fechasEtapa: (string | null)[] = [
+    fechaPorEstado['PLANIFICADA'] ?? ot.fecha_apertura ?? null, // Planificación / generación
+    null,                                                       // Compra de materiales (sin estado propio)
+    fechaPorEstado['EN_CORTE'] ?? null,                          // Corte
+    fechaPorEstado['EN_SERVICIO'] ?? null,                       // Confección / Servicio
+    fechaPorEstado['EN_DECORADO'] ?? null,                       // Decorado
+    fechaPorEstado['EN_CONTROL_CALIDAD'] ?? null,                // Control de calidad
+    fechaPorEstado['COMPLETADA'] ?? (ot as { fecha_cierre?: string | null }).fecha_cierre ?? null, // Almacén
+  ];
+
   // Liquidar corte con cantidades distintas al plan requiere gerencia
   // (pedido del cliente 21/07/2026). El server revalida igual; esto es solo
   // para mostrar el aviso correcto antes de intentar guardar.
@@ -301,9 +320,10 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
     >
       <EstadoBanner estado={ot.estado} />
 
-      {/* Línea de tiempo del avance de la OT (planificación → materiales → corte
-          → confección/servicio → decorado → control de calidad → almacén). */}
-      <OtTimeline estado={ot.estado} />
+      {/* Línea de tiempo del avance de la OT con FECHAS de cada etapa (de los
+          eventos de estado). Planificación → materiales → corte → confección →
+          decorado → control de calidad → almacén (pedido cliente 2026-08-27). */}
+      <OtTimeline estado={ot.estado} fechas={fechasEtapa} />
 
       {/* Semáforo de AVANCE REAL por área (derivado de las declaraciones de
           tiempo). Avanza solo a medida que se declaran las operaciones. */}

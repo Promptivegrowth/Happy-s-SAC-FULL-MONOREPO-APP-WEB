@@ -37,6 +37,18 @@ export async function crearCorte(_prev: unknown, fd: FormData): Promise<ActionRe
     });
     const { sb } = await requireUser();
 
+    // Si la OT ya avanzó a un proceso POSTERIOR al corte (confección, decorado,
+    // control de calidad, o cerrada), el corte ya se hizo: no se generan más
+    // cortes (pedido cliente 2026-08-27).
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const sbOt = sb as unknown as { from: (t: string) => any };
+    const { data: otRow } = await sbOt.from('ot').select('estado, numero').eq('id', data.ot_id).maybeSingle();
+    const estadoOt = otRow?.estado as string | undefined;
+    const ESTADOS_POST_CORTE = ['EN_SERVICIO', 'EN_DECORADO', 'EN_CONTROL_CALIDAD', 'COMPLETADA', 'CANCELADA'];
+    if (estadoOt && ESTADOS_POST_CORTE.includes(estadoOt)) {
+      throw new Error(`La OT ${otRow?.numero ?? ''} ya está en "${estadoOt.replace('_', ' ').toLowerCase()}" (proceso posterior al corte): el corte ya se realizó y no se pueden generar más cortes.`);
+    }
+
     // Si no vino producto_id, inferir de ot_lineas. Si la OT tiene 1 solo
     // producto, lo usamos directo. Si tiene varios, exigimos el campo.
     let productoId = data.producto_id;

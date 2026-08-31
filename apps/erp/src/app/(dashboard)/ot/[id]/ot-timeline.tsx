@@ -34,7 +34,14 @@ const ESTADO_A_ETAPA: Record<string, number> = {
   COMPLETADA: 6,
 };
 
-export function OtTimeline({ estado }: { estado: string }) {
+function fmtFecha(iso: string | null | undefined): string | null {
+  if (!iso) return null;
+  const d = new Date(iso.length <= 10 ? `${iso}T12:00:00` : iso);
+  if (Number.isNaN(d.getTime())) return null;
+  return d.toLocaleDateString('es-PE', { day: '2-digit', month: '2-digit', year: '2-digit' });
+}
+
+export function OtTimeline({ estado, fechas = [] }: { estado: string; fechas?: (string | null)[] }) {
   const cancelada = estado === 'CANCELADA';
   const actual = ESTADO_A_ETAPA[estado] ?? 0;
   const completada = estado === 'COMPLETADA';
@@ -78,6 +85,9 @@ export function OtTimeline({ estado }: { estado: string }) {
                 <p className={`mt-1.5 max-w-[96px] text-center text-[11px] leading-tight ${current ? 'font-semibold text-happy-700' : done ? 'text-emerald-700' : 'text-slate-400'}`}>
                   {et.label}
                 </p>
+                {fmtFecha(fechas[i]) && (
+                  <span className="mt-0.5 font-mono text-[10px] text-slate-500">{fmtFecha(fechas[i])}</span>
+                )}
                 {current && <span className="mt-0.5 rounded-full bg-happy-100 px-1.5 text-[9px] font-semibold uppercase text-happy-700">Aquí</span>}
               </div>
             );

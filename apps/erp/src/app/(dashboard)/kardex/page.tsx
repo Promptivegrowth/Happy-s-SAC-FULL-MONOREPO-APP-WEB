@@ -8,9 +8,11 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { ArrowDownCircle, ArrowUpCircle, ArrowRightLeft, History, Warehouse } from 'lucide-react';
 import { PageShell } from '@/components/page-shell';
 import { TableSkeleton } from '@/components/skeletons';
+import { createClient } from '@happy/db/server';
 import { listarKardex, listarAlmacenes, type KardexMov } from '@/server/actions/kardex';
 import { formatTallaChip } from '@happy/lib';
 import { ExportarKardexButton } from './exportar-kardex-button';
+import { SearchAutocomplete, type AutocompleteItem } from '@/components/search-autocomplete';
 
 export const metadata = { title: 'Kardex' };
 export const dynamic = 'force-dynamic';
@@ -37,6 +39,21 @@ export default async function KardexPage({ searchParams }: { searchParams: Promi
   const resAlms = await listarAlmacenes();
   const almacenes = resAlms.ok ? (resAlms.data ?? []) : [];
 
+  // Índice para el autocompletar del buscador: productos + materiales.
+  const sbIdx = await createClient();
+  const [{ data: prodsIdx }, { data: matsIdx }] = await Promise.all([
+    sbIdx.from('productos').select('id, nombre, codigo').eq('activo', true).order('nombre').limit(2000),
+    sbIdx.from('materiales').select('id, nombre, codigo').eq('activo', true).order('nombre').limit(3000),
+  ]);
+  const buscadorItems: AutocompleteItem[] = [
+    ...((prodsIdx ?? []) as { id: string; nombre: string; codigo: string }[]).map((p) => ({
+      id: `p-${p.id}`, label: p.nombre, sublabel: `Producto · ${p.codigo}`, searchKey: p.codigo,
+    })),
+    ...((matsIdx ?? []) as { id: string; nombre: string; codigo: string }[]).map((m) => ({
+      id: `m-${m.id}`, label: m.nombre, sublabel: `Material · ${m.codigo}`, searchKey: m.codigo,
+    })),
+  ];
+
   const tableKey = `${sp.almacen ?? ''}|${sp.tipo ?? ''}|${sp.entidad ?? ''}|${sp.q ?? ''}|${sp.desde ?? ''}|${sp.hasta ?? ''}|${sp.pagina ?? '1'}`;
   const filtrosExport = {
     almacen_id: sp.almacen ?? '',
@@ -53,18 +70,14 @@ export default async function KardexPage({ searchParams }: { searchParams: Promi
       description="Movimientos de inventario por almacén — entradas, salidas, traslados, ajustes."
       actions={<ExportarKardexButton filtros={filtrosExport} />}
     >
-      <Card className="p-4">
+      <Card className="p-4 space-y-3">
+        <div>
+          <span className="mb-1 block text-xs font-medium text-slate-500">Buscar producto / talla / material</span>
+          <SearchAutocomplete items={buscadorItems} paramName="q" placeholder="Escribe un producto o material (ej. Marina, sermat…)" />
+        </div>
         <form className="grid gap-3 sm:grid-cols-2 lg:grid-cols-6">
-          <label className="flex flex-col gap-1 sm:col-span-2 lg:col-span-3">
-            <span className="text-xs font-medium text-slate-500">Buscar producto / talla / material</span>
-            <input
-              type="text"
-              name="q"
-              defaultValue={sp.q ?? ''}
-              placeholder="Ej. Marina, PFM0002, AC0002, sermat…"
-              className="h-9 rounded-md border border-input bg-white px-2 text-sm"
-            />
-          </label>
+          {/* q se mantiene al aplicar los demás filtros (lo controla el buscador de arriba). */}
+          <input type="hidden" name="q" defaultValue={sp.q ?? ''} />
           <label className="flex flex-col gap-1">
             <span className="text-xs font-medium text-slate-500">Almacén</span>
             <select
