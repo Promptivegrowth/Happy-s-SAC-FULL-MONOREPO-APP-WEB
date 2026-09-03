@@ -1169,7 +1169,7 @@ export async function registrarRecepcionOS(
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const sbAny = sb as unknown as { from: (t: string) => any };
 
-    const { data: osRow } = await sbAny.from('ordenes_servicio').select('estado').eq('id', osId).maybeSingle();
+    const { data: osRow } = await sbAny.from('ordenes_servicio').select('estado, ot_id').eq('id', osId).maybeSingle();
     if (!osRow) throw new Error('OS no encontrada');
     if (osRow.estado === 'ANULADA') throw new Error('La OS está anulada.');
 
@@ -1226,9 +1226,16 @@ export async function registrarRecepcionOS(
       })
       .eq('id', osId);
     if (e2) throw new Error(e2.message);
+
+    // Al retornar la OS (recepción total o parcial), avanzar el estado de la OT
+    // al área del proceso tercerizado (p.ej. confección → EN_SERVICIO). Antes la
+    // OT se quedaba en EN_CORTE y la línea de tiempo no avanzaba (cliente 2026-09-02).
+    if (['RECEPCIONADA', 'RECEPCION_PARCIAL'].includes(nuevoEstado) && osRow.ot_id) {
+      try { await autoAvanzarEstadoOT(sbAny, osRow.ot_id as string); } catch { /* no bloquea la recepción */ }
+    }
     return null;
   });
-  // Refrescar OS + OT (para habilitar operaciones post-confección).
+  // Refrescar OS + OT (para habilitar operaciones post-confección y refrescar timeline).
   if (r.ok) await bumpPaths(`/servicios/${osId}`, '/servicios', '/ot');
   return r;
 }
@@ -1399,7 +1406,7 @@ const FLOW_OS: Record<string, string[]> = {
 export async function cambiarEstadoOS(osId: string, nuevoEstado: string): Promise<ActionResult> {
   const r = await runAction(async () => {
     const { sb, userId } = await requireUser();
-    const { data: actual } = await sb.from('ordenes_servicio').select('estado').eq('id', osId).single();
+    const { data: actual } = await sb.from('ordenes_servicio').select('estado, ot_id').eq('id', osId).single();
     if (!actual) throw new Error('OS no encontrada');
 
     const estadoActual = (actual.estado as string) ?? 'EMITIDA';
@@ -1438,8 +1445,15 @@ export async function cambiarEstadoOS(osId: string, nuevoEstado: string): Promis
     if (nuevoEstado === 'DESPACHADA') {
       try { await descontarAviosOS(sbAny, osId, userId); } catch { /* no bloquea el despacho */ }
     }
+
+    // Al recepcionar/cerrar la OS, avanzar el estado de la OT al área del proceso
+    // tercerizado (confección → EN_SERVICIO, decorado → EN_DECORADO). Sin esto la
+    // OT quedaba en EN_CORTE y la línea de tiempo no avanzaba (cliente 2026-09-02).
+    if (['RECEPCIONADA', 'RECEPCION_PARCIAL', 'CERRADA'].includes(nuevoEstado) && actual.ot_id) {
+      try { await autoAvanzarEstadoOT(sbAny, actual.ot_id as string); } catch { /* no bloquea el cambio de estado */ }
+    }
     return null;
   });
-  if (r.ok) await bumpPaths(`/servicios/${osId}`, '/servicios');
+  if (r.ok) await bumpPaths(`/servicios/${osId}`, '/servicios', '/ot');
   return r;
 }

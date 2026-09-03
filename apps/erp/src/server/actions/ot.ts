@@ -667,6 +667,20 @@ export async function autoAvanzarEstadoOT(sbAny: { from: (t: string) => any }, o
     }
   }
 
+  // Órdenes de servicio ya retornadas del taller (confección/decorado
+  // tercerizado): su retorno ES la declaración de que ese proceso se ejecutó.
+  // Sin esto la OT se quedaba en EN_CORTE aunque la OS de confección estuviera
+  // recepcionada/cerrada (pedido cliente 2026-09-02). `proceso` es el código de
+  // área (COSTURA, BORDADO, …) → estadoDeArea.
+  const { data: oss } = await sbAny
+    .from('ordenes_servicio')
+    .select('proceso, estado')
+    .eq('ot_id', otId)
+    .in('estado', ['RECEPCION_PARCIAL', 'RECEPCIONADA', 'CERRADA']);
+  for (const os of (oss ?? []) as { proceso: string | null }[]) {
+    if (os.proceso) objetivoIdx = Math.max(objetivoIdx, idxEstado(estadoDeArea(os.proceso)));
+  }
+
   const objetivo = ORDEN_ESTADOS_OT[objetivoIdx];
   if (objetivo && objetivo !== estadoActual) {
     await sbAny.from('ot').update({ estado: objetivo }).eq('id', otId);

@@ -738,7 +738,8 @@ function OperacionBlock({
   bloqueado?: boolean;
   operacionAnterior?: string;
   faltanAnterior?: number;
-  /** Operación post-confección: bloqueada (duro) hasta que retorne la OS. */
+  /** Operación post-confección cuya OS del taller aún no retorna: solo muestra
+   *  un aviso (ya NO bloquea el registro; se puede trabajar en paralelo). */
   esperandoTaller?: boolean;
   hayOs?: boolean;
 }) {
@@ -777,17 +778,18 @@ function OperacionBlock({
               {faltanAnterior > 0 ? ` (faltan ${faltanAnterior} unid.)` : ''} — puede registrar igual si trabajan en paralelo.
             </p>
           )}
-          {/* Bloqueo DURO: operación posterior a la confección — no se puede
-              registrar hasta que retorne la orden de servicio del taller. */}
+          {/* Aviso NO bloqueante: operación posterior a la confección. Se puede
+              registrar igual si trabajan en paralelo (cliente 2026-09-02: no
+              bloquear el registro aunque la OS del taller aún no retorne). */}
           {esperandoTaller && (
-            <p className="mt-0.5 text-[10px] font-medium text-sky-700">
-              🔒 {hayOs
-                ? 'Disponible cuando la orden de servicio del taller se marque RECEPCIONADA (retorno).'
-                : 'Va después de la confección — primero envíe la orden de servicio al taller y regístrela como recepcionada al retornar.'}
+            <p className="mt-0.5 text-[10px] text-amber-600">
+              ⚠ {hayOs
+                ? 'La orden de servicio del taller aún no retorna (recepcionada) — puedes registrar igual si trabajan en paralelo.'
+                : 'Va después de la confección — normalmente se envía primero la orden de servicio al taller; puedes registrar igual si trabajan en paralelo.'}
             </p>
           )}
         </div>
-        {!disabled && !esperandoTaller && (
+        {!disabled && (
           completo && !openForm ? (
             <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2 py-1 text-[10px] font-semibold text-emerald-700" title="Todas las unidades cortadas ya fueron registradas">
               ✓ Completo
