@@ -60,6 +60,11 @@ export function CerrarCajaModal({
     }
   }, [modo, cajeros.length]);
 
+  // La caja está pensada para jornadas de hasta 24 h; si lleva más abierta,
+  // el cuadre mezcla varios días y conviene cerrarla (aviso, no bloqueo).
+  const horasAbierta = (Date.now() - new Date(sesion.abierta_en).getTime()) / 3600000;
+  const sesionLarga = Number.isFinite(horasAbierta) && horasAbierta > 24;
+
   const contadoNum = Number(contado);
   const diferencia = Number.isFinite(contadoNum) ? contadoNum - balance.esperado_efectivo : 0;
   const tone: 'ok' | 'sobrante' | 'faltante' = Math.abs(diferencia) < 0.01 ? 'ok' : diferencia > 0 ? 'sobrante' : 'faltante';
@@ -145,7 +150,8 @@ export function CerrarCajaModal({
     // Cierre definitivo
     start(async () => {
       try {
-        await cerrarSesion({ monto_contado_efectivo: contadoNum, observacion: obs || null });
+        const r = await cerrarSesion({ monto_contado_efectivo: contadoNum, observacion: obs || null });
+        if (!r.ok) { toast.error(r.error); return; }
         toast.success('Caja cerrada correctamente');
         onCerrada();
       } catch (e) {
@@ -173,6 +179,17 @@ export function CerrarCajaModal({
             <X className="h-4 w-4" />
           </button>
         </div>
+
+        {sesionLarga && (
+          <div className="mt-3 flex items-start gap-2 rounded-md border border-amber-200 bg-amber-50 p-2 text-[11px] text-amber-800">
+            <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+            <span>
+              Esta caja lleva <strong>{Math.floor(horasAbierta)} h</strong> abierta. La jornada de caja está pensada
+              para <strong>máximo 24 h</strong>: al pasarse, el cuadre acumula ventas de varios días. Cierra la caja
+              al terminar el día y ábrela de nuevo al día siguiente.
+            </span>
+          </div>
+        )}
 
         {/* Selector de tipo de cierre */}
         <div className="mt-4 grid grid-cols-2 gap-2">

@@ -229,17 +229,20 @@ async function calcularBalanceInterno(
     .eq('caja_sesion_id', sesionId)
     .eq('estado', 'COMPLETADA');
 
-  const ventaIds = (ventas ?? []).map((v) => v.id);
   const totalVentas = (ventas ?? []).reduce((a, v) => a + Number(v.total ?? 0), 0);
 
   let efectivo = 0, yape = 0, plin = 0, tarjeta = 0, transferencia = 0, otros = 0;
 
-  if (ventaIds.length > 0) {
+  // Los pagos se traen con JOIN sobre la sesión (no con .in(ventaIds)): una caja
+  // puede estar abierta hasta 24 h con cientos de ventas y la lista de IDs en la
+  // URL reventaba el request. Con el join el costo es constante.
+  {
     const { data: pagos } = await sb
       .from('ventas_pagos')
-      .select('metodo, monto')
-      .in('venta_id', ventaIds);
-    for (const p of pagos ?? []) {
+      .select('metodo, monto, ventas!inner(caja_sesion_id, estado)')
+      .eq('ventas.caja_sesion_id', sesionId)
+      .eq('ventas.estado', 'COMPLETADA');
+    for (const p of (pagos ?? []) as Array<{ metodo: string; monto: number | string }>) {
       const monto = Number(p.monto ?? 0);
       const m = String(p.metodo);
       if (m === 'EFECTIVO') efectivo += monto;
@@ -599,19 +602,36 @@ const cerrarSchema = z.object({
   observacion: z.string().max(500).optional().nullable(),
 });
 
-export async function cerrarSesion(input: { monto_contado_efectivo: number; observacion?: string | null }) {
+/**
+ * Cierra la sesión de caja. Devuelve un resultado ESTRUCTURADO (nunca lanza):
+ * en producción Next censura los errores de server actions ("An error occurred
+ * in the Server Components render..."), por lo que el cajero veía un mensaje
+ * opaco y creía que el cierre había fallado. Ahora el motivo real llega al POS.
+ */
+export async function cerrarSesion(
+  input: { monto_contado_efectivo: number; observacion?: string | null },
+): Promise<
+  | { ok: true; id: string; diferencia: number; esperado: number; contado: number; balance: BalanceCajaDTO }
+  | { ok: false; error: string }
+> {
+  try {
   const parsed = cerrarSchema.parse(input);
   const sb = await createClient();
   const user = await requireUser(sb);
   const { caja } = await getCajaDefault(sb, user.id);
 
-  const { data: sesion } = await sb
+  // OJO: `limit(1)` en vez de `maybeSingle()` — si por un doble clic quedaran
+  // dos sesiones abiertas, maybeSingle devolvía error y el cierre se caía.
+  const { data: sesiones, error: errSes } = await sb
     .from('cajas_sesiones')
     .select('id, monto_apertura, observaciones')
     .eq('caja_id', caja.id)
     .is('cerrada_en', null)
-    .maybeSingle();
-  if (!sesion) throw new Error('No hay sesión de caja abierta para cerrar.');
+    .order('abierta_en', { ascending: false })
+    .limit(1);
+  if (errSes) return { ok: false, error: `No se pudo leer la sesión de caja: ${errSes.message}` };
+  const sesion = (sesiones ?? [])[0];
+  if (!sesion) return { ok: false, error: 'No hay una sesión de caja abierta. Es posible que ya se haya cerrado; recarga la página.' };
 
   const balance = await calcularBalanceInterno(sb, sesion.id, Number(sesion.monto_apertura ?? 0));
   const diferencia = parsed.monto_contado_efectivo - balance.esperado_efectivo;
@@ -620,7 +640,7 @@ export async function cerrarSesion(input: { monto_contado_efectivo: number; obse
     .filter(Boolean)
     .join('\n---\n') || null;
 
-  const { error } = await sb
+  const { error, count } = await sb
     .from('cajas_sesiones')
     .update({
       cerrada_por: user.id,
@@ -635,18 +655,33 @@ export async function cerrarSesion(input: { monto_contado_efectivo: number; obse
       total_transferencia: balance.total_transferencia,
       total_otros: balance.total_otros,
       observaciones: observacionesFinal,
-    })
-    .eq('id', sesion.id);
-  if (error) throw new Error(`No se pudo cerrar caja: ${error.message}`);
+    }, { count: 'exact' })
+    .eq('id', sesion.id)
+    .is('cerrada_en', null);
+  if (error) return { ok: false, error: `No se pudo cerrar caja: ${error.message}` };
+  if ((count ?? 0) === 0) {
+    return { ok: false, error: 'La caja ya fue cerrada por otro usuario o no tienes permiso para cerrarla. Recarga la página.' };
+  }
 
-  revalidatePath('/venta');
+  // NO usamos revalidatePath('/venta') aquí: forzaba a Next a re-renderizar la
+  // página DENTRO de la respuesta de la acción y, si ese render fallaba por
+  // cualquier motivo, el cierre (ya guardado) aparecía como error. El POS
+  // refresca la sesión por su cuenta con `refrescarSesion()`.
   return {
+    ok: true,
     id: sesion.id,
     diferencia,
     esperado: balance.esperado_efectivo,
     contado: parsed.monto_contado_efectivo,
     balance,
   };
+  } catch (e) {
+    const msg = e instanceof z.ZodError
+      ? `Monto inválido: ${e.errors[0]?.message ?? 'revisa el efectivo contado'}`
+      : (e as Error).message || 'Error inesperado al cerrar caja';
+    console.error('[cerrarSesion] fallo:', e);
+    return { ok: false, error: msg };
+  }
 }
 
 // ============================================================================
