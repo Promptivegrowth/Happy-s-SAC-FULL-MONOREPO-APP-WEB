@@ -4,6 +4,7 @@ import { Card, CardContent } from '@happy/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@happy/ui/table';
 import { PageShell } from '@/components/page-shell';
 import { formatDateTime, formatPEN } from '@happy/lib';
+import { ResumenBoletasButton } from './resumen-boletas-button';
 
 export const metadata = { title: 'Comprobantes SUNAT' };
 export const dynamic = 'force-dynamic';
@@ -18,7 +19,7 @@ export default async function ComprobantesPage() {
   const sb = await createClient();
   const { data } = await sb.from('comprobantes').select('id, tipo, serie, numero, numero_completo, fecha_emision, total, estado, razon_social_cliente, numero_documento_cliente').order('fecha_emision', { ascending: false }).limit(200);
   return (
-    <PageShell title="Comprobantes Electrónicos SUNAT" description="Boletas, Facturas, Notas de Crédito/Débito, Guías.">
+    <PageShell title="Comprobantes Electrónicos SUNAT" description="Boletas, Facturas, Notas de Crédito/Débito, Guías." actions={<ResumenBoletasButton />}>
       <Card><CardContent className="p-0">
         <Table>
           <TableHeader><TableRow>
