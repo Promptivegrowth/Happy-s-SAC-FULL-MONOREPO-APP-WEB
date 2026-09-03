@@ -92,6 +92,113 @@ export async function enviarSendBill(args: {
   }
 }
 
+// ===========================================================================
+// RESUMEN DIARIO (asíncrono): sendSummary -> ticket -> getStatus -> CDR
+// ===========================================================================
+
+export type SendSummaryResult =
+  | { ok: true; ticket: string }
+  | { ok: false; error: string; soapFault?: string; httpStatus?: number };
+
+/** Envía el Resumen Diario (ZIP firmado) y devuelve el TICKET de SUNAT. */
+export async function enviarSendSummary(args: {
+  endpointUrl: string;
+  rucEmisor: string;
+  usuarioSol: string;
+  claveSol: string;
+  zipBytes: Uint8Array;
+  nombreArchivoZip: string; // sin .zip
+}): Promise<SendSummaryResult> {
+  const zipBase64 = Buffer.from(args.zipBytes).toString('base64');
+  const envelope = `<?xml version="1.0" encoding="UTF-8"?>
+<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:ser="http://service.sunat.gob.pe" xmlns:wsse="http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-wssecurity-secext-1.0.xsd">
+  <soapenv:Header>
+    <wsse:Security><wsse:UsernameToken>
+      <wsse:Username>${args.rucEmisor}${args.usuarioSol}</wsse:Username>
+      <wsse:Password>${args.claveSol}</wsse:Password>
+    </wsse:UsernameToken></wsse:Security>
+  </soapenv:Header>
+  <soapenv:Body>
+    <ser:sendSummary>
+      <fileName>${args.nombreArchivoZip}.zip</fileName>
+      <contentFile>${zipBase64}</contentFile>
+    </ser:sendSummary>
+  </soapenv:Body>
+</soapenv:Envelope>`;
+
+  let response: Response;
+  try {
+    response = await fetch(args.endpointUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/xml; charset=utf-8', 'SOAPAction': '', 'Accept': 'text/xml' },
+      body: envelope,
+    });
+  } catch (e) {
+    return { ok: false, error: `Fallo de red: ${(e as Error).message}` };
+  }
+  const text = await response.text();
+  const fault = text.match(/<faultstring[^>]*>([\s\S]*?)<\/faultstring>/i);
+  if (fault) return { ok: false, error: fault[1]!.trim(), soapFault: text, httpStatus: response.status };
+  const ticket = text.match(/<ticket>([\s\S]*?)<\/ticket>/i)?.[1]?.trim();
+  if (!ticket) return { ok: false, error: 'SUNAT no devolvió ticket', soapFault: text, httpStatus: response.status };
+  return { ok: true, ticket };
+}
+
+export type GetStatusResult =
+  | { ok: true; statusCode: string; procesado: boolean; enProceso: boolean; cdrZipBase64?: string; cdr?: { codigo: string; descripcion: string; observaciones: string[] } }
+  | { ok: false; error: string; soapFault?: string; httpStatus?: number };
+
+/** Consulta el estado del ticket del Resumen Diario y, si está listo, el CDR. */
+export async function consultarGetStatus(args: {
+  endpointUrl: string;
+  rucEmisor: string;
+  usuarioSol: string;
+  claveSol: string;
+  ticket: string;
+}): Promise<GetStatusResult> {
+  const envelope = `<?xml version="1.0" encoding="UTF-8"?>
+<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:ser="http://service.sunat.gob.pe" xmlns:wsse="http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-wssecurity-secext-1.0.xsd">
+  <soapenv:Header>
+    <wsse:Security><wsse:UsernameToken>
+      <wsse:Username>${args.rucEmisor}${args.usuarioSol}</wsse:Username>
+      <wsse:Password>${args.claveSol}</wsse:Password>
+    </wsse:UsernameToken></wsse:Security>
+  </soapenv:Header>
+  <soapenv:Body>
+    <ser:getStatus><ticket>${args.ticket}</ticket></ser:getStatus>
+  </soapenv:Body>
+</soapenv:Envelope>`;
+
+  let response: Response;
+  try {
+    response = await fetch(args.endpointUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/xml; charset=utf-8', 'SOAPAction': '', 'Accept': 'text/xml' },
+      body: envelope,
+    });
+  } catch (e) {
+    return { ok: false, error: `Fallo de red: ${(e as Error).message}` };
+  }
+  const text = await response.text();
+  const fault = text.match(/<faultstring[^>]*>([\s\S]*?)<\/faultstring>/i);
+  if (fault) return { ok: false, error: fault[1]!.trim(), soapFault: text, httpStatus: response.status };
+
+  const statusCode = text.match(/<statusCode>([\s\S]*?)<\/statusCode>/i)?.[1]?.trim() ?? '';
+  const content = text.match(/<content>([\s\S]*?)<\/content>/i)?.[1]?.trim();
+  // 0/1 = procesado (CDR en content). 98 = en proceso. 99 / otros = error (content puede traer CDR con el error).
+  const enProceso = statusCode === '98';
+  const procesado = statusCode === '0' || statusCode === '1';
+  if (content) {
+    try {
+      const cdr = await parsearCDR(content);
+      return { ok: true, statusCode, procesado, enProceso, cdrZipBase64: content, cdr };
+    } catch {
+      return { ok: true, statusCode, procesado, enProceso, cdrZipBase64: content };
+    }
+  }
+  return { ok: true, statusCode, procesado, enProceso };
+}
+
 /** Parsea el ZIP del CDR y extrae el código de respuesta de SUNAT. */
 async function parsearCDR(cdrZipBase64: string): Promise<{ codigo: string; descripcion: string; observaciones: string[] }> {
   const { default: JSZip } = await import('jszip');
