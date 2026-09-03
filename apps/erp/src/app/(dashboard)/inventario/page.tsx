@@ -16,6 +16,7 @@ import { AjustarStockButton } from './ajustar-stock-client';
 import { NuevoMovimientoButton } from './nuevo-movimiento-client';
 import { MovimientoMasivoButton } from './movimiento-masivo-client';
 import { MovimientoMaterialButton, AjustarMaterialButton, MaterialMasivoButton } from './material-stock-client';
+import { ConteoExcelButton } from './conteo-excel-client';
 import { ExportarInventarioButton } from './exportar-inventario-button';
 import { esGerente } from '@/server/actions/_helpers';
 
@@ -114,6 +115,7 @@ export default async function InventarioPage({ searchParams }: { searchParams: P
           <ExportarInventarioButton almacenId={sp.almacen} />
           {gerente && <NuevoMovimientoButton almacenes={almacenes} variantes={variantesParaModal} />}
           {gerente && <MovimientoMasivoButton almacenes={almacenes} variantes={variantesParaModal} />}
+          {gerente && <ConteoExcelButton almacenes={almacenes} />}
           <Link href="/inventario/alertas">
             <Button variant="outline" className="gap-2">
               <AlertTriangle className="h-4 w-4 text-amber-500" /> Ver alertas
