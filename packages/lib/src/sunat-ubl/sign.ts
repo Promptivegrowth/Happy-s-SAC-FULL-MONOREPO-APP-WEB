@@ -73,7 +73,10 @@ export function firmarUBL(xml: string, cert: CertificadoData): string {
     canonicalizationAlgorithm: 'http://www.w3.org/TR/2001/REC-xml-c14n-20010315',
   });
 
-  // Referencia: el documento entero (URI vacío) con transformación enveloped + c14n
+  // Referencia: el documento ENTERO con URI="" (enveloped). Es CLAVE pasar
+  // uri:'' + isEmptyUri para que xml-crypto NO agregue un atributo `Id` al
+  // elemento raíz <Invoice> — SUNAT rechaza el XML con "cvc-complex-type 3:
+  // element Invoice had undefined attribute Id" (fault 0306) si ese Id aparece.
   sig.addReference({
     xpath: "/*",
     transforms: [
@@ -81,6 +84,8 @@ export function firmarUBL(xml: string, cert: CertificadoData): string {
       'http://www.w3.org/TR/2001/REC-xml-c14n-20010315',
     ],
     digestAlgorithm: 'http://www.w3.org/2000/09/xmldsig#sha1',
+    uri: '',
+    isEmptyUri: true,
   });
 
   sig.computeSignature(xml, {
