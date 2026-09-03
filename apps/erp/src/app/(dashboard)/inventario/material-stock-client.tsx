@@ -273,20 +273,27 @@ export function MaterialMasivoButton({
   function procesarBulk() {
     const comun = Number(bulkQty);
     const filas = bulkText.split(/\r?\n/).map((s) => s.trim()).filter(Boolean);
-    if (filas.length === 0) return toast.error('Pega al menos un código');
+    if (filas.length === 0) return toast.error('Pega al menos una línea: CÓDIGO y CANTIDAD');
     let ok = 0;
-    const noEnc: string[] = [];
+    const noEnc: string[] = [];   // código no existe
+    const cantMala: string[] = []; // cantidad no numérica / negativa
+    const formato: string[] = []; // más de 2 datos (ej. decimal con coma "12,5")
     for (const fila of filas) {
       const partes = fila.split(/[\s,;\t]+/).filter(Boolean);
+      if (partes.length > 2) { formato.push(fila); continue; }
       const codigo = partes[0] ?? '';
       const cant = partes[1] !== undefined ? Number(partes[1]) : comun;
       const m = buscarPorCodigo(codigo);
-      if (m && Number.isFinite(cant) && cant >= 0) { upsertLinea(m, { set: cant }); ok++; }
-      else noEnc.push(codigo || fila);
+      if (!m) { noEnc.push(codigo || fila); continue; }
+      if (!Number.isFinite(cant) || cant < 0) { cantMala.push(codigo); continue; }
+      upsertLinea(m, { set: cant });
+      ok++;
     }
     setBulkText('');
     if (ok > 0) toast.success(`${ok} cargados`);
-    if (noEnc.length > 0) toast.warning(`No encontrados: ${noEnc.join(', ')}`);
+    if (noEnc.length > 0) toast.warning(`Código no encontrado: ${noEnc.join(', ')}`);
+    if (cantMala.length > 0) toast.error(`Cantidad inválida en: ${cantMala.join(', ')}`);
+    if (formato.length > 0) toast.error(`Formato incorrecto (usa "CÓDIGO CANTIDAD", decimales con punto): ${formato.join(' | ')}`);
   }
 
   function procesarScan() {
@@ -453,6 +460,10 @@ export function MaterialMasivoButton({
 
               <div className="space-y-1 rounded-lg border border-violet-200 bg-violet-50/40 p-2">
                 <Label className="text-[10px] uppercase text-violet-700">Pegar lista</Label>
+                <p className="text-[9px] leading-tight text-violet-700/90">
+                  Orden: <b>CÓDIGO</b> y luego <b>CANTIDAD</b>, un material por línea.
+                  Decimales con <b>punto</b> (12.5), no coma.
+                </p>
                 <Textarea value={bulkText} onChange={(e) => setBulkText(e.target.value)}
                   placeholder={'TELM0001 12.5\nAV0002 8\nTELM0003 40'} rows={2} className="font-mono text-[10px]" />
                 <div className="flex items-center gap-1">
