@@ -5,6 +5,7 @@ import { Card, CardHeader, CardTitle, CardContent } from '@happy/ui/card';
 import { Badge } from '@happy/ui/badge';
 import { Button } from '@happy/ui/button';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@happy/ui/table';
+import { AlertTriangle } from 'lucide-react';
 import { PageShell } from '@/components/page-shell';
 import { esGerente } from '@/server/actions/_helpers';
 import { LineasCorteEditor, TiemposCorteEditor, AccionCerrarCorte, GenerarOSDesdeCorte } from './client';
@@ -131,6 +132,19 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
     (l) => l.cantidad_real != null && Number(l.cantidad_real) !== Number(l.cantidad_teorica ?? 0),
   );
   const autorizacionEstado = (corte as unknown as { autorizacion_estado?: string | null }).autorizacion_estado ?? null;
+  const autorizacionMotivo = (corte as unknown as { autorizacion_motivo?: string | null }).autorizacion_motivo ?? null;
+  const autorizacionSolicitadaPor = (corte as unknown as { autorizacion_solicitada_por?: string | null }).autorizacion_solicitada_por ?? null;
+  // Nombre de quien (producción) solicitó la autorización, para mostrárselo a
+  // gerencia junto al motivo de la diferencia (pedido cliente 2026-09-02).
+  let solicitanteNombre: string | null = null;
+  if (autorizacionMotivo && autorizacionSolicitadaPor) {
+    const { data: solic } = await sb
+      .from('perfiles')
+      .select('nombre_completo')
+      .eq('id', autorizacionSolicitadaPor)
+      .maybeSingle();
+    solicitanteNombre = (solic as { nombre_completo?: string | null } | null)?.nombre_completo ?? null;
+  }
 
   // Plan de la OT para este modelo (cantidad planificada por talla) y lo que
   // ya se cortó en OTROS cortes del mismo OT/producto, para calcular el saldo
@@ -185,6 +199,28 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
         <Stat label="Merma (m)" value={Number(corte.merma_metros ?? 0).toFixed(2)} />
         <Stat label="Líneas" value={`${(lineas ?? []).length}`} />
       </div>
+
+      {usuarioEsGerente && autorizacionMotivo && (
+        <div
+          className={`rounded-lg border p-3 text-sm ${
+            autorizacionEstado === 'AUTORIZADA'
+              ? 'border-emerald-200 bg-emerald-50 text-emerald-900'
+              : 'border-amber-200 bg-amber-50 text-amber-900'
+          }`}
+        >
+          <p className="mb-0.5 flex items-center gap-2 font-semibold">
+            <AlertTriangle className="h-4 w-4" />
+            Motivo de la diferencia (cantidad programada vs real)
+            <Badge variant={autorizacionEstado === 'AUTORIZADA' ? 'success' : 'warning'} className="ml-1">
+              {autorizacionEstado === 'AUTORIZADA' ? 'Autorizado' : 'Pendiente de autorización'}
+            </Badge>
+          </p>
+          <p className="whitespace-pre-wrap">{autorizacionMotivo}</p>
+          {solicitanteNombre && (
+            <p className="mt-1 text-xs opacity-80">Indicado por producción: {solicitanteNombre}</p>
+          )}
+        </div>
+      )}
 
       <Card>
         <CardHeader>

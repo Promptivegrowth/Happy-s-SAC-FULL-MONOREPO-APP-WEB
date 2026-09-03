@@ -2,7 +2,7 @@
 
 import { z } from 'zod';
 import { runAction, requireUser, bumpPaths, type ActionResult } from './_helpers';
-import { formatTallaChip } from '@happy/lib';
+import { formatTallaChip, ordenTalla } from '@happy/lib';
 
 /**
  * Módulo de Traslados Multi-Almacén (traslados / traslados_lineas).
@@ -273,7 +273,23 @@ export async function obtenerTraslado(
       .order('id');
     if (errLin) throw new Error(errLin.message);
 
-    const lineasMapped: TrasladoLineaDetalle[] = ((lineas ?? []) as unknown as LineaRaw[]).map(
+    // Ordenar por producto/material y, dentro de cada uno, por talla ascendente
+    // (de la más pequeña a la más grande) — pedido cliente 2026-09-02. El
+    // localeCompare de string ordena mal (10 antes que 4); usamos ordenTalla.
+    const lineasOrdenadas = [...((lineas ?? []) as unknown as LineaRaw[])].sort((a, b) => {
+      const na = a.variante?.producto?.nombre ?? a.material?.nombre ?? '';
+      const nb = b.variante?.producto?.nombre ?? b.material?.nombre ?? '';
+      const porNombre = na.localeCompare(nb, 'es');
+      if (porNombre !== 0) return porNombre;
+      const ta = a.variante?.talla;
+      const tb = b.variante?.talla;
+      if (ta && tb) return ordenTalla(ta) - ordenTalla(tb);
+      if (ta) return -1; // variantes (con talla) antes que materiales
+      if (tb) return 1;
+      return (a.variante?.sku ?? a.material?.codigo ?? '').localeCompare(b.variante?.sku ?? b.material?.codigo ?? '', 'es');
+    });
+
+    const lineasMapped: TrasladoLineaDetalle[] = lineasOrdenadas.map(
       (l) => {
         const cant = Number(l.cantidad ?? 0);
         const recibida = l.cantidad_recibida != null ? Number(l.cantidad_recibida) : null;
