@@ -15,7 +15,7 @@ import { Boxes, AlertTriangle, History } from 'lucide-react';
 import { AjustarStockButton } from './ajustar-stock-client';
 import { NuevoMovimientoButton } from './nuevo-movimiento-client';
 import { MovimientoMasivoButton } from './movimiento-masivo-client';
-import { MovimientoMaterialButton, AjustarMaterialButton } from './material-stock-client';
+import { MovimientoMaterialButton, AjustarMaterialButton, MaterialMasivoButton } from './material-stock-client';
 import { ExportarInventarioButton } from './exportar-inventario-button';
 import { esGerente } from '@/server/actions/_helpers';
 
@@ -223,7 +223,10 @@ async function MaterialStockTable({ almacenId, q, vista, gerente }: { almacenId:
       <CardContent className="p-0">
         <div className="flex items-center justify-between gap-2 border-b bg-slate-50/60 p-3">
           <p className="text-sm font-semibold text-corp-900">Materiales en {almacenNombre}</p>
-          <MovimientoMaterialButton almacenes={almacenParaModal} materiales={materiales} almacenPreseleccionado={almacenId} permitirAjuste={gerente} />
+          <div className="flex items-center gap-2">
+            {gerente && <MaterialMasivoButton almacenes={almacenParaModal} materiales={materiales} almacenPreseleccionado={almacenId} />}
+            <MovimientoMaterialButton almacenes={almacenParaModal} materiales={materiales} almacenPreseleccionado={almacenId} permitirAjuste={gerente} />
+          </div>
         </div>
         {filas.length === 0 ? (
           <EmptyState

@@ -486,3 +486,131 @@ export async function registrarMovimientoStockBatch(
   if (r.ok) await bumpPaths('/inventario', '/productos', '/inventario/alertas');
   return r;
 }
+
+// ===========================================================================
+// MASIVO DE MATERIALES (mismo concepto que variantes, pero por material_id)
+// ===========================================================================
+// Pedido cliente 2026-09-02: replicar el masivo (conteo físico + sumar/restar)
+// para materiales/materia prima. Todo es AJUSTE → solo gerencia. Admite decimales.
+
+/** Stock actual de un conjunto de materiales en un almacén (para mostrar en UI). */
+export async function obtenerStockMateriales(
+  almacen_id: string,
+  material_ids: string[],
+): Promise<Record<string, number>> {
+  if (!almacen_id || material_ids.length === 0) return {};
+  const { sb } = await requireUser();
+  const { data } = await sb
+    .from('stock_actual')
+    .select('material_id, cantidad')
+    .eq('almacen_id', almacen_id)
+    .in('material_id', material_ids)
+    .is('material_lote_id', null);
+  const out: Record<string, number> = {};
+  for (const s of (data ?? []) as { material_id: string; cantidad: number }[]) {
+    out[s.material_id] = Number(s.cantidad ?? 0);
+  }
+  return out;
+}
+
+const ajustarMaterialBatchSchema = z.object({
+  almacen_id: z.string().uuid('Almacén requerido'),
+  observacion: z.string().max(500).optional().or(z.literal('')),
+  lineas: z.array(z.object({
+    material_id: z.string().uuid(),
+    cantidad_nueva: z.coerce.number().min(0, 'La cantidad no puede ser negativa'),
+  })).min(1, 'Agrega al menos una línea'),
+});
+
+/** Conteo físico masivo de materiales: fija el stock final e inserta el delta. */
+export async function ajustarStockMaterialBatch(
+  input: z.input<typeof ajustarMaterialBatchSchema>,
+): Promise<ActionResult<{ aplicados: number; sin_cambio: number; entradas: number; salidas: number }>> {
+  const r = await runAction(async () => {
+    const data = ajustarMaterialBatchSchema.parse(input);
+    const { sb, userId } = await requireUser();
+    await requireGerenteAjuste(sb, userId); // conteo = ajuste → solo gerencia
+
+    const ids = data.lineas.map((l) => l.material_id);
+    const { data: stockRows } = await sb
+      .from('stock_actual')
+      .select('material_id, cantidad')
+      .eq('almacen_id', data.almacen_id)
+      .in('material_id', ids)
+      .is('material_lote_id', null);
+    const mapa = new Map<string, number>();
+    for (const s of (stockRows ?? []) as { material_id: string; cantidad: number }[]) {
+      mapa.set(s.material_id, Number(s.cantidad ?? 0));
+    }
+
+    const candidatos = data.lineas.map((l) => {
+      const actual = mapa.get(l.material_id) ?? 0;
+      return { material_id: l.material_id, actual, cantidad_nueva: l.cantidad_nueva, delta: l.cantidad_nueva - actual };
+    });
+    const conCambio = candidatos.filter((c) => c.delta !== 0);
+    const sinCambio = candidatos.length - conCambio.length;
+    const entradas = conCambio.filter((c) => c.delta > 0).length;
+    const salidas = conCambio.filter((c) => c.delta < 0).length;
+
+    const rows = conCambio.map((c) => ({
+      tipo: (c.delta > 0 ? 'ENTRADA_AJUSTE' : 'SALIDA_AJUSTE') as 'ENTRADA_AJUSTE' | 'SALIDA_AJUSTE',
+      almacen_id: data.almacen_id,
+      material_id: c.material_id,
+      cantidad: Math.abs(c.delta),
+      referencia_tipo: 'AJUSTE',
+      usuario_id: userId,
+      observacion: [
+        `Conteo físico material (${c.actual} → ${c.cantidad_nueva})`,
+        data.observacion?.trim() || null,
+      ].filter(Boolean).join(' · '),
+    }));
+
+    if (rows.length > 0) {
+      const { error } = await sb.from('kardex_movimientos').insert(rows);
+      if (error) throw new Error(error.message);
+    }
+    return { aplicados: rows.length, sin_cambio: sinCambio, entradas, salidas };
+  });
+  if (r.ok) await bumpPaths('/inventario', '/materiales');
+  return r;
+}
+
+const movimientoMaterialBatchSchema = z.object({
+  almacen_id: z.string().uuid('Almacén requerido'),
+  tipo: z.enum(['ENTRADA_AJUSTE', 'SALIDA_AJUSTE']),
+  observacion: z.string().max(500).optional().or(z.literal('')),
+  lineas: z.array(z.object({
+    material_id: z.string().uuid(),
+    cantidad: z.coerce.number().positive(),
+  })).min(1, 'Agrega al menos una línea'),
+});
+
+/** Sumar/restar el mismo ajuste a varios materiales a la vez. */
+export async function registrarMovimientoMaterialBatch(
+  input: z.input<typeof movimientoMaterialBatchSchema>,
+): Promise<ActionResult<{ insertados: number }>> {
+  const r = await runAction(async () => {
+    const data = movimientoMaterialBatchSchema.parse(input);
+    const { sb, userId } = await requireUser();
+    await requireGerenteAjuste(sb, userId); // ajuste masivo → solo gerencia
+
+    const rows = data.lineas.map((l) => ({
+      tipo: data.tipo,
+      almacen_id: data.almacen_id,
+      material_id: l.material_id,
+      cantidad: l.cantidad,
+      referencia_tipo: 'AJUSTE',
+      usuario_id: userId,
+      observacion: data.observacion?.trim() || null,
+    }));
+
+    const { data: inserted, error } = await sb
+      .from('kardex_movimientos')
+      .insert(rows)
+      .select('id');
+    if (error) throw new Error(error.message);
+    return { insertados: (inserted ?? []).length };
+  });
+  if (r.ok) await bumpPaths('/inventario', '/materiales');
+  return r;
+}
