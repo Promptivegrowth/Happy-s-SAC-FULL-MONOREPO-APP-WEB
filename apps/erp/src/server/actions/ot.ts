@@ -729,45 +729,80 @@ export async function crearRegistroTiempoOT(
       throw new Error('Ingresá fecha inicio + fin O tiempo directo (> 0)');
     }
 
-    // Validar que las unidades procesadas no excedan las cortadas para esa
-    // (talla, producto). Sumamos las unidades ya registradas para el mismo
-    // (proceso, talla) y verificamos que el nuevo + acumulado no pase del
-    // máximo cortado. Sin esta guarda el cliente puede ingresar valores
-    // imposibles (ej. 700 unidades cuando se cortaron 70).
-    if (data.unidades_procesadas != null && data.unidades_procesadas > 0) {
-      // Producto del proceso (productos_procesos.producto_id)
-      const { data: procRow } = await sbAny
-        .from('productos_procesos')
-        .select('producto_id')
-        .eq('id', data.proceso_id)
+    // Producto + área del proceso (para el gate de corte y el tope de unidades).
+    const { data: procRow } = await sbAny
+      .from('productos_procesos')
+      .select('producto_id, areas_produccion(codigo)')
+      .eq('id', data.proceso_id)
+      .maybeSingle();
+    const productoId = procRow?.producto_id as string | undefined;
+    const areaCod = (procRow?.areas_produccion as { codigo?: string } | null)?.codigo ?? null;
+
+    let cortadaTalla = 0;
+    if (productoId) {
+      const { data: linea } = await sbAny
+        .from('ot_lineas')
+        .select('cantidad_cortada, cantidad_planificada')
+        .eq('ot_id', otId)
+        .eq('producto_id', productoId)
+        .eq('talla', data.talla)
         .maybeSingle();
-      const productoId = procRow?.producto_id as string | undefined;
-      if (productoId) {
-        const { data: linea } = await sbAny
-          .from('ot_lineas')
-          .select('cantidad_cortada')
+      cortadaTalla = Number(linea?.cantidad_cortada ?? 0);
+      const planificada = Number(linea?.cantidad_planificada ?? 0);
+
+      // GATE (pedido cliente 2026-09-02, por talla): no registrar operaciones
+      // aguas abajo si el corte de esa talla NO está culminado: cortado ≥
+      // planificado y sin cortes abiertos para la talla. No aplica al área CORTE
+      // (sus tiempos se declaran en la liquidación del corte).
+      if (areaCod !== 'CORTE') {
+        if (planificada > 0 && cortadaTalla < planificada) {
+          throw new Error(
+            `El corte de la talla ${formatTallaChip(data.talla)} no está completo ` +
+            `(cortadas ${cortadaTalla} de ${planificada} planificadas). Termina el corte antes de registrar esta operación.`,
+          );
+        }
+        const { data: cortes } = await sbAny
+          .from('ot_corte')
+          .select('id')
           .eq('ot_id', otId)
           .eq('producto_id', productoId)
-          .eq('talla', data.talla)
-          .maybeSingle();
-        const cortada = Number(linea?.cantidad_cortada ?? 0);
-        if (cortada > 0) {
-          const { data: previos } = await sbAny
-            .from('ot_registros_tiempo')
-            .select('unidades_procesadas')
-            .eq('ot_id', otId)
-            .eq('proceso_id', data.proceso_id)
-            .eq('talla', data.talla);
-          const yaRegistrado = ((previos ?? []) as { unidades_procesadas: number | null }[])
-            .reduce((s, r) => s + Number(r.unidades_procesadas ?? 0), 0);
-          const disponible = cortada - yaRegistrado;
-          if (data.unidades_procesadas > disponible) {
+          .in('estado', ['ABIERTO', 'EN_PROCESO']);
+        const cortesIds = ((cortes ?? []) as { id: string }[]).map((c) => c.id);
+        if (cortesIds.length > 0) {
+          const { data: lin } = await sbAny
+            .from('ot_corte_lineas')
+            .select('id')
+            .in('corte_id', cortesIds)
+            .eq('talla', data.talla)
+            .limit(1);
+          if ((lin ?? []).length > 0) {
             throw new Error(
-              `No podés registrar ${data.unidades_procesadas} unidades en talla ${formatTallaChip(data.talla)}: ` +
-              `se cortaron ${cortada} y ya hay ${yaRegistrado} registradas (quedan ${Math.max(0, disponible)}).`,
+              `Hay un corte sin cerrar para la talla ${formatTallaChip(data.talla)}. ` +
+              `Cierra (liquida) el corte antes de registrar esta operación.`,
             );
           }
         }
+      }
+    }
+
+    // Tope de unidades: no exceder lo cortado para esa (talla, producto). Sin
+    // esta guarda se podrían ingresar valores imposibles (ej. 700 cuando se
+    // cortaron 70).
+    if (data.unidades_procesadas != null && data.unidades_procesadas > 0 && productoId && cortadaTalla > 0) {
+      const { data: previos } = await sbAny
+        .from('ot_registros_tiempo')
+        .select('unidades_procesadas')
+        .eq('ot_id', otId)
+        .eq('proceso_id', data.proceso_id)
+        .eq('talla', data.talla);
+      const yaRegistrado = ((previos ?? []) as { unidades_procesadas: number | null }[])
+        .reduce((s, r) => s + Number(r.unidades_procesadas ?? 0), 0);
+      const disponible = cortadaTalla - yaRegistrado;
+      if (data.unidades_procesadas > disponible) {
+        throw new Error(
+          `No puedes registrar ${data.unidades_procesadas} unidades en talla ${formatTallaChip(data.talla)}: ` +
+          `se cortaron ${cortadaTalla} y ya hay ${yaRegistrado} registradas (quedan ${Math.max(0, disponible)}).`,
+        );
       }
     }
 

@@ -272,6 +272,7 @@ export function TiemposCostoTab({ otId, procesos, lineas, registros, operarios, 
                         return {
                           talla: l.talla,
                           cortada: Number(l.cantidad_cortada),
+                          planificada: Number(l.cantidad_planificada ?? 0),
                           yaRegistrado: yaReg,
                         };
                       })
@@ -639,7 +640,7 @@ function StatBox({ label, value, sub, highlight }: { label: string; value: strin
   );
 }
 
-type TallaDisp = { talla: string; cortada: number; yaRegistrado: number };
+type TallaDisp = { talla: string; cortada: number; planificada: number; yaRegistrado: number };
 
 /**
  * Bloque de SOLO LECTURA del área de corte en la OT. Los tiempos de corte se
@@ -875,8 +876,9 @@ function FormRegistro({
   function marcarTodasTallas() {
     const next: Record<string, string> = {};
     for (const t of tallasDisponibles) {
+      const corteIncompleto = !esAreaCorte && t.planificada > 0 && t.cortada < t.planificada;
       const rem = Math.max(0, t.cortada - t.yaRegistrado);
-      next[t.talla] = rem > 0 ? String(rem) : '';
+      next[t.talla] = !corteIncompleto && rem > 0 ? String(rem) : '';
     }
     setCantPorTalla(next);
   }
@@ -904,6 +906,13 @@ function FormRegistro({
     }
     // Validar máximos en cliente (el server también valida)
     for (const t of tallasAEnviar) {
+      if (!esAreaCorte && t.planificada > 0 && t.cortada < t.planificada) {
+        toast.error(
+          `Talla ${formatTallaChip(t.talla)}: el corte no está completo (cortadas ${t.cortada} de ${t.planificada}). ` +
+          `Termina el corte antes de registrar.`,
+        );
+        return;
+      }
       const rem = t.cortada - t.yaRegistrado;
       if (t.cantidad > rem) {
         toast.error(
@@ -1070,26 +1079,36 @@ function FormRegistro({
           {tallasDisponibles.map((t) => {
             const rem = Math.max(0, t.cortada - t.yaRegistrado);
             const completo = rem === 0;
+            // Corte incompleto (pedido cliente 2026-09-02): fuera del área CORTE,
+            // no se puede registrar una talla cuyo corte no está culminado
+            // (cortado < planificado). El servidor también lo valida.
+            const corteIncompleto = !esAreaCorte && t.planificada > 0 && t.cortada < t.planificada;
+            const bloqueado = completo || corteIncompleto;
             return (
               <div
                 key={t.talla}
                 className={`flex items-center gap-1 rounded border px-1.5 py-1 ${
-                  completo ? 'border-slate-200 bg-slate-50 opacity-60' : 'border-slate-200 bg-white'
+                  corteIncompleto ? 'border-rose-200 bg-rose-50 opacity-70'
+                    : completo ? 'border-slate-200 bg-slate-50 opacity-60'
+                      : 'border-slate-200 bg-white'
                 }`}
+                title={corteIncompleto ? `Corte incompleto: cortadas ${t.cortada} de ${t.planificada} planificadas` : undefined}
               >
                 <Badge variant="outline" className="text-[9px]">{formatTallaChip(t.talla)}</Badge>
                 <Input
                   type="number"
                   min="0"
                   max={rem}
-                  value={cantPorTalla[t.talla] ?? ''}
+                  value={corteIncompleto ? '' : (cantPorTalla[t.talla] ?? '')}
                   onChange={(e) => setCant(t.talla, e.target.value)}
-                  disabled={completo}
+                  disabled={bloqueado}
                   className="h-6 px-1 text-right text-xs font-mono"
-                  placeholder={completo ? 'ok' : `máx ${rem}`}
-                  title={`Cortadas: ${t.cortada} · Ya registradas: ${t.yaRegistrado} · Disponible: ${rem}`}
+                  placeholder={corteIncompleto ? 'corte ✂' : completo ? 'ok' : `máx ${rem}`}
+                  title={corteIncompleto
+                    ? `Corte incompleto: cortadas ${t.cortada} de ${t.planificada} planificadas`
+                    : `Cortadas: ${t.cortada} · Ya registradas: ${t.yaRegistrado} · Disponible: ${rem}`}
                 />
-                <span className="text-[9px] text-slate-400">/{t.cortada}</span>
+                <span className="text-[9px] text-slate-400">/{corteIncompleto ? t.planificada : t.cortada}</span>
               </div>
             );
           })}

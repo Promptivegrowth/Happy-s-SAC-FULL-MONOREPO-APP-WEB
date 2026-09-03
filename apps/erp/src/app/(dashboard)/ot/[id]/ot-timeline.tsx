@@ -1,37 +1,42 @@
 import { Card } from '@happy/ui/card';
 import {
-  ClipboardList, ShoppingCart, Scissors, Shirt, Sparkles, BadgeCheck, Warehouse, XCircle, Check,
-  type LucideIcon,
+  ClipboardList, Scissors, Shirt, Sparkles, BadgeCheck, Warehouse, Layers, Scan, Brush,
+  XCircle, Check, Circle, type LucideIcon,
 } from 'lucide-react';
 
 /**
- * Línea de tiempo visual del avance de una OT: en qué etapa está, desde
- * planificación → materiales → corte → confección/servicio → decorado →
- * control de calidad → envío a almacén (pedido cliente 2026-08-24).
+ * Línea de tiempo del avance de una OT. Ahora es DINÁMICA (pedido cliente
+ * 2026-09-02): las etapas reflejan la SECUENCIA REAL de áreas de los procesos
+ * del/los producto(s) de la OT (derivada de productos_procesos.orden), no una
+ * lista genérica fija. Cada producto puede tener su propia secuencia.
+ *
+ * Las etapas y su estado (done/current/pending) se calculan en el server
+ * (page.tsx) a partir del corte declarado, los registros de tiempo y las OS
+ * retornadas. Aquí solo se renderiza.
  */
 
-type Etapa = { label: string; icon: LucideIcon };
-const ETAPAS: Etapa[] = [
-  { label: 'Planificación', icon: ClipboardList },
-  { label: 'Compra de materiales', icon: ShoppingCart },
-  { label: 'Corte', icon: Scissors },
-  { label: 'Confección / Servicio', icon: Shirt },
-  { label: 'Decorado', icon: Sparkles },
-  { label: 'Control de calidad', icon: BadgeCheck },
-  { label: 'Enviado a almacén', icon: Warehouse },
-];
+export type EtapaTimeline = {
+  label: string;
+  /** Código de área (CORTE, COSTURA, BORDADO, …) o pseudo-etapa (__PLAN__, __ALM__). */
+  codigo: string;
+  estado: 'done' | 'current' | 'pending';
+  fecha: string | null;
+};
 
-// Índice de etapa según el estado de la OT. "Compra de materiales" (1) no es un
-// estado propio: se marca cumplida cuando la OT ya pasó a corte.
-const ESTADO_A_ETAPA: Record<string, number> = {
-  BORRADOR: 0,
-  PLANIFICADA: 0,
-  EN_CORTE: 2,
-  EN_HABILITADO: 2,
-  EN_SERVICIO: 3,
-  EN_DECORADO: 4,
-  EN_CONTROL_CALIDAD: 5,
-  COMPLETADA: 6,
+const ICON_AREA: Record<string, LucideIcon> = {
+  __PLAN__: ClipboardList,
+  CORTE: Scissors,
+  COSTURA: Shirt,
+  CONFECCION: Shirt,
+  BORDADO: Sparkles,
+  ESTAMPADO: Scan,
+  SUBLIMADO: Scan,
+  DECORADO: Sparkles,
+  PLISADO: Layers,
+  ACABADO: BadgeCheck,
+  PLANCHADO: Brush,
+  CONTROL_CALIDAD: BadgeCheck,
+  __ALM__: Warehouse,
 };
 
 function fmtFecha(iso: string | null | undefined): string | null {
@@ -41,11 +46,8 @@ function fmtFecha(iso: string | null | undefined): string | null {
   return d.toLocaleDateString('es-PE', { day: '2-digit', month: '2-digit', year: '2-digit' });
 }
 
-export function OtTimeline({ estado, fechas = [] }: { estado: string; fechas?: (string | null)[] }) {
-  const cancelada = estado === 'CANCELADA';
-  const actual = ESTADO_A_ETAPA[estado] ?? 0;
-  const completada = estado === 'COMPLETADA';
-
+export function OtTimeline({ etapas, cancelada = false }: { etapas: EtapaTimeline[]; cancelada?: boolean }) {
+  const minW = Math.max(720, etapas.length * 108);
   return (
     <Card className="p-4">
       <div className="mb-3 flex items-center justify-between">
@@ -58,11 +60,11 @@ export function OtTimeline({ estado, fechas = [] }: { estado: string; fechas?: (
       </div>
 
       <div className="overflow-x-auto pb-1">
-        <div className="flex min-w-[720px] items-start">
-          {ETAPAS.map((et, i) => {
-            const Icon = et.icon;
-            const done = !cancelada && (completada || i < actual);
-            const current = !cancelada && !completada && i === actual;
+        <div className="flex items-start" style={{ minWidth: `${minW}px` }}>
+          {etapas.map((et, i) => {
+            const Icon = ICON_AREA[et.codigo] ?? Circle;
+            const done = !cancelada && et.estado === 'done';
+            const current = !cancelada && et.estado === 'current';
             const circle = cancelada
               ? 'border-slate-200 bg-slate-100 text-slate-400'
               : done
@@ -70,23 +72,22 @@ export function OtTimeline({ estado, fechas = [] }: { estado: string; fechas?: (
                 : current
                   ? 'border-happy-500 bg-happy-50 text-happy-600 ring-4 ring-happy-100'
                   : 'border-slate-200 bg-white text-slate-300';
-            const lineDone = !cancelada && (completada || i < actual);
+            const lineDone = !cancelada && done;
+            const prevDone = !cancelada && (etapas[i - 1]?.estado === 'done');
             return (
-              <div key={et.label} className="flex flex-1 flex-col items-center">
+              <div key={`${et.codigo}-${i}`} className="flex flex-1 flex-col items-center">
                 <div className="flex w-full items-center">
-                  {/* línea izquierda */}
-                  <div className={`h-0.5 flex-1 ${i === 0 ? 'opacity-0' : lineDone ? 'bg-emerald-400' : 'bg-slate-200'}`} />
+                  <div className={`h-0.5 flex-1 ${i === 0 ? 'opacity-0' : prevDone ? 'bg-emerald-400' : 'bg-slate-200'}`} />
                   <div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full border-2 transition ${circle}`}>
                     {done ? <Check className="h-5 w-5" /> : <Icon className="h-5 w-5" />}
                   </div>
-                  {/* línea derecha */}
-                  <div className={`h-0.5 flex-1 ${i === ETAPAS.length - 1 ? 'opacity-0' : (!cancelada && (completada || i < actual)) ? 'bg-emerald-400' : 'bg-slate-200'}`} />
+                  <div className={`h-0.5 flex-1 ${i === etapas.length - 1 ? 'opacity-0' : lineDone ? 'bg-emerald-400' : 'bg-slate-200'}`} />
                 </div>
-                <p className={`mt-1.5 max-w-[96px] text-center text-[11px] leading-tight ${current ? 'font-semibold text-happy-700' : done ? 'text-emerald-700' : 'text-slate-400'}`}>
-                  {et.label}
+                <p className={`mt-1.5 max-w-[100px] text-center text-[11px] capitalize leading-tight ${current ? 'font-semibold text-happy-700' : done ? 'text-emerald-700' : 'text-slate-400'}`}>
+                  {et.label.toLowerCase()}
                 </p>
-                {fmtFecha(fechas[i]) && (
-                  <span className="mt-0.5 font-mono text-[10px] text-slate-500">{fmtFecha(fechas[i])}</span>
+                {fmtFecha(et.fecha) && (
+                  <span className="mt-0.5 font-mono text-[10px] text-slate-500">{fmtFecha(et.fecha)}</span>
                 )}
                 {current && <span className="mt-0.5 rounded-full bg-happy-100 px-1.5 text-[9px] font-semibold uppercase text-happy-700">Aquí</span>}
               </div>

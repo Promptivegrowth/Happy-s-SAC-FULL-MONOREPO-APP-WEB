@@ -50,15 +50,6 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
       if (!prev || e.fecha < prev) fechaPorEstado[e.estado_nuevo] = e.fecha;
     }
   }
-  const fechasEtapa: (string | null)[] = [
-    fechaPorEstado['PLANIFICADA'] ?? ot.fecha_apertura ?? null, // Planificación / generación
-    null,                                                       // Compra de materiales (sin estado propio)
-    fechaPorEstado['EN_CORTE'] ?? null,                          // Corte
-    fechaPorEstado['EN_SERVICIO'] ?? null,                       // Confección / Servicio
-    fechaPorEstado['EN_DECORADO'] ?? null,                       // Decorado
-    fechaPorEstado['EN_CONTROL_CALIDAD'] ?? null,                // Control de calidad
-    fechaPorEstado['COMPLETADA'] ?? (ot as { fecha_cierre?: string | null }).fecha_cierre ?? null, // Almacén
-  ];
 
   // Liquidar corte con cantidades distintas al plan requiere gerencia
   // (pedido del cliente 21/07/2026). El server revalida igual; esto es solo
@@ -248,6 +239,82 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
     return { completo: false as const, codigo, nombre: i.nombre, pendientes: i.pendientes, total: i.total };
   })();
 
+  // LÍNEA DE TIEMPO DINÁMICA (pedido cliente 2026-09-02): las etapas reflejan la
+  // SECUENCIA REAL de áreas de los procesos del/los producto(s) de la OT
+  // (productos_procesos.orden + areas_produccion), no una lista genérica fija.
+  // El estado de cada etapa se deriva del avance real: corte declarado, registros
+  // de tiempo y OS retornadas (procesos tercerizados).
+  const etapasTimeline = (() => {
+    const declaradoSet = new Set(registros.map((r) => `${r.proceso_id}::${r.talla}`));
+    const osRetSet = new Set(
+      osArr.filter((o) => ['RECEPCION_PARCIAL', 'RECEPCIONADA', 'CERRADA'].includes(o.estado)).map((o) => o.proceso),
+    );
+    const lineasCorte = ((lineas ?? []) as Array<{ producto_id: string; talla: string; cantidad_cortada: number | null }>)
+      .filter((l) => Number(l.cantidad_cortada ?? 0) > 0);
+
+    // Primera fecha de declaración por proceso (para la fecha del área).
+    const fechaRegPorProc = new Map<string, string>();
+    for (const r of registros) {
+      const f = r.fecha_inicio ?? r.created_at;
+      if (!f) continue;
+      const prev = fechaRegPorProc.get(r.proceso_id);
+      if (!prev || f < prev) fechaRegPorProc.set(r.proceso_id, f);
+    }
+
+    type Agg = { codigo: string; nombre: string; minOrden: number; total: number; hechos: number; fecha: string | null };
+    const agg = new Map<string, Agg>();
+    for (const p of procesos) {
+      const cod = p.area?.codigo;
+      if (!cod) continue;
+      for (const l of lineasCorte) {
+        if (l.producto_id !== p.producto_id) continue;
+        const cur = agg.get(cod) ?? { codigo: cod, nombre: p.area?.nombre ?? cod, minOrden: p.orden, total: 0, hechos: 0, fecha: null };
+        cur.minOrden = Math.min(cur.minOrden, p.orden);
+        cur.total += 1;
+        const declarado = cod === 'CORTE'
+          ? corteDeclarado
+          : p.es_tercerizado
+            ? osRetSet.has(p.proceso)
+            : declaradoSet.has(`${p.id}::${l.talla}`);
+        if (declarado) cur.hechos += 1;
+        const fproc = cod === 'CORTE' ? (fechaPorEstado['EN_CORTE'] ?? null) : (fechaRegPorProc.get(p.id) ?? null);
+        if (fproc && (!cur.fecha || fproc < cur.fecha)) cur.fecha = fproc;
+        agg.set(cod, cur);
+      }
+    }
+    const areasOrden = [...agg.values()].sort((a, b) => a.minOrden - b.minOrden);
+
+    const cancelada = ot.estado === 'CANCELADA';
+    const completada = ot.estado === 'COMPLETADA';
+    const hayCorte = lineasCorte.length > 0;
+
+    const etapas: import('./ot-timeline').EtapaTimeline[] = [];
+    etapas.push({
+      label: 'Planificación',
+      codigo: '__PLAN__',
+      estado: hayCorte || areasOrden.some((a) => a.hechos > 0) ? 'done' : 'current',
+      fecha: fechaPorEstado['PLANIFICADA'] ?? (ot as { fecha_apertura?: string | null }).fecha_apertura ?? null,
+    });
+    let currentAssigned = etapas[0]!.estado === 'current';
+    for (const a of areasOrden) {
+      const done = a.total > 0 && a.hechos >= a.total;
+      let estado: 'done' | 'current' | 'pending';
+      if (done) estado = 'done';
+      else if (!currentAssigned) { estado = 'current'; currentAssigned = true; }
+      else estado = 'pending';
+      etapas.push({ label: a.nombre, codigo: a.codigo, estado, fecha: a.fecha });
+    }
+    etapas.push({
+      label: 'Enviado a almacén',
+      codigo: '__ALM__',
+      estado: completada ? 'done' : (!currentAssigned ? 'current' : 'pending'),
+      fecha: fechaPorEstado['COMPLETADA'] ?? (ot as { fecha_cierre?: string | null }).fecha_cierre ?? null,
+    });
+    if (completada) for (const e of etapas) e.estado = 'done';
+
+    return { etapas, cancelada };
+  })();
+
   // BLOQUEO DE AVANCE (pedido del cliente 21/07/2026): no se puede pasar la OT
   // al siguiente proceso si el área del proceso ACTUAL todavía tiene operaciones
   // sin declarar como tiempo ejecutado. El área en curso se deriva de las
@@ -323,7 +390,7 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
       {/* Línea de tiempo del avance de la OT con FECHAS de cada etapa (de los
           eventos de estado). Planificación → materiales → corte → confección →
           decorado → control de calidad → almacén (pedido cliente 2026-08-27). */}
-      <OtTimeline estado={ot.estado} fechas={fechasEtapa} />
+      <OtTimeline etapas={etapasTimeline.etapas} cancelada={etapasTimeline.cancelada} />
 
       {/* Semáforo de AVANCE REAL por área (derivado de las declaraciones de
           tiempo). Avanza solo a medida que se declaran las operaciones. */}
