@@ -172,8 +172,110 @@ const movimientoBatchSchema = z.object({
   lineas: z.array(z.object({
     variante_id: z.string().uuid(),
     cantidad: z.coerce.number().positive(),
-  })).min(1, 'Agregá al menos una línea'),
+  })).min(1, 'Agrega al menos una línea'),
 });
+
+// ---------------------------------------------------------------------------
+// Conteo físico MASIVO (fijar stock final exacto de varias variantes a la vez)
+// ---------------------------------------------------------------------------
+// A diferencia del batch anterior (que SUMA/RESTA), aquí el usuario indica la
+// cantidad FINAL de cada ítem y el sistema calcula el delta e inserta el ajuste
+// correspondiente (ENTRADA_AJUSTE / SALIDA_AJUSTE). Es lo que se necesita para
+// una toma física / carga inicial (ej. "este SKU debe quedar en 20", sin
+// importar cuánto había). Pedido cliente 2026-08-31.
+
+const ajustarBatchSchema = z.object({
+  almacen_id: z.string().uuid('Almacén requerido'),
+  observacion: z.string().max(500).optional().or(z.literal('')),
+  lineas: z.array(z.object({
+    variante_id: z.string().uuid(),
+    cantidad_nueva: z.coerce.number().min(0, 'La cantidad no puede ser negativa'),
+  })).min(1, 'Agrega al menos una línea'),
+});
+
+/** Stock actual de un conjunto de variantes en un almacén (para mostrar en UI). */
+export async function obtenerStockVariantes(
+  almacen_id: string,
+  variante_ids: string[],
+): Promise<Record<string, number>> {
+  if (!almacen_id || variante_ids.length === 0) return {};
+  const { sb } = await requireUser();
+  const { data } = await sb
+    .from('stock_actual')
+    .select('variante_id, cantidad')
+    .eq('almacen_id', almacen_id)
+    .in('variante_id', variante_ids)
+    .is('material_lote_id', null);
+  const out: Record<string, number> = {};
+  for (const s of (data ?? []) as { variante_id: string; cantidad: number }[]) {
+    out[s.variante_id] = Number(s.cantidad ?? 0);
+  }
+  return out;
+}
+
+export async function ajustarStockBatch(
+  input: z.input<typeof ajustarBatchSchema>,
+): Promise<ActionResult<{ aplicados: number; sin_cambio: number; entradas: number; salidas: number }>> {
+  const r = await runAction(async () => {
+    const data = ajustarBatchSchema.parse(input);
+    const { sb, userId } = await requireUser();
+    await requireGerenteAjuste(sb, userId); // conteo = ajuste → solo gerencia
+
+    // Guardarraíl: bloquear productos terminados en almacén de materia prima.
+    const { data: almRow } = await sb
+      .from('almacenes')
+      .select('tipo, nombre')
+      .eq('id', data.almacen_id)
+      .single();
+    if ((almRow as { tipo?: string } | null)?.tipo === 'MATERIA_PRIMA') {
+      throw new Error(
+        `No se puede cargar productos terminados en "${(almRow as { nombre: string }).nombre}" — es un almacén de materia prima.`,
+      );
+    }
+
+    const ids = data.lineas.map((l) => l.variante_id);
+    const { data: stockRows } = await sb
+      .from('stock_actual')
+      .select('variante_id, cantidad')
+      .eq('almacen_id', data.almacen_id)
+      .in('variante_id', ids)
+      .is('material_lote_id', null);
+    const mapa = new Map<string, number>();
+    for (const s of (stockRows ?? []) as { variante_id: string; cantidad: number }[]) {
+      mapa.set(s.variante_id, Number(s.cantidad ?? 0));
+    }
+
+    const candidatos = data.lineas.map((l) => {
+      const actual = mapa.get(l.variante_id) ?? 0;
+      return { variante_id: l.variante_id, actual, cantidad_nueva: l.cantidad_nueva, delta: l.cantidad_nueva - actual };
+    });
+    const conCambio = candidatos.filter((c) => c.delta !== 0);
+    const sinCambio = candidatos.length - conCambio.length;
+    const entradas = conCambio.filter((c) => c.delta > 0).length;
+    const salidas = conCambio.filter((c) => c.delta < 0).length;
+
+    const rows = conCambio.map((c) => ({
+      tipo: (c.delta > 0 ? 'ENTRADA_AJUSTE' : 'SALIDA_AJUSTE') as 'ENTRADA_AJUSTE' | 'SALIDA_AJUSTE',
+      almacen_id: data.almacen_id,
+      variante_id: c.variante_id,
+      cantidad: Math.abs(c.delta),
+      referencia_tipo: 'AJUSTE',
+      usuario_id: userId,
+      observacion: [
+        `Conteo físico (${c.actual} → ${c.cantidad_nueva})`,
+        data.observacion?.trim() || null,
+      ].filter(Boolean).join(' · '),
+    }));
+
+    if (rows.length > 0) {
+      const { error } = await sb.from('kardex_movimientos').insert(rows);
+      if (error) throw new Error(error.message);
+    }
+    return { aplicados: rows.length, sin_cambio: sinCambio, entradas, salidas };
+  });
+  if (r.ok) await bumpPaths('/inventario', '/productos', '/inventario/alertas');
+  return r;
+}
 
 // ============================================================================
 // MATERIALES (telas, avíos, insumos) — stock en almacén de materia prima
