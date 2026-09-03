@@ -3,7 +3,7 @@
 import { z } from 'zod';
 import { runAction, requireUser, bumpPaths, type ActionResult } from './_helpers';
 import {
-  generarUBLInvoice, firmarUBL, empaquetarZip, enviarSendBill,
+  generarUBLInvoice, firmarUBL, empaquetarZip, enviarSendBill, digestSHA1,
   type ComprobanteInput,
 } from '@happy/lib/sunat-ubl';
 import { numeroALetras } from '@happy/lib/format';
@@ -92,6 +92,9 @@ export async function emitirComprobanteSunat(comprobanteId: string): Promise<Act
       password: config.certificado_password,
     });
 
+    // Hash del documento firmado (para trazabilidad / consulta SUNAT).
+    const hashFirma = digestSHA1(xmlFirmado);
+
     // 6. Empaquetar zip
     const zipBytes = await empaquetarZip(xmlFirmado, nombreArchivo);
 
@@ -153,6 +156,7 @@ export async function emitirComprobanteSunat(comprobanteId: string): Promise<Act
       estado: nuevoEstado,
       xml_firmado_url: xmlPath,
       cdr_url: cdrPath,
+      hash_firma: hashFirma,
       sunat_codigo_respuesta: r.ok ? r.cdr.codigo : null,
       sunat_mensaje: r.ok ? r.cdr.descripcion : r.error,
       sunat_enviado_en: new Date().toISOString(),

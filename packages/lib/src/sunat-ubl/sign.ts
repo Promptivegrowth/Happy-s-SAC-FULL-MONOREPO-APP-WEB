@@ -10,7 +10,7 @@
  *  3. La firma se hace sobre todo el documento usando enveloped-signature transform
  */
 
-import * as forge from 'node-forge';
+import forge from 'node-forge';
 import { SignedXml } from 'xml-crypto';
 
 export type CertificadoData = {

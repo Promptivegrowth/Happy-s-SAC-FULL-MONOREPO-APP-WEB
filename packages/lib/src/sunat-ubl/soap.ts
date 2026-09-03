@@ -7,7 +7,6 @@
  * Ref: https://cpe.sunat.gob.pe (manual del programador)
  */
 
-import * as forge from 'node-forge';
 
 export type SoapResult =
   | { ok: true; cdrZipBase64: string; cdr: { codigo: string; descripcion: string; observaciones: string[] } }
@@ -48,7 +47,9 @@ export async function enviarSendBill(args: {
   zipBytes: Uint8Array;
   nombreArchivoZip: string;  // sin .zip
 }): Promise<SoapResult> {
-  const zipBase64 = forge.util.encode64(String.fromCharCode(...args.zipBytes));
+  // Buffer maneja ZIPs de cualquier tamaño sin desbordar la pila (el spread de
+  // String.fromCharCode(...bytes) revienta con arreglos grandes).
+  const zipBase64 = Buffer.from(args.zipBytes).toString('base64');
   const envelope = buildSendBillEnvelope({ ...args, zipBase64 });
 
   let response: Response;
