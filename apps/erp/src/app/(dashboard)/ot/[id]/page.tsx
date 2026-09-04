@@ -261,28 +261,39 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
       if (!prev || f < prev) fechaRegPorProc.set(r.proceso_id, f);
     }
 
-    type Agg = { codigo: string; nombre: string; minOrden: number; total: number; hechos: number; fecha: string | null };
-    const agg = new Map<string, Agg>();
-    for (const p of procesos) {
+    // TRAMOS CONSECUTIVOS de área siguiendo el `orden` REAL de la receta. Antes
+    // se agrupaba por área usando el orden MÍNIMO, y eso distorsionaba la
+    // secuencia cuando la receta intercala áreas: p.ej. un único "habilitado en
+    // procesos" (ACABADO, orden 60) antes de CONFECCIÓN (orden 70) arrastraba
+    // TODO el acabado delante de confección. Con tramos, cada área aparece en la
+    // posición que le da la receta (y puede repetirse si la receta la repite).
+    // Pedido cliente 2026-09-04.
+    type Tramo = { codigo: string; nombre: string; procs: typeof procesos; total: number; hechos: number; fecha: string | null };
+    const tramos: Tramo[] = [];
+    for (const p of [...procesos].sort((a, b) => a.orden - b.orden)) {
       const cod = p.area?.codigo;
       if (!cod) continue;
-      for (const l of lineasCorte) {
-        if (l.producto_id !== p.producto_id) continue;
-        const cur = agg.get(cod) ?? { codigo: cod, nombre: p.area?.nombre ?? cod, minOrden: p.orden, total: 0, hechos: 0, fecha: null };
-        cur.minOrden = Math.min(cur.minOrden, p.orden);
-        cur.total += 1;
-        const declarado = cod === 'CORTE'
-          ? corteDeclarado
-          : p.es_tercerizado
-            ? osRetSet.has(p.proceso)
-            : declaradoSet.has(`${p.id}::${l.talla}`);
-        if (declarado) cur.hechos += 1;
-        const fproc = cod === 'CORTE' ? (fechaPorEstado['EN_CORTE'] ?? null) : (fechaRegPorProc.get(p.id) ?? null);
-        if (fproc && (!cur.fecha || fproc < cur.fecha)) cur.fecha = fproc;
-        agg.set(cod, cur);
+      const ultimo = tramos[tramos.length - 1];
+      if (ultimo && ultimo.codigo === cod) ultimo.procs.push(p);
+      else tramos.push({ codigo: cod, nombre: p.area?.nombre ?? cod, procs: [p], total: 0, hechos: 0, fecha: null });
+    }
+    for (const t of tramos) {
+      for (const p of t.procs) {
+        for (const l of lineasCorte) {
+          if (l.producto_id !== p.producto_id) continue;
+          t.total += 1;
+          const declarado = t.codigo === 'CORTE'
+            ? corteDeclarado
+            : p.es_tercerizado
+              ? osRetSet.has(p.proceso)
+              : declaradoSet.has(`${p.id}::${l.talla}`);
+          if (declarado) t.hechos += 1;
+          const fproc = t.codigo === 'CORTE' ? (fechaPorEstado['EN_CORTE'] ?? null) : (fechaRegPorProc.get(p.id) ?? null);
+          if (fproc && (!t.fecha || fproc < t.fecha)) t.fecha = fproc;
+        }
       }
     }
-    const areasOrden = [...agg.values()].sort((a, b) => a.minOrden - b.minOrden);
+    const areasOrden = tramos;
 
     const cancelada = ot.estado === 'CANCELADA';
     const completada = ot.estado === 'COMPLETADA';

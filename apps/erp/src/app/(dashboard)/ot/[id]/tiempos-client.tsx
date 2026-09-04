@@ -162,16 +162,22 @@ export function TiemposCostoTab({ otId, procesos, lineas, registros, operarios, 
   const unidades = Number(lineaTalla?.cantidad_cortada ?? 0);
   const unidadesPlan = Number(lineaTalla?.cantidad_planificada ?? 0);
 
-  // Agrupar procesos por área (área puede repetirse, cada operación es única)
-  const procesosPorArea = useMemo(() => {
-    const map = new Map<string, Proceso[]>();
-    for (const p of procesosTalla) {
+  // Agrupar por TRAMOS CONSECUTIVOS de la misma área, respetando el `orden` de
+  // la receta. Antes se juntaban TODAS las operaciones de un área en un solo
+  // bloque, lo que rompía la secuencia real cuando la receta intercala áreas
+  // (ej. ACABADO "habilitado en procesos" ANTES de CONFECCIÓN y el resto de
+  // acabados DESPUÉS): confección aparecía al final. Con tramos, cada área se
+  // muestra en la posición que le toca (pedido cliente 2026-09-04).
+  const bloquesArea = useMemo(() => {
+    const ordenados = [...procesosTalla].sort((a, b) => a.orden - b.orden);
+    const bloques: Array<{ areaCodigo: string; procs: Proceso[] }> = [];
+    for (const p of ordenados) {
       const k = p.area?.codigo ?? 'SIN_AREA';
-      if (!map.has(k)) map.set(k, []);
-      map.get(k)!.push(p);
+      const ultimo = bloques[bloques.length - 1];
+      if (ultimo && ultimo.areaCodigo === k) ultimo.procs.push(p);
+      else bloques.push({ areaCodigo: k, procs: [p] });
     }
-    for (const list of map.values()) list.sort((a, b) => a.orden - b.orden);
-    return map;
+    return bloques;
   }, [procesosTalla]);
 
   // Registros filtrados a la talla seleccionada (para la vista "Avance por talla")
@@ -240,17 +246,17 @@ export function TiemposCostoTab({ otId, procesos, lineas, registros, operarios, 
           </p>
         </CardHeader>
         <CardContent className="space-y-3 p-3">
-          {[...procesosPorArea.entries()].map(([areaCodigo, procs]) => {
+          {bloquesArea.map(({ areaCodigo, procs }, bloqueIdx) => {
             const area = procs[0]!.area;
             // El área de CORTE NO se registra en la OT: los tiempos (tendido,
             // corte, habilitado) se declaran en la orden de corte. Acá solo se
             // muestra un resumen informativo de solo lectura (pedido del cliente
             // 21/07/2026).
             if (areaCodigo === 'CORTE') {
-              return <CorteAreaInfo key={areaCodigo} procesos={procs} resumen={corteResumen} />;
+              return <CorteAreaInfo key={`${areaCodigo}-${bloqueIdx}`} procesos={procs} resumen={corteResumen} />;
             }
             return (
-              <div key={areaCodigo} className="rounded-md border border-slate-200 bg-slate-50/50 p-3">
+              <div key={`${areaCodigo}-${bloqueIdx}`} className="rounded-md border border-slate-200 bg-slate-50/50 p-3">
                 <div className="mb-2 flex items-center gap-2">
                   <Badge variant="default" className="bg-corp-600 text-[10px]">{areaCodigo}</Badge>
                   <span className="text-xs text-slate-500">{area?.nombre ?? areaCodigo}</span>
