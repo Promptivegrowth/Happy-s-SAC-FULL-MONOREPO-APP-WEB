@@ -21,6 +21,8 @@ type Linea = {
   cantidad_teorica: number;
   cantidad_real: number | null;
   merma: number | null;
+  /** Motivo que declaró producción cuando la cantidad real difiere del plan. */
+  observacion?: string | null;
 };
 
 export function LineasCorteEditor({
@@ -200,10 +202,11 @@ export function LineasCorteEditor({
           <TableHead className="text-right">Teórica</TableHead>
           <TableHead className="text-right">Real</TableHead>
           <TableHead className="text-right">Diferencia</TableHead>
+          <TableHead>Motivo de la diferencia</TableHead>
         </TableRow></TableHeader>
         <TableBody>
           {lineas.length === 0 ? (
-            <TableRow><TableCell colSpan={4} className="py-10 text-center text-sm text-slate-400">Sin líneas. Agrega tallas para empezar.</TableCell></TableRow>
+            <TableRow><TableCell colSpan={5} className="py-10 text-center text-sm text-slate-400">Sin líneas. Agrega tallas para empezar.</TableCell></TableRow>
           ) : lineas.map((l) => {
             const dif = (l.cantidad_real ?? l.cantidad_teorica) - l.cantidad_teorica;
             return (
@@ -212,6 +215,19 @@ export function LineasCorteEditor({
                 <TableCell className="text-right font-mono">{l.cantidad_teorica}</TableCell>
                 <TableCell className="text-right font-mono">{l.cantidad_real ?? '—'}</TableCell>
                 <TableCell className={`text-right font-mono ${dif < 0 ? 'text-danger' : dif > 0 ? 'text-emerald-600' : ''}`}>{dif > 0 ? '+' : ''}{dif}</TableCell>
+                <TableCell className="text-xs">
+                  {dif !== 0 ? (
+                    l.observacion ? (
+                      <span className="text-corp-800">{l.observacion}</span>
+                    ) : (
+                      <span className="inline-flex items-center gap-1 rounded bg-amber-50 px-1.5 py-0.5 text-amber-700 ring-1 ring-amber-200">
+                        Sin motivo declarado
+                      </span>
+                    )
+                  ) : (
+                    <span className="text-slate-300">—</span>
+                  )}
+                </TableCell>
               </TableRow>
             );
           })}

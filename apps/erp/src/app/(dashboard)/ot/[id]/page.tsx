@@ -202,6 +202,10 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
     telas: corteTiempos,
   };
 
+  // ¿Hay algún corte de esta OT SIN CERRAR? Mientras el corte no se liquide no
+  // se pueden registrar operaciones aguas abajo (pedido cliente 2026-09-04).
+  const hayCorteAbierto = corteResumen.cortes.some((c) => c.estado === 'ABIERTO' || c.estado === 'EN_PROCESO');
+
   // ÁREA EN CURSO derivada de las declaraciones (pedido del cliente
   // 21/07/2026): la primera área — en orden de proceso — que todavía tiene
   // operaciones sin declarar. A medida que se declaran los tiempos, el
@@ -545,6 +549,7 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
             osRetornada={osRetornada}
             hayOs={hayOs}
             corteResumen={corteResumen}
+            corteAbierto={hayCorteAbierto}
           />
         </TabsContent>
 

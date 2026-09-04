@@ -96,11 +96,14 @@ type Props = {
   hayOs?: boolean;
   /** Resumen de la liquidación de tiempos de corte (se declara en la orden de corte). */
   corteResumen?: CorteResumen;
+  /** ¿La OT tiene algún corte SIN CERRAR (ABIERTO/EN_PROCESO)? Mientras lo haya
+   *  no se pueden registrar operaciones aguas abajo. */
+  corteAbierto?: boolean;
 };
 
 const PEN = (n: number) => `S/ ${n.toFixed(2)}`;
 
-export function TiemposCostoTab({ otId, procesos, lineas, registros, operarios, disabled, ordenConfeccion = -1, osRetornada = false, hayOs = false, corteResumen }: Props) {
+export function TiemposCostoTab({ otId, procesos, lineas, registros, operarios, disabled, ordenConfeccion = -1, osRetornada = false, hayOs = false, corteResumen, corteAbierto = false }: Props) {
   // Productos únicos en las líneas de la OT
   const productos = useMemo(() => {
     const map = new Map<string, { id: string; nombre: string; codigo: string }>();
@@ -308,6 +311,8 @@ export function TiemposCostoTab({ otId, procesos, lineas, registros, operarios, 
                         // Post-confección: bloqueado hasta que retorne la OS.
                         esperandoTaller={ordenConfeccion >= 0 && p.orden > ordenConfeccion && !osRetornada}
                         hayOs={hayOs}
+                        // Corte sin liquidar: no se registra nada aguas abajo.
+                        corteSinCerrar={corteAbierto && areaCodigo !== 'CORTE'}
                       />
                     );
                   })}
@@ -731,7 +736,7 @@ function CorteAreaInfo({ procesos, resumen }: { procesos: Proceso[]; resumen?: C
 function OperacionBlock({
   otId, proceso, tallaActual, tallasDisponibles, registros, operarios, esAreaCorte, disabled,
   bloqueado = false, operacionAnterior = '', faltanAnterior = 0,
-  esperandoTaller = false, hayOs = false,
+  esperandoTaller = false, hayOs = false, corteSinCerrar = false,
 }: {
   otId: string;
   proceso: Proceso;
@@ -749,6 +754,8 @@ function OperacionBlock({
    *  un aviso (ya NO bloquea el registro; se puede trabajar en paralelo). */
   esperandoTaller?: boolean;
   hayOs?: boolean;
+  /** La OT tiene un corte SIN CERRAR: bloquea el registro (pedido 2026-09-04). */
+  corteSinCerrar?: boolean;
 }) {
   const [openForm, setOpenForm] = useState(false);
   const totalMin = registros.reduce((s, r) => s + Number(r.tiempo_total_min), 0);
@@ -795,8 +802,15 @@ function OperacionBlock({
                 : 'Va después de la confección — normalmente se envía primero la orden de servicio al taller; puedes registrar igual si trabajan en paralelo.'}
             </p>
           )}
+          {/* BLOQUEO DURO: mientras el corte no se liquide no se registra nada
+              aguas abajo (pedido cliente 2026-09-04). */}
+          {corteSinCerrar && (
+            <p className="mt-0.5 text-[10px] font-medium text-rose-700">
+              🔒 Hay una orden de corte SIN CERRAR. Cierra (liquida) el corte antes de registrar esta operación.
+            </p>
+          )}
         </div>
-        {!disabled && (
+        {!disabled && !corteSinCerrar && (
           completo && !openForm ? (
             <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2 py-1 text-[10px] font-semibold text-emerald-700" title="Todas las unidades cortadas ya fueron registradas">
               ✓ Completo

@@ -138,12 +138,19 @@ export async function agregarLineaCorte(_prev: unknown, fd: FormData): Promise<A
     // merma por talla quedó deprecada — la merma del corte se carga en metros
     // a nivel cabecera (ot_corte.merma_metros). Insertamos 0 para no romper
     // la columna existente.
+    // El MOTIVO que declara producción cuando la cantidad real difiere de la
+    // programada se guarda en `observacion` de la línea. Antes se leía del
+    // formulario y se descartaba en el insert, por eso gerencia nunca lo veía
+    // al momento de aprobar (reporte del cliente 2026-09-04).
+    const motivoLinea = (typeof data.motivo === 'string' ? data.motivo.trim() : '') || null;
+
     const { error } = await sb.from('ot_corte_lineas').insert({
       corte_id: data.corte_id,
       talla: data.talla,
       cantidad_teorica: data.cantidad_teorica,
       cantidad_real: real,
       merma: 0,
+      observacion: motivoLinea,
     });
     if (error) throw new Error(error.message);
 
