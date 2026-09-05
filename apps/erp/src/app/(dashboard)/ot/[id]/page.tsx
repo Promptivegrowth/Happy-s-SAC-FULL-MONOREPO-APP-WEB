@@ -160,6 +160,11 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
   // Recepción parcial (campaña) también cuenta como retorno: las unidades que
   // ya volvieron habilitan las operaciones post-confección.
   const osRetornada = osArr.some((o) => ['RECEPCION_PARCIAL', 'RECEPCIONADA', 'CERRADA'].includes(o.estado));
+  // Procesos cuya orden de servicio ya retornó del taller. Su retorno ES la
+  // declaración de que ese proceso se ejecutó (el taller no carga tiempos en la OT).
+  const osRetSet = new Set(
+    osArr.filter((o) => ['RECEPCION_PARCIAL', 'RECEPCIONADA', 'CERRADA'].includes(o.estado)).map((o) => o.proceso),
+  );
   const hayOs = osArr.length > 0;
 
   // TIEMPOS DEL ÁREA DE CORTE (pedido del cliente 21/07/2026): se declaran en
@@ -220,7 +225,9 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
     if (lineasCorte.length === 0) return null; // aún sin corte declarado
     const info = new Map<string, { nombre: string; minOrden: number; pendientes: number; total: number }>();
     for (const p of procesos) {
-      if (p.es_tercerizado) continue;
+      // Antes se saltaban los procesos tercerizados; ahora se incluyen y su
+      // avance se mide por el retorno de la OS (ver estaDeclarado).
+
       const cod = p.area?.codigo;
       if (!cod) continue;
       for (const l of lineasCorte) {
@@ -231,7 +238,9 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
         // El área de CORTE se declara en la orden de corte (liquidación), no en
         // los registros de la OT. Se considera declarada si la liquidación tiene
         // tiempos cargados.
-        const estaDeclarado = cod === 'CORTE' ? corteDeclarado : declarado.has(`${p.id}::${l.talla}`);
+        const estaDeclarado = cod === 'CORTE'
+          ? corteDeclarado
+          : (osRetSet.has(p.proceso) || declarado.has(`${p.id}::${l.talla}`));
         if (!estaDeclarado) prev.pendientes += 1;
         info.set(cod, prev);
       }
@@ -250,9 +259,6 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
   // de tiempo y OS retornadas (procesos tercerizados).
   const etapasTimeline = (() => {
     const declaradoSet = new Set(registros.map((r) => `${r.proceso_id}::${r.talla}`));
-    const osRetSet = new Set(
-      osArr.filter((o) => ['RECEPCION_PARCIAL', 'RECEPCIONADA', 'CERRADA'].includes(o.estado)).map((o) => o.proceso),
-    );
     const lineasCorte = ((lineas ?? []) as Array<{ producto_id: string; talla: string; cantidad_cortada: number | null }>)
       .filter((l) => Number(l.cantidad_cortada ?? 0) > 0);
 
@@ -286,11 +292,15 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
         for (const l of lineasCorte) {
           if (l.producto_id !== p.producto_id) continue;
           t.total += 1;
+          // Una etapa cuenta como hecha si se declaró el tiempo en la OT O si la
+          // orden de servicio de ese proceso ya retornó del taller. NO se
+          // condiciona a `es_tercerizado`: ese flag casi nunca está marcado
+          // (309 de 315 productos tienen COSTURA sin tercerizar) y hacía que la
+          // confección nunca se marcara aunque la OS estuviera cerrada — la OT
+          // se veía "estancada en corte" (reporte del cliente 2026-09-04).
           const declarado = t.codigo === 'CORTE'
             ? corteDeclarado
-            : p.es_tercerizado
-              ? osRetSet.has(p.proceso)
-              : declaradoSet.has(`${p.id}::${l.talla}`);
+            : (osRetSet.has(p.proceso) || declaradoSet.has(`${p.id}::${l.talla}`));
           if (declarado) t.hechos += 1;
           const fproc = t.codigo === 'CORTE' ? (fechaPorEstado['EN_CORTE'] ?? null) : (fechaRegPorProc.get(p.id) ?? null);
           if (fproc && (!t.fecha || fproc < t.fecha)) t.fecha = fproc;
