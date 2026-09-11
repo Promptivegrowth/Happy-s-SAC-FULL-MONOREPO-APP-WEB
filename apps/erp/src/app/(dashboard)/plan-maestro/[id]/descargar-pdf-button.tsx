@@ -134,40 +134,6 @@ export function DescargarPdfButton({
 
       y += blockH + 5;
 
-      // ─── Tabla: Líneas del plan ───────────────────────────────────────────
-      doc.setTextColor(...AZUL); doc.setFont('helvetica', 'bold'); doc.setFontSize(9);
-      doc.text('LÍNEAS DEL PLAN', M, y);
-      y += 2;
-      const lineasOrden = [...lineasProductos].sort(
-        (a, b) => a.producto_nombre.localeCompare(b.producto_nombre, 'es') || ordenTalla(a.talla) - ordenTalla(b.talla),
-      );
-      autoTable(doc, {
-        startY: y,
-        margin: { left: M, right: M },
-        head: [['Código', 'Producto', 'Talla', 'Cantidad', 'Prioridad']],
-        body: lineasOrden.map((l) => [
-          l.producto_codigo || '—',
-          l.producto_nombre,
-          formatTallaChip(l.talla),
-          String(l.cantidad),
-          l.prioridad != null ? String(l.prioridad) : '—',
-        ]),
-        foot: [[{ content: 'TOTAL', colSpan: 3, styles: { halign: 'right' } }, String(totalUnidades), '']],
-        headStyles: { fillColor: AZUL, textColor: 255, fontSize: 8, halign: 'center' },
-        footStyles: { fillColor: [241, 245, 249], textColor: [...AZUL], fontStyle: 'bold' },
-        bodyStyles: { fontSize: 8, cellPadding: 1.4 },
-        columnStyles: {
-          0: { cellWidth: 26 },
-          1: { cellWidth: 'auto' },
-          2: { cellWidth: 20, halign: 'center' },
-          3: { cellWidth: 26, halign: 'right' },
-          4: { cellWidth: 26, halign: 'center' },
-        },
-        theme: 'striped',
-        alternateRowStyles: { fillColor: [248, 250, 252] },
-      });
-      y = doc.lastAutoTable.finalY + 8;
-
       // ─── Tabla: Explosión de materiales ───────────────────────────────────
       if (materiales.length > 0) {
         if (y > pageH - 40) { doc.addPage(); y = M; }
@@ -188,7 +154,11 @@ export function DescargarPdfButton({
           alternateRowStyles: { fillColor: [248, 250, 252] },
         });
         y = doc.lastAutoTable.finalY + 8;
+      }
 
+      // RESUMEN por producto x talla. Va ANTES de las líneas del plan: el
+      // cliente pidió que el detalle línea a línea quede al final (2026-09-10).
+      if (lineasProductos.length > 0) {
         // ─── Pivot productos × tallas ───────────────────────────────────────
         if (y > pageH - 40) { doc.addPage(); y = M; }
         doc.setTextColor(...AZUL); doc.setFont('helvetica', 'bold'); doc.setFontSize(9);
@@ -226,7 +196,44 @@ export function DescargarPdfButton({
           alternateRowStyles: { fillColor: [248, 250, 252] },
           footStyles: { fillColor: [240, 253, 244], textColor: 0, fontStyle: 'bold', halign: 'center' },
         });
+        y = doc.lastAutoTable.finalY + 8;
       }
+
+      // ─── Tabla: Líneas del plan ───────────────────────────────────────────
+      // (va al final del documento, debajo del resumen)
+      if (y > pageH - 40) { doc.addPage(); y = M; }
+      doc.setTextColor(...AZUL); doc.setFont('helvetica', 'bold'); doc.setFontSize(9);
+      doc.text('LÍNEAS DEL PLAN', M, y);
+      y += 2;
+      const lineasOrden = [...lineasProductos].sort(
+        (a, b) => a.producto_nombre.localeCompare(b.producto_nombre, 'es') || ordenTalla(a.talla) - ordenTalla(b.talla),
+      );
+      autoTable(doc, {
+        startY: y,
+        margin: { left: M, right: M },
+        head: [['Código', 'Producto', 'Talla', 'Cantidad', 'Prioridad']],
+        body: lineasOrden.map((l) => [
+          l.producto_codigo || '—',
+          l.producto_nombre,
+          formatTallaChip(l.talla),
+          String(l.cantidad),
+          l.prioridad != null ? String(l.prioridad) : '—',
+        ]),
+        foot: [[{ content: 'TOTAL', colSpan: 3, styles: { halign: 'right' } }, String(totalUnidades), '']],
+        headStyles: { fillColor: AZUL, textColor: 255, fontSize: 8, halign: 'center' },
+        footStyles: { fillColor: [241, 245, 249], textColor: [...AZUL], fontStyle: 'bold' },
+        bodyStyles: { fontSize: 8, cellPadding: 1.4 },
+        columnStyles: {
+          0: { cellWidth: 26 },
+          1: { cellWidth: 'auto' },
+          2: { cellWidth: 20, halign: 'center' },
+          3: { cellWidth: 26, halign: 'right' },
+          4: { cellWidth: 26, halign: 'center' },
+        },
+        theme: 'striped',
+        alternateRowStyles: { fillColor: [248, 250, 252] },
+      });
+      y = doc.lastAutoTable.finalY + 8;
 
       // ─── Footer ───────────────────────────────────────────────────────────
       const total = doc.internal.getNumberOfPages();

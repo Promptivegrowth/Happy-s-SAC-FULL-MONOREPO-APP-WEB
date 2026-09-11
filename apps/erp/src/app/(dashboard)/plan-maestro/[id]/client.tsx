@@ -7,7 +7,7 @@ import { Input } from '@happy/ui/input';
 import { Badge } from '@happy/ui/badge';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@happy/ui/table';
 import { FormGrid, FormRow } from '@happy/ui/form-row';
-import { Plus, Trash2, Loader2, CheckCircle2, Factory, X, Search, Pencil, Save } from 'lucide-react';
+import { Plus, Trash2, Loader2, CheckCircle2, Factory, X, Search, Pencil, Save, Send } from 'lucide-react';
 import { toast } from 'sonner';
 import { formatTallaChip } from '@happy/lib';
 import {
@@ -15,6 +15,7 @@ import {
   actualizarLineaPlan,
   eliminarLineaPlan,
   aprobarPlan,
+  solicitarAprobacionPlan,
   generarOTsDelPlan,
   type TallaCantidad,
 } from '@/server/actions/plan-maestro';
@@ -28,6 +29,9 @@ type Linea = {
   cantidad_planificada: number;
   prioridad: number | null;
   productos?: { codigo: string; nombre: string } | null;
+  /** SKU de la VARIANTE para esta talla (el código del producto es igual para
+   *  todas las tallas, así que no sirve para identificar lo que se produce). */
+  sku?: string | null;
 };
 
 export function LineasEditor({
@@ -420,7 +424,7 @@ function LineaPlanRow({
   if (!editando) {
     return (
       <TableRow>
-        <TableCell className="font-mono text-xs">{l.productos?.codigo}</TableCell>
+        <TableCell className="font-mono text-xs">{l.sku ?? l.productos?.codigo}</TableCell>
         <TableCell className="font-medium">{l.productos?.nombre}</TableCell>
         <TableCell><Badge variant="outline">{formatTallaChip(l.talla)}</Badge></TableCell>
         <TableCell className="text-right font-mono">{l.cantidad_planificada}</TableCell>
@@ -443,7 +447,7 @@ function LineaPlanRow({
 
   return (
     <TableRow className="bg-happy-50/40">
-      <TableCell className="font-mono text-xs">{l.productos?.codigo}</TableCell>
+      <TableCell className="font-mono text-xs">{l.sku ?? l.productos?.codigo}</TableCell>
       <TableCell className="font-medium">{l.productos?.nombre}</TableCell>
       <TableCell><Badge variant="outline">{formatTallaChip(l.talla)}</Badge></TableCell>
       <TableCell className="text-right">
@@ -495,6 +499,7 @@ export function AccionesPlan({
   hayLineas,
   lineasSinReceta = 0,
   usuarioEsGerente = false,
+  aprobacionSolicitadaEn = null,
 }: {
   planId: string;
   estado: string;
@@ -502,8 +507,28 @@ export function AccionesPlan({
   lineasSinReceta?: number;
   /** Solo gerencia aprueba el plan (pedido 21/07/2026). */
   usuarioEsGerente?: boolean;
+  /** Fecha en que producción envió el plan a gerencia (null = aún no se envió). */
+  aprobacionSolicitadaEn?: string | null;
 }) {
   const [pending, start] = useTransition();
+  const [enviado, setEnviado] = useState<boolean>(!!aprobacionSolicitadaEn);
+
+  /** Producción avisa a gerencia que el plan está listo para aprobar. */
+  function enviarAGerencia() {
+    start(async () => {
+      const r = await solicitarAprobacionPlan(planId);
+      if (r.ok && r.data) {
+        setEnviado(true);
+        toast.success(
+          r.data.notificados > 0
+            ? `Plan enviado a gerencia · ${r.data.notificados} notificación(es)`
+            : 'Plan marcado como listo, pero no hay usuarios con rol gerente para notificar.',
+        );
+      } else {
+        toast.error(r.error ?? 'No se pudo enviar el plan a gerencia');
+      }
+    });
+  }
 
   function aprobar() {
     if (!confirm('¿Aprobar el plan? Después no se podrán editar líneas.')) return;
@@ -527,9 +552,22 @@ export function AccionesPlan({
     // Solo gerencia aprueba: el supervisor arma el plan pero no lo aprueba.
     if (!usuarioEsGerente) {
       return (
-        <span className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-xs font-medium text-amber-800">
-          Plan en borrador — la aprobación la realiza gerencia.
-        </span>
+        <div className="flex flex-col items-end gap-1">
+          <Button
+            onClick={enviarAGerencia}
+            disabled={pending || !hayLineas}
+            variant={enviado ? 'outline' : 'premium-corp'}
+            title={!hayLineas ? 'Agrega al menos una línea antes de enviar' : 'Notifica a gerencia que el plan está listo para aprobar'}
+          >
+            {pending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+            {enviado ? 'Reenviar a gerencia' : 'Enviar a gerencia para aprobación'}
+          </Button>
+          <span className="text-[11px] text-slate-500">
+            {enviado
+              ? 'Gerencia fue notificada. La aprobación la realiza gerencia.'
+              : 'Plan en borrador — la aprobación la realiza gerencia.'}
+          </span>
+        </div>
       );
     }
     return (

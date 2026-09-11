@@ -65,6 +65,27 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
   const lineasConReceta = lineas.filter((l) => recetasDisponibles.has(`${l.producto_id}|${l.talla}`));
   const lineasSinReceta = lineas.filter((l) => !recetasDisponibles.has(`${l.producto_id}|${l.talla}`));
 
+  // SKU REAL por (producto, talla): el código del PRODUCTO (ej. PFM0001) es el
+  // mismo para todas las tallas; el que identifica lo que se produce es el SKU
+  // de la VARIANTE (T8 -> PF0007, T10 -> PF0001…). Antes se mostraba el del
+  // producto en todas las filas (reporte del cliente 2026-09-10).
+  const skuPorProductoTalla = new Map<string, string>();
+  if (lineas.length > 0) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const sbVar = sb as unknown as { from: (t: string) => any };
+    const { data: vars } = await sbVar
+      .from('productos_variantes')
+      .select('producto_id, talla, sku')
+      .in('producto_id', Array.from(new Set(lineas.map((l) => l.producto_id))))
+      .eq('activo', true);
+    for (const v of (vars ?? []) as Array<{ producto_id: string; talla: string; sku: string | null }>) {
+      if (v.sku) skuPorProductoTalla.set(`${v.producto_id}|${v.talla}`, v.sku);
+    }
+  }
+  /** SKU de la talla; si la variante no existe, cae al código del producto. */
+  const skuDeLinea = (l: Linea): string =>
+    skuPorProductoTalla.get(`${l.producto_id}|${l.talla}`) ?? (l.productos?.codigo ?? '');
+
   const isEditable = plan.estado === 'BORRADOR';
   const totalUnidades = lineas.reduce((a, l) => a + Number(l.cantidad_planificada ?? 0), 0);
   const codigoCorrupto = (plan.codigo ?? '').endsWith('-null');
@@ -74,7 +95,7 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
   // PDF del plan (cabecera + líneas + explosión). Empresa para el membrete.
   const empresa = await cargarEmpresaPDF();
   const lineasPdf = lineas.map((l) => ({
-    producto_codigo: l.productos?.codigo ?? '',
+    producto_codigo: skuDeLinea(l),
     producto_nombre: l.productos?.nombre ?? '—',
     talla: l.talla,
     cantidad: Number(l.cantidad_planificada ?? 0),
@@ -103,7 +124,14 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
       actions={
         <div className="flex items-center gap-2">
           {pdfPlanButton}
-          <AccionesPlan planId={id} estado={plan.estado ?? 'BORRADOR'} hayLineas={lineas.length > 0} lineasSinReceta={lineasSinReceta.length} usuarioEsGerente={usuarioEsGerente} />
+          <AccionesPlan
+            planId={id}
+            estado={plan.estado ?? 'BORRADOR'}
+            hayLineas={lineas.length > 0}
+            lineasSinReceta={lineasSinReceta.length}
+            usuarioEsGerente={usuarioEsGerente}
+            aprobacionSolicitadaEn={(plan as { aprobacion_solicitada_en?: string | null }).aprobacion_solicitada_en ?? null}
+          />
         </div>
       }
     >
@@ -142,7 +170,7 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
         <TabsContent value="lineas">
           <LineasEditor
             planId={id}
-            lineas={lineas as Parameters<typeof LineasEditor>[0]['lineas']}
+            lineas={lineas.map((l) => ({ ...l, sku: skuDeLinea(l) })) as Parameters<typeof LineasEditor>[0]['lineas']}
             productos={(productos ?? []) as { id: string; codigo: string; nombre: string }[]}
             isEditable={isEditable}
           />

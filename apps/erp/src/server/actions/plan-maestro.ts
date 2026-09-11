@@ -245,6 +245,64 @@ export async function eliminarLineaPlan(id: string, planId: string): Promise<Act
 }
 
 /**
+ * Producción termina de armar el plan y lo ENVÍA a gerencia para su aprobación
+ * (pedido cliente 2026-09-10). No cambia el estado del plan — sigue en BORRADOR
+ * hasta que gerencia lo apruebe —, solo deja constancia de la solicitud y
+ * notifica a todos los gerentes con enlace directo al plan.
+ */
+export async function solicitarAprobacionPlan(planId: string): Promise<ActionResult<{ notificados: number }>> {
+  const r = await runAction(async () => {
+    const { sb, userId } = await requireUser();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const sbAny = sb as unknown as { from: (t: string) => any };
+
+    const { data: plan } = await sbAny
+      .from('plan_maestro')
+      .select('codigo, estado, semana, anio')
+      .eq('id', planId)
+      .maybeSingle();
+    if (!plan) throw new Error('Plan no encontrado');
+    if (plan.estado !== 'BORRADOR') {
+      throw new Error(`El plan ya está en estado ${String(plan.estado).replace('_', ' ')}: no hace falta pedir aprobación.`);
+    }
+
+    // Debe tener líneas: no tiene sentido pedir aprobación de un plan vacío.
+    const { data: lineas } = await sbAny
+      .from('plan_maestro_lineas')
+      .select('cantidad_planificada')
+      .eq('plan_id', planId);
+    const filas = (lineas ?? []) as Array<{ cantidad_planificada: number | null }>;
+    if (filas.length === 0) throw new Error('El plan no tiene líneas: agrega al menos una antes de enviarlo a gerencia.');
+    const unidades = filas.reduce((a, l) => a + Number(l.cantidad_planificada ?? 0), 0);
+
+    await sbAny
+      .from('plan_maestro')
+      .update({ aprobacion_solicitada_por: userId, aprobacion_solicitada_en: new Date().toISOString() })
+      .eq('id', planId);
+
+    // Notificar a gerencia (una notificación por gerente).
+    const { data: gerentes } = await sbAny.from('usuarios_roles').select('usuario_id').eq('rol', 'gerente');
+    const ids = [...new Set(((gerentes ?? []) as { usuario_id: string }[]).map((g) => g.usuario_id))];
+    const { data: perfil } = await sbAny.from('perfiles').select('nombre_completo').eq('id', userId).maybeSingle();
+    const solicitante = (perfil as { nombre_completo?: string } | null)?.nombre_completo ?? 'Producción';
+
+    if (ids.length > 0) {
+      await sbAny.from('notificaciones').insert(ids.map((uid) => ({
+        destinatario_usuario_id: uid,
+        tipo: 'APROBACION_PLAN',
+        titulo: 'Plan de producción pendiente de aprobación',
+        mensaje: `${solicitante} terminó el plan ${plan.codigo} (semana ${plan.semana ?? '—'}/${plan.anio ?? '—'}) con ${filas.length} línea(s) y ${unidades} unidades. Requiere tu aprobación.`,
+        enlace: `/plan-maestro/${planId}`,
+      })));
+    }
+
+    return { notificados: ids.length };
+  });
+  if (r.ok) await bumpPaths('/plan-maestro', `/plan-maestro/${planId}`);
+  return r;
+}
+
+/**
  * Aprueba un plan idempotente: solo permite la transición BORRADOR → APROBADO.
  * Si ya está APROBADO/EN_EJECUCION/COMPLETADO/CANCELADO, devuelve error claro
  * en vez de hacer un UPDATE silencioso (evita doble-click duplicando OTs).
