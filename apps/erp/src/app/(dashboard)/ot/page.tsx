@@ -125,7 +125,7 @@ async function OtTable({ q, estado, prioridad }: SP) {
   let query = sb
     .from('ot')
     .select(
-      'id, numero, estado, fecha_apertura, fecha_entrega_objetivo, prioridad, observacion, created_at, ot_lineas(cantidad_planificada, cantidad_cortada, cantidad_terminada)',
+      'id, numero, estado, fecha_apertura, fecha_entrega_objetivo, prioridad, observacion, created_at, ot_lineas(cantidad_planificada, cantidad_cortada, cantidad_terminada, productos(codigo, nombre))',
     )
     .order('created_at', { ascending: false })
     .limit(200);
@@ -189,6 +189,7 @@ async function OtTable({ q, estado, prioridad }: SP) {
           <TableHeader>
             <TableRow>
               <TableHead>N°</TableHead>
+              <TableHead>Producto</TableHead>
               <TableHead>Apertura</TableHead>
               <TableHead>Entrega obj.</TableHead>
               <TableHead>Estado</TableHead>
@@ -217,6 +218,27 @@ async function OtTable({ q, estado, prioridad }: SP) {
                     <Link href={`/ot/${o.id}`} className="font-medium text-corp-900 hover:text-happy-600">
                       {o.numero}
                     </Link>
+                  </TableCell>
+                  <TableCell className="text-sm">
+                    {(() => {
+                      // Nombre del producto para ubicar la OT sin abrirla
+                      // (pedido cliente 2026-09-10). Una OT agrupa un producto,
+                      // pero contemplamos varios por si se agregaron líneas.
+                      const nombres = Array.from(new Set(
+                        (lineas as Array<{ productos?: { codigo: string | null; nombre: string | null } | null }>)
+                          .map((l) => l.productos?.nombre)
+                          .filter((n): n is string => !!n),
+                      ));
+                      if (nombres.length === 0) return <span className="text-slate-400">—</span>;
+                      return (
+                        <span className="block max-w-[220px] truncate" title={nombres.join(' · ')}>
+                          {nombres[0]}
+                          {nombres.length > 1 && (
+                            <span className="ml-1 text-[10px] text-slate-400">+{nombres.length - 1}</span>
+                          )}
+                        </span>
+                      );
+                    })()}
                   </TableCell>
                   <TableCell className="text-sm">{formatDate(o.fecha_apertura)}</TableCell>
                   <TableCell className="text-sm">

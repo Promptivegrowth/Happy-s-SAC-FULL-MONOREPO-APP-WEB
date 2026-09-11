@@ -429,6 +429,20 @@ export async function generarOTsDelPlan(planId: string): Promise<ActionResult<{ 
     // Almacén de producción default
     const { data: alm } = await sb.from('almacenes').select('id').eq('codigo', 'ALM-SB').maybeSingle();
 
+    // Datos legibles para la observación de la OT: código del PLAN y nombre del
+    // PRODUCTO. Antes se guardaba `plan <uuid recortado>`, que no le decía nada
+    // a nadie en el listado de OTs (reporte del cliente 2026-09-10).
+    const { data: planInfo } = await sb.from('plan_maestro').select('codigo').eq('id', planId).maybeSingle();
+    const planCodigo = (planInfo as { codigo?: string } | null)?.codigo ?? planId.slice(0, 8);
+    const { data: prodsOT } = await sb
+      .from('productos')
+      .select('id, codigo, nombre')
+      .in('id', Array.from(porProducto.keys()));
+    const nombreProducto = new Map(
+      ((prodsOT ?? []) as Array<{ id: string; codigo: string | null; nombre: string | null }>)
+        .map((p) => [p.id, `${p.codigo ?? ''} ${p.nombre ?? ''}`.trim()]),
+    );
+
     let count = 0;
     try {
       for (const [productoId, items] of porProducto) {
@@ -442,7 +456,7 @@ export async function generarOTsDelPlan(planId: string): Promise<ActionResult<{ 
           almacen_produccion: alm?.id ?? null,
           responsable_usuario_id: userId,
           prioridad: Math.min(...items.map((i) => i.prioridad ?? 100)),
-          observacion: `Generada desde plan ${planId.slice(0, 8)}`,
+          observacion: `Plan ${planCodigo} · ${nombreProducto.get(productoId) ?? 'Producto'}`,
         }).select('id').single();
         if (errOt) throw new Error(errOt.message);
 

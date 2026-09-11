@@ -28,7 +28,7 @@ export default async function Page() {
   const sbAny = sb as unknown as { from: (t: string) => any };
   const [{ data }, { count: pendientes }] = await Promise.all([
     sb.from('ordenes_servicio')
-      .select('id, numero, proceso, fecha_emision, fecha_entrega_esperada, monto_total, estado, talleres(nombre), ot(numero)')
+      .select('id, numero, proceso, fecha_emision, fecha_entrega_esperada, monto_total, estado, talleres(nombre), ot(numero), ordenes_servicio_lineas(productos(nombre))')
       // Última OS generada arriba: el número es correlativo (OS-0000NN), así que
       // ordenar por número descendente pone la más reciente primero.
       .order('numero', { ascending: false }).limit(100),
@@ -63,7 +63,7 @@ export default async function Page() {
         <Card><CardContent className="p-0">
           <Table>
             <TableHeader><TableRow>
-              <TableHead>N°</TableHead><TableHead>OT</TableHead><TableHead>Taller</TableHead>
+              <TableHead>N°</TableHead><TableHead>OT</TableHead><TableHead>Producto</TableHead><TableHead>Taller</TableHead>
               <TableHead>Proceso</TableHead><TableHead>Emisión</TableHead><TableHead>Entrega</TableHead>
               <TableHead className="text-right">Monto</TableHead><TableHead>Estado</TableHead><TableHead></TableHead>
             </TableRow></TableHeader>
@@ -77,6 +77,21 @@ export default async function Page() {
                       <Link href={`/servicios/${o.id}`} className="hover:text-happy-600">{o.numero}</Link>
                     </TableCell>
                     <TableCell className="font-mono text-xs">{ot?.numero ?? '—'}</TableCell>
+                    <TableCell className="text-sm">
+                      {(() => {
+                        // Nombre del producto para ubicar la OS sin abrirla
+                        // (pedido cliente 2026-09-10).
+                        const lin = (o as unknown as { ordenes_servicio_lineas?: Array<{ productos?: { nombre: string | null } | null }> }).ordenes_servicio_lineas ?? [];
+                        const nombres = Array.from(new Set(lin.map((l) => l.productos?.nombre).filter((n): n is string => !!n)));
+                        if (nombres.length === 0) return <span className="text-slate-400">—</span>;
+                        return (
+                          <span className="block max-w-[200px] truncate" title={nombres.join(' · ')}>
+                            {nombres[0]}
+                            {nombres.length > 1 && <span className="ml-1 text-[10px] text-slate-400">+{nombres.length - 1}</span>}
+                          </span>
+                        );
+                      })()}
+                    </TableCell>
                     <TableCell className="font-medium">{t?.nombre}</TableCell>
                     <TableCell><Badge variant="secondary" className="text-[10px]">{o.proceso}</Badge></TableCell>
                     <TableCell className="text-sm">{formatDate(o.fecha_emision)}</TableCell>

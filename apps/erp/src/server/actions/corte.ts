@@ -108,6 +108,78 @@ const lineaCorteSchema = z.object({
   motivo: z.string().optional().or(z.literal('')),
 });
 
+/**
+ * Edita la CANTIDAD REAL y el MOTIVO de una línea de corte.
+ *
+ * Solo se permite mientras el corte no se haya enviado a aprobación: si ya está
+ * PENDIENTE (esperando a gerencia) o AUTORIZADA, queda congelado para preservar
+ * lo que gerencia revisó/aprobó (pedido cliente 2026-09-10). Tampoco se edita un
+ * corte COMPLETADO o ANULADO.
+ */
+export async function actualizarLineaCorte(
+  lineaId: string,
+  cantidadReal: number | null,
+  motivo: string,
+): Promise<ActionResult> {
+  const r = await runAction(async () => {
+    const { sb } = await requireUser();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const sbAny = sb as unknown as { from: (t: string) => any };
+
+    const { data: linea } = await sbAny
+      .from('ot_corte_lineas')
+      .select('id, corte_id, cantidad_teorica')
+      .eq('id', lineaId)
+      .maybeSingle();
+    if (!linea) throw new Error('Línea de corte no encontrada.');
+
+    const { data: corte } = await sbAny
+      .from('ot_corte')
+      .select('id, numero, estado, autorizacion_estado, ot_id, producto_id')
+      .eq('id', linea.corte_id)
+      .maybeSingle();
+    if (!corte) throw new Error('Corte no encontrado.');
+
+    if (corte.estado === 'COMPLETADO' || corte.estado === 'ANULADO') {
+      throw new Error(`El corte ${corte.numero} ya está cerrado: no se pueden modificar sus cantidades.`);
+    }
+    if (corte.autorizacion_estado === 'PENDIENTE') {
+      throw new Error(
+        `El corte ${corte.numero} ya fue enviado a gerencia para aprobación: no se puede modificar mientras esté pendiente. Si necesitas corregirlo, pide a gerencia que lo rechace primero.`,
+      );
+    }
+    if (corte.autorizacion_estado === 'AUTORIZADA') {
+      throw new Error(`El corte ${corte.numero} ya fue autorizado por gerencia: las cantidades quedaron congeladas.`);
+    }
+
+    if (cantidadReal != null && (!Number.isFinite(cantidadReal) || cantidadReal < 0)) {
+      throw new Error('La cantidad real debe ser un número mayor o igual a 0.');
+    }
+
+    const difiere = cantidadReal != null && Number(cantidadReal) !== Number(linea.cantidad_teorica);
+    const motivoLimpio = motivo?.trim() || null;
+    if (difiere && !motivoLimpio) {
+      throw new Error('Indica el motivo de la diferencia: gerencia lo necesita para aprobar el cierre.');
+    }
+
+    const { error } = await sbAny
+      .from('ot_corte_lineas')
+      .update({ cantidad_real: cantidadReal, observacion: difiere ? motivoLimpio : motivoLimpio })
+      .eq('id', lineaId);
+    if (error) throw new Error(error.message);
+
+    // La OT jala en vivo lo cortado (mig 70).
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const rpc = sb as unknown as { rpc: (fn: string, args: any) => any };
+    if (corte.ot_id && corte.producto_id) {
+      await rpc.rpc('sync_ot_cortada', { p_ot_id: corte.ot_id, p_producto_id: corte.producto_id });
+    }
+    return null;
+  });
+  if (r.ok) await bumpPaths('/corte', '/ot');
+  return r;
+}
+
 export async function agregarLineaCorte(_prev: unknown, fd: FormData): Promise<ActionResult> {
   const r = await runAction(async () => {
     const data = lineaCorteSchema.parse({

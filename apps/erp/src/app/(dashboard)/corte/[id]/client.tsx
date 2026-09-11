@@ -10,7 +10,7 @@ import { FormGrid, FormRow } from '@happy/ui/form-row';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@happy/ui/table';
 import { Plus, Loader2, CheckCircle2, Wrench } from 'lucide-react';
 import { toast } from 'sonner';
-import { agregarLineaCorte, cerrarCorte, crearOS, guardarTiemposCorte, solicitarAutorizacionCorte } from '@/server/actions/corte';
+import { actualizarLineaCorte, agregarLineaCorte, cerrarCorte, crearOS, guardarTiemposCorte, solicitarAutorizacionCorte } from '@/server/actions/corte';
 import { formatTallaChip } from '@happy/lib';
 
 const TALLAS = ['T0','T2','T4','T6','T8','T10','T12','T14','T16','TS','TAD', 'TU'] as const;
@@ -32,6 +32,7 @@ export function LineasCorteEditor({
   planPorTalla,
   cortadoOtrosPorTalla,
   usuarioEsGerente = false,
+  autorizacionEstado = null,
 }: {
   corteId: string;
   lineas: Linea[];
@@ -42,9 +43,17 @@ export function LineasCorteEditor({
   cortadoOtrosPorTalla: Record<string, number>;
   /** Solo gerencia autoriza una cantidad real distinta a la teórica del plan. */
   usuarioEsGerente?: boolean;
+  /** Estado de autorización del corte: si ya se envió (PENDIENTE) o se aprobó
+   *  (AUTORIZADA), las cantidades quedan congeladas. */
+  autorizacionEstado?: string | null;
 }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
+  const [editando, setEditando] = useState<string | null>(null);
+  // Se puede corregir la cantidad real y el motivo SOLO mientras el corte siga
+  // editable y no se haya enviado a gerencia (pedido cliente 2026-09-10).
+  const puedeEditarCantidades =
+    editable && autorizacionEstado !== 'PENDIENTE' && autorizacionEstado !== 'AUTORIZADA';
   const [pending, start] = useTransition();
   const [tallaSel, setTallaSel] = useState('');
   const [cantTeorica, setCantTeorica] = useState('');
@@ -209,6 +218,16 @@ export function LineasCorteEditor({
             <TableRow><TableCell colSpan={5} className="py-10 text-center text-sm text-slate-400">Sin líneas. Agrega tallas para empezar.</TableCell></TableRow>
           ) : lineas.map((l) => {
             const dif = (l.cantidad_real ?? l.cantidad_teorica) - l.cantidad_teorica;
+            if (editando === l.id) {
+              return (
+                <FilaCorteEditable
+                  key={l.id}
+                  linea={l}
+                  onCancel={() => setEditando(null)}
+                  onSaved={() => { setEditando(null); router.refresh(); }}
+                />
+              );
+            }
             return (
               <TableRow key={l.id}>
                 <TableCell><Badge variant="outline">{formatTallaChip(l.talla)}</Badge></TableCell>
@@ -226,6 +245,16 @@ export function LineasCorteEditor({
                     )
                   ) : (
                     <span className="text-slate-300">—</span>
+                  )}
+                  {puedeEditarCantidades && (
+                    <button
+                      type="button"
+                      onClick={() => setEditando(l.id)}
+                      className="ml-2 text-[11px] font-medium text-happy-600 hover:underline"
+                      title="Modificar la cantidad real y el motivo (solo antes de enviar a aprobación)"
+                    >
+                      Editar
+                    </button>
                   )}
                 </TableCell>
               </TableRow>
@@ -574,5 +603,80 @@ export function GenerarOSDesdeCorte({ corteId, otId, talleres }: { corteId: stri
         </div>
       </form>
     </Card>
+  );
+}
+
+
+/**
+ * Fila en modo edición: permite corregir la CANTIDAD REAL y el MOTIVO de una
+ * línea de corte antes de enviarla a aprobación. El servidor revalida el estado
+ * de autorización (no basta con ocultar el botón).
+ */
+function FilaCorteEditable({
+  linea,
+  onCancel,
+  onSaved,
+}: {
+  linea: Linea;
+  onCancel: () => void;
+  onSaved: () => void;
+}) {
+  const [pending, start] = useTransition();
+  const [real, setReal] = useState(linea.cantidad_real != null ? String(linea.cantidad_real) : '');
+  const [motivo, setMotivo] = useState(linea.observacion ?? '');
+
+  const realNum = real.trim() === '' ? null : Number(real);
+  const dif = (realNum ?? linea.cantidad_teorica) - linea.cantidad_teorica;
+
+  function guardar() {
+    if (realNum != null && (!Number.isFinite(realNum) || realNum < 0)) {
+      return toast.error('La cantidad real debe ser un número mayor o igual a 0');
+    }
+    if (dif !== 0 && !motivo.trim()) {
+      return toast.error('Indica el motivo de la diferencia: gerencia lo necesita para aprobar');
+    }
+    start(async () => {
+      const r = await actualizarLineaCorte(linea.id, realNum, motivo);
+      if (r.ok) { toast.success('Línea actualizada'); onSaved(); }
+      else toast.error(r.error ?? 'No se pudo actualizar');
+    });
+  }
+
+  return (
+    <TableRow className="bg-happy-50/40">
+      <TableCell><Badge variant="outline">{formatTallaChip(linea.talla)}</Badge></TableCell>
+      <TableCell className="text-right font-mono">{linea.cantidad_teorica}</TableCell>
+      <TableCell className="text-right">
+        <Input
+          type="number"
+          min={0}
+          value={real}
+          onChange={(e) => setReal(e.target.value)}
+          className="h-8 w-24 text-right text-xs"
+          placeholder="real"
+          autoFocus
+        />
+      </TableCell>
+      <TableCell className={`text-right font-mono ${dif < 0 ? 'text-danger' : dif > 0 ? 'text-emerald-600' : ''}`}>
+        {dif > 0 ? '+' : ''}{dif}
+      </TableCell>
+      <TableCell>
+        <div className="flex items-center gap-1.5">
+          <Input
+            value={motivo}
+            onChange={(e) => setMotivo(e.target.value)}
+            className="h-8 flex-1 text-xs"
+            placeholder={dif !== 0 ? 'Motivo (obligatorio)' : 'Motivo (opcional)'}
+            maxLength={300}
+          />
+          <Button size="sm" className="h-8" onClick={guardar} disabled={pending}>
+            {pending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : 'Guardar'}
+          </Button>
+          <Button size="sm" variant="ghost" className="h-8" onClick={onCancel} disabled={pending}>
+            Cancelar
+          </Button>
+        </div>
+      </TableCell>
+    </TableRow>
   );
 }

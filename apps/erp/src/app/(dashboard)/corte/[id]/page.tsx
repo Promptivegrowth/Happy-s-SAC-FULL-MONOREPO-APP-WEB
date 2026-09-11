@@ -234,6 +234,7 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
             planPorTalla={planPorTalla}
             cortadoOtrosPorTalla={cortadoOtrosPorTalla}
             usuarioEsGerente={usuarioEsGerente}
+            autorizacionEstado={autorizacionEstado}
           />
         </CardContent>
       </Card>
