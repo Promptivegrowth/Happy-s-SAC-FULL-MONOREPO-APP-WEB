@@ -140,7 +140,7 @@ export default async function CategoriasPage({ searchParams }: { searchParams: P
           <p className="font-semibold text-corp-900">Cómo funciona la publicación en la web</p>
           <p className="text-xs">
             El <strong>toggle "Categoría activa"</strong> publica o despublica TODOS los productos
-            de la categoría en la web. Es la única acción que necesitás para una categoría completa.
+            de la categoría en la web. Es la única acción que necesitas para una categoría completa.
           </p>
           <ul className="ml-4 list-disc text-xs text-slate-600">
             <li>
@@ -156,7 +156,7 @@ export default async function CategoriasPage({ searchParams }: { searchParams: P
               categoría asignada — esos requieren acción aparte).
             </li>
             <li>
-              ¿Necesitás ocultar UN producto puntual sin afectar al resto de la categoría? Andá
+              ¿Necesitas ocultar UN producto puntual sin afectar al resto de la categoría? Ve
               a <code className="rounded bg-slate-100 px-1">/web-catalogo</code> y usá el toggle
               individual de ese producto.
             </li>

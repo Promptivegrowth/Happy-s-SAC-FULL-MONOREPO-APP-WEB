@@ -164,7 +164,7 @@ export function NuevaOSForm({
   // OT directa: en ambos casos usa lineasFuente + tallas seleccionadas.
   async function calcularTarifa() {
     if (!productoIdActual || !tallerId) {
-      toast.error('Necesitás producto (vía corte u OT) y taller para sugerir tarifa');
+      toast.error('Necesitas producto (vía corte u OT) y taller para sugerir tarifa');
       return;
     }
     setCalcPending(true);
@@ -184,7 +184,10 @@ export function NuevaOSForm({
     if (r.ok && r.data) {
       setTarifaInfo(r.data);
       if (r.data.detalle.length === 0) {
-        toast.error('No hay tarifas configuradas para este taller. Andá a /talleres/[id]/tarifas para cargarlas.');
+        toast.error(
+          `No hay tarifa cargada para este producto en ${proceso.replace('_', ' ')}. ` +
+          'Cárgala en Configuración → Tarifas de servicios (vale para todos los talleres).',
+        );
       } else {
         setMontoBase(String(r.data.total));
         toast.success(`Tarifa sugerida: S/ ${r.data.total.toFixed(2)}`);
@@ -435,17 +438,26 @@ export function NuevaOSForm({
                   </Button>
                 </div>
                 {tarifaInfo.detalle.length === 0 ? (
-                  <p className="text-xs text-amber-700">
-                    ⚠️ No hay tarifas configuradas para este taller. Andá a{' '}
-                    <a
-                      href={`/talleres/${tallerId}/tarifas`}
-                      className="underline hover:text-amber-900"
-                      target="_blank"
-                    >
-                      /talleres/{tallerId.slice(0, 8)}…/tarifas
-                    </a>{' '}
-                    para crearlas.
-                  </p>
+                  <div className="space-y-1 text-xs text-amber-700">
+                    <p>
+                      ⚠️ No hay tarifa cargada para <strong>este producto</strong> en el proceso{' '}
+                      <strong>{proceso.replace('_', ' ')}</strong>
+                      {tarifaInfo.faltantes.length > 0 && (
+                        <> (tallas sin tarifa: {tarifaInfo.faltantes.map((t) => formatTallaChip(t)).join(', ')})</>
+                      )}.
+                    </p>
+                    <p>
+                      La tarifa es <strong>por producto y proceso</strong>, no por taller: cárgala una sola vez en{' '}
+                      <a href="/configuracion/tarifas-servicios" className="font-semibold underline hover:text-amber-900" target="_blank">
+                        Configuración → Tarifas de servicios
+                      </a>{' '}
+                      y vale para todos los talleres. Solo si <em>este</em> taller cobra distinto, carga una tarifa propia en{' '}
+                      <a href={`/talleres/${tallerId}/tarifas`} className="underline hover:text-amber-900" target="_blank">
+                        las tarifas del taller
+                      </a>.
+                    </p>
+                    <p>Mientras tanto puedes escribir el monto a mano en el campo de abajo.</p>
+                  </div>
                 ) : (
                   <>
                     <table className="w-full text-xs">

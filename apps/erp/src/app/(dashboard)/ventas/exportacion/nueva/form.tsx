@@ -235,7 +235,7 @@ export function NuevaVentaExportForm({
             <FormRow label="Puerto/aeropuerto salida" hint="Auto por país">
               <Input value={puertoSalida} onChange={(e) => setPuertoSalida(e.target.value)} />
             </FormRow>
-            <FormRow label="N° DUA (opcional)" hint="Declaración Única de Aduanas — si ya tenés">
+            <FormRow label="N° DUA (opcional)" hint="Declaración Única de Aduanas — si ya la tienes">
               <Input value={numeroDua} onChange={(e) => setNumeroDua(e.target.value)} />
             </FormRow>
           </FormGrid>

@@ -62,7 +62,7 @@ export async function crearCorte(_prev: unknown, fd: FormData): Promise<ActionRe
         throw new Error('La OT seleccionada no tiene líneas planificadas — no se puede crear un corte sobre ella.');
       }
       if (productos.length > 1) {
-        throw new Error('La OT tiene varios productos; tenés que indicar cuál se está cortando.');
+        throw new Error('La OT tiene varios productos; tienes que indicar cuál se está cortando.');
       }
       productoId = productos[0]!;
     }

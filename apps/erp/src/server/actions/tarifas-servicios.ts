@@ -10,6 +10,18 @@ const PROCESOS = [
 ] as const;
 const TALLAS = ['T0','T2','T4','T6','T8','T10','T12','T14','T16','TS','TAD', 'TU'] as const;
 
+/**
+ * Una tarifa SIN fecha de inicio vale desde siempre.
+ *
+ * La pantalla de tarifas no pide vigencia, así que la tarifa se guardaba con
+ * `vigente_desde = NULL`; como la búsqueda filtraba `vigente_desde <= hoy` y en
+ * SQL una comparación contra NULL nunca es verdadera, esas tarifas quedaban
+ * INVISIBLES: el usuario cargaba la tarifa del producto y la orden de servicio
+ * seguía diciendo que no había tarifa. Ahora se guarda la fecha de hoy al crear
+ * y, además, la lectura acepta las filas sin fecha.
+ */
+const hoyISO = () => new Date().toISOString().slice(0, 10);
+
 const schema = z.object({
   proceso: z.enum(PROCESOS).optional().or(z.literal('')),
   producto_id: z.string().uuid().optional().or(z.literal('')),
@@ -33,7 +45,7 @@ export async function crearTarifaServicio(input: z.input<typeof schema>): Promis
         producto_id: data.producto_id || null,
         talla: (data.talla || null) as (typeof TALLAS)[number] | null,
         precio_unitario: data.precio_unitario,
-        vigente_desde: data.vigente_desde || null,
+        vigente_desde: data.vigente_desde || hoyISO(),
         vigente_hasta: data.vigente_hasta || null,
         observacion: data.observacion || null,
       })
@@ -61,17 +73,21 @@ export async function actualizarTarifaServicio(
     const { sb } = await requireUser();
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const sbAny = sb as unknown as { from: (t: string) => any };
+    // La vigencia sólo se toca si el usuario la envía: editar el precio no debe
+    // mover la fecha desde la que rige la tarifa.
+    const cambios: Record<string, unknown> = {
+      proceso: (data.proceso || null) as (typeof PROCESOS)[number] | null,
+      producto_id: data.producto_id || null,
+      talla: (data.talla || null) as (typeof TALLAS)[number] | null,
+      precio_unitario: data.precio_unitario,
+      vigente_hasta: data.vigente_hasta || null,
+      observacion: data.observacion || null,
+    };
+    if (data.vigente_desde) cambios.vigente_desde = data.vigente_desde;
+
     const { error } = await sbAny
       .from('tarifas_servicios')
-      .update({
-        proceso: (data.proceso || null) as (typeof PROCESOS)[number] | null,
-        producto_id: data.producto_id || null,
-        talla: (data.talla || null) as (typeof TALLAS)[number] | null,
-        precio_unitario: data.precio_unitario,
-        vigente_desde: data.vigente_desde || null,
-        vigente_hasta: data.vigente_hasta || null,
-        observacion: data.observacion || null,
-      })
+      .update(cambios)
       .eq('id', id);
     if (error) throw new Error(error.message);
     return null;
@@ -128,7 +144,7 @@ export async function consultarTarifaServicio(
   const { data } = await sbAny
     .from('tarifas_servicios')
     .select('precio_unitario, proceso, producto_id, talla, observacion, vigente_hasta')
-    .lte('vigente_desde', today);
+    .or(`vigente_desde.is.null,vigente_desde.lte.${today}`);
   const rows = ((data ?? []) as Row[]).filter(
     (r) => !r.vigente_hasta || r.vigente_hasta >= today,
   );

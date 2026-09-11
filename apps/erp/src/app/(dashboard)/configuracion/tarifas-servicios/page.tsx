@@ -7,7 +7,7 @@ import { EmptyState } from '@happy/ui/empty-state';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@happy/ui/table';
 import { PageShell } from '@/components/page-shell';
 import { ArrowLeft, Tags } from 'lucide-react';
-import { NewButton, EditButton, DeleteButton } from './client';
+import { NewButton, EditButton, DeleteButton, ProductosProvider } from './client';
 import { formatPEN, formatDate , formatTallaChip } from '@happy/lib';
 
 export const metadata = { title: 'Tarifas de servicios' };
@@ -25,9 +25,13 @@ type Tarifa = {
   productos: { codigo: string; nombre: string } | null;
 };
 
-export default async function Page({ searchParams }: { searchParams: Promise<{ proceso?: string }> }) {
+/** Con ~800 tarifas, pintarlas todas de una hacía la pantalla inusable. */
+const POR_PAGINA = 100;
+
+export default async function Page({ searchParams }: { searchParams: Promise<{ proceso?: string; q?: string; page?: string }> }) {
   const sp = await searchParams;
   const filtroProceso = sp.proceso || '';
+  const q = (sp.q || '').trim();
   const sb = await createClient();
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -43,14 +47,45 @@ export default async function Page({ searchParams }: { searchParams: Promise<{ p
   const todas = (tarifasData ?? []) as Tarifa[];
   const procesos = Array.from(new Set(todas.map((t) => t.proceso).filter(Boolean))) as string[];
   procesos.sort();
-  const tarifas = filtroProceso
-    ? todas.filter((t) => (filtroProceso === '__SIN__' ? !t.proceso : t.proceso === filtroProceso))
-    : todas;
+  const qLower = q.toLowerCase();
+  const filtradas = todas.filter((t) => {
+    if (filtroProceso) {
+      const coincide = filtroProceso === '__SIN__' ? !t.proceso : t.proceso === filtroProceso;
+      if (!coincide) return false;
+    }
+    if (!qLower) return true;
+    const texto = `${t.proceso ?? ''} ${t.productos?.nombre ?? ''} ${t.productos?.codigo ?? ''} ${t.talla ?? ''} ${t.observacion ?? ''}`.toLowerCase();
+    return texto.includes(qLower);
+  });
+
+  const totalPaginas = Math.max(1, Math.ceil(filtradas.length / POR_PAGINA));
+  const pagina = Math.min(Math.max(1, Number(sp.page) || 1), totalPaginas);
+  const tarifas = filtradas.slice((pagina - 1) * POR_PAGINA, pagina * POR_PAGINA);
+
+  /** Arma el link conservando los filtros vigentes. */
+  const linkCon = (cambios: { proceso?: string; q?: string; page?: number }) => {
+    const params = new URLSearchParams();
+    const proc = cambios.proceso !== undefined ? cambios.proceso : filtroProceso;
+    const texto = cambios.q !== undefined ? cambios.q : q;
+    const pag = cambios.page ?? 1;
+    if (proc) params.set('proceso', proc);
+    if (texto) params.set('q', texto);
+    if (pag > 1) params.set('page', String(pag));
+    const qs = params.toString();
+    return `/configuracion/tarifas-servicios${qs ? `?${qs}` : ''}`;
+  };
+
+  const catalogoProductos = (productos ?? []).map((p) => ({
+    id: p.id as string,
+    codigo: p.codigo as string,
+    nombre: p.nombre as string,
+  }));
 
   return (
+    <ProductosProvider productos={catalogoProductos}>
     <PageShell
       title="Tarifas de servicios"
-      description="Tarifario CENTRAL de pago por unidad. Una sola entrada vale para todos los talleres. Si un taller específico cobra distinto, podés override en /talleres/[id]/tarifas."
+      description="Tarifario CENTRAL de pago por unidad. Una sola entrada vale para todos los talleres. Si un taller específico cobra distinto, puedes ponerle una tarifa propia en /talleres/[id]/tarifas."
       actions={
         <div className="flex items-center gap-2">
           <Link href="/configuracion">
@@ -58,13 +93,7 @@ export default async function Page({ searchParams }: { searchParams: Promise<{ p
               <ArrowLeft className="h-4 w-4" /> Volver
             </Button>
           </Link>
-          <NewButton
-            productos={(productos ?? []).map((p) => ({
-              id: p.id as string,
-              codigo: p.codigo as string,
-              nombre: p.nombre as string,
-            }))}
-          />
+          <NewButton />
         </div>
       }
     >
@@ -83,16 +112,42 @@ export default async function Page({ searchParams }: { searchParams: Promise<{ p
           </li>
         </ol>
         <p className="mt-2 text-xs text-slate-600">
-          <strong>Tip</strong>: dejá un campo vacío para que aplique a CUALQUIER valor. Empezá con tarifas por proceso
-          (ej. COSTURA = S/ 4.50 para todos los productos y tallas) y agregá excepciones después.
+          <strong>Tip</strong>: deja un campo vacío para que aplique a CUALQUIER valor. Empieza con tarifas por proceso
+          (ej. COSTURA = S/ 4.50 para todos los productos y tallas) y agrega excepciones después.
         </p>
       </div>
+
+      <form method="get" className="flex flex-wrap items-end gap-2 rounded-lg border border-dashed border-slate-200 p-3">
+        {filtroProceso && <input type="hidden" name="proceso" value={filtroProceso} />}
+        <div className="min-w-[240px] flex-1">
+          <label htmlFor="q" className="mb-1 block text-[10px] font-medium uppercase tracking-wider text-slate-500">
+            Buscar tarifa
+          </label>
+          <input
+            id="q"
+            name="q"
+            defaultValue={q}
+            placeholder="Por producto, código, proceso, talla o nota…"
+            className="h-9 w-full rounded-md border px-2 text-sm"
+          />
+        </div>
+        <Button type="submit" size="sm" variant="premium">Buscar</Button>
+        {(q || filtroProceso) && (
+          <Link href="/configuracion/tarifas-servicios" className="h-9 rounded-md border px-3 text-sm leading-9 hover:bg-slate-50">
+            Limpiar filtros
+          </Link>
+        )}
+        <span className="ml-auto text-xs text-slate-500">
+          {filtradas.length} {filtradas.length === 1 ? 'tarifa' : 'tarifas'}
+          {filtradas.length > POR_PAGINA && ` · mostrando ${tarifas.length} (página ${pagina} de ${totalPaginas})`}
+        </span>
+      </form>
 
       {procesos.length > 0 && (
         <div className="flex flex-wrap items-center gap-2">
           <span className="text-[11px] font-medium uppercase tracking-wider text-slate-500">Filtrar por proceso:</span>
           <Link
-            href="/configuracion/tarifas-servicios"
+            href={linkCon({ proceso: '' })}
             className={`rounded-full border px-3 py-1 text-xs font-medium transition ${!filtroProceso ? 'border-happy-500 bg-happy-500 text-white' : 'border-slate-200 bg-white text-slate-600 hover:border-happy-300'}`}
           >
             Todas ({todas.length})
@@ -102,7 +157,7 @@ export default async function Page({ searchParams }: { searchParams: Promise<{ p
             return (
               <Link
                 key={pr}
-                href={`/configuracion/tarifas-servicios?proceso=${encodeURIComponent(pr)}`}
+                href={linkCon({ proceso: pr })}
                 className={`rounded-full border px-3 py-1 text-xs font-medium transition ${filtroProceso === pr ? 'border-happy-500 bg-happy-500 text-white' : 'border-slate-200 bg-white text-slate-600 hover:border-happy-300'}`}
               >
                 {pr.replace('_', ' ')} ({n})
@@ -115,8 +170,12 @@ export default async function Page({ searchParams }: { searchParams: Promise<{ p
       {tarifas.length === 0 ? (
         <EmptyState
           icon={<Tags className="h-6 w-6" />}
-          title="Sin tarifas configuradas"
-          description="Sin tarifas, el sistema no puede sugerir el monto al crear órdenes de servicio. Empezá cargando una tarifa por proceso."
+          title={todas.length === 0 ? 'Sin tarifas configuradas' : 'Ninguna tarifa coincide con el filtro'}
+          description={
+            todas.length === 0
+              ? 'Sin tarifas, el sistema no puede sugerir el monto al crear órdenes de servicio. Empieza cargando una tarifa por proceso.'
+              : 'Prueba con otro texto de búsqueda o quita el filtro de proceso.'
+          }
         />
       ) : (
         <Card>
@@ -171,7 +230,6 @@ export default async function Page({ searchParams }: { searchParams: Promise<{ p
                     <TableCell className="text-right">
                       <div className="flex justify-end gap-1">
                         <EditButton
-                          productos={(productos ?? []).map((p) => ({ id: p.id, codigo: p.codigo, nombre: p.nombre }))}
                           tarifa={{
                             id: t.id,
                             proceso: t.proceso,
@@ -191,6 +249,31 @@ export default async function Page({ searchParams }: { searchParams: Promise<{ p
           </CardContent>
         </Card>
       )}
+
+      {totalPaginas > 1 && (
+        <div className="flex items-center justify-between gap-2 text-xs text-slate-600">
+          <span>
+            Página {pagina} de {totalPaginas} · {filtradas.length} tarifas en total
+          </span>
+          <div className="flex items-center gap-2">
+            {pagina > 1 ? (
+              <Link href={linkCon({ page: pagina - 1 })} className="rounded-md border px-3 py-1.5 font-medium hover:bg-slate-50">
+                ← Anterior
+              </Link>
+            ) : (
+              <span className="rounded-md border px-3 py-1.5 text-slate-300">← Anterior</span>
+            )}
+            {pagina < totalPaginas ? (
+              <Link href={linkCon({ page: pagina + 1 })} className="rounded-md border px-3 py-1.5 font-medium hover:bg-slate-50">
+                Siguiente →
+              </Link>
+            ) : (
+              <span className="rounded-md border px-3 py-1.5 text-slate-300">Siguiente →</span>
+            )}
+          </div>
+        </div>
+      )}
     </PageShell>
+    </ProductosProvider>
   );
 }

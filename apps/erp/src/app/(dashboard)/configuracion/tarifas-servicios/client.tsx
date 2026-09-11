@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useTransition } from 'react';
+import { createContext, useContext, useState, useTransition, type ReactNode } from 'react';
 import { useRouter } from 'next/navigation';
 import { Button } from '@happy/ui/button';
 import {
@@ -27,6 +27,23 @@ const PROCESOS = [
 const TALLAS = ['T0','T2','T4','T6','T8','T10','T12','T14','T16','TS','TAD', 'TU'] as const;
 
 type Producto = { id: string; codigo: string; nombre: string };
+
+/**
+ * CATÁLOGO DE PRODUCTOS COMPARTIDO.
+ *
+ * Antes cada fila de la tabla le pasaba la lista COMPLETA de productos a su
+ * botón "Editar". Con ~780 tarifas × ~420 productos, la página llegaba a pesar
+ * 42 MB y el navegador quedaba colgado: la pantalla se veía pero no se podía
+ * usar (ni crear ni editar tarifas).
+ *
+ * Ahora la lista viaja UNA sola vez por este contexto y los botones la leen de
+ * acá, así el peso de la página no crece con la cantidad de tarifas.
+ */
+const ProductosCtx = createContext<Producto[]>([]);
+
+export function ProductosProvider({ productos, children }: { productos: Producto[]; children: ReactNode }) {
+  return <ProductosCtx.Provider value={productos}>{children}</ProductosCtx.Provider>;
+}
 
 export type TarifaInicial = {
   id: string;
@@ -97,7 +114,7 @@ function TarifaModal({
           <DialogTitle>{esEdit ? 'Editar tarifa de servicio' : 'Nueva tarifa de servicio'}</DialogTitle>
           <DialogDescription>
             Tarifa estándar central — vale para TODOS los talleres.
-            Dejá un campo vacío para que aplique a CUALQUIER valor de ese campo.
+            Deja un campo vacío para que aplique a CUALQUIER valor de ese campo.
           </DialogDescription>
         </DialogHeader>
 
@@ -187,7 +204,8 @@ function TarifaModal({
   );
 }
 
-export function NewButton({ productos }: { productos: Producto[] }) {
+export function NewButton() {
+  const productos = useContext(ProductosCtx);
   const [open, setOpen] = useState(false);
   return (
     <>
@@ -200,7 +218,8 @@ export function NewButton({ productos }: { productos: Producto[] }) {
   );
 }
 
-export function EditButton({ productos, tarifa }: { productos: Producto[]; tarifa: TarifaInicial }) {
+export function EditButton({ tarifa }: { tarifa: TarifaInicial }) {
+  const productos = useContext(ProductosCtx);
   const [open, setOpen] = useState(false);
   return (
     <>

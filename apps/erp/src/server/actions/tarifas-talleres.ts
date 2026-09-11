@@ -38,11 +38,13 @@ export async function consultarTarifa(
     vigente_hasta: string | null;
   };
 
+  // Igual que en las tarifas centrales: una tarifa sin fecha de inicio vale
+  // desde siempre, así que no puede quedar fuera del filtro de vigencia.
   let q = sb
     .from('talleres_tarifas')
     .select('precio_unitario, producto_id, proceso, talla, observacion, vigente_hasta')
     .eq('taller_id', tallerId)
-    .lte('vigente_desde', today);
+    .or(`vigente_desde.is.null,vigente_desde.lte.${today}`);
   const { data } = await q;
   const rows = ((data ?? []) as Row[]).filter(
     (r) => !r.vigente_hasta || r.vigente_hasta >= today,
@@ -168,7 +170,7 @@ export async function crearTarifa(input: z.input<typeof tarifaSchema>): Promise<
         proceso: (data.proceso || null) as (typeof PROCESOS)[number] | null,
         talla: (data.talla || null) as (typeof TALLAS)[number] | null,
         precio_unitario: data.precio_unitario,
-        vigente_desde: data.vigente_desde || null,
+        vigente_desde: data.vigente_desde || new Date().toISOString().slice(0, 10),
         vigente_hasta: data.vigente_hasta || null,
         observacion: data.observacion || null,
       })

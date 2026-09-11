@@ -106,7 +106,7 @@ export function CategoriaForm({ initial }: { initial?: Categoria }) {
             label="Código"
             error={state.fields?.codigo}
             hint={isEdit
-              ? 'Cambiar este código rompe los SKUs ya emitidos. Editá solo si sabés lo que hacés.'
+              ? 'Cambiar este código rompe los SKUs ya emitidos. Edítalo solo si sabes lo que haces.'
               : 'Se autocompleta del nombre. Editable si querés override.'}
           >
             <div className="relative">
@@ -202,7 +202,7 @@ export function CategoriaForm({ initial }: { initial?: Categoria }) {
 
         <FormRow
           label="Imagen de portada (opcional)"
-          hint="Aparece como banner de la categoría en la web. Si no subís imagen, se usa el emoji."
+          hint="Aparece como banner de la categoría en la web. Si no subes una imagen, se usa el emoji."
         >
           <ImageUploader
             value={imagenUrl}

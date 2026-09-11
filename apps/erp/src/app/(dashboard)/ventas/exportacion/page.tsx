@@ -81,7 +81,7 @@ export default async function Page() {
             <div className="space-y-2 text-sm text-amber-900">
               <p className="font-semibold">Módulo bloqueado — falta configurar serie SUNAT.</p>
               <p>
-                Antes de emitir facturas de exportación necesitás la serie oficial asignada por SUNAT
+                Antes de emitir facturas de exportación necesitas la serie oficial asignada por SUNAT
                 (típicamente empieza con <code className="rounded bg-white px-1 font-mono text-xs">F</code>).
                 Solicitala en tu mesa de partes SOL y actívala en{' '}
                 <Link href="/configuracion/series" className="underline">

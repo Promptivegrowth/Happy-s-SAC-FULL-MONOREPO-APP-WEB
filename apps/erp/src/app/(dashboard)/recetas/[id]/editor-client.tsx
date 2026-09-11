@@ -634,7 +634,7 @@ function BomEditor({
               </div>
               {tallasCongeladas.size > 0 && (
                 <p className="mt-1 text-[10px] text-amber-700">
-                  🔒 Las tallas con candado ya tienen OTs y no se pueden modificar — creá nueva versión si necesitás cambiarlas.
+                  🔒 Las tallas con candado ya tienen OTs y no se pueden modificar — crea una nueva versión si necesitas cambiarlas.
                 </p>
               )}
               {tallasNueva.size > 0 && (

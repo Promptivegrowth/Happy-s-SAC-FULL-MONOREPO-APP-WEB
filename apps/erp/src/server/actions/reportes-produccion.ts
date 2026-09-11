@@ -221,7 +221,8 @@ export async function reporteCosteoComparativo(
     .from('tarifas_servicios')
     .select('producto_id, talla, precio_unitario, vigente_desde, vigente_hasta')
     .in('producto_id', productoIds)
-    .lte('vigente_desde', hoy);
+    // Las tarifas sin fecha de inicio valen desde siempre (ver tarifas-servicios).
+    .or(`vigente_desde.is.null,vigente_desde.lte.${hoy}`);
   const tarifaMap = new Map<string, number>();
   for (const t of (tarifasRaw ?? []) as { producto_id: string; talla: string; precio_unitario: number | string; vigente_hasta: string | null }[]) {
     if (t.vigente_hasta && t.vigente_hasta < hoy) continue;
