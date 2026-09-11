@@ -38,6 +38,8 @@ const COLS_CONSUMOS: ColExport[] = [
   { header: 'Und. cortadas', key: 'und_cortadas', formato: 'numero', width: 14 },
   { header: 'Teórico s/ plan', key: 'teorico_plan', width: 15 },
   { header: 'Teórico s/ cortado', key: 'teorico_cortado', width: 17 },
+  { header: 'Enviado al taller', key: 'enviado_taller', width: 16 },
+  { header: 'Devuelto por taller', key: 'devuelto_taller', width: 18 },
   { header: 'Real consumido', key: 'real_cant', width: 15 },
   { header: 'Diferencia', key: 'diferencia', width: 12 },
   { header: '% Desv.', key: 'desviacion_pct', formato: 'porcentaje', width: 10 },
@@ -197,8 +199,9 @@ export default async function Page({ searchParams }: { searchParams: Promise<SP>
               <strong>Consumos.</strong> El teórico sale de la receta activa del producto (cantidad por talla × unidades).
               Se muestran dos teóricos: sobre lo <em>planificado</em> y sobre lo realmente <em>cortado</em>. La diferencia y
               el % de desviación comparan el consumo real contra el teórico <em>sobre lo cortado</em>, porque es lo que de
-              verdad debió consumirse. El consumo real sale del kardex (salidas de producción del corte y de las órdenes de
-              servicio, menos las devoluciones de material).
+              verdad debió consumirse. El consumo real tiene dos fuentes: la <strong>tela</strong> sale del kardex (la salida
+              que se genera al cerrar el corte) y los <strong>avíos de un servicio</strong> se cuentan como
+              <strong>enviado al taller menos devuelto</strong>, así lo que el taller regresa deja de contarse como consumido.
             </p>
             <p>
               <strong>Tiempos.</strong> El estándar es el tiempo de la receta del proceso × unidades procesadas; el real son

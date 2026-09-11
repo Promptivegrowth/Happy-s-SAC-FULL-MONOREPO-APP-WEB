@@ -11,12 +11,9 @@
  *      · Teórico  = receta activa del producto (recetas_lineas.cantidad, por talla)
  *                   × unidades. Se calcula dos veces: sobre lo PLANIFICADO y
  *                   sobre lo realmente CORTADO.
- *      · Real     = kardex_movimientos SALIDA_PRODUCCION atribuidos a la OT.
- *                   El kardex referencia el CORTE (referencia_tipo='CORTE',
- *                   referencia_id = ot_corte.id) o la ORDEN DE SERVICIO
- *                   (referencia_tipo='OS'), nunca la OT directamente: acá se
- *                   resuelve ese mapeo. Las devoluciones de taller de material
- *                   (ENTRADA_DEVOLUCION_TALLER) se restan del consumo.
+ *      · Real     = tela consumida en el corte (kardex SALIDA_PRODUCCION, que
+ *                   referencia el CORTE y no la OT) MÁS los avíos que se fueron
+ *                   a un servicio, contados como ENVIADO − DEVUELTO por el taller.
  *      · La comparación principal es Real vs Teórico-cortado (es lo que de
  *        verdad debió consumirse por lo que se cortó).
  *      · Valorización: el kardex de producción no guarda costo (costo_unitario
@@ -60,6 +57,8 @@ export type ConsumoRow = {
   und_cortadas: number;
   teorico_plan: number;
   teorico_cortado: number;
+  enviado_taller: number;
+  devuelto_taller: number;
   real_cant: number;
   diferencia: number;
   desviacion_pct: number;
@@ -190,12 +189,13 @@ export async function reporteConsumosYTiempos(
   type ConsAcc = {
     ot_id: string; material_id: string;
     teorico_plan: number; teorico_cortado: number; real_cant: number;
+    enviado: number; devuelto: number;
     und_plan: number; und_cortadas: number;
   };
   const cons = new Map<string, ConsAcc>();
   const acc = (otId: string, materialId: string): ConsAcc => {
     const k = `${otId}::${materialId}`;
-    const cur = cons.get(k) ?? { ot_id: otId, material_id: materialId, teorico_plan: 0, teorico_cortado: 0, real_cant: 0, und_plan: 0, und_cortadas: 0 };
+    const cur = cons.get(k) ?? { ot_id: otId, material_id: materialId, teorico_plan: 0, teorico_cortado: 0, real_cant: 0, enviado: 0, devuelto: 0, und_plan: 0, und_cortadas: 0 };
     cons.set(k, cur);
     return cur;
   };
@@ -219,26 +219,56 @@ export async function reporteConsumosYTiempos(
     }
   }
 
-  // Consumo REAL: el kardex apunta al corte o a la OS, no a la OT.
+  // ------------------------------------------------------- consumo REAL ----
+  // Dos fuentes, sin solaparse:
+  //
+  //   * TELA del corte -> kardex (SALIDA_PRODUCCION). El movimiento referencia
+  //     el CORTE (referencia_id = ot_corte.id), no la OT: hay que resolver ese
+  //     mapeo o el consumo sale en cero.
+  //
+  //   * AVIOS de un servicio -> la orden de servicio: ENVIADO menos DEVUELTO por
+  //     el taller (pedido cliente 2026-09-10: "las devoluciones que se registran
+  //     del taller deben servir para el calculo de consumos reales"). Se toma de
+  //     `ordenes_servicio_avios` y no del kardex porque es el dato operativo que
+  //     carga produccion, asi el consumo es correcto aunque el movimiento de
+  //     almacen no se haya llegado a registrar. Por eso los movimientos de
+  //     kardex que referencian una OS se EXCLUYEN: ya estan contemplados aca.
   const { data: cortesRaw } = await sb.from('ot_corte').select('id, ot_id').in('ot_id', otIds);
   const { data: osRaw } = await sb.from('ordenes_servicio').select('id, ot_id').in('ot_id', otIds);
+
   const refToOt = new Map<string, string>();
   for (const c of (cortesRaw ?? []) as { id: string; ot_id: string }[]) refToOt.set(c.id, c.ot_id);
-  for (const o of (osRaw ?? []) as { id: string; ot_id: string | null }[]) if (o.ot_id) refToOt.set(o.id, o.ot_id);
-  for (const id of otIds) refToOt.set(id, id); // por si algún movimiento referencia la OT directo
+  for (const id of otIds) refToOt.set(id, id); // por si algun movimiento referencia la OT directo
 
   const refIds = [...refToOt.keys()];
   if (refIds.length > 0) {
     const { data: kdxRaw } = await sb.from('kardex_movimientos')
       .select('tipo, material_id, cantidad, referencia_id')
-      .in('tipo', ['SALIDA_PRODUCCION', 'ENTRADA_DEVOLUCION_TALLER'])
+      .in('tipo', ['SALIDA_PRODUCCION'])
       .in('referencia_id', refIds)
       .not('material_id', 'is', null);
     for (const k of (kdxRaw ?? []) as { tipo: string; material_id: string; cantidad: number | string | null; referencia_id: string }[]) {
       const otId = refToOt.get(k.referencia_id);
       if (!otId) continue;
-      const signo = k.tipo === 'SALIDA_PRODUCCION' ? 1 : -1; // devolución de material = menos consumo
-      acc(otId, k.material_id).real_cant += signo * Number(k.cantidad ?? 0);
+      acc(otId, k.material_id).real_cant += Number(k.cantidad ?? 0);
+    }
+  }
+
+  const osToOt = new Map<string, string>();
+  for (const o of (osRaw ?? []) as { id: string; ot_id: string | null }[]) if (o.ot_id) osToOt.set(o.id, o.ot_id);
+  if (osToOt.size > 0) {
+    const { data: aviosRaw } = await sb.from('ordenes_servicio_avios')
+      .select('os_id, material_id, cantidad_enviada, cantidad_devuelta')
+      .in('os_id', [...osToOt.keys()]);
+    for (const a of (aviosRaw ?? []) as { os_id: string; material_id: string | null; cantidad_enviada: number | string | null; cantidad_devuelta: number | string | null }[]) {
+      const otId = osToOt.get(a.os_id);
+      if (!otId || !a.material_id) continue;
+      const enviado = Number(a.cantidad_enviada ?? 0);
+      const devuelto = Number(a.cantidad_devuelta ?? 0);
+      const fila = acc(otId, a.material_id);
+      fila.enviado += enviado;
+      fila.devuelto += devuelto;
+      fila.real_cant += enviado - devuelto; // lo que de verdad quedo en la prenda
     }
   }
 
@@ -262,12 +292,14 @@ export async function reporteConsumosYTiempos(
       const teorico = c.teorico_cortado;
       const dif = c.real_cant - teorico;
       const nota = c.real_cant < 0
-        ? 'Devolución de material sin salida registrada'
+        ? 'Devolución mayor que lo enviado: revisar el registro'
         : c.teorico_plan === 0 && c.teorico_cortado === 0
           ? 'Consumido sin estar en la receta'
           : c.real_cant === 0
             ? 'Sin consumo registrado todavía'
-            : '';
+            : c.devuelto > 0
+              ? 'Neto de servicio: ' + r2(c.enviado) + ' enviado − ' + r2(c.devuelto) + ' devuelto por el taller'
+              : '';
       return {
         ot_id: c.ot_id,
         ot_numero: ot.numero,
@@ -280,6 +312,8 @@ export async function reporteConsumosYTiempos(
         und_cortadas: undCortOt.get(c.ot_id) ?? 0,
         teorico_plan: r2(c.teorico_plan),
         teorico_cortado: r2(c.teorico_cortado),
+        enviado_taller: r2(c.enviado),
+        devuelto_taller: r2(c.devuelto),
         real_cant: r2(c.real_cant),
         diferencia: r2(dif),
         desviacion_pct: teorico > 0 ? r2((dif / teorico) * 100) : 0,

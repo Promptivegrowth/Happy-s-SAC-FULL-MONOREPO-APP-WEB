@@ -316,6 +316,14 @@ async function descontarTelaDeCorte(sbAny: { from: (t: string) => any }, corteId
   if (rows.length > 0) await sbAny.from('kardex_movimientos').insert(rows);
 }
 
+/**
+ * Estados de una OS en los que los avíos YA están físicamente en el taller y por
+ * lo tanto deben estar descontados del almacén.
+ */
+const ESTADOS_OS_MATERIAL_EN_TALLER = [
+  'DESPACHADA', 'EN_PROCESO', 'RECEPCION_PARCIAL', 'RECEPCIONADA', 'CERRADA',
+];
+
 /** Descuenta del almacén de MP los avíos enviados al taller al despachar la OS. */
 async function descontarAviosOS(sbAny: { from: (t: string) => any }, osId: string, userId: string): Promise<void> {
   const { data: ya } = await sbAny
@@ -1369,6 +1377,10 @@ export async function registrarAviosDevueltos(
     // Reingresar al almacén de MP el DELTA de avíos devueltos (solo lo nuevo que
     // volvió desde la última vez). Best-effort: no bloquea el registro.
     try {
+      // Primero garantizamos la SALIDA de los avíos: no se puede reingresar al
+      // almacén algo que nunca se descontó (si no, la devolución inflaba el
+      // stock). El hook es idempotente: si ya salieron, no hace nada.
+      await descontarAviosOS(sbAny, osId, userId);
       const almId = await almacenMateriaPrimaId(sbAny);
       if (almId) {
         const { data: os } = await sbAny.from('ordenes_servicio').select('numero').eq('id', osId).maybeSingle();
@@ -1519,10 +1531,16 @@ export async function cambiarEstadoOS(osId: string, nuevoEstado: string): Promis
       throw new Error('La OS cambió de estado mientras procesabas. Recargá la página.');
     }
 
-    // Al DESPACHAR al taller, descontar los avíos enviados del almacén de MP
-    // (SALIDA_TALLER_SERVICIO). Best-effort: no revierte el cambio de estado.
-    if (nuevoEstado === 'DESPACHADA') {
-      try { await descontarAviosOS(sbAny, osId, userId); } catch { /* no bloquea el despacho */ }
+    // Descontar del almacén los avíos que se fueron al taller
+    // (SALIDA_TALLER_SERVICIO). Antes sólo se hacía en la transición a
+    // DESPACHADA: si la OS pasaba directo a EN PROCESO o RECEPCIONADA —que es
+    // lo que venía ocurriendo— los avíos nunca salían del stock, y después la
+    // devolución del taller los sumaba igual. Resultado: stock inflado y
+    // consumo real negativo. Ahora se descuenta en cualquier estado que
+    // signifique que el material ya está en el taller. El hook es idempotente,
+    // así que repetirlo no duplica movimientos.
+    if (ESTADOS_OS_MATERIAL_EN_TALLER.includes(nuevoEstado)) {
+      try { await descontarAviosOS(sbAny, osId, userId); } catch { /* no bloquea el cambio de estado */ }
     }
 
     // Al recepcionar/cerrar la OS, avanzar el estado de la OT al área del proceso

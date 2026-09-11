@@ -6,7 +6,7 @@ import { Button } from '@happy/ui/button';
 import { EmptyState } from '@happy/ui/empty-state';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@happy/ui/table';
 import { PageShell } from '@/components/page-shell';
-import { ArrowLeft, Factory } from 'lucide-react';
+import { ArrowLeft, Factory, Calculator } from 'lucide-react';
 import { NewButton, EditButton, DeleteButton, ToggleActiva, HistoricoButton } from './client';
 
 export const metadata = { title: 'Áreas de producción' };
@@ -76,8 +76,9 @@ export default async function Page() {
             Desactivar la oculta del selector pero mantiene los procesos que ya la tienen asignada.
           </li>
           <li>
-            <strong>Histórico de valor por minuto</strong>: cada vez que cambiás el valor de un área queda
-            registrado con fecha. Tocá el ícono del reloj 🕒 para ver la evolución y comparar contra valores anteriores.
+            <strong>Centro de costos</strong>: con el ícono de la calculadora registras los costos y pagos del mes del área (planilla, alquiler, luz, depreciación) y el sistema calcula el valor minuto y lo aplica.</li>
+          <li><strong>Histórico de valor por minuto</strong>: cada vez que cambiás el valor de un área queda
+            registrado con fecha. Toca el ícono del reloj 🕒 para ver la evolución y comparar contra valores anteriores.
           </li>
         </ul>
       </div>
@@ -131,6 +132,11 @@ export default async function Page() {
                     </TableCell>
                     <TableCell className="text-right">
                       <div className="flex justify-end gap-1">
+                        <Link href={`/configuracion/areas/${a.id}/costos`}>
+                          <Button variant="ghost" size="sm" title="Centro de costos: calcular el valor minuto con los costos del mes">
+                            <Calculator className="h-3.5 w-3.5" />
+                          </Button>
+                        </Link>
                         <HistoricoButton areaId={a.id} areaNombre={a.nombre} />
                         <EditButton area={a} />
                         <DeleteButton areaId={a.id} usos={a.usos} />

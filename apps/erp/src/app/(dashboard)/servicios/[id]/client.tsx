@@ -474,6 +474,8 @@ export function AviosDevueltosEditor({ osId, avios, disabled }: { osId: string; 
     setRows((prev) => prev.map((r, idx) => (idx === i ? { ...r, observacion: v } : r)));
   }
   const excede = rows.some((r) => r.devuelto > r.enviado + 0.0001);
+  const totalEnviado = rows.reduce((acc, r) => acc + r.enviado, 0);
+  const totalDevuelto = rows.reduce((acc, r) => acc + (r.devuelto || 0), 0);
 
   function guardar() {
     if (excede) return toast.error('La cantidad devuelta no puede superar lo enviado.');
@@ -493,6 +495,7 @@ export function AviosDevueltosEditor({ osId, avios, disabled }: { osId: string; 
             <TableHead>Categoría</TableHead>
             <TableHead className="text-right">Enviado</TableHead>
             <TableHead className="text-right">Devuelto</TableHead>
+            <TableHead className="text-right">Consumo real</TableHead>
             <TableHead>Obs.</TableHead>
           </TableRow>
         </TableHeader>
@@ -518,6 +521,9 @@ export function AviosDevueltosEditor({ osId, avios, disabled }: { osId: string; 
                     className={`ml-auto h-8 w-24 text-right text-xs ${filaExcede ? 'border-danger bg-red-50' : ''}`}
                   />
                 </TableCell>
+                <TableCell className="text-right font-mono text-sm font-semibold text-emerald-700">
+                  {Math.max(0, a.enviado - (a.devuelto || 0)).toFixed(4)}
+                </TableCell>
                 <TableCell>
                   <Input
                     value={a.observacion}
@@ -533,6 +539,12 @@ export function AviosDevueltosEditor({ osId, avios, disabled }: { osId: string; 
           })}
         </TableBody>
       </Table>
+      <p className="border-t bg-slate-50 px-4 py-2 text-[11px] text-slate-600">
+        Lo que el taller devuelve <strong>vuelve al almacén</strong> y deja de contarse como consumido: el consumo real de
+        estos avíos es <strong>enviado − devuelto</strong> ({totalEnviado.toFixed(2)} − {totalDevuelto.toFixed(2)} ={' '}
+        <strong>{Math.max(0, totalEnviado - totalDevuelto).toFixed(2)}</strong>), y con ese número se compara contra la
+        receta en el reporte de Consumos y Tiempos.
+      </p>
       {!disabled && (
         <div className="flex justify-end p-4">
           <Button variant="premium" size="sm" onClick={guardar} disabled={pending || excede}>
