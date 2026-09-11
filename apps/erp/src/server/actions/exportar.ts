@@ -29,12 +29,36 @@ export type ExportResult = { base64: string; filename: string; mime: string };
 // ============================================================================
 // EXCEL BRANDEADO (exceljs)
 // ============================================================================
-export async function generarExcelBrandeado(opts: ExportOpts): Promise<ExportResult> {
-  const wb = new ExcelJS.Workbook();
-  wb.creator = 'HAPPY SAC ERP';
-  wb.created = new Date();
+export type HojaExport = ExportOpts & { nombre: string };
 
-  const ws = wb.addWorksheet(opts.titulo.slice(0, 31) || 'Reporte', {
+/**
+ * Carga el logo de la empresa una sola vez por workbook y devuelve el id de
+ * imagen de ExcelJS (o null si no hay logo / falla la descarga).
+ */
+async function cargarLogoWorkbook(wb: ExcelJS.Workbook): Promise<number | null> {
+  try {
+    const { createClient } = await import('@happy/db/server');
+    const sb = await createClient();
+    const { data: empresa } = await sb.from('empresa').select('logo_url').single();
+    if (!empresa?.logo_url) return null;
+    const resp = await fetch(empresa.logo_url);
+    if (!resp.ok) return null;
+    const ab = await resp.arrayBuffer();
+    const ext = (empresa.logo_url.split('.').pop() ?? 'png').toLowerCase();
+    const extension = ext === 'jpg' || ext === 'jpeg' ? 'jpeg' : 'png';
+    const buf = Buffer.from(ab) as unknown as Parameters<typeof wb.addImage>[0]['buffer'];
+    return wb.addImage({ buffer: buf, extension });
+  } catch {
+    return null; // logo opcional — si falla seguimos sin él
+  }
+}
+
+/**
+ * Pinta UNA hoja brandeada (logo + título + filtros + tabla zebra + totales +
+ * footer). Se usa tanto para el Excel de una sola hoja como para el de varias.
+ */
+function pintarHoja(wb: ExcelJS.Workbook, nombre: string, opts: ExportOpts, logoId: number | null): void {
+  const ws = wb.addWorksheet(nombre.slice(0, 31) || 'Reporte', {
     pageSetup: { paperSize: 9, orientation: 'landscape', margins: { left: 0.5, right: 0.5, top: 0.6, bottom: 0.6, header: 0.3, footer: 0.3 } },
     views: [{ state: 'frozen', ySplit: 4 + (opts.subtitulo ? 1 : 0) + (opts.filtros?.length ? 1 : 0) }],
   });
@@ -44,27 +68,12 @@ export async function generarExcelBrandeado(opts: ExportOpts): Promise<ExportRes
   // los widths de columna. El título se posiciona luego en col D (4) con
   // margen seguro. Esto evita la superposición que aparecía con tl+ext.
   let logoCargado = false;
-  try {
-    const { createClient } = await import('@happy/db/server');
-    const sb = await createClient();
-    const { data: empresa } = await sb.from('empresa').select('logo_url').single();
-    if (empresa?.logo_url) {
-      const resp = await fetch(empresa.logo_url);
-      if (resp.ok) {
-        const ab = await resp.arrayBuffer();
-        const ext = (empresa.logo_url.split('.').pop() ?? 'png').toLowerCase();
-        const extension = ext === 'jpg' || ext === 'jpeg' ? 'jpeg' : 'png';
-        const buf = Buffer.from(ab) as unknown as Parameters<typeof wb.addImage>[0]['buffer'];
-        const imgId = wb.addImage({ buffer: buf, extension });
-        ws.addImage(imgId, {
-          tl: { col: 0, row: 0 } as unknown as ExcelJS.Anchor,
-          br: { col: 3, row: 3 } as unknown as ExcelJS.Anchor,
-        });
-        logoCargado = true;
-      }
-    }
-  } catch {
-    /* logo opcional — si falla seguimos sin él */
+  if (logoId !== null) {
+    ws.addImage(logoId, {
+      tl: { col: 0, row: 0 } as unknown as ExcelJS.Anchor,
+      br: { col: 3, row: 3 } as unknown as ExcelJS.Anchor,
+    });
+    logoCargado = true;
   }
 
   // ---- Título principal (naranja, bold, size 18) ----
@@ -117,11 +126,8 @@ export async function generarExcelBrandeado(opts: ExportOpts): Promise<ExportRes
   headerRow.height = 28;
 
   // Set column widths/keys. Cuando hay logo: las cols 1-3 deben ser
-  // suficientemente anchas para que el logo se vea bien (≥18 cada una),
-  // y la col 4 (donde arranca el título) un poco más ancha para acomodar
-  // el texto "Reporte de XYZ — DISFRACES HAPPYS".
-  // Usamos getColumn().width DESPUÉS para forzar y evitar que mergeCells
-  // las resetee.
+  // suficientemente anchas para que el logo se vea bien, y la col 4 (donde
+  // arranca el título) un poco más ancha para acomodar el texto.
   ws.columns = opts.cols.map((col) => ({ key: col.key, width: col.width ?? 18 }));
   if (logoCargado) {
     for (let i = 1; i <= Math.min(3, opts.cols.length); i++) {
@@ -194,6 +200,53 @@ export async function generarExcelBrandeado(opts: ExportOpts): Promise<ExportRes
   const fc = ws.getCell(fr.number, 1);
   fc.font = { name: 'Calibri', size: 8, italic: true, color: { argb: 'FF94A3B8' } };
   fc.alignment = { horizontal: 'right' };
+}
+
+export async function generarExcelBrandeado(opts: ExportOpts): Promise<ExportResult> {
+  const wb = new ExcelJS.Workbook();
+  wb.creator = 'HAPPY SAC ERP';
+  wb.created = new Date();
+
+  const logoId = await cargarLogoWorkbook(wb);
+  pintarHoja(wb, opts.titulo, opts, logoId);
+
+  const buf = await wb.xlsx.writeBuffer();
+  const base64 = Buffer.from(buf as ArrayBuffer).toString('base64');
+  return {
+    base64,
+    filename: `${slugify(opts.titulo)}_${new Date().toISOString().slice(0, 10)}.xlsx`,
+    mime: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  };
+}
+
+/**
+ * Excel brandeado de VARIAS hojas en un solo archivo (ej. el reporte de
+ * consumos y tiempos: una hoja por mirada + resumen). Cada hoja se pinta con
+ * el mismo estilo que `generarExcelBrandeado`, compartiendo un único logo.
+ */
+export async function generarExcelMultiHoja(opts: {
+  titulo: string;
+  hojas: HojaExport[];
+}): Promise<ExportResult> {
+  const wb = new ExcelJS.Workbook();
+  wb.creator = 'HAPPY SAC ERP';
+  wb.created = new Date();
+
+  const logoId = await cargarLogoWorkbook(wb);
+  const hojas = opts.hojas.filter((h) => h.cols.length > 0);
+  if (hojas.length === 0) {
+    pintarHoja(wb, 'Sin datos', { titulo: opts.titulo, cols: [{ header: 'Sin datos', key: 'x' }], rows: [] }, logoId);
+  } else {
+    // Nombres de hoja únicos: Excel rechaza duplicados y nombres > 31 chars.
+    const usados = new Set<string>();
+    for (const h of hojas) {
+      let nombre = (h.nombre || 'Hoja').slice(0, 31);
+      let i = 2;
+      while (usados.has(nombre)) nombre = `${(h.nombre || 'Hoja').slice(0, 28)} ${i++}`;
+      usados.add(nombre);
+      pintarHoja(wb, nombre, h, logoId);
+    }
+  }
 
   const buf = await wb.xlsx.writeBuffer();
   const base64 = Buffer.from(buf as ArrayBuffer).toString('base64');

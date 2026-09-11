@@ -73,7 +73,7 @@ export function GestionarFamiliasModal() {
         <DialogHeader>
           <DialogTitle>Familias de color</DialogTitle>
           <DialogDescription>
-            Podés eliminar las familias vacías (sin productos). Para eliminar una que tiene productos,
+            Puedes eliminar las familias vacías (sin productos). Para eliminar una que tiene productos,
             primero quitá cada producto de la familia (en su ficha, elegí «— Sin familia —»).
           </DialogDescription>
         </DialogHeader>

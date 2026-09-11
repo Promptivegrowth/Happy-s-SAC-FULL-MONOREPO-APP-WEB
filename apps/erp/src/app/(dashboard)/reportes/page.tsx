@@ -104,6 +104,14 @@ const REPORTES: ReporteCard[] = [
     badge: 'Nuevo',
   },
   {
+    href: '/reportes/consumos-tiempos',
+    titulo: 'Consumos y Tiempos: Receta vs Real',
+    descripcion: 'Por OT y material: cuánto material pide la receta vs cuánto se consumió de verdad. Y por proceso: tiempo estándar vs tiempo declarado. Descargable en Excel de 3 hojas.',
+    icono: Boxes,
+    categoria: 'Producción',
+    badge: 'Nuevo',
+  },
+  {
     href: '/reportes/trazabilidad-modelo',
     titulo: 'Trazabilidad producción → venta',
     descripcion: 'Por modelo y talla: cuánto se produjo, se vendió y queda en stock. Sigue el flujo de la producción hasta la venta.',

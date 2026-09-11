@@ -1153,7 +1153,7 @@ function DuplicarRecetaModal({
             <h3 className="font-display text-base font-semibold">Duplicar receta</h3>
             <p className="text-xs text-slate-500">
               Copia las líneas de esta receta a otro producto. Por defecto duplica todas las tallas
-              con sus líneas. Podés filtrar por una talla origen y/o cambiar la talla destino.
+              con sus líneas. Puedes filtrar por una talla origen y/o cambiar la talla destino.
             </p>
           </div>
           <button onClick={onClose} className="rounded p-1 text-slate-400 hover:bg-slate-100"><X className="h-4 w-4" /></button>

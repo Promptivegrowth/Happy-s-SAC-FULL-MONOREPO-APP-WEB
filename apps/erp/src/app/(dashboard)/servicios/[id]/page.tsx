@@ -236,7 +236,7 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
           {totalFallas > 0 && (
             <div className="flex items-center justify-between gap-2 border-t bg-amber-50/40 px-4 py-3">
               <p className="text-xs text-amber-800">
-                Hay <strong>{totalFallas}</strong> prenda(s) con falla. Podés retornarlas al taller para reproceso (se crea una nueva OS de re-trabajo).
+                Hay <strong>{totalFallas}</strong> prenda(s) con falla. Puedes retornarlas al taller para reproceso (se crea una nueva OS de re-trabajo).
               </p>
               <RetornarFallasButton osId={id} totalFallas={totalFallas} disabled={os.estado === 'ANULADA'} />
             </div>

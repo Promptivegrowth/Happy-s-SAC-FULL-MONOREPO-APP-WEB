@@ -107,7 +107,7 @@ export default async function Page({ searchParams }: { searchParams: Promise<SP>
       </div>
 
       {rows.length === 0 ? (
-        <EmptyState icon={<Clock className="h-6 w-6" />} title="Sin datos" description="No hay OTs cerradas con tiempos en el rango. Ampliá fechas." />
+        <EmptyState icon={<Clock className="h-6 w-6" />} title="Sin datos" description="No hay OTs cerradas con tiempos en el rango. Amplía el rango de fechas e intenta de nuevo." />
       ) : (
         <Card>
           <div className="border-b bg-slate-50 p-3"><h3 className="text-sm font-semibold text-corp-900">Detalle por OT (ordenado por mayor desviación)</h3></div>

@@ -229,16 +229,47 @@ export async function reporteCosteoComparativo(
     tarifaMap.set(k, (tarifaMap.get(k) ?? 0) + Number(t.precio_unitario ?? 0));
   }
 
-  // Costos reales
+  // Costos reales — MATERIALES.
+  // El kardex de producción NO referencia la OT: referencia el CORTE
+  // (referencia_tipo='CORTE', referencia_id = ot_corte.id) o la ORDEN DE
+  // SERVICIO. Hay que resolver ese mapeo, si no el costo real sale siempre 0.
+  // Además `costo_total` viene NULL en estos movimientos, así que se valoriza
+  // con el precio unitario del material.
+  const { data: cortesRaw } = await sb.from('ot_corte').select('id, ot_id').in('ot_id', otIds);
+  const { data: osIdsRaw } = await sb.from('ordenes_servicio').select('id, ot_id').in('ot_id', otIds);
+  const refToOt = new Map<string, string>();
+  for (const c of (cortesRaw ?? []) as { id: string; ot_id: string }[]) refToOt.set(c.id, c.ot_id);
+  for (const o of (osIdsRaw ?? []) as { id: string; ot_id: string | null }[]) if (o.ot_id) refToOt.set(o.id, o.ot_id);
+  for (const id of otIds) refToOt.set(id, id);
+
+  const realMat = new Map<string, number>();
   const { data: kdxRaw } = await sb
     .from('kardex_movimientos')
-    .select('referencia_id, costo_total')
-    .eq('tipo', 'SALIDA_PRODUCCION')
-    .in('referencia_id', otIds);
-  const realMat = new Map<string, number>();
-  for (const k of (kdxRaw ?? []) as { referencia_id: string; costo_total: number | string | null }[]) {
-    realMat.set(k.referencia_id, (realMat.get(k.referencia_id) ?? 0) + Number(k.costo_total ?? 0));
+    .select('tipo, referencia_id, material_id, cantidad, costo_total')
+    .in('tipo', ['SALIDA_PRODUCCION', 'ENTRADA_DEVOLUCION_TALLER'])
+    .in('referencia_id', [...refToOt.keys()])
+    .not('material_id', 'is', null);
+  type Kdx = { tipo: string; referencia_id: string; material_id: string; cantidad: number | string | null; costo_total: number | string | null };
+  const kdx = (kdxRaw ?? []) as Kdx[];
+  const precioMat = new Map<string, number>();
+  const matIds = Array.from(new Set(kdx.map((k) => k.material_id)));
+  if (matIds.length > 0) {
+    const { data: matRaw } = await sb.from('materiales').select('id, precio_unitario').in('id', matIds);
+    for (const m of (matRaw ?? []) as { id: string; precio_unitario: number | string | null }[]) {
+      precioMat.set(m.id, Number(m.precio_unitario ?? 0));
+    }
   }
+  for (const k of kdx) {
+    const otId = refToOt.get(k.referencia_id);
+    if (!otId) continue;
+    const costo = k.costo_total != null
+      ? Number(k.costo_total)
+      : Number(k.cantidad ?? 0) * (precioMat.get(k.material_id) ?? 0);
+    // La devolución de material desde el taller descuenta consumo.
+    const signo = k.tipo === 'SALIDA_PRODUCCION' ? 1 : -1;
+    realMat.set(otId, (realMat.get(otId) ?? 0) + signo * costo);
+  }
+
   const { data: osRaw } = await sb
     .from('ordenes_servicio')
     .select('ot_id, monto_total')

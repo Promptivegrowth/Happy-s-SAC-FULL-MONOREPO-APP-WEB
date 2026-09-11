@@ -1668,7 +1668,7 @@ function CompartirModal({ fichaId, onClose }: { fichaId: string; onClose: () => 
         </div>
 
         <p className="mb-4 text-xs text-slate-500">
-          Genera un link público que el cliente B2B puede abrir sin login. Podés revocarlo cuando quieras.
+          Genera un link público que el cliente B2B puede abrir sin login. Puedes revocarlo cuando quieras.
         </p>
 
         {/* Generar nuevo */}

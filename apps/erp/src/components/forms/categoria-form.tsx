@@ -143,7 +143,7 @@ export function CategoriaForm({ initial }: { initial?: Categoria }) {
                 {' '}<span className="font-mono text-[10px]">{codigo}0002</span>…
               </p>
               <p className="text-[11px] text-slate-500">
-                El correlativo es independiente por categoría. Podés cambiar el código si preferís otra abreviatura.
+                El correlativo es independiente por categoría. Puedes cambiar el código si prefieres otra abreviatura.
               </p>
             </div>
           </div>

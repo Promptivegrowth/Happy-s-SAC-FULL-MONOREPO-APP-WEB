@@ -138,7 +138,7 @@ export default async function Page({ searchParams }: { searchParams: Promise<SP>
       )}
 
       {rows.length === 0 ? (
-        <EmptyState icon={<Scale className="h-6 w-6" />} title="Sin datos" description="No hay OTs cerradas en el rango. Ampliá fechas." />
+        <EmptyState icon={<Scale className="h-6 w-6" />} title="Sin datos" description="No hay OTs cerradas en el rango. Amplía el rango de fechas e intenta de nuevo." />
       ) : (
         <Card>
           <div className="border-b bg-slate-50 p-3">

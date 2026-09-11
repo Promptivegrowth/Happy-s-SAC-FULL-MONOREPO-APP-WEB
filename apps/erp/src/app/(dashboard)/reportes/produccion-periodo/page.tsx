@@ -169,7 +169,7 @@ export default async function Page({ searchParams }: { searchParams: Promise<SP>
 
       {/* Detalle por OT */}
       {por_ot.length === 0 ? (
-        <EmptyState icon={<Factory className="h-6 w-6" />} title="Sin OTs cerradas en el rango" description="Ampliá fechas o esperá al cierre de OTs activas." />
+        <EmptyState icon={<Factory className="h-6 w-6" />} title="Sin OTs cerradas en el rango" description="Amplía el rango de fechas o espera al cierre de las OTs activas." />
       ) : (
         <Card>
           <div className="border-b bg-slate-50 p-3">

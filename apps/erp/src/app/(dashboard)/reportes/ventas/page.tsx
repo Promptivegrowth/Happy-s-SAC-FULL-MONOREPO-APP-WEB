@@ -179,7 +179,7 @@ export default async function Page({ searchParams }: { searchParams: Promise<SP>
       </form>
 
       {rows.length === 0 ? (
-        <EmptyState icon={<TrendingUp className="h-6 w-6" />} title="Sin ventas en este rango" description="Ampliá fechas o quitá filtros." />
+        <EmptyState icon={<TrendingUp className="h-6 w-6" />} title="Sin ventas en este rango" description="Amplía el rango de fechas o quita algunos filtros." />
       ) : (
         <Card>
           <CardContent className="p-0">
