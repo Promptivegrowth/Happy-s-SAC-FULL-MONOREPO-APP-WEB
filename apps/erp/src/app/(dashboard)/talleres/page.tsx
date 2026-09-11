@@ -33,6 +33,26 @@ export default async function TalleresPage({ searchParams }: { searchParams: Pro
   if (q) query = query.or(`nombre.ilike.%${q}%,codigo.ilike.%${q}%`);
 
   const { data } = await query;
+
+  // Cuántos controles de calidad respaldan la calificación de cada taller. La
+  // calificación se calcula sola (trigger, mig 88); mostrar el respaldo evita
+  // que parezca un número arbitrario.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const sbAny = sb as unknown as { from: (t: string) => any };
+  const { data: ccRaw } = await sbAny
+    .from('controles_calidad')
+    .select('responsable_taller_id, cantidad_revisada, os:os_id(taller_id)')
+    .limit(20000);
+  const controlesPorTaller = new Map<string, { controles: number; revisadas: number }>();
+  for (const c of (ccRaw ?? []) as Array<{ responsable_taller_id: string | null; cantidad_revisada: number | null; os: { taller_id: string | null } | null }>) {
+    const tid = c.responsable_taller_id ?? c.os?.taller_id ?? null;
+    if (!tid) continue;
+    const prev = controlesPorTaller.get(tid) ?? { controles: 0, revisadas: 0 };
+    prev.controles += 1;
+    prev.revisadas += Number(c.cantidad_revisada ?? 0);
+    controlesPorTaller.set(tid, prev);
+  }
+
   const talleres = (data ?? []) as Array<{
     id: string;
     codigo: string;
@@ -129,7 +149,23 @@ export default async function TalleresPage({ searchParams }: { searchParams: Pro
                       {(t.especialidades ?? []).slice(0, 4).map((e: string) => <Badge key={e} variant="outline" className="text-[10px]">{e}</Badge>)}
                     </div>
                   </TableCell>
-                  <TableCell><Badge variant="secondary">⭐ {Number(t.calificacion ?? 5).toFixed(1)}</Badge></TableCell>
+                  <TableCell>
+                    {(() => {
+                      const info = controlesPorTaller.get(t.id);
+                      const calif = Number(t.calificacion ?? 5);
+                      const tono = calif >= 4.5 ? 'success' : calif >= 3.5 ? 'secondary' : 'destructive';
+                      return (
+                        <div className="flex flex-col gap-0.5">
+                          <Badge variant={tono as 'success' | 'secondary' | 'destructive'}>⭐ {calif.toFixed(1)}</Badge>
+                          <span className="text-[10px] text-slate-400">
+                            {info
+                              ? `${info.controles} control${info.controles === 1 ? '' : 'es'} · ${info.revisadas} rev.`
+                              : 'sin evaluar'}
+                          </span>
+                        </div>
+                      );
+                    })()}
+                  </TableCell>
                   <TableCell>
                     {t.activo ? (
                       <Badge variant="success" className="text-[10px]">Activo</Badge>

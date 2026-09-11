@@ -12,6 +12,9 @@ const horarioDiaSchema = z.object({
   dia: z.enum(DIAS),
   inicio: z.string().regex(/^\d{2}:\d{2}$/, 'Hora inicio inválida'),
   fin: z.string().regex(/^\d{2}:\d{2}$/, 'Hora fin inválida'),
+  /** Minutos de refrigerio que NO cuentan como tiempo trabajado (jornada
+   *  estándar: 60 min de lunes a viernes, 0 los sábados). */
+  refrigerio_min: z.coerce.number().int().min(0).max(240).default(0),
 });
 
 const schema = z.object({

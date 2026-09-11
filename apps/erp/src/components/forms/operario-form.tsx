@@ -15,7 +15,7 @@ import { crearOperario, actualizarOperario } from '@/server/actions/operarios';
 
 type Area = { id: string; nombre: string };
 
-type HorarioDia = { dia: string; inicio: string; fin: string };
+type HorarioDia = { dia: string; inicio: string; fin: string; refrigerio_min?: number | null };
 
 type Operario = {
   id?: string;
@@ -41,7 +41,38 @@ type Operario = {
   activo?: boolean | null;
 };
 
-type JornadaEstandar = { inicio: string; fin: string; dias: string[] };
+type HorarioStd = { inicio: string; fin: string; refrigerio_min: number };
+type JornadaEstandar = { inicio: string; fin: string; dias: string[]; horarios: Record<string, HorarioStd> };
+
+/** Minutos efectivos de un día (duración menos refrigerio). */
+function minutosEfectivos(h: HorarioStd): number {
+  const [hi, mi] = h.inicio.split(':').map(Number);
+  const [hf, mf] = h.fin.split(':').map(Number);
+  if ([hi, mi, hf, mf].some((n) => !Number.isFinite(n))) return 0;
+  return Math.max(0, (hf! * 60 + mf!) - (hi! * 60 + mi!) - (h.refrigerio_min ?? 0));
+}
+function formatoHoras(min: number): string {
+  const h = Math.floor(min / 60);
+  const m = min % 60;
+  return m === 0 ? `${h} h` : `${h} h ${m} min`;
+}
+/** Resumen legible agrupando días consecutivos con el mismo horario. */
+function resumenJornada(j: JornadaEstandar): string {
+  const grupos: Array<{ dias: string[]; h: HorarioStd }> = [];
+  for (const d of j.dias) {
+    const h = j.horarios?.[d];
+    if (!h) continue;
+    const u = grupos[grupos.length - 1];
+    if (u && u.h.inicio === h.inicio && u.h.fin === h.fin && u.h.refrigerio_min === h.refrigerio_min) u.dias.push(d);
+    else grupos.push({ dias: [d], h });
+  }
+  if (grupos.length === 0) return `${j.inicio} a ${j.fin}`;
+  return grupos.map((g) => {
+    const rango = g.dias.length > 1 ? `${g.dias[0]}-${g.dias[g.dias.length - 1]}` : g.dias[0];
+    const ref = g.h.refrigerio_min > 0 ? `, ${g.h.refrigerio_min} min de refrigerio` : ', sin refrigerio';
+    return `${rango} ${g.h.inicio}-${g.h.fin}${ref}`;
+  }).join(' · ');
+}
 
 const TIPOS_OPERARIO = [
   { v: 'OPERARIO',       l: 'Operario' },
@@ -84,23 +115,28 @@ export function OperarioForm({ initial, areas, jornadaEstandar }: {
   // Cada día puede tener su propio horario. El estado se mantiene como un Map
   // dia->{inicio,fin} por día, así al apagar/prender un día no se pierde el
   // horario que el usuario haya configurado previamente.
-  const inicialHorarios = (): Record<string, { inicio: string; fin: string }> => {
-    const map: Record<string, { inicio: string; fin: string }> = {};
-    // Pre-carga la jornada estándar para todos los días (fallback cuando se
-    // marca un día sin tocar las horas).
+  const inicialHorarios = (): Record<string, HorarioStd> => {
+    const map: Record<string, HorarioStd> = {};
+    // Pre-carga la jornada estándar POR DÍA (L-V y sábado tienen horarios
+    // distintos), incluyendo los minutos de refrigerio.
     for (const d of DIAS) {
-      map[d.v] = { inicio: jornadaEstandar.inicio, fin: jornadaEstandar.fin };
+      const std = jornadaEstandar.horarios?.[d.v];
+      map[d.v] = std
+        ? { ...std }
+        : { inicio: jornadaEstandar.inicio, fin: jornadaEstandar.fin, refrigerio_min: 0 };
     }
     if (initial?.jornada_horarios?.length) {
-      for (const h of initial.jornada_horarios) map[h.dia] = { inicio: h.inicio, fin: h.fin };
+      for (const h of initial.jornada_horarios) {
+        map[h.dia] = { inicio: h.inicio, fin: h.fin, refrigerio_min: Number(h.refrigerio_min ?? 0) };
+      }
     } else if (initial?.jornada_inicio && initial?.jornada_fin && initial?.jornada_dias) {
       for (const d of initial.jornada_dias) {
-        map[d] = { inicio: initial.jornada_inicio, fin: initial.jornada_fin };
+        map[d] = { inicio: initial.jornada_inicio, fin: initial.jornada_fin, refrigerio_min: 0 };
       }
     }
     return map;
   };
-  const [horariosPorDia, setHorariosPorDia] = useState<Record<string, { inicio: string; fin: string }>>(inicialHorarios);
+  const [horariosPorDia, setHorariosPorDia] = useState<Record<string, HorarioStd>>(inicialHorarios);
   const [diasActivos, setDiasActivos] = useState<string[]>(
     initial?.jornada_horarios?.length
       ? initial.jornada_horarios.map((h) => h.dia)
@@ -120,6 +156,10 @@ export function OperarioForm({ initial, areas, jornadaEstandar }: {
 
   function setHoraDia(dia: string, campo: 'inicio' | 'fin', valor: string) {
     setHorariosPorDia((m) => ({ ...m, [dia]: { ...m[dia]!, [campo]: valor } }));
+  }
+  function setRefrigerio(dia: string, valor: string) {
+    const n = Math.max(0, Math.min(240, Number(valor) || 0));
+    setHorariosPorDia((m) => ({ ...m, [dia]: { ...m[dia]!, refrigerio_min: n } }));
   }
 
   /** Atajo: copia el horario del primer día activo al resto de días activos. */
@@ -223,7 +263,7 @@ export function OperarioForm({ initial, areas, jornadaEstandar }: {
 
       <FormSection
         title="Jornada de trabajo"
-        description={`Por defecto usa la jornada estándar (${jornadaEstandar.inicio} a ${jornadaEstandar.fin}, ${jornadaEstandar.dias.join('-')}). Activá el switch sólo si este operario tiene un horario distinto. Cada día puede tener su propio horario.`}
+        description={`Jornada estándar de planta: ${resumenJornada(jornadaEstandar)}. Activa el switch solo si este operario tiene un horario distinto. Cada día puede tener su propio horario y refrigerio.`}
       >
         <label className="flex items-center gap-3 text-sm">
           <Switch checked={jornadaPersonalizada} onCheckedChange={setJornadaPersonalizada} />
@@ -270,7 +310,12 @@ export function OperarioForm({ initial, areas, jornadaEstandar }: {
             <input
               type="hidden"
               name="jornada_horarios"
-              value={JSON.stringify(diasActivos.map((dia) => ({ dia, inicio: horariosPorDia[dia]?.inicio ?? '', fin: horariosPorDia[dia]?.fin ?? '' })))}
+              value={JSON.stringify(diasActivos.map((dia) => ({
+                dia,
+                inicio: horariosPorDia[dia]?.inicio ?? '',
+                fin: horariosPorDia[dia]?.fin ?? '',
+                refrigerio_min: horariosPorDia[dia]?.refrigerio_min ?? 0,
+              })))}
             />
 
             {diasActivos.length === 0 ? (
@@ -280,9 +325,10 @@ export function OperarioForm({ initial, areas, jornadaEstandar }: {
             ) : (
               <div className="space-y-1.5">
                 {DIAS.filter((d) => diasActivos.includes(d.v)).map((d) => {
-                  const h = horariosPorDia[d.v] ?? { inicio: jornadaEstandar.inicio, fin: jornadaEstandar.fin };
+                  const h = horariosPorDia[d.v] ?? { inicio: jornadaEstandar.inicio, fin: jornadaEstandar.fin, refrigerio_min: 0 };
+                  const efectivos = minutosEfectivos(h);
                   return (
-                    <div key={d.v} className="grid grid-cols-[80px_1fr_1fr] items-center gap-2 rounded-md border border-slate-200 bg-white px-3 py-2">
+                    <div key={d.v} className="grid grid-cols-[72px_1fr_1fr_1fr_84px] items-center gap-2 rounded-md border border-slate-200 bg-white px-3 py-2">
                       <span className="text-xs font-semibold text-slate-700">
                         {d.l} <span className="ml-1 text-[10px] uppercase text-slate-400">{d.v}</span>
                       </span>
@@ -306,13 +352,41 @@ export function OperarioForm({ initial, areas, jornadaEstandar }: {
                           required
                         />
                       </label>
+                      <label className="flex items-center gap-2 text-[11px] text-slate-500">
+                        Refrigerio
+                        <Input
+                          type="number"
+                          min={0}
+                          max={240}
+                          step={15}
+                          value={h.refrigerio_min}
+                          onChange={(e) => setRefrigerio(d.v, e.target.value)}
+                          className="h-8 text-xs"
+                          title="Minutos de almuerzo/refrigerio que no cuentan como tiempo trabajado"
+                        />
+                      </label>
+                      <span
+                        className={`text-right text-[11px] font-semibold ${efectivos === 0 ? 'text-rose-600' : 'text-emerald-700'}`}
+                        title="Horas efectivas (duración menos refrigerio)"
+                      >
+                        {formatoHoras(efectivos)}
+                      </span>
                     </div>
                   );
                 })}
               </div>
             )}
             <p className="text-[11px] text-slate-500">
-              Sin límite de duración: cada día puede tener jornada completa, media o parcial.
+              Sin límite de duración: cada día puede tener jornada completa, media o parcial. El
+              refrigerio se descuenta de las horas efectivas.
+              {diasActivos.length > 0 && (
+                <>
+                  {' '}Total semanal:{' '}
+                  <strong className="text-slate-700">
+                    {formatoHoras(diasActivos.reduce((acc, d) => acc + minutosEfectivos(horariosPorDia[d] ?? { inicio: '00:00', fin: '00:00', refrigerio_min: 0 }), 0))}
+                  </strong>
+                </>
+              )}
             </p>
           </div>
         )}

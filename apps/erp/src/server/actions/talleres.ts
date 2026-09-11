@@ -19,7 +19,6 @@ const schema = z.object({
   banco: z.string().optional().or(z.literal('')),
   numero_cuenta: z.string().optional().or(z.literal('')),
   notas: z.string().optional().or(z.literal('')),
-  calificacion: z.coerce.number().min(0).max(5).default(5),
   activo: z.boolean().default(true),
 });
 
@@ -38,7 +37,6 @@ function parseForm(fd: FormData) {
     banco: fd.get('banco') || '',
     numero_cuenta: fd.get('numero_cuenta') || '',
     notas: fd.get('notas') || '',
-    calificacion: fd.get('calificacion') || 5,
     activo: fd.get('activo') !== 'off',
   });
   return { ...data, especialidades: especialidades as string[] };
@@ -59,7 +57,10 @@ function clean(d: ReturnType<typeof parseForm>) {
     banco: d.banco || null,
     numero_cuenta: d.numero_cuenta || null,
     notas: d.notas || null,
-    calificacion: d.calificacion,
+    // `calificacion` NO se escribe desde el formulario: la calcula el trigger
+    // `controles_calidad_calificacion_taller` a partir de los registros de
+    // calidad de los servicios (mig 88). Un taller nuevo arranca en 5.0 por
+    // el default de la columna.
     activo: d.activo,
   };
 }

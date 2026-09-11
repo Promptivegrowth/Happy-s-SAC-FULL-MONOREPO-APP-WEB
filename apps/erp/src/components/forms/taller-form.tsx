@@ -130,8 +130,14 @@ export function TallerForm({ initial }: { initial?: Taller }) {
           <FormRow label="Contacto">
             <Input name="contacto_nombre" defaultValue={initial?.contacto_nombre ?? ''} />
           </FormRow>
-          <FormRow label="Calificación (0-5)">
-            <Input name="calificacion" type="number" step="0.1" defaultValue={initial?.calificacion ?? 5} min={0} max={5} />
+          <FormRow
+            label="Calificación (automática)"
+            hint="Se calcula sola con los controles de calidad de los servicios que retornan de este taller. Todos arrancan en 5.0."
+          >
+            <div className="flex h-10 items-center gap-2 rounded-md border border-dashed border-slate-300 bg-slate-50 px-3 text-sm">
+              <span className="font-semibold text-corp-900">⭐ {Number(initial?.calificacion ?? 5).toFixed(1)}</span>
+              <span className="text-xs text-slate-500">· no editable</span>
+            </div>
           </FormRow>
         </FormGrid>
       </FormSection>
