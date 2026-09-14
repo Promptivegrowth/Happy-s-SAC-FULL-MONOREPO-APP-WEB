@@ -10,6 +10,9 @@ const PUBLIC_PATHS = [
   // una sesión expirada lo hace devolver HTML del /login en vez de JSON y
   // los dropdowns de ubigeo quedan mudos en el cliente.
   '/api/ubigeo',
+  // El envío automático a SUNAT lo invoca Vercel Cron, que no trae cookie de
+  // sesión: la ruta se protege con su propio secreto (CRON_SECRET).
+  '/api/cron',
 ];
 
 export async function middleware(request: NextRequest) {

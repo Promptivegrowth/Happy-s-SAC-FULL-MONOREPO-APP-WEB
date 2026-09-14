@@ -4,5 +4,11 @@
   "buildCommand": "cd ../.. && pnpm turbo run build --filter=@happy/erp",
   "installCommand": "cd ../.. && pnpm install --frozen-lockfile",
   "outputDirectory": ".next",
-  "regions": ["pdx1"]
+  "regions": ["pdx1"],
+  "crons": [
+    {
+      "path": "/api/cron/sunat",
+      "schedule": "*/15 * * * *"
+    }
+  ]
 }

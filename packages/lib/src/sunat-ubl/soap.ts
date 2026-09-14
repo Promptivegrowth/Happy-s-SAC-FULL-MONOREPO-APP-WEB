@@ -38,6 +38,46 @@ function buildSendBillEnvelope(args: {
 </soapenv:Envelope>`;
 }
 
+
+/**
+ * SUNAT limita la frecuencia de envíos: cuando se le mandan varios documentos
+ * seguidos responde HTTP 401 (o 503) desde su nginx, ANTES de llegar al
+ * servicio — no es un problema de credenciales. Verificado en beta el
+ * 2026-09-14: cuatro envíos consecutivos daban OK / 401 / OK / 401, y al
+ * espaciarlos pasaron los cuatro.
+ *
+ * Por eso cada llamada reintenta con espera creciente. Sin esto, el primer día
+ * de operación con varias facturas seguidas dejaría comprobantes sin enviar.
+ */
+const REINTENTOS = 3;
+const ESPERA_BASE_MS = 6000;
+
+function esThrottle(status: number, cuerpo: string): boolean {
+  if (status === 401 || status === 429 || status === 503) {
+    // Un 401 de SUNAT con cuerpo HTML es del balanceador, no del servicio SOAP:
+    // el servicio siempre responde XML (SOAP Fault) cuando la clave está mal.
+    return !/<soap|<\?xml/i.test(cuerpo);
+  }
+  return false;
+}
+
+/** fetch con reintentos ante el throttle de SUNAT. Devuelve la última respuesta. */
+async function fetchSunat(url: string, body: string): Promise<{ status: number; text: string }> {
+  let ultimo = { status: 0, text: '' };
+  for (let intento = 1; intento <= REINTENTOS; intento++) {
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/xml; charset=utf-8', 'SOAPAction': '', 'Accept': 'text/xml' },
+      body,
+    });
+    const text = await response.text();
+    ultimo = { status: response.status, text };
+    if (!esThrottle(response.status, text) || intento === REINTENTOS) return ultimo;
+    await new Promise((r) => setTimeout(r, ESPERA_BASE_MS * intento));
+  }
+  return ultimo;
+}
+
 /** Envía el zip firmado a SUNAT y devuelve el CDR (zip base64) + parseo. */
 export async function enviarSendBill(args: {
   endpointUrl: string;
@@ -52,23 +92,14 @@ export async function enviarSendBill(args: {
   const zipBase64 = Buffer.from(args.zipBytes).toString('base64');
   const envelope = buildSendBillEnvelope({ ...args, zipBase64 });
 
-  let response: Response;
+  let respuesta: { status: number; text: string };
   try {
-    response = await fetch(args.endpointUrl, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'text/xml; charset=utf-8',
-        'SOAPAction': '',
-        'Accept': 'text/xml',
-      },
-      body: envelope,
-      // SUNAT puede tardar 15-30s. Sin timeout estricto.
-    });
+    respuesta = await fetchSunat(args.endpointUrl, envelope);
   } catch (e) {
     return { ok: false, error: `Fallo de red: ${(e as Error).message}` };
   }
-
-  const text = await response.text();
+  const response = { status: respuesta.status };
+  const text = respuesta.text;
 
   // Detectar SOAP Fault
   const faultMatch = text.match(/<faultstring[^>]*>([\s\S]*?)<\/faultstring>/i);
@@ -126,17 +157,14 @@ export async function enviarSendSummary(args: {
   </soapenv:Body>
 </soapenv:Envelope>`;
 
-  let response: Response;
+  let respuesta: { status: number; text: string };
   try {
-    response = await fetch(args.endpointUrl, {
-      method: 'POST',
-      headers: { 'Content-Type': 'text/xml; charset=utf-8', 'SOAPAction': '', 'Accept': 'text/xml' },
-      body: envelope,
-    });
+    respuesta = await fetchSunat(args.endpointUrl, envelope);
   } catch (e) {
     return { ok: false, error: `Fallo de red: ${(e as Error).message}` };
   }
-  const text = await response.text();
+  const response = { status: respuesta.status };
+  const text = respuesta.text;
   const fault = text.match(/<faultstring[^>]*>([\s\S]*?)<\/faultstring>/i);
   if (fault) return { ok: false, error: fault[1]!.trim(), soapFault: text, httpStatus: response.status };
   const ticket = text.match(/<ticket>([\s\S]*?)<\/ticket>/i)?.[1]?.trim();
@@ -169,17 +197,14 @@ export async function consultarGetStatus(args: {
   </soapenv:Body>
 </soapenv:Envelope>`;
 
-  let response: Response;
+  let respuesta: { status: number; text: string };
   try {
-    response = await fetch(args.endpointUrl, {
-      method: 'POST',
-      headers: { 'Content-Type': 'text/xml; charset=utf-8', 'SOAPAction': '', 'Accept': 'text/xml' },
-      body: envelope,
-    });
+    respuesta = await fetchSunat(args.endpointUrl, envelope);
   } catch (e) {
     return { ok: false, error: `Fallo de red: ${(e as Error).message}` };
   }
-  const text = await response.text();
+  const response = { status: respuesta.status };
+  const text = respuesta.text;
   const fault = text.match(/<faultstring[^>]*>([\s\S]*?)<\/faultstring>/i);
   if (fault) return { ok: false, error: fault[1]!.trim(), soapFault: text, httpStatus: response.status };
 

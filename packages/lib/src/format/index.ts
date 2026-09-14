@@ -118,3 +118,39 @@ export function slugify(text: string): string {
 }
 
 export { NF_NUMBER };
+
+// ===========================================================================
+// HORA DE PERÚ (UTC-5)
+// ===========================================================================
+/**
+ * Perú usa UTC-5 todo el año: no aplica horario de verano desde 1994, así que
+ * el desfase es constante y no hace falta una librería de zonas horarias.
+ *
+ * Esto importa para SUNAT: el servidor corre en UTC, y una venta de las 19:00
+ * en Lima cae al día siguiente en UTC. Si la fecha de emisión se toma del reloj
+ * del servidor, el comprobante sale con fecha futura (SUNAT lo rechaza) y el
+ * resumen diario agrupa boletas en el día equivocado. Verificado sobre los
+ * datos reales: 7 de 59 ventas quedaron registradas en un día distinto al de
+ * Lima.
+ */
+const DESFASE_PERU_MS = 5 * 60 * 60 * 1000;
+
+function enHoraPeru(valor?: string | Date | null): Date {
+  const d = valor ? new Date(valor) : new Date();
+  return new Date(d.getTime() - DESFASE_PERU_MS);
+}
+
+/** Fecha 'YYYY-MM-DD' en hora de Perú. Sin argumento, el día de hoy en Lima. */
+export function fechaLima(valor?: string | Date | null): string {
+  return enHoraPeru(valor).toISOString().slice(0, 10);
+}
+
+/** Hora 'HH:mm:ss' en hora de Perú. */
+export function horaLima(valor?: string | Date | null): string {
+  return enHoraPeru(valor).toISOString().slice(11, 19);
+}
+
+/** Marca de tiempo completa en hora de Perú, con su offset explícito. */
+export function ahoraLimaISO(): string {
+  return `${enHoraPeru().toISOString().slice(0, 19)}-05:00`;
+}
