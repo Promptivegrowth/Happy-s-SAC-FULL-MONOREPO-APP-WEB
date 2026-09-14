@@ -101,27 +101,67 @@ export async function GET(request: Request) {
     }
   }
 
-  // --------------------------------------- 2. resumen diario de boletas ----
-  // Se informa el día anterior (en hora de Perú), una sola vez por día.
-  let resumenDiario = 'sin novedad';
-  const ayerLima = fechaLima(new Date(Date.now() - 24 * 3600 * 1000));
+  // ----------------------------- 2. tickets de resúmenes ya enviados -------
+  // El resumen es asíncrono: SUNAT devuelve un ticket y el CDR se recoge
+  // después. Hasta que no se recoge, las boletas informadas siguen figurando
+  // como pendientes, así que hay que consultarlo en cada corrida.
+  let resumenesCerrados = 0;
   try {
-    const { data: yaEnviado } = await sb
-      .from('sunat_envios_log')
-      .select('id')
-      .eq('resumen_diario', ayerLima)
-      .limit(1);
-    if ((yaEnviado ?? []).length === 0) {
-      const { generarResumenDiarioConCliente } = await import('@/server/sunat-core');
-      const r = await generarResumenDiarioConCliente(sb, ayerLima);
-      resumenDiario = ayerLima;
-      detalle.push(`resumen ${ayerLima}: ${r.resumenId} enviado con ${r.cantidad} boleta(s), ticket ${r.ticket}`);
+    const { consultarResumenConCliente } = await import('@/server/sunat-core');
+    const { data: enProceso } = await sb
+      .from('sunat_resumenes')
+      .select('id, resumen_id')
+      .eq('estado', 'EN_PROCESO')
+      .not('ticket', 'is', null)
+      .limit(10);
+    for (const res of (enProceso ?? []) as Array<{ id: string; resumen_id: string }>) {
+      const r = await consultarResumenConCliente(sb, res.id);
+      if (r.estado !== 'EN_PROCESO') resumenesCerrados++;
+      detalle.push(`ticket ${res.resumen_id}: ${r.estado}${r.codigo ? ` (${r.codigo})` : ''}`);
+      await new Promise((x) => setTimeout(x, 1500));
     }
   } catch (e) {
-    detalle.push(`resumen ${ayerLima}: error ${(e as Error).message.slice(0, 160)}`);
+    detalle.push(`consulta de tickets: error ${(e as Error).message.slice(0, 140)}`);
   }
 
-  // ------------------------------- 3. alerta de plazo (norma peruana) ------
+  // --------------------------------------- 3. resumen diario de boletas ----
+  // Se informan TODOS los días cerrados que tengan boletas pendientes, no solo
+  // el de ayer: si una corrida falló o el sistema estuvo caído, esas boletas no
+  // pueden quedar huérfanas. Hoy no entra porque el día aún no cierra.
+  const resumenesEnviados: string[] = [];
+  try {
+    const inicioHoyLima = `${fechaLima()}T05:00:00.000Z`;
+    const { data: boletasPendientes } = await sb
+      .from('comprobantes')
+      .select('fecha_emision')
+      .eq('tipo', 'BOLETA')
+      .in('estado', ['BORRADOR', 'EMITIDO', 'RECHAZADO'])
+      .lt('fecha_emision', inicioHoyLima)
+      .order('fecha_emision', { ascending: true })
+      .limit(500);
+
+    const fechas = [...new Set(((boletasPendientes ?? []) as Array<{ fecha_emision: string }>)
+      .map((b) => fechaLima(b.fecha_emision)))].slice(0, 3); // máximo 3 días por corrida
+
+    if (fechas.length > 0) {
+      const { generarResumenDiarioConCliente } = await import('@/server/sunat-core');
+      for (const fecha of fechas) {
+        try {
+          const r = await generarResumenDiarioConCliente(sb, fecha);
+          resumenesEnviados.push(fecha);
+          detalle.push(`resumen ${fecha}: ${r.resumenId} con ${r.cantidad} boleta(s), ticket ${r.ticket}`);
+        } catch (e) {
+          detalle.push(`resumen ${fecha}: ${(e as Error).message.slice(0, 140)}`);
+        }
+        await new Promise((x) => setTimeout(x, 2500));
+      }
+    }
+  } catch (e) {
+    detalle.push(`resúmenes: error ${(e as Error).message.slice(0, 160)}`);
+  }
+  const resumenDiario = resumenesEnviados.length > 0 ? resumenesEnviados.join(', ') : 'sin novedad';
+
+  // ------------------------------- 4. alerta de plazo (norma peruana) ------
   // El plazo legal de envío corre desde la emisión. Si un comprobante lleva más
   // de 24 horas sin ser aceptado, alguien tiene que enterarse antes de que se
   // venza: se avisa a gerencia una vez al día.
@@ -151,10 +191,10 @@ export async function GET(request: Request) {
     }
   }
 
-  // ------------------------------------------------------- 4. bitácora ----
+  // ------------------------------------------------------- 5. bitácora ----
   await sb.from('sunat_envios_log').insert({
     enviados, aceptados, fallidos,
-    resumen_diario: resumenDiario === 'sin novedad' ? null : resumenDiario,
+    resumen_diario: resumenesEnviados.length > 0 ? resumenesEnviados.join(',').slice(0, 100) : null,
     detalle: detalle.join(' | ').slice(0, 4000),
     duracion_ms: Date.now() - inicio,
   });
@@ -164,6 +204,7 @@ export async function GET(request: Request) {
     enviados, aceptados, fallidos,
     pendientes_mas_24h: vencidos ?? 0,
     resumen_diario: resumenDiario,
+    resumenes_cerrados: resumenesCerrados,
     duracion_ms: Date.now() - inicio,
     detalle,
   });

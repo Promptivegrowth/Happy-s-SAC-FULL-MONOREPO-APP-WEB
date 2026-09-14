@@ -9,7 +9,7 @@
 
 import {
   generarUBLInvoice, generarUBLCreditNote, generarUBLDebitNote, generarUBLResumenBoletas, MOTIVO_ND,
-  firmarUBL, empaquetarZip, enviarSendBill, enviarSendSummary, digestSHA1,
+  firmarUBL, empaquetarZip, enviarSendBill, enviarSendSummary, consultarGetStatus, digestSHA1,
   type ComprobanteInput, type ResumenBoletaLinea,
 } from '@happy/lib/sunat-ubl';
 import { numeroALetras, fechaLima, horaLima } from '@happy/lib/format';
@@ -285,11 +285,16 @@ export async function generarResumenDiarioConCliente(
       igv: Number(b.igv ?? 0),
     }));
 
+    // El identificador del resumen es RC-{fechaGeneracion}-{correlativo}, así que
+    // el correlativo tiene que ser único por DÍA DE ENVÍO, no por día informado.
+    // Contándolo por fecha_referencia, informar tres días distintos en la misma
+    // jornada generaba tres veces "RC-AAAAMMDD-1": beta los acepta, pero
+    // producción los rechaza por duplicado.
+    const fechaGen = fechaPeru();
     const { count } = await sbAny.from('sunat_resumenes')
       .select('id', { count: 'exact', head: true })
-      .eq('empresa_id', empresa.id).eq('fecha_referencia', fechaRef);
+      .eq('empresa_id', empresa.id).eq('fecha_generacion', fechaGen);
     const correlativo = (count ?? 0) + 1;
-    const fechaGen = fechaPeru();
 
     const { xml, id: resumenId, nombreArchivo } = generarUBLResumenBoletas({
       correlativo, fechaReferencia: fechaRef, fechaGeneracion: fechaGen,
@@ -319,5 +324,71 @@ export async function generarResumenDiarioConCliente(
     }).select('id').single();
 
     return { rowId: insRow?.id as string, resumenId, ticket: snd.ticket, cantidad: lineas.length };
+  
+}
+
+
+/**
+ * Consulta el ticket de un resumen diario y, si SUNAT ya respondió, archiva el
+ * CDR y cierra las boletas informadas.
+ *
+ * Sin este paso el resumen queda "enviado" pero las boletas nunca pasan a
+ * aceptadas: el envío automático lo llama en cada corrida.
+ */
+export async function consultarResumenConCliente(
+  sb: ClienteSb,
+  resumenRowId: string,
+): Promise<{ estado: string; codigo: string | null; descripcion: string | null }> {
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const sbAny = sb as unknown as { from: (t: string) => any };
+
+    const { data: empresa } = await sb.from('empresa').select('id, ruc').single();
+    if (!empresa) throw new Error('Empresa no configurada');
+    const { data: config } = await sb.from('sunat_config').select('*').eq('empresa_id', empresa.id).maybeSingle();
+    if (!config) throw new Error('Falta configurar SUNAT');
+
+    const { data: res } = await sbAny.from('sunat_resumenes').select('*').eq('id', resumenRowId).maybeSingle();
+    if (!res) throw new Error('Resumen no encontrado');
+    if (!res.ticket) throw new Error('El resumen no tiene ticket');
+
+    const st = await consultarGetStatus({
+      endpointUrl: config.endpoint_factura, rucEmisor: empresa.ruc,
+      usuarioSol: config.usuario_sol, claveSol: config.clave_sol, ticket: res.ticket,
+    });
+    if (!st.ok) throw new Error(`Error consultando SUNAT: ${st.error}`);
+
+    let estado = 'EN_PROCESO';
+    let cdrPath: string | null = null;
+    if (!st.enProceso) {
+      const aceptado = st.cdr?.codigo === '0';
+      estado = aceptado ? 'ACEPTADO' : 'RECHAZADO';
+      if (st.cdrZipBase64) {
+        cdrPath = `comprobantes/${empresa.ruc}/RC/R-${res.resumen_id}.zip`;
+        await sb.storage.from('comprobantes').upload(cdrPath, new Blob([Uint8Array.from(atob(st.cdrZipBase64), (c) => c.charCodeAt(0))], { type: 'application/zip' }), { upsert: true, contentType: 'application/zip' });
+      }
+      if (aceptado) {
+        await sb.from('comprobantes').update({
+          estado: 'ACEPTADO', sunat_codigo_respuesta: '0',
+          sunat_mensaje: `Aceptada por Resumen Diario ${res.resumen_id}`,
+          sunat_aceptado_en: new Date().toISOString(),
+        }).eq('tipo', 'BOLETA')
+          // Misma ventana que se usó para armar el resumen: si acá se filtrara
+          // por día UTC, las boletas de la noche quedarían sin marcar aunque
+          // SUNAT sí las haya aceptado.
+          .gte('fecha_emision', ventanaDiaPeru(res.fecha_referencia as string).desde)
+          .lt('fecha_emision', ventanaDiaPeru(res.fecha_referencia as string).hasta)
+          .neq('estado', 'ANULADO');
+      }
+    }
+
+    await sbAny.from('sunat_resumenes').update({
+      estado, sunat_codigo: st.cdr?.codigo ?? st.statusCode,
+      sunat_descripcion: st.cdr?.descripcion ?? null, cdr_path: cdrPath,
+      observaciones: st.cdr?.observaciones?.length ? st.cdr.observaciones : null,
+      updated_at: new Date().toISOString(),
+    }).eq('id', resumenRowId);
+
+    return { estado, codigo: st.cdr?.codigo ?? st.statusCode, descripcion: st.cdr?.descripcion ?? null };
   
 }

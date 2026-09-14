@@ -2,7 +2,7 @@
 
 import { z } from 'zod';
 import { runAction, requireUser, bumpPaths, type ActionResult } from './_helpers';
-import { emitirComprobanteConCliente, generarResumenDiarioConCliente } from '../sunat-core';
+import { emitirComprobanteConCliente, generarResumenDiarioConCliente, consultarResumenConCliente } from '../sunat-core';
 import {
   generarUBLInvoice, generarUBLCreditNote, generarUBLDebitNote, generarUBLResumenBoletas, MOTIVO_ND,
   firmarUBL, empaquetarZip, enviarSendBill, enviarSendSummary, consultarGetStatus, digestSHA1,
@@ -136,53 +136,8 @@ export async function consultarResumenDiario(
 ): Promise<ActionResult<{ estado: string; codigo: string | null; descripcion: string | null }>> {
   return runAction(async () => {
     const { sb } = await requireUser();
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const sbAny = sb as unknown as { from: (t: string) => any };
-
-    const { data: empresa } = await sb.from('empresa').select('id, ruc').single();
-    if (!empresa) throw new Error('Empresa no configurada');
-    const { data: config } = await sb.from('sunat_config').select('*').eq('empresa_id', empresa.id).maybeSingle();
-    if (!config) throw new Error('Falta configurar SUNAT');
-
-    const { data: res } = await sbAny.from('sunat_resumenes').select('*').eq('id', resumenRowId).maybeSingle();
-    if (!res) throw new Error('Resumen no encontrado');
-    if (!res.ticket) throw new Error('El resumen no tiene ticket');
-
-    const st = await consultarGetStatus({
-      endpointUrl: config.endpoint_factura, rucEmisor: empresa.ruc,
-      usuarioSol: config.usuario_sol, claveSol: config.clave_sol, ticket: res.ticket,
-    });
-    if (!st.ok) throw new Error(`Error consultando SUNAT: ${st.error}`);
-
-    let estado = 'EN_PROCESO';
-    let cdrPath: string | null = null;
-    if (!st.enProceso) {
-      const aceptado = st.cdr?.codigo === '0';
-      estado = aceptado ? 'ACEPTADO' : 'RECHAZADO';
-      if (st.cdrZipBase64) {
-        cdrPath = `comprobantes/${empresa.ruc}/RC/R-${res.resumen_id}.zip`;
-        await sb.storage.from('comprobantes').upload(cdrPath, new Blob([Uint8Array.from(atob(st.cdrZipBase64), (c) => c.charCodeAt(0))], { type: 'application/zip' }), { upsert: true, contentType: 'application/zip' });
-      }
-      if (aceptado) {
-        await sb.from('comprobantes').update({
-          estado: 'ACEPTADO', sunat_codigo_respuesta: '0',
-          sunat_mensaje: `Aceptada por Resumen Diario ${res.resumen_id}`,
-          sunat_aceptado_en: new Date().toISOString(),
-        }).eq('tipo', 'BOLETA')
-          .gte('fecha_emision', `${res.fecha_referencia}T00:00:00`)
-          .lte('fecha_emision', `${res.fecha_referencia}T23:59:59`)
-          .neq('estado', 'ANULADO');
-      }
-    }
-
-    await sbAny.from('sunat_resumenes').update({
-      estado, sunat_codigo: st.cdr?.codigo ?? st.statusCode,
-      sunat_descripcion: st.cdr?.descripcion ?? null, cdr_path: cdrPath,
-      observaciones: st.cdr?.observaciones?.length ? st.cdr.observaciones : null,
-      updated_at: new Date().toISOString(),
-    }).eq('id', resumenRowId);
-
+    const r = await consultarResumenConCliente(sb, resumenRowId);
     await bumpPaths('/comprobantes');
-    return { estado, codigo: st.cdr?.codigo ?? st.statusCode, descripcion: st.cdr?.descripcion ?? null };
+    return r;
   });
 }
