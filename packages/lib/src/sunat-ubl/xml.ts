@@ -8,7 +8,7 @@
  * Ref: https://cpe.sunat.gob.pe/sites/default/files/inline-files/Anexo_1_2.0.pdf
  */
 
-import { type ComprobanteInput, calcularTotales, IGV_RATE } from './types';
+import { type ComprobanteInput, calcularTotales, IGV_RATE, formatearNumeroComprobante } from './types';
 
 function esc(s: string | number | undefined | null): string {
   if (s === undefined || s === null) return '';
@@ -34,7 +34,7 @@ const NS = `xmlns="urn:oasis:names:specification:ubl:schema:xsd:Invoice-2"
  */
 export function generarUBLInvoice(input: ComprobanteInput): { xml: string; numeroCompleto: string; nombreArchivo: string } {
   const tot = calcularTotales(input);
-  const numeroCompleto = `${input.serie}-${String(input.numero).padStart(8, '0')}`;
+  const numeroCompleto = formatearNumeroComprobante(input.serie, input.numero);
   const isFactura = input.tipo === '01';
   const tipoDoc = input.tipo;
   const fecha = input.fechaEmision; // YYYY-MM-DD

@@ -3,6 +3,24 @@
  * UBL 2.1 / SUNAT.
  */
 
+/**
+ * Dígitos del correlativo en el número del comprobante.
+ *
+ * El cliente venía emitiendo con 7 dígitos (F005-0000189) y pidió que el
+ * formato quede idéntico tras la migración, para que el correlativo se lea como
+ * una continuación y no como una serie nueva. SUNAT admite de 1 a 8 dígitos: lo
+ * que valida es el número, no el relleno.
+ *
+ * Está acá y no repetido en cada generador para que impresión, XML y consultas
+ * no puedan quedar con formatos distintos.
+ */
+export const DIGITOS_CORRELATIVO = 7;
+
+/** 'F005' + 190 -> 'F005-0000190' */
+export function formatearNumeroComprobante(serie: string, numero: number | string): string {
+  return `${serie}-${String(numero).padStart(DIGITOS_CORRELATIVO, '0')}`;
+}
+
 export type TipoComprobanteSunat =
   | '01'   // Factura
   | '03'   // Boleta

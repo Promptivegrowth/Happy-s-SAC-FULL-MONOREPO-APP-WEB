@@ -15,6 +15,7 @@
 import { z } from 'zod';
 import { revalidatePath } from 'next/cache';
 import ExcelJS from 'exceljs';
+import { DIGITOS_CORRELATIVO } from '@happy/lib/sunat-ubl';
 import { createClient } from '@happy/db/server';
 import { formatTallaChip } from '@happy/lib';
 import {
@@ -59,7 +60,7 @@ async function getCajaDefault(sb: ServerClient, userId: string) {
   return { caja, cajeroNombre: perfil.nombre_completo ?? 'Cajero' };
 }
 
-function fmtNumero(n: number, padding = 8): string {
+function fmtNumero(n: number, padding = DIGITOS_CORRELATIVO): string {
   return String(n).padStart(padding, '0');
 }
 
@@ -1200,9 +1201,9 @@ export async function emitirComprobante(input: z.infer<typeof emitirSchema>): Pr
       .single();
     serie = caja?.serie_nota_venta ?? 'NV01';
 
-    const { data: numComp } = await sb.rpc('next_correlativo', { p_clave: `COMP_${serie}`, p_padding: 8 });
+    const { data: numComp } = await sb.rpc('next_correlativo', { p_clave: `COMP_${serie}`, p_padding: DIGITOS_CORRELATIVO });
     numeroNum = Number(numComp);
-    numeroCompleto = `${serie}-${fmtNumero(numeroNum, 8)}`;
+    numeroCompleto = `${serie}-${fmtNumero(numeroNum)}`;
 
     // No insertamos en tabla `comprobantes` para NOTA_VENTA, pero sí devolvemos número artificial.
     comprobanteId = '';
@@ -1231,9 +1232,9 @@ export async function emitirComprobante(input: z.infer<typeof emitirSchema>): Pr
     }
     serie = serieElegida;
 
-    const { data: numComp } = await sb.rpc('next_correlativo', { p_clave: `COMP_${serie}`, p_padding: 8 });
+    const { data: numComp } = await sb.rpc('next_correlativo', { p_clave: `COMP_${serie}`, p_padding: DIGITOS_CORRELATIVO });
     numeroNum = Number(numComp);
-    numeroCompleto = `${serie}-${fmtNumero(numeroNum, 8)}`;
+    numeroCompleto = `${serie}-${fmtNumero(numeroNum)}`;
 
     // Validar RUC en factura
     if (parsed.tipo === 'FACTURA') {

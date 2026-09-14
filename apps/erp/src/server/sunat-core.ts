@@ -10,6 +10,7 @@
 import {
   generarUBLInvoice, generarUBLCreditNote, generarUBLDebitNote, generarUBLResumenBoletas, MOTIVO_ND,
   firmarUBL, empaquetarZip, enviarSendBill, enviarSendSummary, consultarGetStatus, digestSHA1,
+  formatearNumeroComprobante,
   type ComprobanteInput, type ResumenBoletaLinea,
 } from '@happy/lib/sunat-ubl';
 import { numeroALetras, fechaLima, horaLima } from '@happy/lib/format';
@@ -104,7 +105,7 @@ export async function emitirComprobanteConCliente(
       const motivoCod = (comp as unknown as { motivo_nc_nd?: string | null }).motivo_nc_nd || '01';
       documentoReferencia = {
         tipo: (TIPO_MAP[refComp.tipo as keyof typeof TIPO_MAP] ?? '01'),
-        serieNumero: refComp.numero_completo ?? `${refComp.serie}-${String(refComp.numero).padStart(8, '0')}`,
+        serieNumero: refComp.numero_completo ?? formatearNumeroComprobante(refComp.serie as string, refComp.numero as number),
         tipoMotivo: motivoCod,
         descripcionMotivo: (tipoSunat === '08' ? MOTIVO_ND[motivoCod] : MOTIVO_NC[motivoCod]) ?? 'Ajuste',
       };
@@ -276,7 +277,7 @@ export async function generarResumenDiarioConCliente(
 
     const lineas: ResumenBoletaLinea[] = lista.map((b) => ({
       tipoDoc: '03',
-      serieNumero: b.numero_completo ?? `${b.serie}-${String(b.numero).padStart(8, '0')}`,
+      serieNumero: b.numero_completo ?? formatearNumeroComprobante(b.serie, b.numero),
       clienteTipoDoc: tipoDocClienteSunat(b.tipo_documento_cliente),
       clienteNumeroDoc: b.numero_documento_cliente || '0',
       condicion: '1',

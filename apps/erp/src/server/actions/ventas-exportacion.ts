@@ -1,6 +1,7 @@
 'use server';
 
 import { z } from 'zod';
+import { DIGITOS_CORRELATIVO } from '@happy/lib/sunat-ubl';
 import { revalidatePath } from 'next/cache';
 import { createClient } from '@happy/db/server';
 import { requireRol } from '@/server/session';
@@ -210,7 +211,7 @@ export async function registrarVentaExportacion(input: VentaExportInput): Promis
   await sb.from('kardex_movimientos').insert(movs);
 
   // 7) Comprobante — FACTURA EXPORTACIÓN
-  const { data: numComp } = await sb.rpc('next_correlativo', { p_clave: `COMP_${serieExp.serie}`, p_padding: 8 });
+  const { data: numComp } = await sb.rpc('next_correlativo', { p_clave: `COMP_${serieExp.serie}`, p_padding: DIGITOS_CORRELATIVO });
   const { data: comp, error: errComp } = await sb.from('comprobantes').insert({
     tipo: 'FACTURA',
     serie: serieExp.serie,

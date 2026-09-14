@@ -3,6 +3,7 @@
 import { z } from 'zod';
 import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
+import { DIGITOS_CORRELATIVO } from '@happy/lib/sunat-ubl';
 import { createClient } from '@happy/db/server';
 import { formatTallaChip } from '@happy/lib';
 
@@ -283,7 +284,7 @@ export async function registrarVenta(input: VentaInput): Promise<VentaResultado>
       serie = (parsed.tipo_comprobante === 'FACTURA' ? caja?.serie_factura : caja?.serie_boleta) ?? undefined;
     }
     if (serie) {
-      const { data: numComp } = await sb.rpc('next_correlativo', { p_clave: `COMP_${serie}`, p_padding: 8 });
+      const { data: numComp } = await sb.rpc('next_correlativo', { p_clave: `COMP_${serie}`, p_padding: DIGITOS_CORRELATIVO });
       const numeroNum = Number(numComp);
       const { data: comp, error: errComp } = await sb.from('comprobantes').insert({
         tipo: parsed.tipo_comprobante,

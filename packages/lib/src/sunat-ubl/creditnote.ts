@@ -7,7 +7,7 @@
  * Ref: SUNAT Guía UBL 2.1 — Nota de Crédito.
  */
 
-import { type ComprobanteInput, calcularTotales, IGV_RATE } from './types';
+import { type ComprobanteInput, calcularTotales, IGV_RATE, formatearNumeroComprobante } from './types';
 
 function esc(s: string | number | undefined | null): string {
   if (s === undefined || s === null) return '';
@@ -29,7 +29,7 @@ export function generarUBLCreditNote(input: ComprobanteInput): { xml: string; nu
     throw new Error('La nota de crédito requiere documentoReferencia (comprobante afectado).');
   }
   const tot = calcularTotales(input);
-  const numeroCompleto = `${input.serie}-${String(input.numero).padStart(8, '0')}`;
+  const numeroCompleto = formatearNumeroComprobante(input.serie, input.numero);
   const fecha = input.fechaEmision;
   const hora = input.horaEmision ?? '12:00:00';
   const moneda = input.moneda;
