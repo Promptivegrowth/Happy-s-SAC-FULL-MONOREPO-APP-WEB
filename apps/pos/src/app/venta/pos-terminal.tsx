@@ -2091,7 +2091,7 @@ export function PosTerminal({
             </div>
             <h3 className="font-display text-xl font-semibold text-corp-900">No hay caja abierta</h3>
             <p className="mt-1 text-sm text-slate-500">
-              Para vender necesitás abrir tu turno con un monto inicial.
+              Para vender, {cajeroNombre} tiene que abrir su turno con un monto inicial.
             </p>
             <Button
               onClick={() => setAbrirCajaOpen(true)}
@@ -2101,8 +2101,25 @@ export function PosTerminal({
             >
               <LogIn className="h-4 w-4" /> Abrir caja
             </Button>
+
+            {/* Salir tiene que estar ACA DENTRO.
+                El boton de la barra de arriba funciona igual con este aviso
+                encima -el fondo deja pasar el clic-, pero se ve apagado detras
+                del velo y nadie lo intenta. Quien llega a esta pantalla y no es
+                el usuario correcto, lo que busca es justamente esto. */}
+            <Button
+              variant="outline"
+              className="mt-2 w-full"
+              onClick={() => {
+                if (!confirm(`Vas a salir de la cuenta de ${cajeroNombre} para que entre otra persona. ¿Continuamos?`)) return;
+                void cerrarSesionUsuario();
+              }}
+            >
+              <UserX className="h-4 w-4" /> Entrar con otro usuario
+            </Button>
+
             <p className="mt-3 text-[10px] text-slate-400">
-              Podés navegar por la app aunque no tengas caja abierta (consultar historial, cerrar sesión).
+              Sin caja abierta puedes igual consultar el historial y usar el resto del sistema.
             </p>
           </div>
         </div>

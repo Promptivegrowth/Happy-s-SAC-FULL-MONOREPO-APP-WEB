@@ -16,6 +16,7 @@ import { Button } from '@happy/ui/button';
 import { Banknote, Loader2, LogIn, X } from 'lucide-react';
 import { toast } from 'sonner';
 import { abrirSesion } from '@/server/actions/caja';
+import { cerrarSesionUsuario } from '@/server/actions/auth';
 
 export function AbrirCajaModal({
   cajeroNombre,
@@ -110,7 +111,14 @@ export function AbrirCajaModal({
           <div className="grid grid-cols-2 gap-3">
             <div>
               <Label className="text-xs">Cajero</Label>
-              <Input value={cajeroNombre} readOnly className="mt-1 bg-slate-50" />
+              {/* Texto y no un <Input readOnly>: un campo que se ve editable y
+                  no lo es hace que la gente intente cambiar el cajero desde
+                  acá. El turno es de quien inició sesión —suya es la plata del
+                  cajón y suyo el cuadre al cerrar—, así que para cambiar de
+                  cajero hay que cambiar de usuario. */}
+              <div className="mt-1 flex h-10 items-center rounded-md border border-slate-200 bg-slate-50 px-3 text-sm font-medium text-corp-900">
+                {cajeroNombre}
+              </div>
             </div>
             <div>
               <Label className="text-xs">Caja <span className="text-rose-600">*</span></Label>
@@ -181,6 +189,21 @@ export function AbrirCajaModal({
             />
           </div>
         </div>
+
+        <p className="mt-3 text-[11px] text-slate-500">
+          El turno queda a nombre de quien inició sesión, porque suyo es el dinero del cajón y suyo
+          el cuadre al cerrar.{' '}
+          <button
+            type="button"
+            onClick={() => {
+              if (!confirm(`Vas a salir de la cuenta de ${cajeroNombre} para que entre otra persona. ¿Continuamos?`)) return;
+              void cerrarSesionUsuario();
+            }}
+            className="font-medium text-happy-600 underline underline-offset-2 hover:text-happy-700"
+          >
+            ¿Es otra persona? Cambiar de usuario
+          </button>
+        </p>
 
         <Button
           onClick={submit}

@@ -7,7 +7,7 @@ import { Input } from '@happy/ui/input';
 import { Label } from '@happy/ui/label';
 import { Badge } from '@happy/ui/badge';
 import { createClient } from '@happy/db/browser';
-import { DEMO_USERS, DEMO_PASSWORD } from '@happy/lib/demo-users';
+import { DEMO_USERS, demoPassword, mostrarCuentasDemo } from '@happy/lib/demo-users';
 import { toast } from 'sonner';
 import { Loader2, Sparkles } from 'lucide-react';
 
@@ -39,12 +39,20 @@ export function LoginForm() {
 
   function quickLogin(demoEmail: string) {
     setEmail(demoEmail);
-    setPassword(DEMO_PASSWORD);
-    void login(demoEmail, DEMO_PASSWORD);
+    const clave = demoPassword();
+    if (!clave) return;
+    setPassword(clave);
+    void login(demoEmail, clave);
   }
 
   // Solo los usuarios que tienen acceso al ERP
   const erpUsers = DEMO_USERS.filter((u) => u.acceso !== 'pos');
+
+  /**
+   * Ver el comentario del login del POS: este panel regala las credenciales, así
+   * que solo aparece si se enciende con NEXT_PUBLIC_MOSTRAR_CUENTAS_DEMO=1.
+   */
+  const conCuentasDemo = mostrarCuentasDemo();
 
   return (
     <div className="space-y-5">
@@ -79,7 +87,8 @@ export function LoginForm() {
         </Button>
       </form>
 
-      {/* === DEMO USERS — REMOVER ANTES DE PRODUCCIÓN === */}
+      {/* === CUENTAS DEMO — solo con NEXT_PUBLIC_MOSTRAR_CUENTAS_DEMO=1 === */}
+      {conCuentasDemo && (
       <div className="rounded-xl border border-dashed border-amber-300 bg-amber-50/60 p-3">
         <div className="mb-2 flex items-center gap-2">
           <Sparkles className="h-3.5 w-3.5 text-amber-600" />
@@ -88,7 +97,7 @@ export function LoginForm() {
           </p>
         </div>
         <p className="mb-3 text-[11px] text-amber-700">
-          Modo pruebas. Password común: <code className="rounded bg-amber-100 px-1 font-mono">{DEMO_PASSWORD}</code>
+          Modo pruebas. Password común: <code className="rounded bg-amber-100 px-1 font-mono">{demoPassword()}</code>
         </p>
         <div className="grid grid-cols-1 gap-1.5">
           {erpUsers.map((u) => (
@@ -110,6 +119,7 @@ export function LoginForm() {
           ))}
         </div>
       </div>
+      )}
     </div>
   );
 }

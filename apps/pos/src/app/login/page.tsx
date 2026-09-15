@@ -9,7 +9,7 @@ import { Label } from '@happy/ui/label';
 import { Badge } from '@happy/ui/badge';
 import { Card, CardContent, CardHeader, CardTitle } from '@happy/ui/card';
 import { Logo } from '@happy/ui/logo';
-import { DEMO_USERS, DEMO_PASSWORD } from '@happy/lib/demo-users';
+import { DEMO_USERS, demoPassword, mostrarCuentasDemo } from '@happy/lib/demo-users';
 import { toast } from 'sonner';
 import { Loader2, Sparkles } from 'lucide-react';
 
@@ -37,12 +37,22 @@ export default function PosLoginPage() {
 
   function quickLogin(demoEmail: string) {
     setEmail(demoEmail);
-    setPwd(DEMO_PASSWORD);
-    void login(demoEmail, DEMO_PASSWORD);
+    const clave = demoPassword();
+    if (!clave) return;
+    setPwd(clave);
+    void login(demoEmail, clave);
   }
 
   // Solo cajeros + gerente (gerente puede entrar a todo)
   const posUsers = DEMO_USERS.filter((u) => u.acceso !== 'erp');
+
+  /**
+   * El panel de cuentas de un clic IMPRIME LA CONTRASEÑA en pantalla. Con el
+   * sistema emitiendo comprobantes reales a SUNAT, eso significa que cualquiera
+   * con el enlace entra como gerente. Se enciende a propósito para probar, con
+   * NEXT_PUBLIC_MOSTRAR_CUENTAS_DEMO=1, y en producción no se define.
+   */
+  const conCuentasDemo = mostrarCuentasDemo();
 
   return (
     <main className="relative flex min-h-screen items-center justify-center overflow-hidden bg-corp-900 p-4 py-8">
@@ -71,7 +81,8 @@ export default function PosLoginPage() {
             </Button>
           </form>
 
-          {/* === DEMO USERS — REMOVER ANTES DE PRODUCCIÓN === */}
+          {/* === CUENTAS DEMO — solo con NEXT_PUBLIC_MOSTRAR_CUENTAS_DEMO=1 === */}
+          {conCuentasDemo && (
           <div className="rounded-xl border border-dashed border-amber-300 bg-amber-50/60 p-3">
             <div className="mb-2 flex items-center gap-2">
               <Sparkles className="h-3.5 w-3.5 text-amber-600" />
@@ -80,7 +91,7 @@ export default function PosLoginPage() {
               </p>
             </div>
             <p className="mb-3 text-[11px] text-amber-700">
-              Password común: <code className="rounded bg-amber-100 px-1 font-mono">{DEMO_PASSWORD}</code>
+              Password común: <code className="rounded bg-amber-100 px-1 font-mono">{demoPassword()}</code>
             </p>
             <div className="grid grid-cols-1 gap-1.5">
               {posUsers.map((u) => (
@@ -102,6 +113,7 @@ export default function PosLoginPage() {
               ))}
             </div>
           </div>
+          )}
         </CardContent>
       </Card>
     </main>

@@ -9,7 +9,7 @@
  * a la vendedora que la realizó para cálculo de comisiones.
  *
  * Estrategia: NO crear una tabla nueva — reusar `perfiles` filtrando por
- * usuarios con rol que pueda atender ventas (cajero, vendedor_b2b).
+ * usuarios ACTIVOS con rol que pueda atender ventas (cajero, vendedor_b2b).
  * El GERENTE no aparece (pedido del cliente 20/07/2026: "javier mauricio es
  * gerente y no debería aparecer") — si un gerente también vende, basta con
  * asignarle ADEMÁS el rol cajero en Usuarios & Roles.
@@ -38,11 +38,16 @@ export async function listarVendedoresPOS(): Promise<VendedorOpcion[]> {
   const idsConRol = Array.from(new Set((rolesRows ?? []).map((r) => (r as { usuario_id: string }).usuario_id)));
   if (idsConRol.length === 0) return [];
 
-  // 2) Perfiles activos (solo nombre)
+  // 2) Perfiles ACTIVOS.
+  //
+  // El filtro por `activo` faltaba: un usuario dado de baja en Usuarios & Roles
+  // seguía apareciendo en la lista, y se le podía atribuir una venta —y su
+  // comisión— a alguien que ya no trabaja ahí.
   const { data: perfiles } = await sb
     .from('perfiles')
     .select('id, nombre_completo')
     .in('id', idsConRol)
+    .eq('activo', true)
     .order('nombre_completo');
 
   type R = { id: string; nombre_completo: string | null };
