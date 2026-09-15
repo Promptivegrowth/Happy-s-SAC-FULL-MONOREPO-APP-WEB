@@ -240,14 +240,28 @@ export function PosTerminal({
   const [colorSelId, setColorSelId] = useState<string | null>(null);
   // Header del panel derecho: tipo comprobante, vendedor, formato PDF.
   // Persistidos en localStorage por sesión — el cajero no elige c/venta.
-  const [tipoDoc, setTipoDoc] = useState<TipoDoc>('NOTA_VENTA');
+  //
+  // Arranca en BOLETA, no en NOTA DE VENTA.
+  //
+  // La nota de venta es un documento INTERNO: no se declara, no se le manda a
+  // SUNAT y no sirve de comprobante de pago. Arrancando ahí, una caja que nadie
+  // toca vende todo el día sin emitir comprobantes, y eso no se nota hasta que
+  // alguien revisa por qué SUNAT no recibió nada. Paso: la primera venta real de
+  // la tienda salió como nota de venta (15/09/2026).
+  //
+  // La venta al público en una tienda es una boleta, así que ese es el punto de
+  // partida. La nota de venta sigue a un clic para cuando de verdad haga falta.
+  const [tipoDoc, setTipoDoc] = useState<TipoDoc>('BOLETA');
   const [vendedorId, setVendedorId] = useState<string>('');
   const [formato, setFormato] = useState<FormatoDoc>('TICKET_80MM');
   useEffect(() => {
     // Hidratar desde localStorage al montar (solo cliente-side).
     try {
+      // La nota de venta NO se recupera: es la excepcion y hay que elegirla a
+      // proposito. Si se recordara, una caja que quedo en NOTA sigue ahi al dia
+      // siguiente y vende toda la jornada sin emitir comprobantes.
       const tv = localStorage.getItem('pos-tipo-doc') as TipoDoc | null;
-      if (tv === 'BOLETA' || tv === 'FACTURA' || tv === 'NOTA_VENTA') setTipoDoc(tv);
+      if (tv === 'BOLETA' || tv === 'FACTURA') setTipoDoc(tv);
       const vv = localStorage.getItem('pos-vendedor-id');
       if (vv) setVendedorId(vv);
       const fv = localStorage.getItem('pos-formato') as FormatoDoc | null;
@@ -1437,6 +1451,17 @@ export function PosTerminal({
               );
             })}
           </div>
+
+          {/* Con la nota de venta activa hay que decirlo: es un documento
+              interno, no se declara y no llega a SUNAT. Sin este aviso, una
+              caja puede pasar el dia entero sin emitir comprobantes. */}
+          {tipoDoc === 'NOTA_VENTA' && (
+            <p className="rounded-md border border-amber-300 bg-amber-50 px-2 py-1.5 text-[10px] font-medium leading-tight text-amber-900">
+              La nota de venta es un documento interno: no se declara ni llega a SUNAT. Para una
+              venta al publico usa BOLETA.
+            </p>
+          )}
+
           <div className="grid grid-cols-[1fr_auto] gap-1.5">
             <select
               value={vendedorId}
