@@ -11,7 +11,7 @@ import { PageShell } from '@/components/page-shell';
 import { SearchAutocomplete } from '@/components/search-autocomplete';
 import { FilterChip } from '@/components/filter-chip';
 import { TableSkeleton } from '@/components/skeletons';
-import { Plus, Shirt, Pencil, Globe, AlertTriangle, Gem } from 'lucide-react';
+import { Plus, Shirt, Pencil, Globe, AlertTriangle, Gem, Barcode } from 'lucide-react';
 
 export const metadata = { title: 'Productos' };
 export const dynamic = 'force-dynamic';
@@ -72,11 +72,18 @@ export default async function ProductosPage({ searchParams }: { searchParams: Pr
       title="Productos / Disfraces"
       description="Catálogo de modelos con sus variantes (talla). Aquí se crean, editan y publican en la web."
       actions={
-        <Link href="/productos/nuevo">
-          <Button variant="premium">
-            <Plus className="h-4 w-4" /> Nuevo producto
-          </Button>
-        </Link>
+        <>
+          <Link href="/productos/etiquetas">
+            <Button variant="outline">
+              <Barcode className="h-4 w-4" /> Etiquetas
+            </Button>
+          </Link>
+          <Link href="/productos/nuevo">
+            <Button variant="premium">
+              <Plus className="h-4 w-4" /> Nuevo producto
+            </Button>
+          </Link>
+        </>
       }
     >
       <div className="flex flex-wrap items-center gap-3">

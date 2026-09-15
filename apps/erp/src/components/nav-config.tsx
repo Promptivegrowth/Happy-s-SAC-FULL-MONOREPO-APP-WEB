@@ -2,7 +2,7 @@ import {
   LayoutDashboard, Package, Layers3, FileText, Shirt, Users, Truck, Factory,
   Warehouse, ShoppingCart, Boxes, Receipt, ClipboardList, Scale,
   AlertTriangle, MessageSquareWarning, BarChart3, Settings, UserCog, Globe,
-  Tags, Scissors, Wrench, Coins, Hammer, Store, QrCode, Plane,
+  Tags, Scissors, Wrench, Coins, Hammer, Store, QrCode, Plane, Barcode,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import type { Rol } from '@happy/db/enums';
@@ -31,6 +31,7 @@ export const NAV: NavGroup[] = [
     label: 'Catálogo',
     items: [
       { label: 'Productos / Disfraces', href: '/productos', icon: Shirt },
+      { label: 'Etiquetas de barras', href: '/productos/etiquetas', icon: Barcode },
       { label: 'Categorías', href: '/categorias', icon: Tags },
       { label: 'Materiales', href: '/materiales', icon: Boxes },
       { label: 'Recetas (BOM)', href: '/recetas', icon: FileText },
