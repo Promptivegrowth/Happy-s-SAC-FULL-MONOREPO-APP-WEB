@@ -1,0 +1,4 @@
+# El ejecutable se genera con compilar.ps1; no entra al repositorio.
+*.exe
+*.rar
+*.zip

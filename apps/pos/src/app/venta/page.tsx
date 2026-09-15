@@ -75,11 +75,16 @@ export default async function VentaPage() {
     };
   })
     .from('empresa')
-    .select('razon_social, nombre_comercial, escalon_mayorista_desde, escalon_industrial_desde, escalones_activos')
+    .select('razon_social, nombre_comercial, ruc, direccion_fiscal, telefono, logo_url, igv_porcentaje, escalon_mayorista_desde, escalon_industrial_desde, escalones_activos')
     .single();
   const empresa = empresaRaw as {
     razon_social: string | null;
     nombre_comercial: string | null;
+    ruc: string | null;
+    direccion_fiscal: string | null;
+    telefono: string | null;
+    logo_url: string | null;
+    igv_porcentaje: number | null;
     escalon_mayorista_desde: number | null;
     escalon_industrial_desde: number | null;
     escalones_activos: boolean | null;
@@ -101,7 +106,7 @@ export default async function VentaPage() {
   const sbAny = sb as unknown as { from: (t: string) => any };
 
   // Catálogo (siempre se carga; el overlay de apertura sólo bloquea visualmente)
-  const [{ data: variantesRaw }, { data: cajas }, { data: categoriasRaw }, stocksRes, { data: cuentasRaw }] =
+  const [{ data: variantesRaw }, { data: cajas }, { data: almacenesRaw }, { data: categoriasRaw }, stocksRes, { data: cuentasRaw }] =
     await Promise.all([
       sb
         .from('productos_variantes')
@@ -114,6 +119,9 @@ export default async function VentaPage() {
         // solo veía 1000 de 1758 variantes) — subido a 5000 el 20/07/2026.
         .limit(3000),
       sb.from('cajas').select('id, codigo, nombre, almacen_id').eq('activo', true),
+      // Las tiendas, con su dirección: el ticket tiene que llevar la del
+      // ESTABLECIMIENTO donde se emite, no la del domicilio fiscal.
+      sb.from('almacenes').select('id, codigo, nombre, direccion').eq('activo', true),
       sb.from('categorias').select('id, nombre, activo').eq('activo', true).order('orden_web'),
       // Stock del almacén activo (si hay caja); si no, total global como fallback.
       almacenActivoId
@@ -167,6 +175,16 @@ export default async function VentaPage() {
     <PosTerminal
       variantes={variantes as unknown as Parameters<typeof PosTerminal>[0]['variantes']}
       cajas={(cajas ?? []) as unknown as Parameters<typeof PosTerminal>[0]['cajas']}
+      almacenes={(almacenesRaw ?? []) as unknown as Parameters<typeof PosTerminal>[0]['almacenes']}
+      empresaTicket={{
+        razon_social: empresa?.razon_social ?? "HAPPY'S S.A.C.",
+        nombre_comercial: empresa?.nombre_comercial ?? null,
+        ruc: empresa?.ruc ?? '',
+        direccion_fiscal: empresa?.direccion_fiscal ?? null,
+        telefono: empresa?.telefono ?? null,
+        logo_url: empresa?.logo_url ?? null,
+        igv_porcentaje: Number(empresa?.igv_porcentaje ?? 18),
+      }}
       categorias={(categoriasRaw ?? []) as unknown as Parameters<typeof PosTerminal>[0]['categorias']}
       stockPorVariante={Object.fromEntries(stockMap)}
       cajeroNombre={perfil?.nombre_completo ?? 'Cajero'}

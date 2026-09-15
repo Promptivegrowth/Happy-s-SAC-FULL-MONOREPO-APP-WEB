@@ -31,6 +31,7 @@ import { AbrirCajaModal } from './abrir-caja-modal';
 import { CerrarCajaModal } from './cerrar-caja-modal';
 import { CobrarModal, type CobrarPayload } from './cobrar-modal';
 import { generarTicket, generarA4, abrirPDF } from './comprobante-pdf';
+import { datosDelTicket, equipoParaImprimir, imprimirPorAgente, type EmpresaTicket } from './imprimir-ticket';
 import { generarPdfCotizacion, siguienteNumeroCotizacion, type FormatoCotizacion } from './cotizacion-pdf';
 import { HistorialModal } from './historial-modal';
 import { GastosModal } from './gastos-modal';
@@ -80,6 +81,7 @@ type GrupoVenta = {
   variantesTodas: Variante[];
 };
 type Caja = { id: string; codigo: string; nombre: string; almacen_id: string };
+type AlmacenTienda = { id: string; codigo: string; nombre: string; direccion: string | null };
 type Categoria = { id: string; nombre: string; activo: boolean };
 type LineaCarrito = { variante: Variante; cantidad: number };
 type ConfigEscalones = { mayorista_desde: number; industrial_desde: number; activos: boolean };
@@ -129,6 +131,8 @@ export function PosTerminal({
   cajaDefault,
   sesionInicial,
   empresaNombre = 'HAPPY SAC',
+  almacenes = [],
+  empresaTicket,
   configEscalones = { mayorista_desde: 3, industrial_desde: 100, activos: true },
   cuentasBancarias = [],
   vendedores = [],
@@ -141,6 +145,10 @@ export function PosTerminal({
   cajaDefault: { id: string; nombre: string; codigo: string; almacen_id: string; monto_apertura_default: number } | null;
   sesionInicial: { sesion: SesionCajaDTO; balance: BalanceCajaDTO } | null;
   empresaNombre?: string;
+  /** Las tiendas con su dirección: el ticket lleva la del establecimiento. */
+  almacenes?: AlmacenTienda[];
+  /** Datos del emisor para el ticket de la ticketera. */
+  empresaTicket?: EmpresaTicket;
   configEscalones?: ConfigEscalones;
   /** Cuentas bancarias visibles en el POS (BCP HAPPYS, BCP JAVIER, etc.).
    *  Se administran desde ERP → Configuración → Cuentas bancarias. */
@@ -834,12 +842,59 @@ export function PosTerminal({
         });
         numeroComprobante = emitido.numero_completo;
 
-        // 3) Generar PDF según formato (ahora async: carga logo + QR)
+        // 3) Imprimir.
+        //
+        //    Con agente instalado el ticket SALE SOLO: se arma en ESC/POS y se
+        //    deja en la cola; la ticketera lo escupe en menos de un segundo, sin
+        //    dialogo de Windows y cortando donde corresponde. Es lo que pidio la
+        //    tienda: se presiona Pagar y sale el papel.
+        //
+        //    El PDF se genera igual porque se guarda en el sistema para poder
+        //    consultarlo despues, pero solo se ABRE cuando no hubo forma de
+        //    imprimir por la ticketera. Abrirlo siempre traeria de vuelta el
+        //    dialogo de impresion que justamente se queria sacar del medio.
         const blob = payload.formato === 'TICKET_80MM'
           ? await generarTicket(emitido.pdf_data)
           : await generarA4(emitido.pdf_data);
         const filename = `${payload.tipo.toLowerCase()}_${numeroComprobante.replace(/[^A-Za-z0-9_-]/g, '_')}.pdf`;
-        abrirPDF(blob, filename);
+
+        let impresoPorAgente = false;
+        // En A4 no se usa la ticketera: ese formato es para imprimir en hoja.
+        if (payload.formato === 'TICKET_80MM' && empresaTicket) {
+          try {
+            const equipo = await equipoParaImprimir(sesionActiva?.almacen_id ?? cajaActual?.almacen_id ?? null);
+            if (equipo) {
+              const tienda = almacenes.find((a) => a.id === (sesionActiva?.almacen_id ?? cajaActual?.almacen_id));
+              const datos = await datosDelTicket(emitido.pdf_data, {
+                empresa: empresaTicket,
+                establecimiento: tienda ? { nombre: tienda.nombre, direccion: tienda.direccion } : null,
+                caja: sesionActiva?.caja_nombre ?? cajaActual?.nombre ?? null,
+              });
+              const r = await imprimirPorAgente(datos, equipo, { comprobanteId: emitido.id || null });
+
+              if (r.via === 'agente' && r.estado === 'impreso') {
+                impresoPorAgente = true;
+              } else if (r.via === 'agente' && r.estado === 'esperando') {
+                // La ticketera no contesto a tiempo, pero el ticket sigue en la
+                // cola: va a salir en cuanto se resuelva. No se abre el PDF para
+                // no terminar con el comprobante impreso dos veces.
+                impresoPorAgente = true;
+                toast.warning(
+                  `El ticket esta en cola en ${r.equipo} y todavia no sale. Revisa que la ticketera tenga papel y este encendida.`,
+                  { duration: 9000 },
+                );
+              } else if (r.via === 'agente') {
+                toast.error(`La ticketera de ${r.equipo} no pudo imprimir. Se abre el PDF para imprimirlo a mano.`);
+              }
+            }
+          } catch (e) {
+            // Cualquier problema con la ticketera cae al PDF: una venta no se
+            // puede caer porque falle la impresion.
+            console.warn('No se pudo imprimir por la ticketera:', e);
+          }
+        }
+
+        if (!impresoPorAgente) abrirPDF(blob, filename);
 
         // 3.5) Guardar el PDF dentro del sistema (bucket privado) para poder
         //      consultarlo desde cualquier PC vía el ERP. Best-effort: la venta
