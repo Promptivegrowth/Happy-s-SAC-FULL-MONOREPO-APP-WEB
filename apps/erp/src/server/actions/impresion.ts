@@ -24,6 +24,14 @@ export type EquipoImpresionDTO = {
   ultima_conexion: string | null;
   version_agente: string | null;
   activo: boolean;
+  /** Nombre de Windows de la computadora que reportó por última vez. */
+  maquina: string | null;
+  /**
+   * Computadoras distintas que usaron este código. Más de una significa que el
+   * mismo código se instaló en varias máquinas y los tickets se reparten entre
+   * ellas —o el mismo sale impreso dos veces—.
+   */
+  maquinas_vistas: string[];
   /** Dio señales en el último minuto: el agente pregunta cada segundo. */
   conectado: boolean;
   /** Conectado Y con una ticketera encontrada: puede imprimir de verdad. */
@@ -63,6 +71,11 @@ function aDTO(fila: Record<string, unknown>): EquipoImpresionDTO {
     ultima_conexion: ultima,
     version_agente: (fila.version_agente as string | null) ?? null,
     activo: Boolean(fila.activo),
+    maquina: (fila.maquina as string | null) ?? null,
+    maquinas_vistas: String(fila.maquinas_vistas ?? '')
+      .split('|')
+      .map((m) => m.trim())
+      .filter(Boolean),
     conectado,
     listo: conectado && Boolean(impresora || detectada),
   };
@@ -72,7 +85,7 @@ export async function listarEquiposImpresion(): Promise<EquipoImpresionDTO[]> {
   const { sb } = await requireUser();
   const { data } = await sb
     .from('equipos_impresion')
-    .select('id, nombre, token, almacen_id, impresora, impresora_detectada, impresoras_disponibles, avance_corte_mm, ultima_conexion, version_agente, activo, almacenes:almacen_id(nombre)')
+    .select('id, nombre, token, almacen_id, impresora, impresora_detectada, impresoras_disponibles, avance_corte_mm, ultima_conexion, version_agente, activo, maquina, maquinas_vistas, almacenes:almacen_id(nombre)')
     .order('nombre');
   return ((data ?? []) as unknown as Record<string, unknown>[]).map(aDTO);
 }
@@ -92,7 +105,7 @@ export async function crearEquipoImpresion(
     const { data, error } = await sb
       .from('equipos_impresion')
       .insert({ nombre: datos.nombre, almacen_id: datos.almacen_id ?? null } as never)
-      .select('id, nombre, token, almacen_id, impresora, impresora_detectada, impresoras_disponibles, avance_corte_mm, ultima_conexion, version_agente, activo, almacenes:almacen_id(nombre)')
+      .select('id, nombre, token, almacen_id, impresora, impresora_detectada, impresoras_disponibles, avance_corte_mm, ultima_conexion, version_agente, activo, maquina, maquinas_vistas, almacenes:almacen_id(nombre)')
       .single();
 
     if (error) throw new Error(error.message);
@@ -127,7 +140,7 @@ export async function actualizarEquipoImpresion(
       .from('equipos_impresion')
       .update(cambios as never)
       .eq('id', id)
-      .select('id, nombre, token, almacen_id, impresora, impresora_detectada, impresoras_disponibles, avance_corte_mm, ultima_conexion, version_agente, activo, almacenes:almacen_id(nombre)')
+      .select('id, nombre, token, almacen_id, impresora, impresora_detectada, impresoras_disponibles, avance_corte_mm, ultima_conexion, version_agente, activo, maquina, maquinas_vistas, almacenes:almacen_id(nombre)')
       .single();
 
     if (error) throw new Error(error.message);
@@ -138,29 +151,33 @@ export async function actualizarEquipoImpresion(
 }
 
 /**
- * Da de baja la computadora.
+ * Borra la computadora, con sus tickets.
  *
- * Se borra en vez de desactivar solo si nunca imprimió nada: mientras tenga
- * tickets en el historial, la fila tiene que quedar para poder mirarlos.
+ * Antes, si la computadora tenía tickets en el historial, esto la desactivaba
+ * en vez de borrarla "para conservar el historial". Era una mala decisión: el
+ * usuario pedía borrar, el sistema hacía otra cosa y no quedaba forma de
+ * completar la acción. Y lo que se estaba protegiendo no vale nada — la cola de
+ * impresión son trabajos de papel ya salidos, que además se purgan solos a los
+ * tres días; el comprobante, que es lo que importa, vive en otra tabla y no se
+ * toca.
+ *
+ * Para dejarla registrada pero fuera de servicio está el botón Desactivar, que
+ * es una acción distinta y explícita.
  */
-export async function eliminarEquipoImpresion(id: string): Promise<ActionResult<{ borrado: boolean }>> {
+export async function eliminarEquipoImpresion(id: string): Promise<ActionResult<{ tickets: number }>> {
   const r = await runAction(async () => {
     const { sb } = await soloGerencia();
 
+    // Se cuentan antes solo para poder decir cuántos se fueron con ella.
     const { count } = await sb
       .from('cola_impresion')
       .select('id', { count: 'exact', head: true })
       .eq('equipo_id', id);
 
-    if ((count ?? 0) > 0) {
-      const { error } = await sb.from('equipos_impresion').update({ activo: false } as never).eq('id', id);
-      if (error) throw new Error(error.message);
-      return { borrado: false };
-    }
-
+    // Los tickets se van en cascada (ver la migración 93).
     const { error } = await sb.from('equipos_impresion').delete().eq('id', id);
     if (error) throw new Error(error.message);
-    return { borrado: true };
+    return { tickets: count ?? 0 };
   });
   if (r.ok) await bumpPaths('/configuracion/impresion');
   return r;
@@ -183,6 +200,30 @@ export async function regenerarTokenImpresion(id: string): Promise<ActionResult<
       .single();
     if (error) throw new Error(error.message);
     return { token: (data as { token: string }).token };
+  });
+  if (r.ok) await bumpPaths('/configuracion/impresion');
+  return r;
+}
+
+/**
+ * Da por resuelto el aviso de código instalado en varias computadoras.
+ *
+ * Se limpia la lista dejando solo la que reportó último. Hace falta porque
+ * mover el agente de una computadora a otra es legítimo y también deja dos
+ * nombres: sin poder limpiarlo, el aviso quedaría para siempre y la gente
+ * aprendería a ignorarlo.
+ */
+export async function olvidarMaquinasImpresion(id: string): Promise<ActionResult<{ ok: true }>> {
+  const r = await runAction(async () => {
+    const { sb } = await soloGerencia();
+    const { data } = await sb.from('equipos_impresion').select('maquina').eq('id', id).maybeSingle();
+    const actual = (data as { maquina?: string | null } | null)?.maquina ?? null;
+    const { error } = await sb
+      .from('equipos_impresion')
+      .update({ maquinas_vistas: actual } as never)
+      .eq('id', id);
+    if (error) throw new Error(error.message);
+    return { ok: true as const };
   });
   if (r.ok) await bumpPaths('/configuracion/impresion');
   return r;

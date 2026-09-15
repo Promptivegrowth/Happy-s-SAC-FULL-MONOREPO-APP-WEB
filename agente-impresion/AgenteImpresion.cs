@@ -52,7 +52,7 @@ class Agente
      * en la ventana del agente ni en el ERP—. Se perdio tiempo revisando
      * maquinas que tenian una version vieja sin que nadie lo notara.
      */
-    const string VERSION = "2.3";
+    const string VERSION = "2.4";
     const string MARCA = "Promptive";
     /** Salto de linea de Windows, para los mensajes en pantalla. */
     static readonly string SALTO = Environment.NewLine;
@@ -371,8 +371,21 @@ class Agente
                  * hasta que alguien intentaba facturar.
                  */
                 string usaAhora = !string.IsNullOrEmpty(impresora) ? impresora : AdivinarTicketera();
+                /*
+                 * Se informa tambien en que computadora esta corriendo.
+                 *
+                 * El codigo de instalacion identifica a UNA computadora. Si se
+                 * pega el mismo en dos, las dos preguntan por la misma cola y
+                 * se reparten los tickets al azar -o el mismo ticket sale
+                 * impreso dos veces-. Desde el ERP no habia forma de notarlo.
+                 * Con el nombre de la maquina, el sistema lo detecta solo.
+                 */
+                string maquina;
+                try { maquina = Environment.MachineName; } catch { maquina = ""; }
+
                 string url = urlBase + "/api/impresion/pendientes?token=" + Uri.EscapeDataString(token) +
                              "&version=" + Uri.EscapeDataString(VERSION) +
+                             "&maquina=" + Uri.EscapeDataString(maquina) +
                              "&impresora=" + Uri.EscapeDataString(usaAhora ?? "") +
                              "&impresoras=" + Uri.EscapeDataString(string.Join("|", ImpresorasRealesEnCache().ToArray()));
                 string json = Pedir(url);

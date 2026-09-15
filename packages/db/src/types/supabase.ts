@@ -2591,6 +2591,8 @@ export type Database = {
           impresora: string | null
           impresora_detectada: string | null
           impresoras_disponibles: string | null
+          maquina: string | null
+          maquinas_vistas: string | null
           nombre: string
           token: string
           ultima_conexion: string | null
@@ -2606,6 +2608,8 @@ export type Database = {
           impresora?: string | null
           impresora_detectada?: string | null
           impresoras_disponibles?: string | null
+          maquina?: string | null
+          maquinas_vistas?: string | null
           nombre: string
           token?: string
           ultima_conexion?: string | null
@@ -2621,6 +2625,8 @@ export type Database = {
           impresora?: string | null
           impresora_detectada?: string | null
           impresoras_disponibles?: string | null
+          maquina?: string | null
+          maquinas_vistas?: string | null
           nombre?: string
           token?: string
           ultima_conexion?: string | null

@@ -13,7 +13,7 @@ import {
 import { toast } from 'sonner';
 import {
   crearEquipoImpresion, actualizarEquipoImpresion, eliminarEquipoImpresion,
-  regenerarTokenImpresion, type EquipoImpresionDTO,
+  regenerarTokenImpresion, olvidarMaquinasImpresion, type EquipoImpresionDTO,
 } from '@/server/actions/impresion';
 
 type Almacen = { id: string; codigo: string; nombre: string };
@@ -99,6 +99,11 @@ export function EquiposImpresionClient({
             El programa queda arrancando solo con Windows. En menos de un minuto la computadora
             aparece acá con el punto verde.
           </p>
+          <p className="mt-2 rounded-lg border border-amber-200 bg-amber-50 p-2 text-xs text-amber-900">
+            <b>Cada computadora necesita su propio código.</b> Si pegas el mismo en dos, las dos
+            piden los tickets de la misma cola: unos salen en una y otros en la otra, y el mismo
+            comprobante puede llegar a imprimirse dos veces.
+          </p>
         </CardContent>
       </Card>
 
@@ -161,11 +166,23 @@ export function EquiposImpresionClient({
                 toast.success('Código nuevo generado');
                 router.refresh();
               })}
+              onOlvidarMaquinas={() => iniciar(async () => {
+                const r = await olvidarMaquinasImpresion(e.id);
+                if (!r.ok) { toast.error(r.error ?? 'No se pudo'); return; }
+                toast.success('Aviso descartado');
+                router.refresh();
+              })}
               onEliminar={() => iniciar(async () => {
-                if (!confirm(`¿Dar de baja "${e.nombre}"?`)) return;
+                if (!confirm(
+                  `¿Borrar "${e.nombre}"?
+
+Se borra también su historial de tickets y el código de instalación deja de servir. ` +
+                  'Si solo quieres dejarla fuera de servicio, usa Desactivar.',
+                )) return;
                 const r = await eliminarEquipoImpresion(e.id);
                 if (!r.ok) { toast.error(r.error ?? 'No se pudo'); return; }
-                toast.success(r.data?.borrado ? 'Computadora eliminada' : 'Computadora desactivada (conserva su historial)');
+                const n = r.data?.tickets ?? 0;
+                toast.success(n > 0 ? `Computadora borrada, junto con ${n} ticket(s) de su historial` : 'Computadora borrada');
                 router.refresh();
               })}
             />
@@ -177,7 +194,7 @@ export function EquiposImpresionClient({
 }
 
 function EquipoCard({
-  equipo: e, almacenes, copiado, pendiente, onCopiar, onEditar, onRegenerar, onEliminar,
+  equipo: e, almacenes, copiado, pendiente, onCopiar, onEditar, onRegenerar, onEliminar, onOlvidarMaquinas,
 }: {
   equipo: EquipoImpresionDTO;
   almacenes: Almacen[];
@@ -187,6 +204,7 @@ function EquipoCard({
   onEditar: (cambios: { impresora?: string | null; avance_corte_mm?: number; activo?: boolean; almacen_id?: string | null }) => void;
   onRegenerar: () => void;
   onEliminar: () => void;
+  onOlvidarMaquinas: () => void;
 }) {
   const [avance, setAvance] = useState(String(e.avance_corte_mm));
 
@@ -218,7 +236,11 @@ function EquipoCard({
             <Button variant="ghost" size="sm" onClick={onRegenerar} disabled={pendiente} title="Genera un código nuevo; el anterior deja de servir">
               <RefreshCw className="h-3.5 w-3.5" />
             </Button>
-            <Button variant="ghost" size="sm" onClick={onEliminar} disabled={pendiente} className="text-rose-600 hover:bg-rose-50">
+            <Button
+              variant="ghost" size="sm" onClick={onEliminar} disabled={pendiente}
+              className="text-rose-600 hover:bg-rose-50"
+              title="Borrar esta computadora y su historial de tickets"
+            >
               <Trash2 className="h-3.5 w-3.5" />
             </Button>
           </div>
@@ -227,7 +249,35 @@ function EquipoCard({
         <p className={`text-xs ${e.listo ? 'text-emerald-700' : e.conectado ? 'text-amber-700' : 'text-slate-500'}`}>
           {estado}
           {e.impresora_detectada && ` · imprimiendo por “${e.impresora_detectada}”`}
+          {e.maquina && ` · en ${e.maquina}`}
         </p>
+
+        {/* El mismo código en dos computadoras: los tickets se reparten al azar
+            entre ellas. Es invisible mirando la fila, por eso el aviso. */}
+        {e.maquinas_vistas.length > 1 && (
+          <div className="rounded-lg border border-rose-300 bg-rose-50 p-2.5 text-xs text-rose-900">
+            <p className="flex items-start gap-1.5 font-semibold">
+              <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+              Este código está instalado en {e.maquinas_vistas.length} computadoras
+            </p>
+            <p className="mt-1">
+              {e.maquinas_vistas.join(' · ')} — las dos piden los tickets de esta misma cola, así que
+              unos salen en una y otros en la otra, y el mismo comprobante puede imprimirse dos veces.
+            </p>
+            <p className="mt-1">
+              Desinstala el agente de la que no corresponde (o presiona <b>↻</b> para invalidar este
+              código y volver a instalar solo en la correcta). Después de arreglarlo, presiona
+              &ldquo;Ya lo resolví&rdquo; para que desaparezca este aviso.
+            </p>
+            <Button
+              variant="outline" size="sm" className="mt-2"
+              disabled={pendiente}
+              onClick={onOlvidarMaquinas}
+            >
+              Ya lo resolví
+            </Button>
+          </div>
+        )}
 
         {e.conectado && !e.listo && (
           <p className="flex items-start gap-1.5 rounded-lg border border-amber-200 bg-amber-50 p-2 text-xs text-amber-800">

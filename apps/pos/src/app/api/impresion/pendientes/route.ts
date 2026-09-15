@@ -45,6 +45,16 @@ export async function GET(request: Request) {
    */
   const disponibles = url.searchParams.get('impresoras')?.trim() || null;
 
+  /**
+   * En qué computadora corre el agente.
+   *
+   * El código identifica a UNA computadora; si se pega el mismo en dos, las dos
+   * preguntan por esta cola y se reparten los tickets al azar, o el mismo
+   * ticket sale impreso en las dos. Guardando el nombre de la máquina el ERP lo
+   * detecta solo, que antes era invisible.
+   */
+  const maquina = url.searchParams.get('maquina')?.trim().slice(0, 100) || null;
+
   if (!token) {
     return NextResponse.json({ ok: false, error: 'falta el token del equipo' }, { status: 400 });
   }
@@ -53,7 +63,7 @@ export async function GET(request: Request) {
 
   const { data: equipo } = await sb
     .from('equipos_impresion')
-    .select('id, nombre, impresora, avance_corte_mm, activo')
+    .select('id, nombre, impresora, avance_corte_mm, activo, maquinas_vistas')
     .eq('token', token)
     .maybeSingle();
 
@@ -63,12 +73,18 @@ export async function GET(request: Request) {
 
   // Deja constancia de que está vivo aunque esté desactivado: así en el ERP se
   // distingue "dado de baja" de "apagado".
+  // Se acumulan las computadoras distintas que usaron este código. Más de una
+  // es la señal de que el código se instaló en varias máquinas.
+  const vistas = String(equipo.maquinas_vistas ?? '').split('|').map((m) => m.trim()).filter(Boolean);
+  if (maquina && !vistas.includes(maquina)) vistas.push(maquina);
+
   await sb
     .from('equipos_impresion')
     .update({
       ultima_conexion: new Date().toISOString(),
       version_agente: version,
       impresora_detectada: detectada,
+      ...(maquina ? { maquina, maquinas_vistas: vistas.join('|') } : {}),
       ...(disponibles ? { impresoras_disponibles: disponibles } : {}),
     })
     .eq('id', equipo.id);
