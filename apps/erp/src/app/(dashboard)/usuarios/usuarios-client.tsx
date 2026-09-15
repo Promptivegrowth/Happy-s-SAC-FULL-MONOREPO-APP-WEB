@@ -7,7 +7,7 @@ import { Card, CardContent } from '@happy/ui/card';
 import { Input } from '@happy/ui/input';
 import { Badge } from '@happy/ui/badge';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@happy/ui/table';
-import { Plus, Pencil, Key, Power, PowerOff, Loader2, X, Shield } from 'lucide-react';
+import { Plus, Pencil, Key, Power, PowerOff, Loader2, X, Shield, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
 import {
   crearUsuario,
@@ -15,6 +15,7 @@ import {
   actualizarRolesUsuario,
   cambiarPasswordUsuario,
   cambiarEstadoUsuario,
+  eliminarUsuario,
   type UsuarioRow,
 } from '@/server/actions/usuarios';
 import { ROLES_SISTEMA, DESCRIPCION_ROL, type RolSistema } from '@/server/actions/usuarios-helpers';
@@ -124,6 +125,23 @@ function UsuarioFila({
       } else toast.error(r.error ?? 'Error');
     });
   }
+
+  function borrar() {
+    // Se avisa de las dos cosas que la gente no espera: que el borrado es
+    // definitivo y que puede no ser posible. La alternativa buena —desactivar—
+    // se nombra acá para que no haya que adivinarla.
+    if (!confirm(
+      `¿Borrar la cuenta de ${u.nombre_completo ?? u.email}?\n\n` +
+      'Esto la elimina por completo y no se puede deshacer. Si ya registró ventas o movimientos, ' +
+      'no se va a poder borrar: en ese caso usa Desactivar, que le quita el acceso y conserva su historial.',
+    )) return;
+    start(async () => {
+      const r = await eliminarUsuario(u.id);
+      if (!r.ok) { toast.error(r.error ?? 'No se pudo borrar'); return; }
+      toast.success('Cuenta borrada');
+      onRefresh();
+    });
+  }
   return (
     <TableRow className={u.activo ? '' : 'opacity-60'}>
       <TableCell className="font-medium">{u.nombre_completo ?? '—'}</TableCell>
@@ -152,8 +170,20 @@ function UsuarioFila({
           <Button variant="ghost" size="sm" onClick={() => onEdit('password')} title="Cambiar contraseña">
             <Key className="h-3.5 w-3.5" />
           </Button>
-          <Button variant="ghost" size="sm" onClick={toggle} disabled={pending} title={u.activo ? 'Desactivar' : 'Reactivar'}>
+          <Button
+            variant="ghost" size="sm" onClick={toggle} disabled={pending}
+            title={u.activo
+              ? 'Desactivar: le quita el acceso al ERP y al POS, y conserva su historial'
+              : 'Reactivar: le devuelve el acceso'}
+          >
             {pending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : u.activo ? <PowerOff className="h-3.5 w-3.5 text-rose-500" /> : <Power className="h-3.5 w-3.5 text-emerald-600" />}
+          </Button>
+          <Button
+            variant="ghost" size="sm" onClick={borrar} disabled={pending}
+            className="text-rose-600 hover:bg-rose-50"
+            title="Borrar la cuenta por completo. Solo se puede si la persona no tiene movimientos registrados."
+          >
+            <Trash2 className="h-3.5 w-3.5" />
           </Button>
         </div>
       </TableCell>

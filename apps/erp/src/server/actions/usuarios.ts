@@ -21,6 +21,42 @@ async function ensureGerente() {
   if (!esGerente) throw new Error('Solo el gerente puede administrar usuarios');
 }
 
+/**
+ * Impide quedarse sin ningun gerente.
+ *
+ * El gerente es el unico que puede administrar usuarios. Si el ultimo se quita
+ * el rol, se desactiva o se borra, NADIE puede volver a entrar a esta pantalla
+ * ni devolverselo: hay que meterse a la base de datos a mano. Es un callejon sin
+ * salida y no avisaba de nada.
+ */
+async function asegurarQueQuedaUnGerente(usuarioId: string, accion: string) {
+  const admin = createServiceClient();
+  const { data: gerentes } = await admin
+    .from('usuarios_roles')
+    .select('usuario_id')
+    .eq('rol', 'gerente');
+
+  const ids = new Set((gerentes ?? []).map((g) => (g as { usuario_id: string }).usuario_id));
+  if (ids.has(usuarioId) && ids.size <= 1) {
+    throw new Error(
+      `No se puede ${accion}: es el unico gerente del sistema. Si se queda sin gerente, nadie va a poder administrar usuarios. Nombra gerente a otra persona primero.`,
+    );
+  }
+}
+
+/**
+ * Bloquea o desbloquea el acceso de verdad.
+ *
+ * `perfiles.activo` es solo una marca para las pantallas: no impide entrar. El
+ * bloqueo real se hace en la cuenta de acceso, que es lo unico que el login
+ * mira. Sin esto, "Desactivar" no desactivaba nada y la persona seguia entrando
+ * al ERP y al POS como si nada.
+ *
+ * Se banea por 100 anios en vez de borrar la cuenta porque su historial —ventas,
+ * movimientos de inventario, ordenes— sigue apuntando a ella.
+ */
+const BLOQUEO_LARGO = '876000h';
+
 // ============================================================================
 // CREAR USUARIO
 // ============================================================================
@@ -151,6 +187,12 @@ export async function actualizarRolesUsuario(
     const valid = roles.every((r) => ROLES_VALIDOS.includes(r));
     if (!valid) throw new Error('Rol inválido');
 
+    // Quitarle el rol de gerente al unico gerente deja el sistema sin nadie que
+    // pueda administrar usuarios, y sin forma de recuperarlo desde la pantalla.
+    if (!roles.includes('gerente')) {
+      await asegurarQueQuedaUnGerente(usuarioId, 'quitarle el rol de gerente');
+    }
+
     const admin = createServiceClient();
     // Borrar los existentes + insertar nuevos en una operación lógica
     const { error: errDel } = await admin.from('usuarios_roles').delete().eq('usuario_id', usuarioId);
@@ -199,13 +241,73 @@ export async function cambiarEstadoUsuario(
     await ensureGerente();
     const { userId: actor } = await requireUser();
     if (actor === usuarioId && !activo) {
-      throw new Error('No puede desactivar su propia cuenta');
+      throw new Error('No puedes desactivar tu propia cuenta');
     }
+    if (!activo) await asegurarQueQuedaUnGerente(usuarioId, 'desactivarlo');
+
     const admin = createServiceClient();
+
+    /*
+     * El bloqueo REAL va en la cuenta de acceso.
+     *
+     * Antes esto solo escribia perfiles.activo, con un comentario que decia que
+     * el login lo comprobaba. No lo comprobaba: no habia ni un lugar que mirara
+     * ese campo. La persona "desactivada" seguia entrando al ERP y al POS y
+     * podia seguir vendiendo. Es justo lo que uno espera que pase cuando alguien
+     * deja la empresa, y no pasaba.
+     */
+    const { error: errAuth } = await admin.auth.admin.updateUserById(usuarioId, {
+      ban_duration: activo ? 'none' : BLOQUEO_LARGO,
+    });
+    if (errAuth) throw new Error(`No se pudo ${activo ? 'reactivar' : 'bloquear'} el acceso: ${errAuth.message}`);
+
+    // La marca en el perfil se mantiene: es la que usan las pantallas para
+    // filtrar (por ejemplo la lista de vendedoras del POS).
     const { error } = await admin.from('perfiles').update({ activo }).eq('id', usuarioId);
     if (error) throw new Error(error.message);
-    // También invalidar/restaurar el login bloqueando con admin.updateUserById usando ban_duration
-    // (Supabase Auth no tiene "desactivar" — usamos perfiles.activo + un check en login)
+
+    return null;
+  }).then((r) => {
+    if (r.ok) void bumpPaths('/usuarios');
+    return r;
+  });
+}
+
+// ============================================================================
+// BORRAR
+// ============================================================================
+/**
+ * Borra la cuenta por completo.
+ *
+ * Solo es posible si la persona no dejo rastro en el sistema: 53 tablas
+ * apuntan a los usuarios SIN borrado en cascada —ventas, movimientos de
+ * inventario, ordenes de trabajo, sesiones de caja—, asi que borrar a alguien
+ * con historial falla con un error de base de datos que nadie entiende.
+ *
+ * Cuando hay historial se dice claramente y se sugiere desactivar, que ahora si
+ * bloquea el acceso de verdad. NO se desactiva por su cuenta: el usuario pidio
+ * borrar, y hacer otra cosa en silencio es peor que no hacer nada.
+ */
+export async function eliminarUsuario(usuarioId: string): Promise<ActionResult> {
+  return runAction(async () => {
+    await ensureGerente();
+    const { userId: actor } = await requireUser();
+    if (actor === usuarioId) throw new Error('No puedes borrar tu propia cuenta');
+    await asegurarQueQuedaUnGerente(usuarioId, 'borrarlo');
+
+    const admin = createServiceClient();
+    const { error } = await admin.auth.admin.deleteUser(usuarioId);
+
+    if (error) {
+      // El error de clave foranea llega como un mensaje tecnico ilegible; se
+      // traduce a lo unico que le sirve a quien esta mirando la pantalla.
+      if (/foreign key|violates|constraint/i.test(error.message)) {
+        throw new Error(
+          'No se puede borrar: esta persona ya tiene movimientos registrados (ventas, inventario, ordenes) y su historial quedaria roto. Usa Desactivar, que le quita el acceso al sistema y conserva lo que hizo.',
+        );
+      }
+      throw new Error(error.message);
+    }
     return null;
   }).then((r) => {
     if (r.ok) void bumpPaths('/usuarios');
