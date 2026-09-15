@@ -6,8 +6,11 @@
  * envío corre desde la emisión, así que el comprobante tiene que salir sí o sí,
  * aunque nadie entre al ERP. Esta ruta es la que se encarga:
  *
- *   1. Envía los comprobantes pendientes (con reintentos espaciados).
- *   2. Genera el Resumen Diario de las boletas del día anterior.
+ *   1. Envía las FACTURAS y notas pendientes, al instante (con reintentos
+ *      espaciados). Van una por una porque SUNAT responde en el momento si las
+ *      acepta, y así un rechazo se corrige con el cliente todavía presente.
+ *   2. Genera el Resumen Diario de las BOLETAS, que no se pueden mandar sueltas.
+ *      Sale a las 23:00 hora de Perú, cuando la tienda ya cerró.
  *   3. Deja constancia de la corrida en sunat_envios_log.
  *
  * Seguridad: solo responde con el header `Authorization: Bearer <CRON_SECRET>`,
@@ -16,7 +19,7 @@
 
 import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
-import { fechaLima } from '@happy/lib/format';
+import { fechaLima, horaLima } from '@happy/lib/format';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 300;
@@ -27,6 +30,37 @@ const ESPERA_POR_INTENTO_MIN = [5, 15, 60, 240, 720];
 const LOTE = 15;
 /** Pausa entre envíos, para no gatillar el control de frecuencia de SUNAT. */
 const PAUSA_MS = 2500;
+
+/**
+ * Hora de Perú a partir de la cual se informan las boletas del día.
+ *
+ * Las boletas no se pueden mandar sueltas: van agrupadas en un resumen diario,
+ * y ese resumen tiene sentido con el día terminado. Las 23:00 es cuando la
+ * tienda ya cerró (acordado con el cliente el 15/09/2026); antes se esperaba a
+ * la medianoche, lo que empujaba las boletas al día siguiente.
+ */
+const HORA_CIERRE_LIMA = 23;
+
+/**
+ * Hasta qué fecha se pueden informar boletas en este momento.
+ *
+ * Devuelve HOY solo si ya pasaron las 23:00 en Perú; si no, hasta ayer. Los días
+ * anteriores siempre entran: si una corrida falló o el sistema estuvo caído,
+ * esas boletas no pueden quedar sin informar.
+ */
+export function fechaMaximaInformable(
+  // La fecha y la hora entran por parámetro para poder comprobar la regla a
+  // cualquier hora del día sin esperar a que den las 23:00.
+  hoy: string = fechaLima(),
+  hora: number = Number(horaLima().slice(0, 2)),
+): { hasta: string; motivo: string } {
+  if (hora >= HORA_CIERRE_LIMA) {
+    return { hasta: hoy, motivo: `pasadas las ${HORA_CIERRE_LIMA}:00, entra el día de hoy` };
+  }
+  const ayer = new Date(new Date(`${hoy}T12:00:00.000Z`).getTime() - 86_400_000)
+    .toISOString().slice(0, 10);
+  return { hasta: ayer, motivo: `el día en curso se informa a las ${HORA_CIERRE_LIMA}:00` };
+}
 
 function sbAdmin() {
   return createClient(
@@ -125,23 +159,49 @@ export async function GET(request: Request) {
   }
 
   // --------------------------------------- 3. resumen diario de boletas ----
-  // Se informan TODOS los días cerrados que tengan boletas pendientes, no solo
-  // el de ayer: si una corrida falló o el sistema estuvo caído, esas boletas no
-  // pueden quedar huérfanas. Hoy no entra porque el día aún no cierra.
+  // Se informan todos los días que ya cerraron y tengan boletas pendientes, no
+  // solo el último: si una corrida falló o el sistema estuvo caído, esas
+  // boletas no pueden quedar huérfanas.
   const resumenesEnviados: string[] = [];
   try {
-    const inicioHoyLima = `${fechaLima()}T05:00:00.000Z`;
+    const { hasta, motivo } = fechaMaximaInformable();
+
     const { data: boletasPendientes } = await sb
       .from('comprobantes')
       .select('fecha_emision')
       .eq('tipo', 'BOLETA')
       .in('estado', ['BORRADOR', 'EMITIDO', 'RECHAZADO'])
-      .lt('fecha_emision', inicioHoyLima)
       .order('fecha_emision', { ascending: true })
       .limit(500);
 
+    /*
+     * No se arma un resumen de una fecha que ya tiene otro esperando respuesta.
+     *
+     * El resumen es asíncrono: SUNAT devuelve un ticket y el CDR llega después.
+     * Hasta que llega, las boletas que viajaron en él siguen figurando como
+     * pendientes acá, y la corrida siguiente las metería en un resumen nuevo:
+     * SUNAT lo rechaza por duplicado. Pasa sobre todo con las boletas que se
+     * emiten después de las 23:00, que generan un segundo resumen del mismo día.
+     */
+    const { data: enCurso } = await sb
+      .from('sunat_resumenes')
+      .select('fecha_referencia')
+      .eq('estado', 'EN_PROCESO');
+    const esperandoCDR = new Set(
+      ((enCurso ?? []) as Array<{ fecha_referencia: string }>)
+        .map((r) => String(r.fecha_referencia).slice(0, 10)),
+    );
+
     const fechas = [...new Set(((boletasPendientes ?? []) as Array<{ fecha_emision: string }>)
-      .map((b) => fechaLima(b.fecha_emision)))].slice(0, 3); // máximo 3 días por corrida
+      .map((b) => fechaLima(b.fecha_emision)))]
+      .filter((f) => f <= hasta)
+      .filter((f) => !esperandoCDR.has(f))
+      .slice(0, 3); // máximo 3 días por corrida
+
+    if (esperandoCDR.size > 0) {
+      detalle.push(`esperando CDR de: ${[...esperandoCDR].join(', ')}`);
+    }
+    if (fechas.length === 0) detalle.push(`sin boletas por informar (${motivo})`);
 
     if (fechas.length > 0) {
       const { generarResumenDiarioConCliente } = await import('@/server/sunat-core');
