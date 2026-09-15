@@ -6,7 +6,7 @@ import { Card } from '@happy/ui/card';
 import { Input } from '@happy/ui/input';
 import { Button } from '@happy/ui/button';
 import { Badge } from '@happy/ui/badge';
-import { Trash2, Plus, Minus, ScanBarcode, X, Banknote, Building2, MessageCircle, Loader2, LayoutGrid, ShoppingBag, LogOut, Receipt, History, RotateCcw, Coins, Wallet, Search, LogIn, UserX, Pencil, Send, FileText } from 'lucide-react';
+import { Trash2, Plus, Minus, ScanBarcode, X, Banknote, Building2, MessageCircle, Loader2, LayoutGrid, ShoppingBag, LogOut, Receipt, History, RotateCcw, Coins, Wallet, Search, LogIn, UserX, Pencil, Send, FileText, Printer } from 'lucide-react';
 import { toast } from 'sonner';
 import { formatPEN, ordenTalla, formatTalla, normalizarTexto , formatTallaChip } from '@happy/lib';
 
@@ -36,6 +36,7 @@ import { HistorialModal } from './historial-modal';
 import { GastosModal } from './gastos-modal';
 import { AdelantosModal } from './adelantos-modal';
 import { StockAlmacenesModal } from './stock-almacenes-modal';
+import { PruebaImpresionModal } from './prueba-impresion-modal';
 import { DevolucionModal } from './devolucion-modal';
 import { CotizacionesModal } from './cotizaciones-modal';
 import {
@@ -152,6 +153,7 @@ export function PosTerminal({
   const [balanceActual, setBalanceActual] = useState<BalanceCajaDTO | null>(sesionInicial?.balance ?? null);
   const [cerrarOpen, setCerrarOpen] = useState(false);
   const [historialOpen, setHistorialOpen] = useState(false);
+  const [pruebaImpresionOpen, setPruebaImpresionOpen] = useState(false);
   const [gastosOpen, setGastosOpen] = useState(false);
   const [adelantosOpen, setAdelantosOpen] = useState(false);
   const [stockAlmacenesVarianteId, setStockAlmacenesVarianteId] = useState<string | null>(null);
@@ -1046,6 +1048,16 @@ export function PosTerminal({
                 <LayoutGrid className="h-3.5 w-3.5" /> Catálogo
               </button>
             </div>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setPruebaImpresionOpen(true)}
+              data-pos-no-focus
+              className="gap-1 text-xs"
+              title="Imprimir un ticket de prueba para verificar la impresora, el corte y la pistola"
+            >
+              <Printer className="h-3.5 w-3.5" /> Probar impresora
+            </Button>
             <Button
               variant="ghost"
               size="sm"
@@ -2081,6 +2093,18 @@ export function PosTerminal({
           defaultCliente={{ nombre: nombreCliente, documento: docCliente }}
           onCancel={() => setCobrarOpen(false)}
           onConfirmar={ejecutarCobro}
+        />
+      )}
+
+      {/* MODAL — Prueba de impresión (no registra nada) */}
+      {pruebaImpresionOpen && (
+        <PruebaImpresionModal
+          variantes={variantes}
+          caja={sesionActiva?.caja_nombre ?? cajaActual?.nombre ?? '—'}
+          cajero={cajeroNombre}
+          empresaNombre={empresaNombre}
+          stockPorVariante={stockPorVariante}
+          onClose={() => setPruebaImpresionOpen(false)}
         />
       )}
 

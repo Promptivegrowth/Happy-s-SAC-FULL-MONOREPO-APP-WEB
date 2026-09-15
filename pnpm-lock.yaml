@@ -105,9 +105,6 @@ importers:
       exceljs:
         specifier: ^4.4.0
         version: 4.4.0
-      jsbarcode:
-        specifier: ^3.12.3
-        version: 3.12.3
       jspdf:
         specifier: ^4.2.1
         version: 4.2.1
@@ -460,6 +457,9 @@ importers:
       date-fns:
         specifier: ^4.1.0
         version: 4.1.0
+      jsbarcode:
+        specifier: ^3.12.3
+        version: 3.12.3
       jszip:
         specifier: ^3.10.1
         version: 3.10.1

@@ -3,7 +3,7 @@
  *
  * Se importa el módulo interno a propósito: la API pública de JsBarcode dibuja
  * sobre un <canvas> o un <svg>, y aquí solo hace falta la secuencia de módulos
- * para pintarla como vectores en el PDF (ver etiquetas-pdf.ts). El paquete no
+ * para pintarla como vectores en el PDF (ver barcode/index.ts). El paquete no
  * declara "exports", así que el import profundo es válido.
  */
 declare module 'jsbarcode/bin/barcodes/CODE128/index.js' {

@@ -22,7 +22,12 @@
  *              común mientras la Zebra no esté configurada.
  */
 
-import { CODE128 } from 'jsbarcode/bin/barcodes/CODE128/index.js';
+import {
+  codificarCode128,
+  dibujarBarrasPDF,
+  anchoModuloMm,
+  MODULO_MIN_MM,
+} from '@happy/lib/barcode';
 
 export type EtiquetaItem = {
   /** Lo que se imprime arriba, ej. "Abejita". */
@@ -55,41 +60,11 @@ export const FORMATOS: Formato[] = [
   { id: 'a4_50x30', nombre: 'Hoja A4 · etiquetas de 50 × 30 mm', ancho: 50, alto: 30, soporte: 'a4' },
 ];
 
-/** Zona muda a cada lado del código; por norma CODE 128, 10 módulos mínimo. */
-const QUIET_MODULOS = 10;
-
-/**
- * Ancho mínimo recomendado de módulo (la barra más fina) en milímetros.
- * Por debajo de esto el lector empieza a fallar: a 203 dpi (8 puntos/mm) una
- * barra de 0.25 mm son 2 puntos, que es el piso práctico de una térmica.
- */
-const MODULO_MIN_MM = 0.25;
-
 /** Altura mínima de barras para que la pistola enganche cómodamente. */
 const BARRAS_MIN_MM = 7;
 
 /** 1 punto tipográfico en milímetros; sirve para calcular alturas de texto. */
 const PT_MM = 0.352778;
-
-/**
- * Caracteres imprimibles ASCII. Es el subconjunto que CODE 128 escribe sin
- * códigos de control y el único que una pistola devuelve tal cual al POS.
- *
- * El validador de JsBarcode acepta además el rango 200-211, que son sus
- * marcadores internos de juego de caracteres; una "Ñ" (209) le pasa la
- * validación y después revienta al codificar. Por eso se filtra acá.
- */
-const ASCII_IMPRIMIBLE = /^[ -~]+$/;
-
-/** Codifica el texto a la secuencia de módulos ("1" = barra, "0" = espacio). */
-function codificar(codigo: string): string {
-  if (!ASCII_IMPRIMIBLE.test(codigo)) {
-    throw new Error('Tiene tildes, eñes o símbolos que el código de barras no admite (usa solo letras sin tilde, números y guiones)');
-  }
-  const b = new CODE128(codigo, { ean128: false });
-  if (!b.valid()) throw new Error('No se puede representar en código de barras');
-  return b.encode().data;
-}
 
 /**
  * Nombre corto para la etiqueta. El cliente rotula "ABEJITA #6", no
@@ -136,9 +111,8 @@ export function contarEtiquetas(items: EtiquetaItem[]): number {
  */
 export function anchoModulo(codigo: string, formato: Formato): number | null {
   try {
-    const modulos = codificar(codigo).length + QUIET_MODULOS * 2;
     const margen = margenDe(formato.ancho);
-    return (formato.ancho - margen * 2) / modulos;
+    return anchoModuloMm(codigo, formato.ancho - margen * 2);
   } catch {
     return null;
   }
@@ -216,25 +190,7 @@ function dibujarEtiqueta(
   const altoBarras = alto - margen * 2 - altoTitulo - altoCodigo - separacion * 2;
 
   if (altoBarras > 2) {
-    const modulos = codificar(item.codigo);
-    const total = modulos.length + QUIET_MODULOS * 2;
-    const w = anchoUtil / total;
-    const xInicio = x + margen + QUIET_MODULOS * w;
-
-    doc.setFillColor(0, 0, 0);
-    // Se agrupan los "1" consecutivos en un solo rectángulo: menos objetos en
-    // el PDF y, sobre todo, sin costuras blancas entre barras contiguas.
-    let i = 0;
-    while (i < modulos.length) {
-      if (modulos[i] === '1') {
-        let j = i;
-        while (j < modulos.length && modulos[j] === '1') j++;
-        doc.rect(xInicio + i * w, yBarras, (j - i) * w, altoBarras, 'F');
-        i = j;
-      } else {
-        i++;
-      }
-    }
+    dibujarBarrasPDF(doc, item.codigo, x + margen, yBarras, anchoUtil, altoBarras);
   }
 
   doc.setFont('helvetica', 'normal');
@@ -276,7 +232,7 @@ export async function generarEtiquetasPDF(items: EtiquetaItem[], formato: Format
       continue;
     }
     try {
-      codificar(codigo);
+      codificarCode128(codigo);
     } catch (e) {
       if (!vistos.has(codigo)) {
         vistos.add(codigo);
