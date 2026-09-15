@@ -88,6 +88,10 @@ const CP850: Record<string, number> = {
   'Ó': 0xe0, 'ß': 0xe1, 'Ô': 0xe2, 'Ò': 0xe3, 'õ': 0xe4, 'Õ': 0xe5, 'µ': 0xe6,
   'Ú': 0xe9, 'Û': 0xea, 'Ù': 0xeb, 'ý': 0xec, 'Ý': 0xed, '¯': 0xee, '´': 0xef,
   '°': 0xf8, '¨': 0xf9, '·': 0xfa, '¹': 0xfb, '³': 0xfc, '²': 0xfd,
+  // Bloques de relleno: con estos se imprime la barra negra del ticket de
+  // prueba, que sirve para ver si al cabezal le falta densidad.
+  '░': 0xb0, '▒': 0xb1, '▓': 0xb2,
+  '█': 0xdb, '▄': 0xdc, '▀': 0xdf,
 };
 
 /** Reemplazo sin acento, para cuando un carácter no está en la CP850. */
@@ -238,6 +242,28 @@ export class TicketEscPos {
     this.bytes(...datos);
     // Imprimir
     this.bytes(GS, 0x28, 0x6b, 0x03, 0x00, 0x31, 0x51, 0x30);
+    return this;
+  }
+
+  /**
+   * Código de barras CODE 128 con el comando nativo (GS k 73).
+   *
+   * Nativo y no imagen por lo mismo que el QR: lo dibuja la impresora con sus
+   * propios puntos, así que sale con las barras exactas y a la pistola no le
+   * cuesta engancharlo. Rasterizado desde el navegador pesa cien veces más y
+   * los módulos se redondean al píxel.
+   *
+   * `alto` va en puntos (a 203 ppp, 80 puntos son unos 10 mm).
+   */
+  codigoBarras(texto: string, alto = 80, mostrarTexto = true): this {
+    const datos = aCP850(texto);
+    this.bytes(GS, 0x68, Math.max(1, Math.min(255, alto)));   // GS h: alto
+    this.bytes(GS, 0x77, 0x02);                                // GS w: ancho del módulo
+    this.bytes(GS, 0x48, mostrarTexto ? 0x02 : 0x00);          // GS H: texto debajo
+    // GS k 73 n d1...dn — la variante con longitud explícita, que es la que
+    // admite el juego completo de caracteres.
+    this.bytes(GS, 0x6b, 73, datos.length);
+    this.bytes(...datos);
     return this;
   }
 

@@ -21,7 +21,9 @@
     "./demo-users": "./src/demo-users.ts",
     "./barcode": "./src/barcode/index.ts",
     "./escpos": "./src/escpos/index.ts",
-    "./escpos/ticket": "./src/escpos/ticket-comprobante.ts"
+    "./escpos/ticket": "./src/escpos/ticket-comprobante.ts",
+    "./escpos/prueba": "./src/escpos/ticket-prueba.ts",
+    "./escpos/logo": "./src/escpos/logo.ts"
   },
   "scripts": {
     "lint": "eslint \"src/**/*.{ts,tsx}\" --no-error-on-unmatched-pattern",

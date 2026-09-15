@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Button } from '@happy/ui/button';
 import { Badge } from '@happy/ui/badge';
 import { formatTallaChip } from '@happy/lib';
@@ -9,6 +9,10 @@ import { Printer, Loader2, X, ScanBarcode, CheckCircle2, AlertTriangle } from 'l
 import { toast } from 'sonner';
 import { generarTicketPrueba, type MuestraPrueba } from './ticket-prueba';
 import { abrirPDF } from './comprobante-pdf';
+import { construirTicketPrueba } from '@happy/lib/escpos/prueba';
+import { encolarTicket, esperarImpresion } from './cola-impresion';
+import { equipoParaImprimir } from './imprimir-ticket';
+import type { EquipoImpresion } from './cola-impresion';
 
 type VarianteMin = {
   id: string;
@@ -32,6 +36,7 @@ export function PruebaImpresionModal({
   cajero,
   empresaNombre,
   stockPorVariante = {},
+  almacenId,
   onClose,
 }: {
   variantes: VarianteMin[];
@@ -39,9 +44,24 @@ export function PruebaImpresionModal({
   cajero: string;
   empresaNombre: string;
   stockPorVariante?: Record<string, number>;
+  /** Tienda de la caja: se prefiere su ticketera. */
+  almacenId?: string | null;
   onClose: () => void;
 }) {
   const [imprimiendo, setImprimiendo] = useState(false);
+  /**
+   * La computadora con ticketera que va a imprimir.
+   *
+   * `undefined` mientras se busca, `null` cuando no hay ninguna instalada: en
+   * ese caso el botón sigue sacando el PDF como antes.
+   */
+  const [equipo, setEquipo] = useState<EquipoImpresion | null | undefined>(undefined);
+
+  useEffect(() => {
+    let vivo = true;
+    void equipoParaImprimir(almacenId).then((e) => { if (vivo) setEquipo(e); });
+    return () => { vivo = false; };
+  }, [almacenId]);
   /** Cambia la tanda de productos para no probar siempre con los mismos. */
   const [tanda, setTanda] = useState(0);
 
@@ -74,18 +94,53 @@ export function PruebaImpresionModal({
     return salida;
   }, [candidatas, stockPorVariante, tanda]);
 
-  function imprimir() {
+  async function imprimir() {
     setImprimiendo(true);
     try {
-      const ahora = new Date();
       // Hora de Perú: UTC-5 todo el año, sin horario de verano desde 1994.
-      const lima = new Date(ahora.getTime() - 5 * 60 * 60 * 1000);
-      const fechaHora = `${lima.toISOString().slice(8, 10)}/${lima.toISOString().slice(5, 7)}/${lima
-        .toISOString()
-        .slice(0, 4)} ${lima.toISOString().slice(11, 16)}`;
+      const lima = new Date(Date.now() - 5 * 60 * 60 * 1000);
+      const iso = lima.toISOString();
+      const fechaHora = `${iso.slice(8, 10)}/${iso.slice(5, 7)}/${iso.slice(0, 4)} ${iso.slice(11, 16)}`;
 
+      // Camino bueno: por la ticketera, que es lo que hay que calibrar.
+      if (equipo) {
+        const ticket = construirTicketPrueba({
+          empresa: empresaNombre,
+          equipo: equipo.nombre,
+          caja,
+          cajero,
+          fechaHora,
+          avanceCorteMm: equipo.avance_corte_mm ?? 15,
+          muestras: muestras.map((m) => ({
+            codigo: m.codigo, nombre: m.nombre, talla: m.talla, esSku: m.esSku,
+          })),
+        });
+
+        const encolado = await encolarTicket(ticket.aBase64(), equipo.id, {
+          descripcion: 'Ticket de prueba de impresión',
+        });
+        if (!encolado.ok) {
+          toast.error(`No se pudo encolar: ${encolado.error}`);
+          return;
+        }
+
+        const estado = await esperarImpresion(encolado.id, 15);
+        if (estado === 'impreso') {
+          toast.success(`Ticket de prueba impreso en ${equipo.nombre}`);
+        } else if (estado === 'esperando') {
+          toast.warning(
+            `El ticket está en cola en ${equipo.nombre} y todavía no sale. Revisa que la ticketera tenga papel y esté encendida.`,
+            { duration: 9000 },
+          );
+        } else {
+          toast.error(`La ticketera de ${equipo.nombre} no pudo imprimir. Mira el detalle en el ERP, en Configuración → Impresión de tickets.`);
+        }
+        return;
+      }
+
+      // Sin agente instalado: el PDF de siempre, con el diálogo de Windows.
       const blob = generarTicketPrueba({ empresaNombre, caja, cajero, muestras, fechaHora });
-      abrirPDF(blob, `prueba-impresion-${lima.toISOString().slice(0, 10)}.pdf`, true);
+      abrirPDF(blob, `prueba-impresion-${iso.slice(0, 10)}.pdf`, true);
       toast.success('Ticket de prueba enviado a imprimir');
     } catch (e) {
       toast.error(`No se pudo generar el ticket: ${(e as Error).message}`);
@@ -110,7 +165,8 @@ export function PruebaImpresionModal({
         <div className="space-y-4 px-5 py-4 text-sm">
           <p className="text-slate-600">
             Imprime un ticket de 80 mm que <b>no es comprobante</b>: no registra venta, no consume
-            numeración y no se envía a SUNAT. Sirve para revisar todo de una vez.
+            numeración y no se envía a SUNAT. Sirve para revisar todo de una vez y para calibrar
+            dónde corta el papel.
           </p>
 
           <div className="rounded-lg border bg-slate-50 p-3">
@@ -191,10 +247,24 @@ export function PruebaImpresionModal({
             )}
           </div>
 
-          <p className="text-xs text-slate-500">
-            Al imprimir elige <b>Tamaño real</b> o 100 %. Si lo dejas en “ajustar a la página”, las
-            barras se deforman y la pistola falla.
-          </p>
+          {/* Por dónde va a salir: es lo primero que hay que saber antes de
+              interpretar el resultado de la prueba. */}
+          {equipo === undefined ? (
+            <p className="text-xs text-slate-500">Buscando la ticketera…</p>
+          ) : equipo ? (
+            <p className="rounded-lg border border-emerald-200 bg-emerald-50 p-2.5 text-xs text-emerald-800">
+              Sale por <b>{equipo.nombre}</b> con un avance de corte de{' '}
+              <b>{equipo.avance_corte_mm ?? 15} mm</b>. Si el corte se come la última línea o deja
+              papel en blanco, ajusta ese número en el ERP (Configuración → Impresión de tickets) y
+              vuelve a imprimir esta prueba.
+            </p>
+          ) : (
+            <p className="rounded-lg border border-amber-200 bg-amber-50 p-2.5 text-xs text-amber-800">
+              No hay ninguna computadora con el agente de impresión instalado, así que la prueba sale
+              como PDF por el diálogo de Windows. Al imprimir elige <b>Tamaño real</b> o 100 %: con
+              “ajustar a la página” las barras se deforman y la pistola falla.
+            </p>
+          )}
         </div>
 
         <div className="flex justify-end gap-2 border-t px-5 py-3">

@@ -10,6 +10,7 @@
 import { describe, it, expect } from 'vitest';
 import { TicketEscPos, aCP850, envolver, COLUMNAS, PUNTO_MM } from './index';
 import { construirTicket, cadenaQrSunat, type DatosTicket } from './ticket-comprobante';
+import { construirTicketPrueba } from './ticket-prueba';
 
 /** Los bytes como texto latin1, para poder buscar cadenas dentro. */
 function texto(t: TicketEscPos): string {
@@ -289,5 +290,62 @@ describe('tamaño del ticket', () => {
 
   it('el base64 viaja sin caracteres raros', () => {
     expect(construirTicket(BASE).aBase64()).toMatch(/^[A-Za-z0-9+/]+=*$/);
+  });
+});
+
+describe('ticket de prueba de la impresora', () => {
+  const t = construirTicketPrueba({
+    empresa: 'DISFRACES HAPPYS',
+    equipo: 'Caja Huallaga',
+    caja: 'CAJA HUALLAGA 01',
+    cajero: 'Rosa Quispe',
+    fechaHora: '15/09/2026 15:30',
+    avanceCorteMm: 18,
+    muestras: [{ codigo: 'PR113', nombre: 'Abejita', talla: '6' }],
+  });
+  const s = texto(t);
+
+  it('avisa que no es comprobante', () => {
+    expect(s).toContain('No es comprobante de pago');
+    expect(s).toContain('No se registra ninguna venta');
+  });
+
+  it('la regla mide exactamente el ancho del papel', () => {
+    // Si el rollo o el driver están configurados más angostos, esta línea se
+    // parte en dos y se ve al instante.
+    const regla = s.split('\n').find((l) => /^-+\d/.test(l))!;
+    expect(regla).toHaveLength(COLUMNAS);
+  });
+
+  it('el bloque negro sale como bloques y no como interrogaciones', () => {
+    // El carácter █ no es ASCII: si no estuviera en la tabla CP850, la barra de
+    // densidad saldría impresa como "??????" y la prueba no serviría de nada.
+    const bloque = String.fromCharCode(0xdb).repeat(COLUMNAS);
+    expect(s).toContain(bloque);
+    expect(s).not.toContain('?'.repeat(10));
+  });
+
+  it('imprime el avance de corte que se está probando', () => {
+    // Va en el papel a propósito: al calibrar se imprimen varios y hay que
+    // poder saber cuál salió de qué valor.
+    expect(s).toContain('Avance configurado: 18 mm');
+  });
+
+  it('usa el avance indicado al cortar', () => {
+    const b = bytes(t);
+    expect(b[b.length - 1]).toBe(Math.round(18 / PUNTO_MM));
+  });
+
+  it('manda el código de barras con el comando nativo', () => {
+    // GS k 73 = CODE 128 con longitud explícita.
+    expect(contiene(t, [0x1d, 0x6b, 73])).toBe(true);
+  });
+
+  it('funciona sin códigos para la pistola', () => {
+    const sinMuestras = construirTicketPrueba({
+      empresa: 'X', equipo: 'Y', fechaHora: '1/1/2026', avanceCorteMm: 15,
+    });
+    expect(texto(sinMuestras)).toContain('TICKET DE PRUEBA');
+    expect(contiene(sinMuestras, [0x1d, 0x6b, 73])).toBe(false);
   });
 });

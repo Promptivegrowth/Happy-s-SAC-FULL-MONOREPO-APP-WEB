@@ -2159,6 +2159,7 @@ export function PosTerminal({
           cajero={cajeroNombre}
           empresaNombre={empresaNombre}
           stockPorVariante={stockPorVariante}
+          almacenId={sesionActiva?.almacen_id ?? cajaActual?.almacen_id ?? null}
           onClose={() => setPruebaImpresionOpen(false)}
         />
       )}
