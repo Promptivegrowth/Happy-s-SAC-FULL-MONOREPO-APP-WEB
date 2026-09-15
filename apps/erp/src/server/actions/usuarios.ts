@@ -39,7 +39,7 @@ async function asegurarQueQuedaUnGerente(usuarioId: string, accion: string) {
   const ids = new Set((gerentes ?? []).map((g) => (g as { usuario_id: string }).usuario_id));
   if (ids.has(usuarioId) && ids.size <= 1) {
     throw new Error(
-      `No se puede ${accion}: es el unico gerente del sistema. Si se queda sin gerente, nadie va a poder administrar usuarios. Nombra gerente a otra persona primero.`,
+      `No se puede ${accion}: es el único gerente del sistema. Si el sistema se queda sin gerente, nadie podrá administrar usuarios ni devolver el rol. Nombra gerente a otra persona primero.`,
     );
   }
 }

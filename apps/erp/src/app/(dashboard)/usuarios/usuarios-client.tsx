@@ -217,7 +217,7 @@ function NuevoUsuarioModal({ onClose, onCreated }: { onClose: () => void; onCrea
       return;
     }
     if (roles.size === 0) {
-      toast.error('Asigná al menos un rol');
+      toast.error('Asigna al menos un rol');
       return;
     }
     start(async () => {
@@ -349,7 +349,7 @@ function RolesTab({ usuario, onSaved }: { usuario: UsuarioRow; onSaved: () => vo
   }
   function submit() {
     if (roles.size === 0) {
-      toast.error('Asigná al menos un rol');
+      toast.error('Asigna al menos un rol');
       return;
     }
     start(async () => {
@@ -388,7 +388,7 @@ function PasswordTab({ usuario, onSaved }: { usuario: UsuarioRow; onSaved: () =>
   return (
     <div className="space-y-3">
       <p className="rounded-md border border-amber-200 bg-amber-50 p-2 text-xs text-amber-800">
-        ⚠ El usuario tendrá que usar esta nueva contraseña en su próximo login. Comunicáselo de forma segura.
+        ⚠ La persona tendrá que usar esta contraseña la próxima vez que entre. Comunícasela de forma segura.
       </p>
       <Field label="Nueva contraseña *" hint="Mínimo 8 caracteres">
         <Input type="password" value={pass} onChange={(e) => setPass(e.target.value)} placeholder="••••••••" />
