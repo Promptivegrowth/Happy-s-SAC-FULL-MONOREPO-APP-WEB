@@ -326,7 +326,7 @@ export async function crearVariante(_prev: unknown, fd: FormData): Promise<Actio
     const payload = {
       ...data,
       sku,
-      codigo_barras: data.codigo_barras || null,
+      codigo_barras: data.codigo_barras?.trim() || null,
       precio_mayorista_a: data.precio_mayorista_a === '' ? null : Number(data.precio_mayorista_a),
       precio_mayorista_b: data.precio_mayorista_b === '' ? null : Number(data.precio_mayorista_b),
       precio_mayorista_c: data.precio_mayorista_c === '' ? null : Number(data.precio_mayorista_c),
@@ -371,7 +371,7 @@ export async function actualizarVariante(
     const { sb } = await requireUser();
     const payload = {
       sku: data.sku.trim().toUpperCase(),
-      codigo_barras: data.codigo_barras || null,
+      codigo_barras: data.codigo_barras?.trim() || null,
       precio_publico: Number(data.precio_publico),
       precio_mayorista_a: data.precio_mayorista_a === '' ? null : Number(data.precio_mayorista_a),
       precio_mayorista_b: data.precio_mayorista_b === '' ? null : Number(data.precio_mayorista_b),
@@ -382,7 +382,17 @@ export async function actualizarVariante(
     };
     const { error } = await sb.from('productos_variantes').update(payload).eq('id', varianteId);
     if (error) {
-      if (error.code === '23505') throw new Error(`SKU "${payload.sku}" ya existe en otra variante`);
+      if (error.code === '23505') {
+        // El codigo de barras tambien es unico: sin distinguir, el usuario veia
+        // "el SKU ya existe" aunque el repetido fuera el codigo de barras.
+        if (error.message.includes('codigo_barras')) {
+          throw new Error(
+            `El código de barras "${payload.codigo_barras}" ya está asignado a otra talla o producto. ` +
+            'Cada código identifica una sola prenda: revisa la etiqueta.',
+          );
+        }
+        throw new Error(`SKU "${payload.sku}" ya existe en otra variante`);
+      }
       throw new Error(error.message);
     }
     return null;

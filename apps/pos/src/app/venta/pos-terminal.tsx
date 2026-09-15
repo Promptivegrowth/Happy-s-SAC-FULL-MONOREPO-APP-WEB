@@ -461,7 +461,12 @@ export function PosTerminal({
     const barcode = input.trim();
     if (!barcode) return;
     // 1) Match exacto por código de barras o SKU — para lectora de pistola.
-    const exacto = variantes.find((x) => x.codigo_barras === barcode || x.sku === barcode);
+    // Se compara sin distinguir mayúsculas: algunas pistolas y algunos códigos
+    // impresos difieren solo en eso, y una venta no se puede caer por un caso.
+    const clave = barcode.toUpperCase();
+    const exacto = variantes.find(
+      (x) => (x.codigo_barras ?? '').trim().toUpperCase() === clave || x.sku.trim().toUpperCase() === clave,
+    );
     if (exacto) {
       agregarVariante(exacto);
       setSearch('');

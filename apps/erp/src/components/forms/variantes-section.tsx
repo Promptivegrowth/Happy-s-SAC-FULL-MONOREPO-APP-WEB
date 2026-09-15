@@ -143,8 +143,11 @@ export function VariantesSection({
                 maxLength={40}
               />
             </FormRow>
-            <FormRow label="Código de barras (EAN-13)">
-              <Input name="codigo_barras" placeholder="opcional" />
+            <FormRow
+              label="Código de barras"
+              hint="El que está impreso en la etiqueta de la prenda (ej. PR113). Con él la caja encuentra el producto al escanear. Es único por talla."
+            >
+              <Input name="codigo_barras" placeholder="Ej. PR113" />
             </FormRow>
             <FormRow label="Precio público (S/)" required>
               <Input name="precio_publico" type="number" step="0.01" min="0" required placeholder="Ej. 49.90" defaultValue={pv(prefill?.precio_publico)} />
