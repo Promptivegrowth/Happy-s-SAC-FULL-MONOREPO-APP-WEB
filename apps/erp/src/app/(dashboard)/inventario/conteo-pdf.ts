@@ -1,13 +1,16 @@
 import type { EmpresaPDFData } from '@/server/empresa-pdf-helper';
-import type { ResultadoConteo } from '@/server/actions/stock-conteo-import';
+import type { ResultadoConteo, ErrorConteo } from '@/server/actions/stock-conteo-import';
 
 /**
  * PDF de RESUMEN del conteo físico por Excel (A4, multipágina).
  *
  * Sirve para los dos desenlaces:
- *  - Conteo APLICADO: una tabla por almacén con antes → contado → diferencia.
- *  - Conteo RECHAZADO: el listado de errores (hoja, fila, ítem, motivo) para
- *    que el usuario corrija y vuelva a importar.
+ *  - Conteo APLICADO: una tabla por almacén con antes → contado → diferencia,
+ *    y si alguna fila se saltó, la lista de esas filas con el paso a paso para
+ *    corregirlas dentro del ERP (es el papel que el usuario se lleva al
+ *    almacén para terminar el trabajo a mano).
+ *  - Conteo RECHAZADO: el archivo no se pudo leer; el listado de problemas de
+ *    estructura y cómo resolverlos.
  *
  * Imports dinámicos para que jspdf no entre al bundle principal.
  */
@@ -17,6 +20,42 @@ const AZUL: [number, number, number] = [30, 58, 95];
 const GRIS: [number, number, number] = [100, 116, 139];
 const ROJO: [number, number, number] = [190, 42, 42];
 const VERDE: [number, number, number] = [16, 133, 88];
+
+
+/**
+ * Tabla de filas con problema. La ultima columna es la mas importante: dice
+ * que hacer en el ERP para arreglarlo, porque este PDF es el que el usuario se
+ * lleva impreso para terminar el trabajo a mano.
+ */
+function tablaProblemas(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  doc: any,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  autoTable: (doc: any, options: any) => void,
+  filas: ErrorConteo[],
+  startY: number,
+  pageW: number,
+  M: number,
+  color: [number, number, number],
+): void {
+  autoTable(doc, {
+    startY,
+    head: [['Hoja (almacen)', 'Fila', 'Item', 'Que paso', 'Como corregirlo en el ERP']],
+    body: filas.map((e) => [e.hoja, String(e.fila), e.item, e.mensaje, e.solucion]),
+    styles: { fontSize: 7, cellPadding: 1.5, overflow: 'linebreak', textColor: [30, 41, 59] },
+    headStyles: { fillColor: color, textColor: [255, 255, 255], fontStyle: 'bold', fontSize: 7.5 },
+    alternateRowStyles: { fillColor: [252, 250, 245] },
+    columnStyles: {
+      0: { cellWidth: 26 },
+      1: { cellWidth: 10, halign: 'center' },
+      2: { cellWidth: 40 },
+      3: { cellWidth: 42 },
+      4: { cellWidth: 'auto', fontStyle: 'bold' },
+    },
+    margin: { left: M, right: M },
+  });
+  void pageW;
+}
 
 export async function generarConteoPdf(
   res: ResultadoConteo,
@@ -56,8 +95,15 @@ export async function generarConteoPdf(
 
   // ---------------- Título ----------------
   doc.setFont('helvetica', 'bold'); doc.setFontSize(15);
-  doc.setTextColor(...(res.aplicado ? NARANJA : ROJO));
-  doc.text(res.aplicado ? 'RESUMEN DE CONTEO FISICO DE INVENTARIO' : 'CONTEO RECHAZADO — CORRIGE LOS ERRORES', M, y);
+  doc.setTextColor(...(res.aplicado ? (res.omitidas.length > 0 ? [180, 120, 0] as [number, number, number] : NARANJA) : ROJO));
+  doc.text(
+    res.aplicado
+      ? (res.omitidas.length > 0
+          ? 'CONTEO APLICADO — HAY FILAS POR CORREGIR A MANO'
+          : 'RESUMEN DE CONTEO FISICO DE INVENTARIO')
+      : 'ARCHIVO RECHAZADO — NO SE PUDO LEER',
+    M, y,
+  );
   y += 6;
   doc.setFont('helvetica', 'normal'); doc.setFontSize(9); doc.setTextColor(...GRIS);
   doc.text(`Fecha: ${res.fecha}     Responsable: ${res.usuario}`, M, y);
@@ -78,9 +124,14 @@ export async function generarConteoPdf(
     cel('Items actualizados', String(res.totalActualizados), M + 4, VERDE);
     cel('Sin cambio', String(res.totalSinCambio), M + 4 + anchoCel, AZUL);
     cel('Items contados', String(res.totalLeidos), M + 4 + anchoCel * 2, AZUL);
-    cel('Almacenes', String(res.resumen.length), M + 4 + anchoCel * 3, AZUL);
+    cel(
+      res.omitidas.length > 0 ? 'Filas SIN aplicar' : 'Almacenes',
+      String(res.omitidas.length > 0 ? res.omitidas.length : res.resumen.length),
+      M + 4 + anchoCel * 3,
+      res.omitidas.length > 0 ? ROJO : AZUL,
+    );
   } else {
-    cel('Errores encontrados', String(res.errores.length), M + 4, ROJO);
+    cel('Problemas del archivo', String(res.errores.length), M + 4, ROJO);
     cel('Items leidos', String(res.totalLeidos), M + 4 + anchoCel, AZUL);
     cel('Cambios aplicados', '0', M + 4 + anchoCel * 2, ROJO);
     cel('Estado', 'CANCELADO', M + 4 + anchoCel * 3, ROJO);
@@ -103,21 +154,11 @@ export async function generarConteoPdf(
   if (!res.aplicado) {
     doc.setFont('helvetica', 'normal'); doc.setFontSize(9); doc.setTextColor(...ROJO);
     const nota = doc.splitTextToSize(
-      'No se modifico ningun stock. Corrige los siguientes puntos en el Excel y vuelve a importarlo. La fila indicada corresponde al numero de fila de Excel.',
+      'No se modifico ningun stock. El problema no son los items sino la estructura del archivo, asi que no se pudo aplicar ni una parte. La fila indicada corresponde al numero de fila de Excel.',
       pageW - M * 2,
     ) as string[];
     doc.text(nota, M, y); y += nota.length * 4 + 3;
-
-    autoTable(doc, {
-      startY: y,
-      head: [['Hoja (almacen)', 'Fila', 'Item', 'Que corregir']],
-      body: res.errores.map((e) => [e.hoja, String(e.fila), e.item, e.mensaje]),
-      styles: { fontSize: 7.5, cellPadding: 1.6, overflow: 'linebreak', textColor: [30, 41, 59] },
-      headStyles: { fillColor: ROJO, textColor: [255, 255, 255], fontStyle: 'bold', fontSize: 8 },
-      alternateRowStyles: { fillColor: [253, 246, 246] },
-      columnStyles: { 0: { cellWidth: 34 }, 1: { cellWidth: 12, halign: 'center' }, 2: { cellWidth: 52 }, 3: { cellWidth: 'auto' } },
-      margin: { left: M, right: M },
-    });
+    tablaProblemas(doc, autoTable, res.errores, y, pageW, M, ROJO);
   } else {
     for (const alm of res.resumen) {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -169,6 +210,24 @@ export async function generarConteoPdf(
     }
   }
 
+  // ------------- Filas que NO se aplicaron (van al final, para arrancar
+  // la hoja y llevarsela al almacen) -------------
+  if (res.aplicado && res.omitidas.length > 0) {
+    doc.addPage();
+    let yo = M;
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(13); doc.setTextColor(...ROJO);
+    doc.text('FILAS QUE NO SE PUDIERON ACTUALIZAR', M, yo);
+    yo += 6;
+    doc.setFont('helvetica', 'normal'); doc.setFontSize(9); doc.setTextColor(...GRIS);
+    const nota = doc.splitTextToSize(
+      `El resto del conteo SI se aplico. Estos ${res.omitidas.length} item(s) quedaron con el stock que ya tenian: corrigelos a mano siguiendo la ultima columna. La fila indicada es el numero de fila del Excel.`,
+      pageW - M * 2,
+    ) as string[];
+    doc.text(nota, M, yo);
+    yo += nota.length * 4 + 3;
+    tablaProblemas(doc, autoTable, res.omitidas, yo, pageW, M, ROJO);
+  }
+
   // ---------------- Pie de página ----------------
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const total = (doc as any).internal.getNumberOfPages() as number;
@@ -183,5 +242,9 @@ export async function generarConteoPdf(
   }
 
   const stamp = new Date().toISOString().slice(0, 10);
-  doc.save(res.aplicado ? `Resumen-Conteo-${stamp}.pdf` : `Errores-Conteo-${stamp}.pdf`);
+  doc.save(
+    res.aplicado
+      ? (res.omitidas.length > 0 ? `Conteo-${stamp}-PENDIENTES.pdf` : `Resumen-Conteo-${stamp}.pdf`)
+      : `Archivo-Rechazado-${stamp}.pdf`,
+  );
 }

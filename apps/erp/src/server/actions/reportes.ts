@@ -15,6 +15,7 @@
 import { createClient } from '@happy/db/server';
 import { redirect } from 'next/navigation';
 import { formatTallaChip } from '@happy/lib';
+import { LOTE_IDS } from '../lotes';
 import {
   type CanalVenta,
   type EstadoOT,
@@ -278,9 +279,10 @@ export async function reporteProductosTemporada(
   }
 
   // 2) Líneas con variante → producto → categoría
-  // Supabase IN limit ~1000 — partimos en chunks
+  // El filtro `.in(...)` viaja en la URL: con lotes grandes el servidor la
+  // rechaza y el reporte sale vacío sin avisar. Ver LOTE_IDS en _helpers.
   const chunks: string[][] = [];
-  for (let i = 0; i < ventaIds.length; i += 500) chunks.push(ventaIds.slice(i, i + 500));
+  for (let i = 0; i < ventaIds.length; i += LOTE_IDS) chunks.push(ventaIds.slice(i, i + LOTE_IDS));
 
   type LineaRaw = {
     cantidad: number;

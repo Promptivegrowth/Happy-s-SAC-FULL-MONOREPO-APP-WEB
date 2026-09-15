@@ -11,7 +11,7 @@ import {
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { exportarPlantillaConteo } from '@/server/actions/stock-conteo-excel';
-import { importarConteoExcel, type ResultadoConteo } from '@/server/actions/stock-conteo-import';
+import { importarConteoExcel, type ResultadoConteo, type ErrorConteo } from '@/server/actions/stock-conteo-import';
 import { cargarEmpresaPDF } from '@/server/empresa-pdf-helper';
 import { generarConteoPdf } from './conteo-pdf';
 
@@ -21,9 +21,45 @@ type Almacen = { id: string; nombre: string; codigo: string; tipo?: string };
  * CONTEO FÍSICO POR EXCEL (solo gerencia).
  *  Paso 1 — Exporta la plantilla con todos los productos/materiales y su stock.
  *  Paso 2 — La reimporta con la columna "STOCK CONTADO" llena.
- * Si hay errores se cancela TODO y se listan; si va bien, se descarga el PDF
- * de resumen con lo actualizado en cada almacén.
+ * Las filas que fallan (un ítem dado de baja, una cantidad con texto) se saltan
+ * y el resto del conteo se aplica igual; cada una se lista en pantalla y en el
+ * PDF con la instrucción para corregirla a mano. Solo un archivo con la
+ * estructura rota cancela la importación completa.
  */
+
+/** Tabla de filas con problema. `tono` cambia el color: rojo cancela, ámbar solo salta. */
+function TablaProblemas({ filas, tono }: { filas: ErrorConteo[]; tono: 'rojo' | 'ambar' }) {
+  const c = tono === 'rojo'
+    ? { borde: 'border-rose-200', cab: 'bg-rose-100 text-rose-900', linea: 'border-rose-100', texto: 'text-rose-700' }
+    : { borde: 'border-amber-200', cab: 'bg-amber-100 text-amber-900', linea: 'border-amber-100', texto: 'text-amber-800' };
+  return (
+    <div className={`mt-2 max-h-72 overflow-y-auto rounded border bg-white ${c.borde}`}>
+      <table className="w-full text-[11px]">
+        <thead className={`sticky top-0 ${c.cab}`}>
+          <tr>
+            <th className="px-2 py-1 text-left">Hoja</th>
+            <th className="px-2 py-1 text-left">Fila</th>
+            <th className="px-2 py-1 text-left">Ítem</th>
+            <th className="px-2 py-1 text-left">Qué pasó</th>
+            <th className="px-2 py-1 text-left">Cómo corregirlo</th>
+          </tr>
+        </thead>
+        <tbody>
+          {filas.map((e, i) => (
+            <tr key={i} className={`border-t ${c.linea} align-top`}>
+              <td className="px-2 py-1">{e.hoja}</td>
+              <td className="px-2 py-1 font-mono">{e.fila}</td>
+              <td className="px-2 py-1">{e.item}</td>
+              <td className={`px-2 py-1 ${c.texto}`}>{e.mensaje}</td>
+              <td className="px-2 py-1 text-slate-700">{e.solucion}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
 export function ConteoExcelButton({ almacenes }: { almacenes: Almacen[] }) {
   const router = useRouter();
   const inputRef = useRef<HTMLInputElement>(null);
@@ -85,10 +121,17 @@ export function ConteoExcelButton({ almacenes }: { almacenes: Almacen[] }) {
       } catch { /* el PDF es complementario; el resultado ya se muestra en pantalla */ }
 
       if (data.aplicado) {
-        toast.success(`Conteo aplicado · ${data.totalActualizados} ítem(s) actualizados`);
+        if (data.omitidas.length > 0) {
+          toast.warning(
+            `Conteo aplicado · ${data.totalActualizados} ítem(s) actualizados · ${data.omitidas.length} fila(s) quedaron sin aplicar`,
+            { duration: 9000 },
+          );
+        } else {
+          toast.success(`Conteo aplicado · ${data.totalActualizados} ítem(s) actualizados`);
+        }
         router.refresh();
       } else {
-        toast.error(`No se aplicó nada: ${data.errores.length} error(es) por corregir`);
+        toast.error(`No se aplicó nada: el archivo tiene ${data.errores.length} problema(s) de estructura`);
       }
     } catch (e) {
       toast.error((e as Error).message);
@@ -130,7 +173,7 @@ export function ConteoExcelButton({ almacenes }: { almacenes: Almacen[] }) {
                 <li>El archivo trae <strong>una hoja por almacén</strong> (incluye el almacén de materiales).</li>
                 <li>Solo puedes escribir en la columna <strong>STOCK CONTADO</strong>; el resto está bloqueado.</li>
                 <li>Si dejas una fila <strong>en blanco no se toca</strong>. Si escribes <strong>0</strong>, el stock queda en cero.</li>
-                <li>Si el archivo tiene errores, <strong>no se actualiza nada</strong> y te decimos qué corregir.</li>
+                <li>Si alguna fila falla (un ítem dado de baja, una cantidad con texto), <strong>se salta esa fila</strong>, el resto del conteo se aplica igual y te decimos cómo corregirla a mano.</li>
               </ul>
             </div>
 
@@ -187,42 +230,23 @@ export function ConteoExcelButton({ almacenes }: { almacenes: Almacen[] }) {
                 Validar e importar
               </Button>
               <p className="mt-1.5 text-[10px] text-slate-500">
-                Primero se valida todo el archivo. Solo si está correcto se actualiza el stock.
+                Se aplica todo lo que esté correcto. Si alguna fila falla, se salta y te decimos cómo
+                corregirla a mano; el resto del conteo se guarda igual.
               </p>
             </div>
 
-            {/* RESULTADO */}
+            {/* RESULTADO — archivo rechazado por estructura */}
             {resultado && !resultado.aplicado && (
               <div className="rounded-lg border border-rose-200 bg-rose-50 p-3">
                 <p className="flex items-center gap-2 text-sm font-semibold text-rose-800">
                   <AlertTriangle className="h-4 w-4" />
-                  No se actualizó nada · {resultado.errores.length} error(es) por corregir
+                  No se actualizó nada · el archivo no se puede leer
                 </p>
                 <p className="mt-0.5 text-[11px] text-rose-700">
-                  Corrige estos puntos en el Excel y vuelve a importarlo. Se descargó un PDF con el detalle.
+                  El problema no son los ítems sino la estructura del archivo, así que no se puede
+                  aplicar ni una parte. Corrige esto y vuelve a importarlo. Se descargó un PDF con el detalle.
                 </p>
-                <div className="mt-2 max-h-56 overflow-y-auto rounded border border-rose-200 bg-white">
-                  <table className="w-full text-[11px]">
-                    <thead className="sticky top-0 bg-rose-100 text-rose-900">
-                      <tr>
-                        <th className="px-2 py-1 text-left">Hoja</th>
-                        <th className="px-2 py-1 text-left">Fila</th>
-                        <th className="px-2 py-1 text-left">Ítem</th>
-                        <th className="px-2 py-1 text-left">Qué corregir</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {resultado.errores.map((e, i) => (
-                        <tr key={i} className="border-t border-rose-100">
-                          <td className="px-2 py-1">{e.hoja}</td>
-                          <td className="px-2 py-1 font-mono">{e.fila}</td>
-                          <td className="px-2 py-1">{e.item}</td>
-                          <td className="px-2 py-1 text-rose-700">{e.mensaje}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
+                <TablaProblemas filas={resultado.errores} tono="rojo" />
               </div>
             )}
 
@@ -236,6 +260,22 @@ export function ConteoExcelButton({ almacenes }: { almacenes: Almacen[] }) {
                 {resultado.advertencias.map((a, i) => (
                   <p key={i} className="mt-1 text-[11px] text-amber-700">⚠ {a}</p>
                 ))}
+
+                {/* Lo que NO se pudo aplicar: queda a la vista, con el paso a
+                    paso para arreglarlo sin volver a importar el archivo. */}
+                {resultado.omitidas.length > 0 && (
+                  <div className="mt-3 rounded-lg border border-amber-300 bg-amber-50 p-2.5">
+                    <p className="flex items-center gap-2 text-[12px] font-semibold text-amber-900">
+                      <AlertTriangle className="h-4 w-4" />
+                      {resultado.omitidas.length} fila(s) quedaron SIN actualizar
+                    </p>
+                    <p className="mt-0.5 text-[11px] text-amber-800">
+                      El stock de estos ítems quedó como estaba. Corrígelo a mano siguiendo la última
+                      columna; el PDF que se descargó trae la misma lista.
+                    </p>
+                    <TablaProblemas filas={resultado.omitidas} tono="ambar" />
+                  </div>
+                )}
                 <div className="mt-2 space-y-1.5">
                   {resultado.resumen.map((alm) => (
                     <div key={alm.codigo} className="rounded border border-emerald-200 bg-white px-2 py-1.5 text-[11px]">
