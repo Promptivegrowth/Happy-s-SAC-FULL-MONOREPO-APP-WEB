@@ -19,7 +19,9 @@
     "./trazabilidad": "./src/trazabilidad/index.ts",
     "./pdf": "./src/pdf/index.ts",
     "./demo-users": "./src/demo-users.ts",
-    "./barcode": "./src/barcode/index.ts"
+    "./barcode": "./src/barcode/index.ts",
+    "./escpos": "./src/escpos/index.ts",
+    "./escpos/ticket": "./src/escpos/ticket-comprobante.ts"
   },
   "scripts": {
     "lint": "eslint \"src/**/*.{ts,tsx}\" --no-error-on-unmatched-pattern",

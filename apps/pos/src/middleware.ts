@@ -1,7 +1,15 @@
 import { createServerClient, type CookieOptions } from '@supabase/ssr';
 import { NextResponse, type NextRequest } from 'next/server';
 
-const PUBLIC = ['/login', '/auth/callback'];
+/**
+ * Rutas sin sesión.
+ *
+ * `/api/impresion` la usa el AGENTE DE IMPRESIÓN, que es un programa en la
+ * computadora de la caja y no un usuario: se identifica con el token de su
+ * equipo, que la propia ruta valida. Si pasara por acá, el guardia lo mandaría
+ * al login y ningún ticket saldría nunca.
+ */
+const PUBLIC = ['/login', '/auth/callback', '/api/impresion'];
 
 export async function middleware(request: NextRequest) {
   const response = NextResponse.next({ request });
