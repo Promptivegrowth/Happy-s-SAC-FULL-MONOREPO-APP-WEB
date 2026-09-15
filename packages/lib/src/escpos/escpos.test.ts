@@ -349,3 +349,40 @@ describe('ticket de prueba de la impresora', () => {
     expect(contiene(sinMuestras, [0x1d, 0x6b, 73])).toBe(false);
   });
 });
+
+describe('caja y vendedor en el ticket', () => {
+  it('imprime la caja del turno y quién atendió', () => {
+    // El cajero puede abrir un turno en una caja distinta a la suya —cubriendo
+    // otra tienda—, así que estos dos datos tienen que salir del turno abierto
+    // y no de la configuración del usuario.
+    const s = texto(construirTicket({ ...BASE, caja: 'CAJA HUALLAGA 01', vendedor: 'Rosa Quispe' }));
+    expect(s).toContain('Caja: CAJA HUALLAGA 01');
+    expect(s).toContain('Atendido por: Rosa Quispe');
+  });
+
+  it('imprime la vendedora elegida, no la cajera, cuando se eligió una', () => {
+    // En Wayaga varias vendedoras comparten la caja: en el ticket tiene que
+    // figurar la que hizo la venta, que es de quien es la comisión.
+    const s = texto(construirTicket({ ...BASE, vendedor: 'Milagros Ponce', caja: 'CAJA LA QUINTA 01' }));
+    expect(s).toContain('Atendido por: Milagros Ponce');
+    expect(s).not.toContain('Rosa Quispe');
+  });
+
+  it('el establecimiento del ticket es el de la tienda del turno', () => {
+    // Si se abre turno en La Quinta, el comprobante tiene que llevar la
+    // dirección de La Quinta: SUNAT pide la del establecimiento emisor.
+    const s = texto(construirTicket({
+      ...BASE,
+      establecimiento: { nombre: 'TIENDA LA QUINTA', direccion: 'AV. LA QUINTA 123 - LIMA' },
+    }));
+    expect(s).toContain('TIENDA LA QUINTA');
+    expect(s).toContain('AV. LA QUINTA 123 - LIMA');
+    expect(s).not.toContain('JR. HUALLAGA 726');
+  });
+
+  it('sin caja en el turno no imprime una línea vacía', () => {
+    const s = texto(construirTicket({ ...BASE, caja: null }));
+    expect(s).not.toContain('Caja:');
+    expect(s).toContain('Atendido por:');
+  });
+});

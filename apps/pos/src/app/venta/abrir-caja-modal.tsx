@@ -36,15 +36,19 @@ export function AbrirCajaModal({
 }) {
   const [monto, setMonto] = useState<string>(montoDefault.toFixed(2));
   const [obs, setObs] = useState('');
-  // Si el usuario no tiene caja asignada, se obliga a elegir. Si hay solo una
-  // disponible, se preselecciona. Si tiene caja_default, ese valor manda.
+  // La caja asignada viene preseleccionada, pero SE PUEDE CAMBIAR. Antes era un
+  // campo de solo lectura y no habia forma de cambiarla en todo el sistema: el
+  // ERP tampoco escribe caja_default en ninguna pantalla. Una cajera que cubre
+  // el turno de la otra tienda quedaba atrapada.
   const [cajaSel, setCajaSel] = useState<string>(() => {
     if (cajaId) return cajaId;
     if (cajasDisponibles.length === 1) return cajasDisponibles[0]!.id;
     return '';
   });
   const [pending, start] = useTransition();
-  const necesitaElegirCaja = !cajaId;
+  const sinCajaAsignada = !cajaId;
+  /** Cambiar de caja cambia tambien de tienda: conviene que se note. */
+  const cambioDeCaja = Boolean(cajaId) && cajaSel !== cajaId;
 
   function submit() {
     const n = Number(monto);
@@ -53,15 +57,16 @@ export function AbrirCajaModal({
       return;
     }
     if (!cajaSel) {
-      toast.error('Seleccioná una caja');
+      toast.error('Elige una caja');
       return;
     }
     start(async () => {
       try {
-        // Pasamos caja_id solo si el cajero la eligió manualmente (no hay default)
+        // Siempre se manda la caja elegida: el servidor la guarda como la nueva
+        // predeterminada, asi que el proximo turno ya arranca con esta.
         await abrirSesion({
           monto_apertura: n,
-          caja_id: necesitaElegirCaja ? cajaSel : null,
+          caja_id: cajaSel,
           observacion: obs || null,
         });
         toast.success('Caja abierta');
@@ -108,10 +113,8 @@ export function AbrirCajaModal({
               <Input value={cajeroNombre} readOnly className="mt-1 bg-slate-50" />
             </div>
             <div>
-              <Label className="text-xs">Caja {necesitaElegirCaja && <span className="text-rose-600">*</span>}</Label>
-              {!necesitaElegirCaja ? (
-                <Input value={cajaNombre ?? '—'} readOnly className="mt-1 bg-slate-50" />
-              ) : cajasDisponibles.length === 0 ? (
+              <Label className="text-xs">Caja <span className="text-rose-600">*</span></Label>
+              {cajasDisponibles.length === 0 ? (
                 <div className="mt-1 rounded-md border border-amber-300 bg-amber-50 p-2 text-[11px] text-amber-800">
                   No hay cajas configuradas en el sistema. El gerente debe crear al menos
                   una caja desde el ERP antes de poder vender.
@@ -123,16 +126,27 @@ export function AbrirCajaModal({
                     onChange={(e) => setCajaSel(e.target.value)}
                     className="mt-1 h-10 w-full rounded-md border border-input bg-white px-2 text-sm"
                   >
-                    <option value="">— Elegí una caja —</option>
+                    <option value="">— Elige una caja —</option>
                     {cajasDisponibles.map((c) => (
                       <option key={c.id} value={c.id}>
                         {c.codigo} · {c.nombre}
                       </option>
                     ))}
                   </select>
-                  <p className="mt-1 text-[10px] text-slate-500">
-                    No tenés caja asignada. La que elijas se guardará como tu predeterminada.
-                  </p>
+                  {sinCajaAsignada ? (
+                    <p className="mt-1 text-[10px] text-slate-500">
+                      No tienes caja asignada. La que elijas queda como tu predeterminada.
+                    </p>
+                  ) : cambioDeCaja ? (
+                    <p className="mt-1 text-[10px] font-medium text-amber-700">
+                      Cambias de {cajaNombre}. Vas a vender con el stock y las series de esta otra
+                      tienda, y queda como tu caja predeterminada.
+                    </p>
+                  ) : (
+                    <p className="mt-1 text-[10px] text-slate-500">
+                      Tu caja habitual. Puedes cambiarla si hoy cubres otra tienda.
+                    </p>
+                  )}
                 </>
               )}
             </div>
@@ -172,7 +186,7 @@ export function AbrirCajaModal({
           onClick={submit}
           variant="premium"
           size="lg"
-          disabled={pending || (necesitaElegirCaja && cajasDisponibles.length === 0)}
+          disabled={pending || !cajaSel || cajasDisponibles.length === 0}
           className="mt-6 w-full"
         >
           {pending ? <Loader2 className="h-4 w-4 animate-spin" /> : <LogIn className="h-4 w-4" />}
