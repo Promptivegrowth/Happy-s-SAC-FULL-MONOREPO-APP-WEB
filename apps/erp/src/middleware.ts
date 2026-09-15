@@ -15,6 +15,23 @@ const PUBLIC_PATHS = [
   '/api/cron',
 ];
 
+
+/**
+ * Redirige SIN PERDER los cookies que Supabase acaba de renovar.
+ *
+ * Cuando el token esta por vencer, la libreria lo renueva durante el middleware
+ * y deja los cookies nuevos en `response`. Un `NextResponse.redirect()` es una
+ * respuesta distinta y no los lleva: el token renovado se pierde, el navegador
+ * se queda con el viejo —que al renovarse ya quedo invalidado— y el resultado es
+ * un ida y vuelta infinito entre /login y /dashboard que termina en
+ * ERR_TOO_MANY_REDIRECTS, sin forma de entrar ni de salir.
+ */
+function redirigirConservandoSesion(url: URL, response: NextResponse): NextResponse {
+  const redireccion = NextResponse.redirect(url);
+  for (const cookie of response.cookies.getAll()) redireccion.cookies.set(cookie);
+  return redireccion;
+}
+
 export async function middleware(request: NextRequest) {
   const response = NextResponse.next({ request });
 
@@ -43,12 +60,12 @@ export async function middleware(request: NextRequest) {
     const url = request.nextUrl.clone();
     url.pathname = '/login';
     url.searchParams.set('next', pathname);
-    return NextResponse.redirect(url);
+    return redirigirConservandoSesion(url, response);
   }
   if (user && (pathname === '/login' || pathname === '/')) {
     const url = request.nextUrl.clone();
     url.pathname = '/dashboard';
-    return NextResponse.redirect(url);
+    return redirigirConservandoSesion(url, response);
   }
 
   return response;
