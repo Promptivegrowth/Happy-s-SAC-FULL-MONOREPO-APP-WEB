@@ -188,6 +188,7 @@ export default async function VentaPage() {
       categorias={(categoriasRaw ?? []) as unknown as Parameters<typeof PosTerminal>[0]['categorias']}
       stockPorVariante={Object.fromEntries(stockMap)}
       cajeroNombre={perfil?.nombre_completo ?? 'Cajero'}
+      cajeroId={user.id}
       cajaDefault={cajaDefault}
       sesionInicial={sesionData}
       empresaNombre={empresaNombre}

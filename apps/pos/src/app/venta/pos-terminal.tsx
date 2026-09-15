@@ -128,6 +128,7 @@ export function PosTerminal({
   categorias = [],
   stockPorVariante = {},
   cajeroNombre,
+  cajeroId,
   cajaDefault,
   sesionInicial,
   empresaNombre = 'HAPPY SAC',
@@ -142,6 +143,8 @@ export function PosTerminal({
   categorias?: Categoria[];
   stockPorVariante?: Record<string, number>;
   cajeroNombre: string;
+  /** Id de quien está en caja: se usa para no listarla dos veces. */
+  cajeroId?: string | null;
   cajaDefault: { id: string; nombre: string; codigo: string; almacen_id: string; monto_apertura_default: number } | null;
   sesionInicial: { sesion: SesionCajaDTO; balance: BalanceCajaDTO } | null;
   empresaNombre?: string;
@@ -1439,10 +1442,17 @@ export function PosTerminal({
               value={vendedorId}
               onChange={(e) => setVendedorId(e.target.value)}
               className="h-8 rounded-md border border-slate-200 bg-white px-2 text-[11px] font-medium"
-              title="Vendedor de esta venta (se persiste por sesión)"
+              title="Vendedora de esta venta — para la comisión. Se queda elegida hasta cambiarla."
             >
-              <option value="">— sin vendedor —</option>
-              {vendedores.map((v) => (
+              {/* "sin vendedor" era mentira: la venta NO queda sin vendedor, se
+                  le atribuye a quien está en la caja (ver registrarVenta, que
+                  cae a user.id). Decirlo así evita que alguien crea que la venta
+                  quedó sin dueño para la comisión. */}
+              <option value="">{cajeroNombre} (quien está en caja)</option>
+              {/* Se excluye a quien está en caja: ya es la opción de arriba y
+                  elegirla por su nombre hace exactamente lo mismo. Verla dos
+                  veces en la lista solo confunde. */}
+              {vendedores.filter((v) => v.id !== cajeroId).map((v) => (
                 <option key={v.id} value={v.id}>{v.nombre}</option>
               ))}
             </select>
