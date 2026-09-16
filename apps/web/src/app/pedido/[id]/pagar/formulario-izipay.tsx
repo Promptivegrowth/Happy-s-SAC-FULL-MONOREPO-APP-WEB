@@ -11,47 +11,46 @@
  * verifique la firma. NO se confía en `orderStatus` acá: el navegador del
  * comprador puede decir lo que quiera.
  *
+ * El armado sigue el ejemplo oficial de izipay para React:
+ *   https://github.com/izipay-pe/Embedded-PaymentForm-React
+ * Hay dos detalles suyos que no se pueden cambiar sin romperlo todo:
+ *
+ *   1. La librería se carga con `@lyracom/embedded-form-glue`, el paquete de
+ *      ellos. Cargar el script a mano parece equivalente y no lo es.
+ *   2. `attachForm` recibe el div que CONTIENE al `.kr-embedded`, no el
+ *      `.kr-embedded` mismo. Apuntándole al de adentro, izipay lo marca como
+ *      suyo, le vacía el contenido y no dibuja un solo campo: queda un
+ *      recuadro en blanco, sin ningún error, para siempre.
+ *
  * ── Por qué esto es una PÁGINA y no una ventana sobre el checkout ──
  *
- * Krypton (la librería de izipay) se inicializa una sola vez por carga de
- * página. Se probó con un modal y falla de dos maneras: si se desmonta, no
- * vuelve a montarse nunca —queda un recuadro vacío—, y si solo se oculta,
- * izipay da el pago por "Abortado" y el formulario que queda detrás ya no
- * sirve. Las dos dejaban al comprador sin poder reintentar.
- *
- * Con una página propia cada intento es una carga nueva y siempre arranca
- * limpio. Además le queda un enlace al que volver: el pedido ya existe y sigue
- * esperando el pago.
+ * Krypton se inicializa una sola vez por carga de página. Se probó con un
+ * modal y falla de dos maneras: si se desmonta, no vuelve a montarse nunca, y
+ * si solo se oculta, izipay da el pago por "Abortado" y el formulario que
+ * queda detrás ya no sirve. Las dos dejaban al comprador sin poder reintentar.
+ * Con una página propia cada intento es una carga nueva y arranca limpio.
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
+import KRGlue from '@lyracom/embedded-form-glue';
 import { Loader2, Lock, ArrowLeft } from 'lucide-react';
 import { useCart } from '@/store/cart';
 
-// Librería del formulario incrustado (Krypton V4) y su tema "clásico".
-const JS_KRYPTON =
-  'https://static.micuentaweb.pe/static/js/krypton-client/V4.0/stable/kr-payment-form.min.js';
-const CSS_KRYPTON =
-  'https://static.micuentaweb.pe/static/js/krypton-client/V4.0/ext/classic-reset.css';
-const JS_TEMA =
-  'https://static.micuentaweb.pe/static/js/krypton-client/V4.0/ext/classic.js';
+/** Dominio desde el que izipay sirve su librería y su tema. */
+const ENDPOINT_IZIPAY = 'https://static.micuentaweb.pe';
+const CSS_TEMA = `${ENDPOINT_IZIPAY}/static/js/krypton-client/V4.0/ext/classic-reset.css`;
+const JS_TEMA = `${ENDPOINT_IZIPAY}/static/js/krypton-client/V4.0/ext/classic.js`;
 
-const CONTENEDOR = 'izipay-formulario';
+/** El div que envuelve al formulario. Es el que recibe `attachForm`. */
+const ENVOLTORIO = 'izipay-envoltorio';
 
-/* eslint-disable @typescript-eslint/no-explicit-any */
-type KryptonEvent = {
+type RespuestaKrypton = {
   rawClientAnswer: string;
   hash: string;
   hashKey: string;
 };
-declare global {
-  interface Window {
-    KR?: any;
-  }
-}
-/* eslint-enable @typescript-eslint/no-explicit-any */
 
 function cargarCss(href: string) {
   if (document.querySelector(`link[href="${href}"]`)) return;
@@ -61,7 +60,7 @@ function cargarCss(href: string) {
   document.head.appendChild(l);
 }
 
-function cargarScript(src: string, atributos: Record<string, string> = {}): Promise<void> {
+function cargarScript(src: string): Promise<void> {
   return new Promise((resolve, reject) => {
     const yaEsta = document.querySelector<HTMLScriptElement>(`script[src="${src}"]`);
     if (yaEsta) {
@@ -72,7 +71,6 @@ function cargarScript(src: string, atributos: Record<string, string> = {}): Prom
     }
     const s = document.createElement('script');
     s.src = src;
-    for (const [k, v] of Object.entries(atributos)) s.setAttribute(k, v);
     s.addEventListener('load', () => {
       s.dataset.listo = '1';
       resolve();
@@ -83,55 +81,30 @@ function cargarScript(src: string, atributos: Record<string, string> = {}): Prom
 }
 
 /**
- * Ejecuta un paso de Krypton sin que un fallo corte la secuencia.
- *
- * Krypton rechaza con `undefined` en pasos que a veces sobran: volver a
- * enganchar un formulario ya enganchado, o mostrar uno que ya se está viendo.
- * Tratar eso como error dejaba al comprador con un cartel rojo delante de un
- * formulario que funcionaba perfectamente. Lo que decide si hubo un problema
- * de verdad es si los campos llegaron a dibujarse (`esperarFormulario`).
- */
-async function paso<T>(fn: () => Promise<T>): Promise<T | undefined> {
-  try {
-    return await fn();
-  } catch {
-    return undefined;
-  }
-}
-
-/**
  * A los cuántos segundos se avisa que está tardando, y a los cuántos se da por
  * perdido.
  *
  * La primera vez que alguien entra, el navegador se baja una decena de
- * archivos de izipay más su analizador de riesgo. Medido contra el sitio en
- * producción, con la caché vacía eso pasa de los 45 segundos.
- *
- * Por eso no se corta ahí. Decirle a alguien "no cargó, revisa tu conexión"
- * cuando el formulario estaba por aparecer lo manda a cerrar la página con la
- * compra a medias. Se espera de verdad, y mientras tanto se le dice que está
- * tardando, que es la información que sí sirve.
+ * archivos de izipay más su analizador de riesgo. Decirle "no cargó, revisa tu
+ * conexión" cuando el formulario estaba por aparecer lo manda a cerrar la
+ * página con la compra a medias.
  */
 const AVISAR_LENTO_MS = 20000;
-const RENDIRSE_MS = 120000;
+const RENDIRSE_MS = 90000;
 
 /** Espera a que los campos de tarjeta estén realmente en pantalla. */
-function esperarFormulario(
-  listo: () => boolean,
-  avisarLento: () => void,
-  limiteMs = RENDIRSE_MS,
-): Promise<boolean> {
+function esperarFormulario(avisarLento: () => void): Promise<boolean> {
   const desde = Date.now();
   let avisado = false;
   return new Promise((resolve) => {
     const mirar = () => {
-      if (listo() || document.querySelector(`#${CONTENEDOR} iframe`)) return resolve(true);
+      if (document.querySelector(`#${ENVOLTORIO} iframe`)) return resolve(true);
       const pasado = Date.now() - desde;
       if (!avisado && pasado > AVISAR_LENTO_MS) {
         avisado = true;
         avisarLento();
       }
-      if (pasado > limiteMs) return resolve(false);
+      if (pasado > RENDIRSE_MS) return resolve(false);
       setTimeout(mirar, 250);
     };
     mirar();
@@ -169,22 +142,18 @@ export function FormularioIzipay({
   // pedirían dos formTokens y el formulario se dibujaría duplicado.
   const yaArranco = useRef(false);
   /*
-   * Punto de anclaje del formulario de izipay.
+   * El envoltorio lo renderiza React; el `.kr-embedded` de adentro NO.
    *
-   * React renderiza este div VACÍO y no vuelve a tocarlo nunca. El nodo donde
-   * monta Krypton se crea a mano y se cuelga acá dentro.
-   *
-   * Es a propósito: Krypton no dibuja dentro del elemento, lo REEMPLAZA (le
-   * pone `is="krypton-card-form"` y monta su propio componente encima). Si ese
-   * elemento lo hubiera renderizado React, el siguiente re-render se encuentra
-   * con un nodo que ya no es suyo y toda la página se cae con "Application
-   * error: a client-side exception has occurred".
+   * Izipay no dibuja dentro de ese elemento: lo REEMPLAZA, le pone
+   * `is="krypton-card-form"` y monta su propio componente encima. Si lo
+   * hubiera renderizado React, el siguiente repintado se encuentra con un nodo
+   * que ya no es suyo y toda la página se cae con "Application error". Creado
+   * a mano, React ni se entera de que existe.
    */
-  const anclaRef = useRef<HTMLDivElement | null>(null);
-  const formularioListo = useRef(false);
+  const envoltorioRef = useRef<HTMLDivElement | null>(null);
 
   const confirmar = useCallback(
-    async (ev: KryptonEvent) => {
+    async (ev: RespuestaKrypton) => {
       setEstado('procesando');
       try {
         const res = await fetch('/api/pagos/izipay/confirmar', {
@@ -212,11 +181,21 @@ export function FormularioIzipay({
     [pedidoId, router, vaciarCarrito],
   );
 
+  /*
+   * `confirmar` se guarda en una referencia y el efecto NO depende de ella.
+   *
+   * Si el efecto dependiera de la función, cada repintado que le cambiara la
+   * identidad lo volvería a ejecutar: primero corre la limpieza —que le pide a
+   * izipay que quite el formulario— y después el cuerpo, que no rearma nada
+   * porque ya arrancó una vez. El formulario se dibujaba y desaparecía.
+   */
+  const confirmarRef = useRef<(ev: RespuestaKrypton) => Promise<void>>(async () => {});
+  confirmarRef.current = confirmar;
+
   useEffect(() => {
     if (yaArranco.current) return;
     yaArranco.current = true;
     let vivo = true;
-    let anfitrion: HTMLDivElement | null = null;
 
     (async () => {
       try {
@@ -229,64 +208,41 @@ export function FormularioIzipay({
         if (!res.ok) throw new Error(json.error ?? 'No pudimos preparar el pago');
         if (!vivo) return;
 
-        cargarCss(CSS_KRYPTON);
-        await cargarScript(JS_KRYPTON, {
-          'kr-public-key': json.publicKey,
-          'kr-language': 'es-PE',
-        });
+        // El tema es lo que le da forma a los campos; sin él no se dibujan.
+        cargarCss(CSS_TEMA);
         await cargarScript(JS_TEMA);
         if (!vivo) return;
 
-        const KR = window.KR;
-        if (!KR) throw new Error('No se pudo cargar el formulario de izipay');
+        const { KR } = await KRGlue.loadLibrary(ENDPOINT_IZIPAY, json.publicKey);
+        if (!vivo) return;
 
-        /*
-         * El nodo de Krypton se crea DESPUÉS de cargar la librería, y va fuera
-         * del alcance de React (ver `anclaRef`).
-         *
-         * Krypton avisa por consola que lo suyo es tener el elemento antes de
-         * que arranque. Probado: al arrancar marca el div como ya procesado y
-         * después `attachForm` no dibuja nada — queda el recuadro con las
-         * clases puestas y sin un solo campo. Creándolo después funciona, y el
-         * aviso de consola es solo eso, un aviso.
-         */
-        const ancla = anclaRef.current;
-        if (!ancla) throw new Error('No se pudo preparar el formulario');
-        ancla.innerHTML = '';
-        anfitrion = document.createElement('div');
-        anfitrion.id = CONTENEDOR;
-        anfitrion.className = 'kr-embedded';
-        ancla.appendChild(anfitrion);
+        // El hueco donde izipay va a montar (ver `envoltorioRef`).
+        const envoltorio = envoltorioRef.current;
+        if (!envoltorio) throw new Error('No se pudo preparar el formulario');
+        envoltorio.innerHTML = '';
+        const hueco = document.createElement('div');
+        hueco.className = 'kr-embedded';
+        envoltorio.appendChild(hueco);
 
         KR.onError((e: { errorMessage?: string; detailedErrorMessage?: string }) => {
           // Errores del propio formulario: tarjeta inválida, rechazo del
           // banco. No sacan al comprador de la página, puede reintentar.
           setError(e.detailedErrorMessage || e.errorMessage || 'Ocurrió un problema con el pago');
         });
-        KR.onSubmit(async (ev: KryptonEvent) => {
-          await confirmar(ev);
+        KR.onSubmit(async (ev: RespuestaKrypton) => {
+          await confirmarRef.current(ev);
           return false; // nos encargamos nosotros; sin esto izipay redirige
         });
-        KR.onFormReady(() => {
-          formularioListo.current = true;
+
+        await KR.setFormConfig({ formToken: json.formToken, 'kr-language': 'es-PE' });
+        // OJO: el envoltorio, no el `.kr-embedded` de adentro. Ver la nota de
+        // arriba del archivo.
+        const { result } = await KR.attachForm(`#${ENVOLTORIO}`);
+        await KR.showForm(result.formId);
+
+        const seVe = await esperarFormulario(() => {
+          if (vivo) setTardando(true);
         });
-
-        // Los pasos que sobren fallan sin ruido: lo que importa es si los
-        // campos aparecen (ver `paso`).
-        await paso(() => KR.setFormConfig({ formToken: json.formToken, 'kr-language': 'es-PE' }));
-        const enganche = (await paso(() => KR.attachForm(`#${CONTENEDOR}`))) as
-          | { result?: { formId?: string } }
-          | undefined;
-        if (enganche?.result?.formId) {
-          await paso(() => KR.showForm(enganche.result?.formId));
-        }
-
-        const seVe = await esperarFormulario(
-          () => formularioListo.current,
-          () => {
-            if (vivo) setTardando(true);
-          },
-        );
         if (!vivo) return;
         if (!seVe) {
           throw new Error(
@@ -307,16 +263,10 @@ export function FormularioIzipay({
 
     return () => {
       vivo = false;
-      try {
-        window.KR?.removeForms();
-      } catch {
-        /* si la librería no llegó a cargar, no hay nada que limpiar */
-      }
-      // El nodo lo creamos nosotros, así que lo sacamos nosotros: React no
-      // sabe que existe y no lo va a limpiar.
-      anfitrion?.remove();
     };
-  }, [pedidoId, confirmar]);
+    // Solo el pedido. Ver `confirmarRef`: cualquier otra dependencia haría que
+    // este efecto se rehaga y tire abajo el formulario.
+  }, [pedidoId]);
 
   return (
     <div className="container max-w-md px-4 py-10">
@@ -355,9 +305,10 @@ export function FormularioIzipay({
             </p>
           )}
 
-          {/* Acá va el formulario de izipay. Este div queda VACÍO en el JSX:
-              el motivo está en `anclaRef`. */}
-          <div ref={anclaRef} />
+          {/* Acá monta izipay. Este div es el que recibe `attachForm`; el
+              `.kr-embedded` que va adentro se crea a mano — ver
+              `envoltorioRef`. */}
+          <div id={ENVOLTORIO} ref={envoltorioRef} />
 
           {estado === 'procesando' && (
             <div className="mt-3 flex items-center justify-center gap-2 text-sm text-slate-500">

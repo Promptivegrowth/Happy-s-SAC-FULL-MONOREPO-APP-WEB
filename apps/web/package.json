@@ -16,6 +16,7 @@
     "@happy/lib": "workspace:*",
     "@happy/ui": "workspace:*",
     "@hookform/resolvers": "^3.9.1",
+    "@lyracom/embedded-form-glue": "^1.4.4",
     "@radix-ui/react-dialog": "^1.1.2",
     "@radix-ui/react-dropdown-menu": "^2.1.2",
     "@radix-ui/react-select": "^2.1.2",
