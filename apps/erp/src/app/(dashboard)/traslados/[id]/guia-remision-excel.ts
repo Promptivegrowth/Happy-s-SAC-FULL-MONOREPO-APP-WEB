@@ -133,14 +133,36 @@ export async function generarGuiaRemisionExcel(
     row++;
   }
 
-  // Bultos si están cargados
-  if (traslado.cantidad_bultos != null && traslado.cantidad_bultos > 0) {
-    const bultosLabel = `${traslado.cantidad_bultos} ${traslado.tipo_bulto ?? 'BULTOS'}`;
-    const pesoTxt = traslado.peso_total_kg != null && traslado.peso_total_kg > 0
-      ? ` · Peso total: ${traslado.peso_total_kg.toFixed(2)} kg`
-      : '';
-    writePair(ws, row, 'Bultos transportados', bultosLabel + pesoTxt);
+  /*
+   * Los bultos, una fila por cada cosa que viaja.
+   *
+   * El texto lo escribe quien despacha y puede traer varias líneas —costales,
+   * colgadores, bolsas negras—, así que cada una va en su propia fila en vez
+   * de amontonarse en una celda donde Excel la cortaría.
+   *
+   * Los traslados viejos no tienen el texto pero sí los tres campos que había
+   * antes: se arma con ellos la misma línea que salía, para que reimprimir una
+   * guía vieja dé el mismo papel.
+   */
+  const bultosLineas: string[] = (() => {
+    const libre = (traslado.bultos_detalle ?? '').trim();
+    if (libre) return libre.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+    if (traslado.cantidad_bultos != null && traslado.cantidad_bultos > 0) {
+      const peso = traslado.peso_total_kg != null && traslado.peso_total_kg > 0
+        ? ` · Peso total: ${traslado.peso_total_kg.toFixed(2)} kg`
+        : '';
+      return [`${traslado.cantidad_bultos} ${traslado.tipo_bulto ?? 'BULTOS'}${peso}`];
+    }
+    return [];
+  })();
+
+  if (bultosLineas.length > 0) {
+    writePair(ws, row, 'Bultos transportados', bultosLineas[0]!);
     row++;
+    for (const l of bultosLineas.slice(1)) {
+      writePair(ws, row, '', l);
+      row++;
+    }
     row++;
   }
 

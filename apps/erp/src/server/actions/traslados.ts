@@ -87,6 +87,7 @@ export type TrasladoDetalle = {
   vehiculo_tarjeta_circulacion: string | null;
   transportista_ruc: string | null;
   transportista_razon_social: string | null;
+  bultos_detalle: string | null;
   cantidad_bultos: number | null;
   tipo_bulto: string | null;
   peso_total_kg: number | null;
@@ -213,6 +214,7 @@ type DetalleRaw = {
   vehiculo_tarjeta_circulacion: string | null;
   transportista_ruc: string | null;
   transportista_razon_social: string | null;
+  bultos_detalle: string | null;
   cantidad_bultos: number | null;
   tipo_bulto: string | null;
   peso_total_kg: number | string | null;
@@ -251,7 +253,7 @@ export async function obtenerTraslado(
           'modalidad, chofer_nombre, chofer_dni, chofer_licencia, ' +
           'vehiculo_placa, vehiculo_marca, vehiculo_tarjeta_circulacion, ' +
           'transportista_ruc, transportista_razon_social, ' +
-          'cantidad_bultos, tipo_bulto, peso_total_kg, ' +
+          'bultos_detalle, cantidad_bultos, tipo_bulto, peso_total_kg, ' +
           'almacen_origen_join:almacen_origen(id, codigo, nombre, direccion), ' +
           'almacen_destino_join:almacen_destino(id, codigo, nombre, direccion)',
       )
@@ -357,6 +359,7 @@ export async function obtenerTraslado(
       vehiculo_tarjeta_circulacion: c.vehiculo_tarjeta_circulacion,
       transportista_ruc: c.transportista_ruc,
       transportista_razon_social: c.transportista_razon_social,
+      bultos_detalle: c.bultos_detalle,
       cantidad_bultos: c.cantidad_bultos,
       tipo_bulto: c.tipo_bulto,
       peso_total_kg: c.peso_total_kg != null ? Number(c.peso_total_kg) : null,
@@ -511,6 +514,14 @@ const crearSchema = z
     vehiculo_tarjeta_circulacion: z.string().max(50).optional().or(z.literal('')),
     transportista_ruc: z.string().max(15).optional().or(z.literal('')),
     transportista_razon_social: z.string().max(200).optional().or(z.literal('')),
+    /*
+     * Lo que se manda, en texto libre.
+     *
+     * Reemplaza a los tres campos de abajo, que se quedan solo para los
+     * traslados viejos: sus guías se tienen que poder reimprimir igual que
+     * salieron.
+     */
+    bultos_detalle: z.string().max(1000).optional(),
     cantidad_bultos: z.coerce.number().int().min(0).optional(),
     tipo_bulto: z.string().max(50).optional().or(z.literal('')),
     peso_total_kg: z.coerce.number().min(0).optional(),
@@ -573,6 +584,7 @@ export async function crearTraslado(
         vehiculo_tarjeta_circulacion: data.vehiculo_tarjeta_circulacion?.trim() || null,
         transportista_ruc: data.transportista_ruc?.trim() || null,
         transportista_razon_social: data.transportista_razon_social?.trim() || null,
+        bultos_detalle: data.bultos_detalle?.trim() || null,
         cantidad_bultos: data.cantidad_bultos ?? null,
         tipo_bulto: data.tipo_bulto?.trim().toUpperCase() || null,
         peso_total_kg: data.peso_total_kg ?? null,

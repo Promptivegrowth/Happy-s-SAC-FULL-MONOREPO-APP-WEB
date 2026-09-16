@@ -8226,6 +8226,7 @@ export type Database = {
         Row: {
           almacen_destino: string
           almacen_origen: string
+          bultos_detalle: string | null
           cantidad_bultos: number | null
           chofer_dni: string | null
           chofer_licencia: string | null
@@ -8256,6 +8257,7 @@ export type Database = {
         Insert: {
           almacen_destino: string
           almacen_origen: string
+          bultos_detalle?: string | null
           cantidad_bultos?: number | null
           chofer_dni?: string | null
           chofer_licencia?: string | null
@@ -8286,6 +8288,7 @@ export type Database = {
         Update: {
           almacen_destino?: string
           almacen_origen?: string
+          bultos_detalle?: string | null
           cantidad_bultos?: number | null
           chofer_dni?: string | null
           chofer_licencia?: string | null

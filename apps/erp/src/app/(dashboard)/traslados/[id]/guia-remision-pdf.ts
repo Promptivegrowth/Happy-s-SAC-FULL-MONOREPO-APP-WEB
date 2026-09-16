@@ -140,9 +140,34 @@ export async function generarGuiaRemisionPdf(
     traslado.almacen_destino_direccion,
   ].filter(Boolean).join(' — ');
 
-  // Alto del bloque: 5 filas fijas + detalle opcional
+  /*
+   * Los bultos, tal como los escribió quien despachó.
+   *
+   * Es texto libre de varias líneas —"4 costales de disfraces", "3 colgadores
+   * de faldas de marinera", "2 bolsas negras con sombreros"— porque un envío
+   * nunca es de una sola clase de bulto. Cada línea se imprime entera: este
+   * es el papel que mira quien recibe para saber si llegó todo.
+   *
+   * Los traslados anteriores a este cambio no tienen el texto, pero sí los
+   * tres campos viejos. Se arma la misma línea que salía antes para que una
+   * reimpresión de una guía vieja se vea igual que el día que se emitió.
+   */
+  const bultosLineas: string[] = (() => {
+    const libre = (traslado.bultos_detalle ?? '').trim();
+    if (libre) return libre.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+    if (traslado.cantidad_bultos != null && traslado.cantidad_bultos > 0) {
+      const peso = traslado.peso_total_kg != null && traslado.peso_total_kg > 0
+        ? ` · ${traslado.peso_total_kg.toFixed(2)} kg`
+        : '';
+      return [`${traslado.cantidad_bultos} ${traslado.tipo_bulto ?? 'BULTOS'}${peso}`];
+    }
+    return [];
+  })();
+
+  // Alto del bloque: 4 filas fijas + motivo + los bultos, que crecen
   const tieneDetalle = !!traslado.motivo;
-  const blockH = 6 + filaAlta * (4 + (tieneDetalle ? 1 : 0)) + 2;
+  const filasBultos = bultosLineas.length > 0 ? 1 + bultosLineas.length : 1;
+  const blockH = 6 + filaAlta * (3 + filasBultos + (tieneDetalle ? 1 : 0)) + 2;
   doc.setDrawColor(...GRIS);
   doc.setLineWidth(0.3);
   doc.rect(M, y, boxW, blockH, 'S');
@@ -161,13 +186,27 @@ export async function generarGuiaRemisionPdf(
   labelValor('Direc. Pto Llegada:', dirDestino, colIzqX, fy, boxW * 0.54);
   labelValor('N° Interno:', traslado.codigo, colDerX, fy, boxW * 0.42);
   fy += filaAlta;
-  // Fila 4: motivo + bultos/peso
-  labelValor('Motivo:', 'TRASLADO ENTRE ESTABLECIMIENTOS DEL MISMO CONTRIBUYENTE', colIzqX, fy, boxW * 0.54);
-  const bultosTxt = traslado.cantidad_bultos != null && traslado.cantidad_bultos > 0
-    ? `${traslado.cantidad_bultos} ${traslado.tipo_bulto ?? 'BULTOS'}${traslado.peso_total_kg != null && traslado.peso_total_kg > 0 ? ` · ${traslado.peso_total_kg.toFixed(2)} kg` : ''}`
-    : '—';
-  labelValor('Bultos / Peso:', bultosTxt, colDerX, fy, boxW * 0.42);
+  // Fila 4: motivo, a todo el ancho — antes se cortaba a media caja
+  labelValor('Motivo:', 'TRASLADO ENTRE ESTABLECIMIENTOS DEL MISMO CONTRIBUYENTE', colIzqX, fy, boxW - 6);
   fy += filaAlta;
+
+  // Filas 5+: los bultos, una línea por cada cosa que viaja
+  if (bultosLineas.length === 0) {
+    labelValor('Bultos transportados:', '—', colIzqX, fy, boxW - 6);
+    fy += filaAlta;
+  } else {
+    doc.setFont('helvetica', 'bold');
+    doc.setTextColor(...AZUL);
+    doc.text('Bultos transportados:', colIzqX, fy);
+    fy += filaAlta;
+    doc.setFont('helvetica', 'normal');
+    doc.setTextColor(0, 0, 0);
+    for (const l of bultosLineas) {
+      const cortada = (doc.splitTextToSize(l, boxW - 12) as string[])[0] ?? l;
+      doc.text(`• ${cortada}`, colIzqX + 2, fy);
+      fy += filaAlta;
+    }
+  }
   // Fila 5 (opcional): detalle libre
   if (tieneDetalle) {
     labelValor('Detalle:', traslado.motivo!, colIzqX, fy, boxW - 6);

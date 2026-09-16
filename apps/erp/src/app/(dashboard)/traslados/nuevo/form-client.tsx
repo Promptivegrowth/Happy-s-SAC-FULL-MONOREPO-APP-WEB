@@ -28,6 +28,8 @@ type LineaEditable = {
   // Display
   display: string;
   sub: string;
+  /** La talla, que va destacada al costado del nombre. */
+  destacado: string;
   cantidad: string;
   observacion: string;
 };
@@ -71,6 +73,17 @@ export function NuevoTrasladoForm({
   const [cantidadBultos, setCantidadBultos] = useState('');
   const [tipoBulto, setTipoBulto] = useState('COSTALES');
   const [pesoTotal, setPesoTotal] = useState('');
+  /*
+   * Lo que se manda, escrito a mano y en varias líneas.
+   *
+   * Los tres casilleros de antes —cantidad, tipo de una lista cerrada, peso—
+   * asumían que un envío es de una sola clase de bulto. Nunca lo es: van
+   * costales de disfraces, bolsas negras con sombreros y accesorios, y
+   * colgadores con las faldas de marinera, que no se empaquetan para que no
+   * pierdan el planchado. Con un campo por clase había que elegir uno y el
+   * resto viajaba sin declarar en la guía.
+   */
+  const [bultosDetalle, setBultosDetalle] = useState('');
 
   // Cuántos campos del bloque "Vehículo y conductor" tienen dato — para el
   // badge del summary y para abrir el bloque automáticamente si ya se cargó
@@ -140,6 +153,7 @@ export function NuevoTrasladoForm({
         material_id: '',
         display: '',
         sub: '',
+        destacado: '',
         cantidad: '1',
         observacion: '',
       },
@@ -193,7 +207,8 @@ export function NuevoTrasladoForm({
               variante_id: found.v.id,
               material_id: '',
               display: `${found.v.sku} · ${found.v.producto_nombre}`,
-              sub: `Talla ${formatTallaChip(found.v.talla)}`,
+              sub: '',
+              destacado: `Talla ${formatTallaChip(found.v.talla)}`,
               cantidad: String(cantidadAgregar),
               observacion: '',
             }
@@ -204,6 +219,7 @@ export function NuevoTrasladoForm({
               material_id: found.m.id,
               display: `${found.m.codigo} · ${found.m.nombre}`,
               sub: found.m.unidad ?? '—',
+              destacado: '',
               cantidad: String(cantidadAgregar),
               observacion: '',
             };
@@ -269,7 +285,8 @@ export function NuevoTrasladoForm({
       variante_id: v.id,
       material_id: '',
       display: `${v.sku} · ${v.producto_nombre}`,
-      sub: `Talla ${formatTallaChip(v.talla)}`,
+      sub: '',
+      destacado: `Talla ${formatTallaChip(v.talla)}`,
     });
   }
 
@@ -280,6 +297,7 @@ export function NuevoTrasladoForm({
       material_id: m.id,
       display: `${m.codigo} · ${m.nombre}`,
       sub: m.unidad ?? '—',
+      destacado: '',
     });
   }
 
@@ -343,9 +361,7 @@ export function NuevoTrasladoForm({
       vehiculo_tarjeta_circulacion: vehiculoTarjeta,
       transportista_ruc: transportistaRuc,
       transportista_razon_social: transportistaRazon,
-      cantidad_bultos: cantidadBultos ? Number(cantidadBultos) : undefined,
-      tipo_bulto: tipoBulto,
-      peso_total_kg: pesoTotal ? Number(pesoTotal) : undefined,
+      bultos_detalle: bultosDetalle.trim() || undefined,
       ejecutar_ahora: ejecutarAhora,
     };
 
@@ -509,45 +525,24 @@ export function NuevoTrasladoForm({
 
         <div className="mt-4 border-t pt-4">
           <p className="mb-2 text-xs font-medium text-slate-500 uppercase tracking-wide">Bultos transportados</p>
-          <FormGrid cols={3}>
-            <FormRow label="Cantidad de bultos">
-              <Input
-                type="number"
-                min="0"
-                step="1"
-                value={cantidadBultos}
-                onChange={(e) => setCantidadBultos(e.target.value.replace(/[.,]/g, ''))}
-                placeholder="5"
-                disabled={pending}
-              />
-            </FormRow>
-            <FormRow label="Tipo de bulto">
-              <select
-                value={tipoBulto}
-                onChange={(e) => setTipoBulto(e.target.value)}
-                className="h-9 w-full rounded-md border border-input bg-white px-2 text-sm"
-                disabled={pending}
-              >
-                <option value="COSTALES">Costales</option>
-                <option value="CAJAS">Cajas</option>
-                <option value="PAQUETES">Paquetes</option>
-                <option value="BULTOS">Bultos</option>
-                <option value="ROLLOS">Rollos</option>
-                <option value="OTROS">Otros</option>
-              </select>
-            </FormRow>
-            <FormRow label="Peso total (kg)" hint="Opcional — se imprime en la guía">
-              <Input
-                type="number"
-                min="0"
-                step="0.01"
-                value={pesoTotal}
-                onChange={(e) => setPesoTotal(e.target.value)}
-                placeholder="0.00"
-                disabled={pending}
-              />
-            </FormRow>
-          </FormGrid>
+          {/*
+            Una sola caja, con varias líneas.
+            Acá se escribe todo lo que viaja tal como se cargó: los costales,
+            las bolsas negras con accesorios, los colgadores con las faldas. Y
+            cuando el envío es corte para un taller de afuera, de quién es cada
+            costal y quién lo va a recoger, que es lo que mira el que recibe.
+          */}
+          <textarea
+            value={bultosDetalle}
+            onChange={(e) => setBultosDetalle(e.target.value)}
+            rows={4}
+            disabled={pending}
+            placeholder={'4 costales de disfraces\n3 colgadores de faldas de marinera\n2 bolsas negras con sombreros'}
+            className="w-full rounded-md border border-input bg-white px-3 py-2 text-sm leading-relaxed focus:outline-none focus:ring-2 focus:ring-corp-200 disabled:opacity-60"
+          />
+          <p className="mt-1 text-[11px] text-slate-500">
+            Escribe una línea por cada cosa que mandas. Sale tal cual en la guía impresa.
+          </p>
         </div>
         </div>
       </details>
@@ -709,6 +704,7 @@ export function NuevoTrasladoForm({
                                 material_id: '',
                                 display: '',
                                 sub: '',
+                                destacado: '',
                               });
                             }}
                             className="h-8 w-full rounded-md border border-input bg-white px-2 text-xs"
@@ -725,6 +721,7 @@ export function NuevoTrasladoForm({
                               valueId={l.variante_id}
                               display={l.display}
                               sub={l.sub}
+                              destacado={l.destacado}
                               disabled={pending}
                               onPick={(v) => setLineaVariante(l.uid, v)}
                               onClear={() =>
@@ -732,6 +729,7 @@ export function NuevoTrasladoForm({
                                   variante_id: '',
                                   display: '',
                                   sub: '',
+                                  destacado: '',
                                 })
                               }
                             />
@@ -741,6 +739,7 @@ export function NuevoTrasladoForm({
                               valueId={l.material_id}
                               display={l.display}
                               sub={l.sub}
+                              destacado={l.destacado}
                               disabled={pending}
                               onPick={(m) => setLineaMaterial(l.uid, m)}
                               onClear={() =>
@@ -748,6 +747,7 @@ export function NuevoTrasladoForm({
                                   material_id: '',
                                   display: '',
                                   sub: '',
+                                  destacado: '',
                                 })
                               }
                             />
@@ -1215,9 +1215,11 @@ function ComboBase<T>({
   matchText,
   renderLabel,
   renderSub,
+  renderDestacado,
   valueId,
   display,
   sub,
+  destacado,
   disabled,
   placeholder,
   onPick,
@@ -1227,9 +1229,23 @@ function ComboBase<T>({
   matchText: (it: T) => string;
   renderLabel: (it: T) => string;
   renderSub: (it: T) => string;
+  /*
+   * Lo que va DESTACADO al costado del nombre: hoy, la talla.
+   *
+   * Pedido de la encargada de despacho (16/09/2026): "quiero que la talla la
+   * ponga al costado donde termina el nombre del producto, para que se vea más
+   * grande y cuando otra persona lo vea no cometa errores; está bien chiquito y
+   * a mí que uso lentes se me dificulta". Iba en el renglón gris de 10 px
+   * debajo del nombre, junto a datos que a nadie le importan al despachar.
+   *
+   * Un error de talla en un traslado no se descubre hasta que la prenda llega
+   * a la tienda equivocada.
+   */
+  renderDestacado?: (it: T) => string | null;
   valueId: string;
   display: string;
   sub: string;
+  destacado?: string;
   disabled?: boolean;
   placeholder: string;
   onPick: (it: T) => void;
@@ -1253,9 +1269,16 @@ function ComboBase<T>({
   if (valueId) {
     return (
       <div className="flex items-center justify-between gap-2 rounded-md border bg-slate-50 px-2 py-1">
-        <div className="min-w-0">
-          <div className="truncate text-sm font-medium text-corp-900">{display}</div>
-          {sub && <div className="truncate text-[10px] text-slate-500">{sub}</div>}
+        <div className="flex min-w-0 flex-1 items-center gap-2">
+          <div className="min-w-0">
+            <div className="truncate text-sm font-medium text-corp-900">{display}</div>
+            {sub && <div className="truncate text-[10px] text-slate-500">{sub}</div>}
+          </div>
+          {destacado && (
+            <span className="shrink-0 rounded-md border border-corp-300 bg-corp-50 px-2 py-0.5 text-sm font-bold uppercase tracking-wide text-corp-900">
+              {destacado}
+            </span>
+          )}
         </div>
         <Button
           type="button"
@@ -1303,7 +1326,14 @@ function ComboBase<T>({
               }}
               className="flex w-full flex-col items-start gap-0.5 border-b px-3 py-2 text-left text-sm last:border-0 hover:bg-happy-50"
             >
-              <span className="font-medium text-corp-900">{renderLabel(it)}</span>
+              <span className="flex w-full items-center gap-2">
+                <span className="min-w-0 flex-1 font-medium text-corp-900">{renderLabel(it)}</span>
+                {renderDestacado?.(it) && (
+                  <span className="shrink-0 rounded-md border border-corp-300 bg-corp-50 px-2 py-0.5 text-sm font-bold uppercase tracking-wide text-corp-900">
+                    {renderDestacado(it)}
+                  </span>
+                )}
+              </span>
               <span className="text-[11px] text-slate-500">{renderSub(it)}</span>
             </button>
           ))}
@@ -1318,6 +1348,7 @@ function ComboVariante(props: {
   valueId: string;
   display: string;
   sub: string;
+  destacado?: string;
   disabled?: boolean;
   onPick: (v: VarianteItem) => void;
   onClear: () => void;
@@ -1327,10 +1358,14 @@ function ComboVariante(props: {
       items={props.variantes}
       matchText={(v) => `${v.sku} ${v.producto_nombre} ${v.talla}`}
       renderLabel={(v) => `${v.sku} · ${v.producto_nombre}`}
-      renderSub={(v) => `Talla ${formatTallaChip(v.talla)}`}
+      // La talla ya sale destacada al costado; repetirla abajo en gris chico
+      // solo le resta peso.
+      renderSub={() => ''}
+      renderDestacado={(v) => `Talla ${formatTallaChip(v.talla)}`}
       valueId={props.valueId}
       display={props.display}
       sub={props.sub}
+      destacado={props.destacado}
       disabled={props.disabled}
       placeholder="Buscar SKU, producto o talla…"
       onPick={props.onPick}
@@ -1344,6 +1379,9 @@ function ComboMaterial(props: {
   valueId: string;
   display: string;
   sub: string;
+  /* Los materiales no tienen talla; la prop existe para que la fila pueda
+     pasar la misma info a los dos combos sin ramificar. */
+  destacado?: string;
   disabled?: boolean;
   onPick: (m: MaterialItem) => void;
   onClear: () => void;
