@@ -386,3 +386,68 @@ describe('caja y vendedor en el ticket', () => {
     expect(s).toContain('Atendido por:');
   });
 });
+
+describe('a qué cuenta se pagó', () => {
+  /*
+   * El pedido que originó esto (16/09/2026): "al vender, el voucher no muestra
+   * a qué cuenta se pagó —BCP Javier, Continental—, solo dice efectivo o
+   * transferencia". La vendedora lo necesita en la mano: cuando el cliente
+   * dice "ya te yapié", hay que poder mirar el papel y ver a qué número entró.
+   */
+  it('imprime la cuenta debajo del medio de pago', () => {
+    const s = texto(construirTicket({
+      ...BASE,
+      pagos: [{ metodo: 'TRANSFERENCIA', monto: 100, referencia: 'BCP JAVIER' }],
+    }));
+    expect(s).toContain('Transferencia');
+    expect(s).toContain('BCP JAVIER');
+  });
+
+  it('distingue dos cobros del mismo medio a cuentas distintas', () => {
+    const s = texto(construirTicket({
+      ...BASE,
+      pagos: [
+        { metodo: 'PLIN', monto: 60, referencia: 'CONTINENTAL - PLIN HAPPYS' },
+        { metodo: 'PLIN', monto: 40, referencia: 'BCP HAPPYS' },
+      ],
+    }));
+    expect(s).toContain('CONTINENTAL - PLIN HAPPYS');
+    expect(s).toContain('BCP HAPPYS');
+  });
+
+  it('el efectivo no repite la palabra dos veces', () => {
+    // Así viene de la base: el método y la referencia dicen lo mismo.
+    const s = texto(construirTicket({
+      ...BASE,
+      pagos: [{ metodo: 'EFECTIVO', monto: 100, referencia: 'EFECTIVO' }],
+    }));
+    expect((s.match(/Efectivo/g) ?? []).length).toBe(1);
+    expect(s).not.toContain('EFECTIVO\n');
+  });
+
+  it('un pago sin cuenta sale como siempre, sin renglón de más', () => {
+    const s = texto(construirTicket({
+      ...BASE,
+      pagos: [{ metodo: 'YAPE', monto: 100 }],
+    }));
+    expect(s).toContain('Yape');
+  });
+
+  it('el nombre de la cuenta no desborda el ancho del papel', () => {
+    const t = construirTicket({
+      ...BASE,
+      pagos: [{
+        metodo: 'TRANSFERENCIA',
+        monto: 100,
+        referencia: 'CONTINENTAL - CUENTA CORRIENTE SOLES HAPPYS SAC 0011-0814',
+      }],
+    });
+    const soloTexto = texto(t)
+      .split('\n')
+      .filter((l) => !/[\x00-\x09\x0b-\x1f]/.test(l));
+    for (const l of soloTexto) expect(l.length).toBeLessThanOrEqual(COLUMNAS);
+    // Y el nombre largo se ve entero, repartido en renglones.
+    expect(texto(t)).toContain('CONTINENTAL');
+    expect(texto(t)).toContain('0011-0814');
+  });
+});

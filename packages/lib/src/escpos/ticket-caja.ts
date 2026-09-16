@@ -13,7 +13,7 @@
  * 16/09/2026.
  */
 
-import { TicketEscPos, COLUMNAS, CORTE_MM_POR_DEFECTO } from './index';
+import { TicketEscPos, COLUMNAS, CORTE_MM_POR_DEFECTO, envolver } from './index';
 
 /**
  * Cuántas columnas entran con letra de ancho doble.
@@ -157,6 +157,17 @@ export type DatosCierre = {
   esperadoEfectivo: number;
   contadoEfectivo: number;
   observaciones?: string | null;
+  /*
+   * El mismo dinero abierto por cuenta destino.
+   *
+   * Los totales de arriba son por medio de pago; esto dice a qué cuenta entró
+   * cada peso. Sin esto el arqueo decía "Transferencia S/ 1165" y quien cuadra
+   * el banco al día siguiente no sabía cuál de los dos bancos abrir.
+   *
+   * Opcional a propósito: un ticket viejo reimpreso no tiene el dato y debe
+   * seguir saliendo igual que antes en vez de romperse.
+   */
+  porCuenta?: Array<{ etiqueta: string; monto: number; cantidad: number }>;
   /** Cierre de fin de día o cambio de turno. */
   parcial?: boolean;
   /** A quién se le entrega la caja, en un cierre parcial. */
@@ -189,6 +200,28 @@ export function construirTicketCierre(
   t.lineaDoble('Tarjeta', soles(d.totalTarjeta));
   t.lineaDoble('Transferencia', soles(d.totalTransferencia));
   if (d.totalOtros > 0) t.lineaDoble('Otros', soles(d.totalOtros));
+
+  /*
+   * El detalle por cuenta, debajo del resumen por método.
+   *
+   * Va después y no en lugar del otro: el resumen por método es el que se mira
+   * de un vistazo y el que la cajera compara con lo que tiene anotado. El
+   * detalle por cuenta es para quien concilia el banco, que necesita el
+   * renglón exacto.
+   *
+   * El efectivo se salta: no entra a ninguna cuenta y ya está arriba, contado
+   * y cuadrado aparte.
+   */
+  const porCuenta = (d.porCuenta ?? []).filter((c) => c.etiqueta !== 'Efectivo');
+  if (porCuenta.length > 0) {
+    t.salto();
+    t.negrita(true).linea('DETALLE POR CUENTA').negrita(false);
+    for (const c of porCuenta) {
+      for (const l of envolver(`${c.etiqueta} (${c.cantidad})`, COLUMNAS)) t.linea(l);
+      t.lineaDoble('', soles(c.monto));
+    }
+  }
+
   t.separador();
   t.negrita(true);
   t.lineaDoble(`TOTAL VENTAS (${d.cantidadVentas})`, soles(d.totalVentas));

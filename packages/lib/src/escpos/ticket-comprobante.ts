@@ -24,6 +24,7 @@
  * confunda con una boleta.
  */
 
+import { nombreMetodo, cuentaDePago } from '../pagos/etiqueta-pago';
 import { TicketEscPos, COLUMNAS, CORTE_MM_POR_DEFECTO, envolver } from './index';
 
 export type TipoComprobanteTicket =
@@ -39,7 +40,16 @@ export type LineaTicket = {
   codigo?: string | null;
 };
 
-export type PagoTicket = { metodo: string; monto: number };
+export type PagoTicket = {
+  metodo: string;
+  monto: number;
+  /**
+   * La cuenta a la que entró la plata, como la llama el catálogo del cliente:
+   * "BCP JAVIER", "CONTINENTAL - PLIN HAPPYS". El POS ya la guardaba; faltaba
+   * imprimirla.
+   */
+  referencia?: string | null;
+};
 
 export type DatosTicket = {
   empresa: {
@@ -289,7 +299,22 @@ export function construirTicket(
   // ─────────────────────────────────────────────── pagos
   if (d.pagos.length > 0) {
     t.separador();
-    for (const p of d.pagos) t.lineaDoble(p.metodo, `${sim} ${monto(p.monto)}`);
+    /*
+     * El método arriba y la cuenta debajo, indentada.
+     *
+     * En una sola línea no entran: "Transferencia" más "CONTINENTAL - PLIN
+     * HAPPYS" más el importe pasan de los 42 caracteres del papel y el nombre
+     * de la cuenta —que es justo el dato nuevo— sería lo que se corte.
+     *
+     * Va en el voucher porque la vendedora lo necesita en la mano: cuando el
+     * cliente dice "ya te yapié" hay que poder mirar el papel y decir a qué
+     * número entró.
+     */
+    for (const p of d.pagos) {
+      t.lineaDoble(nombreMetodo(p.metodo), `${sim} ${monto(p.monto)}`);
+      const cuenta = cuentaDePago(p.metodo, p.referencia);
+      if (cuenta) for (const l of envolver(`  ${cuenta}`, COLUMNAS)) t.linea(l);
+    }
     if ((d.vuelto ?? 0) > 0) t.lineaDoble('Vuelto', `${sim} ${monto(d.vuelto!)}`);
   }
 

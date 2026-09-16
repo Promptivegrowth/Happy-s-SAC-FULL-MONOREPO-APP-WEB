@@ -15,6 +15,7 @@
 import { z } from 'zod';
 import { revalidatePath } from 'next/cache';
 import ExcelJS from 'exceljs';
+import { etiquetaPago, agruparPorCuenta } from '@happy/lib/pagos/etiqueta';
 import { DIGITOS_CORRELATIVO } from '@happy/lib/sunat-ubl';
 import { createClient } from '@happy/db/server';
 import { formatTallaChip } from '@happy/lib';
@@ -233,6 +234,7 @@ async function calcularBalanceInterno(
   const totalVentas = (ventas ?? []).reduce((a, v) => a + Number(v.total ?? 0), 0);
 
   let efectivo = 0, yape = 0, plin = 0, tarjeta = 0, transferencia = 0, otros = 0;
+  let porCuenta: BalanceCajaDTO['por_cuenta'] = [];
 
   // Los pagos se traen con JOIN sobre la sesión (no con .in(ventaIds)): una caja
   // puede estar abierta hasta 24 h con cientos de ventas y la lista de IDs en la
@@ -240,9 +242,12 @@ async function calcularBalanceInterno(
   {
     const { data: pagos } = await sb
       .from('ventas_pagos')
-      .select('metodo, monto, ventas!inner(caja_sesion_id, estado)')
+      .select('metodo, monto, referencia, ventas!inner(caja_sesion_id, estado)')
       .eq('ventas.caja_sesion_id', sesionId)
       .eq('ventas.estado', 'COMPLETADA');
+    porCuenta = agruparPorCuenta(
+      (pagos ?? []) as Array<{ metodo: string; monto: number | string; referencia: string | null }>,
+    );
     for (const p of (pagos ?? []) as Array<{ metodo: string; monto: number | string }>) {
       const monto = Number(p.monto ?? 0);
       const m = String(p.metodo);
@@ -286,6 +291,7 @@ async function calcularBalanceInterno(
     total_gastos: totalGastos,
     total_ingresos_extra: totalIngresosExtra,
     esperado_efectivo: montoApertura + efectivo + totalIngresosExtra - totalGastos,
+    por_cuenta: porCuenta,
   };
 }
 
@@ -383,11 +389,17 @@ export async function obtenerHistorialSesion(
   if (ids.length > 0) {
     const { data: pagos } = await sb
       .from('ventas_pagos')
-      .select('venta_id, metodo')
+      .select('venta_id, metodo, referencia')
       .in('venta_id', ids);
-    for (const p of (pagos ?? []) as { venta_id: string; metodo: string }[]) {
+    /*
+     * El método con su cuenta: "Plin · CONTINENTAL - PLIN HAPPYS".
+     *
+     * La lista mostraba solo "PLIN" y con dos cuentas Plin distintas no había
+     * manera de saber a cuál había entrado esa venta sin abrir el comprobante.
+     */
+    for (const p of (pagos ?? []) as { venta_id: string; metodo: string; referencia: string | null }[]) {
       const arr = pagosPorVenta.get(p.venta_id) ?? [];
-      arr.push(p.metodo);
+      arr.push(etiquetaPago(p.metodo, p.referencia));
       pagosPorVenta.set(p.venta_id, arr);
     }
   }
@@ -506,7 +518,7 @@ export async function obtenerPdfDataVenta(
 
     const { data: pagosVenta } = await sb
       .from('ventas_pagos')
-      .select('metodo, monto')
+      .select('metodo, monto, referencia')
       .eq('venta_id', venta_id);
 
     const { data: empresaRaw } = await sb
@@ -588,7 +600,7 @@ export async function obtenerPdfDataVenta(
         igv: Number(venta.igv ?? 0),
         total: Number(venta.total ?? 0),
       },
-      pagos: (pagosVenta ?? []).map((p) => ({ metodo: String(p.metodo), monto: Number(p.monto ?? 0) })),
+      pagos: (pagosVenta ?? []).map((p) => ({ metodo: String(p.metodo), monto: Number(p.monto ?? 0), referencia: p.referencia ?? null })),
       vendedor: vendedorNombre,
     };
 
@@ -759,17 +771,32 @@ export async function generarExcelCierre(sesionId: string): Promise<{ base64: st
     for (const p of perfiles ?? []) vendByIdMap.set(p.id, p.nombre_completo ?? '');
   }
 
-  const pagosByVenta = new Map<string, { metodo: string; monto: number }[]>();
+  const pagosByVenta = new Map<string, { metodo: string; monto: number; referencia: string | null }[]>();
+  /*
+   * Los totales del cierre, abiertos por cuenta destino.
+   *
+   * El Excel es el que se manda al contador y el que se abre para conciliar
+   * los bancos, así que es justo donde más falta hacía: sin esto, todas las
+   * transferencias del turno eran un solo número.
+   */
+  let porCuentaExcel: ReturnType<typeof agruparPorCuenta> = [];
   if (ventaIds.length > 0) {
     const { data: pagos } = await sb
       .from('ventas_pagos')
-      .select('venta_id, metodo, monto')
+      .select('venta_id, metodo, monto, referencia')
       .in('venta_id', ventaIds);
     for (const p of pagos ?? []) {
       const arr = pagosByVenta.get(p.venta_id as string) ?? [];
-      arr.push({ metodo: String(p.metodo), monto: Number(p.monto ?? 0) });
+      arr.push({
+        metodo: String(p.metodo),
+        monto: Number(p.monto ?? 0),
+        referencia: (p.referencia as string | null) ?? null,
+      });
       pagosByVenta.set(p.venta_id as string, arr);
     }
+    porCuentaExcel = agruparPorCuenta(
+      (pagos ?? []) as Array<{ metodo: string; monto: number | string; referencia: string | null }>,
+    );
   }
 
   // Helpers para la unión de FKs (Supabase puede devolver array o objeto)
@@ -948,6 +975,41 @@ export async function generarExcelCierre(sesionId: string): Promise<{ base64: st
   });
   row++;
 
+  /*
+   * ---- A QUÉ CUENTA ENTRÓ ----
+   *
+   * El bloque de arriba dice cuánto entró por cada medio de pago; este dice a
+   * qué cuenta. Van los dos porque responden preguntas distintas: uno es para
+   * el arqueo del turno, este es para conciliar cada banco.
+   *
+   * El efectivo se salta: no entra a ninguna cuenta y su cuadre es el de abajo.
+   */
+  const cuentasConMovimiento = porCuentaExcel.filter((c) => c.cuenta);
+  if (cuentasConMovimiento.length > 0) {
+    seccionTitulo('A QUÉ CUENTA ENTRÓ');
+    cuentasConMovimiento.forEach((c, i) => {
+      const c1 = ws.getCell(row, 1);
+      c1.value = c.etiqueta;
+      c1.font = { size: 10 };
+      ws.mergeCells(row, 2, row, COLS - 1);
+      const filler = ws.getCell(row, 2);
+      filler.value = `${c.cantidad} cobro${c.cantidad === 1 ? '' : 's'}`;
+      filler.font = { size: 9, color: { argb: BRAND.textoOscuro } };
+      const cV = ws.getCell(row, COLS);
+      cV.value = c.monto;
+      cV.numFmt = '"S/" #,##0.00';
+      cV.font = { size: 10, bold: true };
+      cV.alignment = { horizontal: 'right' };
+      if (i % 2 === 1) {
+        [c1, filler, cV].forEach((x) => {
+          x.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: BRAND.bgSuave } };
+        });
+      }
+      row++;
+    });
+    row++;
+  }
+
   // ---- RESUMEN DE VENTAS ----
   seccionTitulo('RESUMEN DE VENTAS');
   const resumenRows: Array<[string, string | number, 'moneda' | 'numero' | 'texto']> = [
@@ -1044,7 +1106,7 @@ export async function generarExcelCierre(sesionId: string): Promise<{ base64: st
     const vendNombre = v.vendedor_usuario_id ? vendByIdMap.get(v.vendedor_usuario_id) ?? null : null;
     const pagos = pagosByVenta.get(v.id) ?? [];
     const metodosStr = pagos.length
-      ? pagos.map((p) => `${metodoLabel(p.metodo)} ${p.monto.toFixed(2)}`).join(' · ')
+      ? pagos.map((p) => `${etiquetaPago(p.metodo, p.referencia)} ${p.monto.toFixed(2)}`).join(' | ')
       : '-';
     const hora = new Date(v.fecha).toLocaleTimeString('es-PE', { hour: '2-digit', minute: '2-digit' });
     const cliente = v.nombre_cliente_rapido ?? '-';
@@ -1174,7 +1236,7 @@ export async function emitirComprobante(input: z.infer<typeof emitirSchema>): Pr
   // Pagos
   const { data: pagosVenta } = await sb
     .from('ventas_pagos')
-    .select('metodo, monto')
+    .select('metodo, monto, referencia')
     .eq('venta_id', venta.id);
 
   // Empresa
@@ -1365,7 +1427,7 @@ export async function emitirComprobante(input: z.infer<typeof emitirSchema>): Pr
       igv: Number(venta.igv ?? 0),
       total: Number(venta.total ?? 0),
     },
-    pagos: (pagosVenta ?? []).map((p) => ({ metodo: String(p.metodo), monto: Number(p.monto ?? 0) })),
+    pagos: (pagosVenta ?? []).map((p) => ({ metodo: String(p.metodo), monto: Number(p.monto ?? 0), referencia: p.referencia ?? null })),
     vendedor: vendedorNombre,
   };
 
@@ -1454,6 +1516,14 @@ export type CierreParcialResultado = {
   total_ventas: number;
   total_efectivo: number;
   total_gastos: number;
+  /** A qué cuenta entró cada cobro del turno. */
+  por_cuenta: Array<{
+    metodo: string;
+    cuenta: string | null;
+    etiqueta: string;
+    monto: number;
+    cantidad: number;
+  }>;
 };
 
 export async function cerrarParcialSesion(input: {
@@ -1514,11 +1584,16 @@ export async function cerrarParcialSesion(input: {
 
   // Pagos del turno por método
   let efectivo = 0, yape = 0, plin = 0, tarjeta = 0, transferencia = 0, otros = 0;
+  // Y los mismos pagos abiertos por cuenta destino, para el ticket del turno.
+  let porCuenta: CierreParcialResultado['por_cuenta'] = [];
   if (ventaIds.length > 0) {
     const { data: pagos } = await sb
       .from('ventas_pagos')
-      .select('metodo, monto')
+      .select('metodo, monto, referencia')
       .in('venta_id', ventaIds);
+    porCuenta = agruparPorCuenta(
+      (pagos ?? []) as Array<{ metodo: string; monto: number | string; referencia: string | null }>,
+    );
     for (const p of pagos ?? []) {
       const monto = Number(p.monto ?? 0);
       const m = String(p.metodo);
@@ -1605,6 +1680,7 @@ export async function cerrarParcialSesion(input: {
     total_ventas: ventaIds.length,
     total_efectivo: efectivo,
     total_gastos: totalGastos,
+    por_cuenta: porCuenta,
   };
 }
 

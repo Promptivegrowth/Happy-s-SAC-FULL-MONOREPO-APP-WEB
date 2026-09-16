@@ -12,6 +12,7 @@
  * rangos de mes/temporada. Para data sets más grandes, restringir el rango.
  */
 
+import { etiquetaPago } from '@happy/lib/pagos/etiqueta';
 import { createClient } from '@happy/db/server';
 import { redirect } from 'next/navigation';
 import { formatTallaChip } from '@happy/lib';
@@ -154,16 +155,22 @@ export async function reporteVentas(f: FiltrosVentas): Promise<ReporteVentasResu
     }
   }
 
-  // Cargar métodos de pago por venta (puede haber N por pago dividido)
+  /*
+   * Métodos de pago por venta, con su cuenta destino (puede haber N por pago
+   * dividido).
+   *
+   * Antes salía solo "TRANSFERENCIA" y el reporte no servía para conciliar:
+   * hay dos bancos y dos billeteras, y la columna no decía cuál.
+   */
   const pagosPorVenta = new Map<string, string[]>();
   if (ventasIds.length > 0) {
     const { data: pagos } = await sb
       .from('ventas_pagos')
-      .select('venta_id, metodo')
+      .select('venta_id, metodo, referencia')
       .in('venta_id', ventasIds);
-    for (const p of (pagos ?? []) as { venta_id: string; metodo: string }[]) {
+    for (const p of (pagos ?? []) as { venta_id: string; metodo: string; referencia: string | null }[]) {
       const arr = pagosPorVenta.get(p.venta_id) ?? [];
-      arr.push(p.metodo);
+      arr.push(etiquetaPago(p.metodo, p.referencia));
       pagosPorVenta.set(p.venta_id, arr);
     }
   }

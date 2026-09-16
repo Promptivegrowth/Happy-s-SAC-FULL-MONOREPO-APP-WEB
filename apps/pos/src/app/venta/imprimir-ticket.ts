@@ -91,7 +91,7 @@ export async function datosDelTicket(
       igv: pdf.totales.igv,
       total: pdf.totales.total,
     },
-    pagos: pdf.pagos.map((p) => ({ metodo: p.metodo, monto: p.monto })),
+    pagos: pdf.pagos.map((p) => ({ metodo: p.metodo, monto: p.monto, referencia: p.referencia ?? null })),
     vuelto: extra.vuelto ?? null,
     vendedor: pdf.vendedor,
     caja: extra.caja ?? null,

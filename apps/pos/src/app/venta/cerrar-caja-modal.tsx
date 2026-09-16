@@ -170,6 +170,7 @@ export function CerrarCajaModal({
               totalGastos: balance.total_gastos,
               totalIngresosExtra: balance.total_ingresos_extra,
               esperadoEfectivo: balance.esperado_efectivo,
+              porCuenta: balance.por_cuenta,
               contadoEfectivo: Number.isFinite(contadoNum) ? contadoNum : balance.esperado_efectivo,
               observaciones: obs || null,
               parcial: modo === 'PARCIAL',
@@ -360,6 +361,35 @@ export function CerrarCajaModal({
             <Row icon={<Building2 className="h-3.5 w-3.5 text-slate-600" />} label="Transferencia" value={balance.total_transferencia} />
             {balance.total_otros > 0 && <Row icon={<Banknote className="h-3.5 w-3.5 text-slate-400" />} label="Otros" value={balance.total_otros} />}
           </div>
+
+          {/*
+            A qué cuenta entró cada cobro.
+            Los totales de arriba dicen cuánto entró por Plin; esto dice a cuál
+            de las cuentas Plin. Es lo que se necesita al día siguiente para
+            cuadrar contra el estado de cuenta del banco.
+            El efectivo no aparece: no entra a ninguna cuenta y se cuadra
+            contándolo, ahí abajo.
+          */}
+          {balance.por_cuenta.filter((c) => c.cuenta).length > 0 && (
+            <div className="mt-3 border-t pt-3">
+              <p className="mb-1.5 text-[10px] font-semibold uppercase tracking-wider text-slate-400">
+                A qué cuenta entró
+              </p>
+              <div className="space-y-1">
+                {balance.por_cuenta
+                  .filter((c) => c.cuenta)
+                  .map((c) => (
+                    <div key={c.etiqueta} className="flex items-baseline justify-between gap-2 text-[11px]">
+                      <span className="text-slate-600">
+                        {c.etiqueta}
+                        <span className="ml-1 text-slate-400">({c.cantidad})</span>
+                      </span>
+                      <span className="font-mono tabular-nums text-slate-800">{formatPEN(c.monto)}</span>
+                    </div>
+                  ))}
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Cuadre de efectivo */}

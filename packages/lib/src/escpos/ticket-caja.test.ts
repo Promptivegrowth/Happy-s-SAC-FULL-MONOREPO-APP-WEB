@@ -200,6 +200,47 @@ describe('el ticket de cierre deja el cuadre a la vista', () => {
     expect(salida).toContain('TOTAL VENTAS (23)');
   });
 
+  it('dice a qué cuenta entró cada cobro, no solo el medio de pago', () => {
+    /*
+     * El pedido de la vendedora (16/09/2026): el arqueo decía "Transferencia
+     * S/ 1165" y hay dos bancos. Al día siguiente, quien concilia no sabía
+     * cuál abrir.
+     */
+    const salida = texto(construirTicketCierre(CAB, {
+      ...CIERRE,
+      porCuenta: [
+        { etiqueta: 'Efectivo', monto: 850.5, cantidad: 12 },
+        { etiqueta: 'Plin · CONTINENTAL - PLIN HAPPYS', monto: 715, cantidad: 8 },
+        { etiqueta: 'Transferencia · BCP JAVIER', monto: 1165, cantidad: 16 },
+      ],
+    }));
+    expect(salida).toContain('DETALLE POR CUENTA');
+    expect(salida).toContain('CONTINENTAL - PLIN HAPPYS');
+    expect(salida).toContain('BCP JAVIER');
+    expect(salida).toContain('715.00');
+    expect(salida).toContain('1165.00');
+    // Cuántos cobros hubo: sirve para saber si falta uno.
+    expect(salida).toContain('(8)');
+    expect(salida).toContain('(16)');
+  });
+
+  it('el efectivo no aparece en el detalle por cuenta', () => {
+    // No entra a ninguna cuenta y su cuadre es el de abajo, contado a mano.
+    const salida = texto(construirTicketCierre(CAB, {
+      ...CIERRE,
+      porCuenta: [{ etiqueta: 'Efectivo', monto: 850.5, cantidad: 12 }],
+    }));
+    expect(salida).not.toContain('DETALLE POR CUENTA');
+  });
+
+  it('un cierre sin el dato de cuentas sale como siempre', () => {
+    // Reimprimir un cierre viejo no puede romperse ni quedar a medias.
+    const salida = texto(construirTicketCierre(CAB, CIERRE));
+    expect(salida).not.toContain('DETALLE POR CUENTA');
+    expect(salida).toContain('TOTAL VENTAS (23)');
+    expect(salida).toContain('CUADRA');
+  });
+
   it('muestra cómo se llega al efectivo esperado', () => {
     const salida = texto(construirTicketCierre(CAB, CIERRE));
     expect(salida).toContain('Monto de apertura');

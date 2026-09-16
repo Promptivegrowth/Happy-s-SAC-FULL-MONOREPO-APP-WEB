@@ -90,6 +90,24 @@ export type BalanceCajaDTO = {
   total_gastos: number; // egresos de caja chica (en efectivo)
   total_ingresos_extra: number; // ingresos de caja chica no asociados a venta
   esperado_efectivo: number; // apertura + total_efectivo + total_ingresos_extra - total_gastos
+  /*
+   * El mismo dinero, abierto por cuenta destino.
+   *
+   * Los totales de arriba responden "cuánto entró por Plin"; este responde
+   * "a qué cuenta". Son preguntas distintas y el arqueo necesita la segunda:
+   * con dos cuentas Plin, "Plin S/ 715" no le dice a nadie qué estado de
+   * cuenta hay que abrir.
+   *
+   * Suma exactamente lo mismo que total_ventas — es el mismo conjunto de
+   * pagos agrupado de otra manera.
+   */
+  por_cuenta: Array<{
+    metodo: string;
+    cuenta: string | null;
+    etiqueta: string;
+    monto: number;
+    cantidad: number;
+  }>;
 };
 
 export type EmpresaPDF = {
@@ -117,7 +135,12 @@ export type ItemPDF = {
   sub_total: number; // cantidad * precio_unitario - descuento (con IGV)
 };
 
-export type PagoPDF = { metodo: string; monto: number };
+export type PagoPDF = {
+  metodo: string;
+  monto: number;
+  /** Cuenta destino: "BCP JAVIER", "CONTINENTAL - PLIN HAPPYS". */
+  referencia?: string | null;
+};
 
 export type ComprobantePDFData = {
   empresa: EmpresaPDF;

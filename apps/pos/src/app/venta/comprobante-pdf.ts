@@ -17,6 +17,7 @@ import autoTable from 'jspdf-autotable';
 import QRCode from 'qrcode';
 import type { ComprobantePDFData } from '@/server/actions/caja-helpers';
 import { tipoComprobanteLabel, metodoLabel } from '@/server/actions/caja-helpers';
+import { cuentaDePago, etiquetaPago } from '@happy/lib/pagos/etiqueta';
 
 // ----------------------------------------------------------------------------
 // Paleta corporativa
@@ -287,10 +288,24 @@ export async function generarTicket(data: ComprobantePDFData): Promise<Blob> {
     doc.setTextColor(...COLOR.negro);
     doc.text('Pagos:', PAD_X, y);
     y += 10;
+    /*
+     * La cuenta destino va en su propio renglón, debajo del método.
+     *
+     * Mismo criterio que la ticketera: en el ancho de 80 mm no entran método,
+     * cuenta e importe en una línea, y lo que se cortaría es el nombre de la
+     * cuenta.
+     */
     data.pagos.forEach((p) => {
       doc.text(metodoLabel(p.metodo), PAD_X, y);
       doc.text(`S/ ${fmt(p.monto)}`, WIDTH - PAD_X, y, { align: 'right' });
       y += 10;
+      const cuenta = cuentaDePago(p.metodo, p.referencia);
+      if (cuenta) {
+        doc.setTextColor(...COLOR.textoOscuro);
+        doc.text(`  ${cuenta}`, PAD_X, y);
+        doc.setTextColor(...COLOR.negro);
+        y += 10;
+      }
     });
   }
 
@@ -513,7 +528,8 @@ export async function generarA4(data: ComprobantePDFData): Promise<Blob> {
     doc.setTextColor(...COLOR.textoOscuro);
     let py = pagosY + 14;
     data.pagos.forEach((p) => {
-      doc.text(`• ${metodoLabel(p.metodo)} — S/ ${fmt(p.monto)}`, MARGIN, py);
+      // En A4 sobra ancho: método, cuenta e importe entran en un renglón.
+      doc.text(`• ${etiquetaPago(p.metodo, p.referencia)} — S/ ${fmt(p.monto)}`, MARGIN, py);
       py += 12;
     });
   }
