@@ -30,10 +30,25 @@ export default async function CheckoutPage() {
     .order('orden');
   const cuentasWeb = (data ?? []) as CuentaWeb[];
 
+  /*
+   * La tarjeta se ofrece solo si el servidor puede cobrarla.
+   *
+   * Se mira acá, en el servidor, porque las credenciales de izipay no se
+   * exponen al navegador. Si faltara alguna, mostrar el botón llevaría al
+   * comprador hasta el formulario para que recién ahí falle: mejor que la
+   * opción ni aparezca.
+   */
+  const izipayHabilitado = Boolean(
+    process.env.IZIPAY_USUARIO &&
+      process.env.IZIPAY_PASSWORD &&
+      process.env.IZIPAY_HMAC_KEY &&
+      process.env.IZIPAY_PUBLIC_KEY,
+  );
+
   return (
     <div className="container px-4 py-10">
       <h1 className="mb-6 font-display text-3xl font-semibold">Finaliza tu compra</h1>
-      <CheckoutClient cuentasWeb={cuentasWeb} />
+      <CheckoutClient cuentasWeb={cuentasWeb} izipayHabilitado={izipayHabilitado} />
     </div>
   );
 }

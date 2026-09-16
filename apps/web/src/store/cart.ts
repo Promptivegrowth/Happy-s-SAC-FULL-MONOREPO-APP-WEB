@@ -3,14 +3,25 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 
-// Escalones de precio para clientes web (post-2026-07-08):
-//  - < 6 unidades totales → precio público
-//  - >= 6 unidades totales → precio mayorista (o público si no hay mayorista)
-//  - >= 100 unidades totales → precio de fábrica (o mayorista si no hay fábrica)
-// Los escalones se aplican a TODAS las líneas del carrito una vez que el
-// total de items supera el umbral (no por variante individual).
-export const UMBRAL_MAYORISTA = 6;
-export const UMBRAL_FABRICA = 100;
+// Las reglas de precio viven en @/lib/precios porque el servidor también las
+// usa —recalcula el total antes de cobrar con tarjeta— y no puede importar
+// este archivo, que es 'use client'. Se reexportan para no tocar a quienes ya
+// las importaban desde el carrito.
+import {
+  escalonPorTotalItems,
+  precioEfectivoLinea,
+  UMBRAL_MAYORISTA,
+  UMBRAL_FABRICA,
+  type EscalonAplicado,
+} from '@/lib/precios';
+
+export {
+  escalonPorTotalItems,
+  precioEfectivoLinea,
+  UMBRAL_MAYORISTA,
+  UMBRAL_FABRICA,
+};
+export type { EscalonAplicado };
 
 export type CartItem = {
   varianteId: string;
@@ -28,35 +39,6 @@ export type CartItem = {
   cantidad: number;
   stock?: number;
 };
-
-export type EscalonAplicado = 'PUBLICO' | 'MAYORISTA' | 'FABRICA';
-
-/**
- * Escalón activo según el total de items del carrito.
- * Devuelve el nombre del escalón — el precio efectivo por línea se calcula
- * con `precioEfectivoLinea` de más abajo (respeta el fallback si esa línea
- * no tiene ese precio cargado).
- */
-export function escalonPorTotalItems(totalItems: number): EscalonAplicado {
-  if (totalItems >= UMBRAL_FABRICA) return 'FABRICA';
-  if (totalItems >= UMBRAL_MAYORISTA) return 'MAYORISTA';
-  return 'PUBLICO';
-}
-
-/**
- * Precio unitario efectivo de una línea según el escalón activo.
- * Cae en cascada si no está cargado el precio del escalón:
- *   FABRICA → MAYORISTA → PUBLICO
- *   MAYORISTA → PUBLICO
- */
-export function precioEfectivoLinea(item: CartItem, escalon: EscalonAplicado): number {
-  const publico = Number(item.precio ?? 0);
-  const mayor = Number(item.precioMayorista ?? 0);
-  const fab = Number(item.precioFabrica ?? 0);
-  if (escalon === 'FABRICA') return fab > 0 ? fab : mayor > 0 ? mayor : publico;
-  if (escalon === 'MAYORISTA') return mayor > 0 ? mayor : publico;
-  return publico;
-}
 
 type CartState = {
   items: CartItem[];

@@ -59,16 +59,7 @@ export async function crearCargoCulqi(
   return res.json();
 }
 
-// ===== Izipay (placeholder) =====
-// Izipay requiere SDK cargado en el front + webhook de confirmación. Configurar
-// IZIPAY_MERCHANT_ID, IZIPAY_PUBLIC_KEY, IZIPAY_HMAC_KEY y validar la firma HMAC
-// en el webhook.
-
-export function validarFirmaIzipay(rawBody: string, signature: string, hmacKey: string): boolean {
-  // Implementación simplificada - validar con `crypto.createHmac('sha256', hmacKey).update(rawBody).digest('hex')`
-  // dejado como referencia para el Edge Function.
-  void rawBody;
-  void signature;
-  void hmacKey;
-  return false; // implementar en la Edge Function correspondiente
-}
+// ===== Izipay =====
+// Vive aparte, en `@happy/lib/pagos/izipay`, y NO se reexporta desde acá a
+// propósito: usa `node:crypto` y este módulo lo importan componentes del
+// navegador. Mezclarlos rompe el build de la web.

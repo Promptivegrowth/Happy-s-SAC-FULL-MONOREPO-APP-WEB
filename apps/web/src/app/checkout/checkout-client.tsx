@@ -17,27 +17,23 @@ import { toast } from 'sonner';
 import { useRouter } from 'next/navigation';
 import { buildPedidoWaMessage, buildWhatsappUrl } from '@happy/lib/whatsapp';
 import { formatTallaChip } from '@happy/lib';
+import { ENVIO_GRATIS_DESDE, COSTO_ENVIO_DEFECTO } from '@/lib/precios';
 
-type Metodo = 'yape' | 'plin' | 'culqi_card' | 'transferencia' | 'whatsapp';
+type Metodo = 'yape' | 'plin' | 'izipay_card' | 'transferencia' | 'whatsapp';
 
-// Cliente pidió (post-2026-07-08): solo WhatsApp está habilitado hoy.
-// Los otros medios (Yape, Plin, Tarjeta, Transferencia) se mostrarán como
-// "Próximamente" hasta que se active Culqi para tarjeta y se habilite el
-// flujo de sube-captura para Yape/Plin/Transferencia (pendiente de decisión
-// operativa). WhatsApp queda como método principal — dispara chat directo
-// con asesor con el pedido pre-cargado.
-const METODOS: { id: Metodo; label: string; descripcion: string; icon: React.ReactNode; habilitado: boolean }[] = [
+// Cliente pidió (post-2026-07-08): solo WhatsApp estaba habilitado. Desde el
+// 15/09/2026 se suma la tarjeta por izipay, que se habilita sola cuando el
+// servidor tiene cargadas las credenciales (prop `izipayHabilitado`): así la
+// opción no aparece si todavía no se puede cobrar.
+// Yape, Plin y transferencia siguen como "Próximamente" hasta que se defina el
+// flujo de sube-captura del voucher.
+const metodosDisponibles = (tarjeta: boolean): { id: Metodo; label: string; descripcion: string; icon: React.ReactNode; habilitado: boolean }[] => [
+  { id: 'izipay_card',   label: 'Tarjeta',        descripcion: tarjeta ? 'Crédito o débito · pago seguro' : 'Próximamente', icon: <CreditCard className="h-5 w-5 text-emerald-600" />,    habilitado: tarjeta },
   { id: 'whatsapp',      label: 'WhatsApp',       descripcion: 'Coordinar pago con asesor',    icon: <MessageCircle className="h-5 w-5 text-emerald-500" />, habilitado: true },
   { id: 'yape',          label: 'Yape',           descripcion: 'Próximamente',                 icon: <Smartphone className="h-5 w-5 text-purple-600" />,     habilitado: false },
   { id: 'plin',          label: 'Plin',           descripcion: 'Próximamente',                 icon: <Smartphone className="h-5 w-5 text-blue-600" />,       habilitado: false },
-  { id: 'culqi_card',    label: 'Tarjeta',        descripcion: 'Próximamente',                 icon: <CreditCard className="h-5 w-5 text-emerald-600" />,    habilitado: false },
   { id: 'transferencia', label: 'Transferencia',  descripcion: 'Próximamente',                 icon: <Building2 className="h-5 w-5 text-slate-600" />,       habilitado: false },
 ];
-
-// Envío GRATIS a partir de S/ 249 (cliente reportó post-2026-07-08).
-// Antes era S/ 199 — se subió el umbral.
-const ENVIO_GRATIS_DESDE = 249;
-const COSTO_ENVIO_DEFECTO = 15;
 
 type CuentaWeb = {
   id: string;
@@ -50,8 +46,15 @@ type CuentaWeb = {
   notas: string | null;
 };
 
-export function CheckoutClient({ cuentasWeb = [] }: { cuentasWeb?: CuentaWeb[] }) {
+export function CheckoutClient({
+  cuentasWeb = [],
+  izipayHabilitado = false,
+}: {
+  cuentasWeb?: CuentaWeb[];
+  izipayHabilitado?: boolean;
+}) {
   const router = useRouter();
+  const METODOS = useMemo(() => metodosDisponibles(izipayHabilitado), [izipayHabilitado]);
   const items = useCart((s) => s.items);
   const total = useCart((s) => s.total());
   const totalDisfraces = useCart((s) => s.totalItems());
@@ -67,9 +70,10 @@ export function CheckoutClient({ cuentasWeb = [] }: { cuentasWeb?: CuentaWeb[] }
   const [referencia, setReferencia] = useState('');
   const [ubigeo, setUbigeo] = useState('');
   const [entrega, setEntrega] = useState<'DELIVERY' | 'RECOJO_TIENDA'>('DELIVERY');
-  const [metodo, setMetodo] = useState<Metodo>('whatsapp');
+  const [metodo, setMetodo] = useState<Metodo>(izipayHabilitado ? 'izipay_card' : 'whatsapp');
   const [necesitaFactura, setNecesitaFactura] = useState(false);
   const [enviando, setEnviando] = useState(false);
+
 
   const envio = useMemo(
     () => entrega === 'RECOJO_TIENDA' ? 0 : (total >= ENVIO_GRATIS_DESDE ? 0 : COSTO_ENVIO_DEFECTO),
@@ -174,7 +178,8 @@ export function CheckoutClient({ cuentasWeb = [] }: { cuentasWeb?: CuentaWeb[] }
           entrega: { metodo: entrega, direccion, referencia, ubigeo },
           metodoPago: metodo,
           necesitaFactura,
-          // Pasar el precio efectivo aplicado (con escalón mayor/fábrica).
+          // El precio que se mostró en pantalla. El servidor NO cobra esto:
+          // lo recalcula con los precios de la base y solo avisa si cambió.
           items: items.map((i) => ({ ...i, precio: precioEfectivoLinea(i, escalon) })),
           envio,
           total: totalFinal,
@@ -182,16 +187,29 @@ export function CheckoutClient({ cuentasWeb = [] }: { cuentasWeb?: CuentaWeb[] }
       });
       const json = await res.json();
       if (!res.ok) {
-        // Caso especial: stock insuficiente (mensaje multilínea más explicativo)
+        // Sin stock, o los precios cambiaron: mensajes multilínea explicativos.
         if (res.status === 409 && json.mensaje) {
           toast.error(json.mensaje, { duration: 10000 });
           return;
         }
         throw new Error(json.error ?? 'Error');
       }
+
+      // Con tarjeta el pedido queda esperando el pago y se va a la pantalla de
+      // cobro. El carrito NO se vacía todavía: se vacía cuando el pago se
+      // confirma, así un cobro que no sale no le borra lo que había elegido.
+      if (metodo === 'izipay_card') {
+        // Carga completa, no navegación de Next: el formulario de izipay se
+        // inicializa una sola vez por carga de página, y si el comprador ya
+        // pasó antes por una pantalla de pago la librería sigue en memoria y
+        // no vuelve a dibujarse.
+        window.location.assign(`/pedido/${json.id}/pagar`);
+        return;
+      }
+
       clear();
       toast.success(`Pedido ${json.numero} creado. Te contactaremos para coordinar el pago.`);
-      router.push(`/cuenta/pedidos/${json.id}`);
+      router.push(`/pedido/${json.id}`);
     } catch (e) {
       toast.error((e as Error).message);
     } finally {
@@ -321,8 +339,9 @@ export function CheckoutClient({ cuentasWeb = [] }: { cuentasWeb?: CuentaWeb[] }
         <Card className="p-6">
           <h2 className="mb-1 font-display text-lg font-semibold">3. Método de pago</h2>
           <p className="mb-4 text-xs text-slate-500">
-            Hoy solo aceptamos coordinación por WhatsApp. Yape, Plin, tarjeta y transferencia
-            estarán disponibles próximamente.
+            {izipayHabilitado
+              ? 'Paga con tarjeta al instante o coordina con un asesor por WhatsApp. Yape, Plin y transferencia estarán disponibles próximamente.'
+              : 'Hoy solo aceptamos coordinación por WhatsApp. Yape, Plin, tarjeta y transferencia estarán disponibles próximamente.'}
           </p>
           <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
             {METODOS.map((m) => {
@@ -453,6 +472,8 @@ export function CheckoutClient({ cuentasWeb = [] }: { cuentasWeb?: CuentaWeb[] }
             <><Loader2 className="h-4 w-4 animate-spin" /> Procesando...</>
           ) : metodo === 'whatsapp' ? (
             <><MessageCircle className="h-4 w-4" /> Abrir chat con asesor por WhatsApp</>
+          ) : metodo === 'izipay_card' ? (
+            <><Lock className="h-4 w-4" /> Pagar S/ {totalFinal.toFixed(2)} con tarjeta</>
           ) : (
             'Finalizar compra'
           )}
@@ -461,6 +482,7 @@ export function CheckoutClient({ cuentasWeb = [] }: { cuentasWeb?: CuentaWeb[] }
           Tus datos están protegidos. <a href="/politica-de-privacidad" className="underline">Política de privacidad</a>
         </p>
       </Card>
+
     </div>
   );
 }
