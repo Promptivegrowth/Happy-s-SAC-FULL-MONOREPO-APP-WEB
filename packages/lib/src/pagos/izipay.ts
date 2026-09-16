@@ -44,8 +44,6 @@ export type ConfigIzipay = {
   hmacKey: string;
   /** Servidor REST. */
   apiUrl: string;
-  /** URL a la que izipay debe notificar. Opcional: si no va, usa la del Back Office. */
-  ipnUrl?: string;
 };
 
 /**
@@ -72,7 +70,6 @@ export function configIzipayDesdeEntorno(
     password: password as string,
     hmacKey: hmacKey as string,
     apiUrl: (env.IZIPAY_API_URL?.trim() || API_IZIPAY_POR_DEFECTO).replace(/\/+$/, ''),
-    ipnUrl: env.IZIPAY_IPN_URL?.trim() || undefined,
   };
 }
 
@@ -160,7 +157,20 @@ export async function crearFormToken(
       },
     },
   };
-  if (cfg.ipnUrl) cuerpo.ipnTargetUrl = cfg.ipnUrl;
+
+  /*
+   * NO se manda `ipnTargetUrl`.
+   *
+   * Existe para indicar en cada cobro a qué dirección notificar, pero es un
+   * campo privilegiado: izipay lo rechaza si la tienda no tiene ese permiso
+   * habilitado, y lo hace devolviendo INT_905, "usuario o contraseña
+   * inválidos". O sea que un campo de más se ve exactamente igual que una
+   * credencial mal cargada, y se pierde la tarde revisando las claves.
+   *
+   * La dirección de notificación se configura una vez en el Back Office
+   * (Reglas de notificaciones → "URL de notificación al final del pago"), que
+   * es donde corresponde.
+   */
 
   const auth = Buffer.from(`${cfg.usuario}:${cfg.password}`).toString('base64');
   const res = await fetch(`${cfg.apiUrl}/api-payment/V4/Charge/CreatePayment`, {

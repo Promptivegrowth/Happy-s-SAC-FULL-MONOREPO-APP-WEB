@@ -6,7 +6,6 @@
  * se guardó (ver @/server/cotizar-pedido).
  */
 
-import { createHash } from 'node:crypto';
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
 import { createServiceClient } from '@happy/db/service';
@@ -120,28 +119,16 @@ export async function POST(req: Request) {
      * que quien tenga que arreglarlo sepa qué mirar sin entrar a los registros
      * del servidor. Es un código público: no revela nada de las claves.
      *
-     * Cuando el código es INT_905 —"usuario o contraseña inválidos"— se suma
-     * una huella de lo que hay cargado. Sin ella hay que adivinar cuál de las
-     * dos variables está mal, y cada intento cuesta un despliegue.
-     *
-     * La huella NO es la contraseña: son sus primeros cuatro caracteres, su
-     * largo, y un resumen sha256 recortado. Alcanza para distinguir los
-     * errores que de verdad pasan —quedó la de test, se pegó la clave pública,
-     * o hay cargada otra distinta de la que se cree— y no sirve para
-     * reconstruirla: el resumen es de ida y la clave son 58 caracteres al azar.
-     * El usuario sí va entero: es el identificador de la tienda, que viaja al
-     * navegador dentro de la clave pública en cada cobro.
+     * Cuidado con INT_905: dice "usuario o contraseña inválidos", pero izipay
+     * también lo devuelve cuando el cobro lleva un campo que la tienda no
+     * tiene habilitado. Antes de dar por mala una credencial, conviene probar
+     * la misma clave con un cobro mínimo (monto, moneda y número de pedido, y
+     * nada más).
      */
     const cuerpo: Record<string, unknown> = {
       error: 'No pudimos abrir el pago con tarjeta. Intenta de nuevo en un momento.',
       codigoIzipay: codigo,
     };
-    if (codigo === 'INT_905') {
-      cuerpo.usuarioConfigurado = cfg.usuario;
-      const resumen = createHash('sha256').update(cfg.password, 'utf8').digest('hex').slice(0, 12);
-      cuerpo.huellaContrasena = `${cfg.password.slice(0, 4)}…(${cfg.password.length}) sha=${resumen}`;
-      cuerpo.huellaClavePublica = `${publicKey.slice(0, 13)}…(${publicKey.length})`;
-    }
     return NextResponse.json(cuerpo, { status: 502 });
   }
 }
