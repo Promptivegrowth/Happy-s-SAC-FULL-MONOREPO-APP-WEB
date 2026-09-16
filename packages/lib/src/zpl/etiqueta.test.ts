@@ -108,8 +108,40 @@ describe('el papel y la máquina', () => {
     expect(zpl).toContain(`^PW${esperado}`);
   });
 
-  it('declara el alto de UNA fila, no el del rollo entero', () => {
-    expect(construirEtiquetasZpl([UNA])).toContain(`^LL${aPuntos(25.4)}`);
+  it('NO le impone un largo de etiqueta a la impresora', () => {
+    /*
+     * ^LL le dice "avanza exactamente esto por etiqueta". Basta un desajuste
+     * de décimas contra el troquel real para que cada fila se corra un poco
+     * más que la anterior, y en una tanda larga la suma adelanta una etiqueta
+     * entera: sale una fila en blanco. Pasó en el almacén con el rollo
+     * declarado en 25 mm y el troquel de 25,4.
+     *
+     * El largo lo pone el sensor de la impresora, etiqueta por etiqueta.
+     */
+    expect(construirEtiquetasZpl([UNA])).not.toContain('^LL');
+  });
+
+  it('el alto elegido sigue mandando dentro de la etiqueta', () => {
+    // Lo que se deja de declarar es el AVANCE del papel, no el diseño: el
+    // código legible se sigue apoyando en el borde de abajo.
+    const yCodigo = (alto: number) => {
+      const f = filas(construirEtiquetasZpl([UNA], {
+        formato: { ...ROLLO_2X1_DOBLE, altoEtiquetaMm: alto },
+      }))[0] ?? '';
+      return Math.max(...[...f.matchAll(/\^FO\d+,(\d+)/g)].map((m) => Number(m[1])));
+    };
+    expect(yCodigo(40)).toBeGreaterThan(yCodigo(25.4));
+  });
+
+  it('cada fila del lote sale idéntica: nada depende de la anterior', () => {
+    /*
+     * La prueba de la deriva. Si el ZPL de la fila 1 y el de la fila 30 son
+     * iguales, ningún corrimiento puede venir de lo que mandamos: la
+     * impresora arranca cada fila en el troquel que encuentra.
+     */
+    const f = filas(construirEtiquetasZpl([{ ...UNA, cantidad: 60 }]));
+    expect(f.length).toBe(30);
+    for (const fila of f) expect(fila).toBe(f[0]);
   });
 
   it('avisa que el papel tiene separación entre etiquetas', () => {
@@ -135,7 +167,6 @@ describe('el papel y la máquina', () => {
     expect(f.length).toBe(3);
     for (const fila of f) expect(columnas(fila).length).toBe(1);
     expect(zpl).toContain(`^PW${aPuntos(52)}`);   // margen + una etiqueta
-    expect(zpl).toContain(`^LL${aPuntos(30)}`);
   });
 
   it('se puede ajustar la separación entre columnas sin tocar el código', () => {

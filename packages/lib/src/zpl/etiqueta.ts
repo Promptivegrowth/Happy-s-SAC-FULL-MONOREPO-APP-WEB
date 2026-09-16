@@ -267,14 +267,32 @@ export function construirEtiquetasZpl(
    * ^XA...^XZ sin ^FO es una etiqueta vacía: si esto fuera dentro, la
    * impresora sacaría una fila en blanco antes de empezar.
    */
+  /*
+   * NO se declara el largo de la etiqueta (^LL). A propósito.
+   *
+   * Antes se mandaba ^LL con el alto elegido en el ERP. Eso le dice a la
+   * impresora "avanza exactamente esto por etiqueta", y basta con que no
+   * coincida al milímetro con el troquel real para que cada fila se corra un
+   * poco más que la anterior. Al imprimir una tanda larga la deriva se suma
+   * hasta que el papel adelanta una etiqueta de más y sale una fila en blanco.
+   * Pasó en el almacén el 16/09/2026, con el rollo declarado en 25 mm cuando
+   * el troquel es de una pulgada, 25,4: cuatro décimas por fila, y a las
+   * sesenta etiquetas ya es una entera.
+   *
+   * ^MNY le dice que el papel viene troquelado, así que la impresora encuentra
+   * cada etiqueta con su propio sensor y arranca ahí. Registrando en cada una,
+   * la deriva no se puede acumular: cualquier corrimiento muere en esa fila.
+   * El alto elegido en el ERP sigue mandando en dónde cae cada cosa DENTRO de
+   * la etiqueta, que es para lo que sirve.
+   */
   partes.push(
     '^XA',
     `~SD${oscuridad}`,            // oscurecimiento del cabezal
     `^PR${velocidad}`,            // velocidad de impresión
-    '^MNY',                       // papel con separación entre etiquetas
+    '^MNY',                       // papel troquelado: cada etiqueta se detecta
     '^MMT',                       // corta/para en la posición de despegue
+    '^LT0',                       // sin desplazamiento guardado de fábrica
     `^PW${aPuntos(anchoTotalMm)}`,
-    `^LL${aPuntos(formato.altoEtiquetaMm)}`,
     '^LH0,0',
     '^CI28',                      // texto en UTF-8
     '^JUS',                       // guarda la configuración en la impresora
@@ -295,7 +313,6 @@ export function construirEtiquetasZpl(
     partes.push(
       '^XA',
       `^PW${aPuntos(anchoTotalMm)}`,
-      `^LL${aPuntos(formato.altoEtiquetaMm)}`,
       '^LH0,0',
       ...bloques,
       '^XZ',
