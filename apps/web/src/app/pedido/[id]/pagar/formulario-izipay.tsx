@@ -100,19 +100,38 @@ async function paso<T>(fn: () => Promise<T>): Promise<T | undefined> {
 }
 
 /**
- * Espera a que los campos de tarjeta estén realmente en pantalla.
+ * A los cuántos segundos se avisa que está tardando, y a los cuántos se da por
+ * perdido.
  *
- * El margen es generoso a propósito: la primera vez que alguien entra, el
- * navegador se baja una decena de archivos de izipay más el analizador de
- * riesgo. Con 20 segundos, un comprador nuevo en una conexión lenta veía
- * "no llegó a cargar" mientras el formulario estaba por aparecer.
+ * La primera vez que alguien entra, el navegador se baja una decena de
+ * archivos de izipay más su analizador de riesgo. Medido contra el sitio en
+ * producción, con la caché vacía eso pasa de los 45 segundos.
+ *
+ * Por eso no se corta ahí. Decirle a alguien "no cargó, revisa tu conexión"
+ * cuando el formulario estaba por aparecer lo manda a cerrar la página con la
+ * compra a medias. Se espera de verdad, y mientras tanto se le dice que está
+ * tardando, que es la información que sí sirve.
  */
-function esperarFormulario(listo: () => boolean, limiteMs = 45000): Promise<boolean> {
-  const hasta = Date.now() + limiteMs;
+const AVISAR_LENTO_MS = 20000;
+const RENDIRSE_MS = 120000;
+
+/** Espera a que los campos de tarjeta estén realmente en pantalla. */
+function esperarFormulario(
+  listo: () => boolean,
+  avisarLento: () => void,
+  limiteMs = RENDIRSE_MS,
+): Promise<boolean> {
+  const desde = Date.now();
+  let avisado = false;
   return new Promise((resolve) => {
     const mirar = () => {
       if (listo() || document.querySelector(`#${CONTENEDOR} iframe`)) return resolve(true);
-      if (Date.now() > hasta) return resolve(false);
+      const pasado = Date.now() - desde;
+      if (!avisado && pasado > AVISAR_LENTO_MS) {
+        avisado = true;
+        avisarLento();
+      }
+      if (pasado > limiteMs) return resolve(false);
       setTimeout(mirar, 250);
     };
     mirar();
@@ -144,6 +163,7 @@ export function FormularioIzipay({
   const vaciarCarrito = useCart((s) => s.clear);
   const [estado, setEstado] = useState<'cargando' | 'listo' | 'procesando' | 'error'>('cargando');
   const [error, setError] = useState('');
+  const [tardando, setTardando] = useState(false);
 
   // React monta dos veces en desarrollo (StrictMode). Sin esta guarda se
   // pedirían dos formTokens y el formulario se dibujaría duplicado.
@@ -261,13 +281,20 @@ export function FormularioIzipay({
           await paso(() => KR.showForm(enganche.result?.formId));
         }
 
-        const seVe = await esperarFormulario(() => formularioListo.current);
+        const seVe = await esperarFormulario(
+          () => formularioListo.current,
+          () => {
+            if (vivo) setTardando(true);
+          },
+        );
         if (!vivo) return;
         if (!seVe) {
           throw new Error(
-            'El formulario de pago no llegó a cargar. Revisa tu conexión e intenta de nuevo.',
+            'El formulario de pago no llegó a cargar. Revisa tu conexión e intenta de nuevo. ' +
+              'Tu pedido quedó guardado: puedes volver a intentarlo desde la página del pedido.',
           );
         }
+        setTardando(false);
         setEstado('listo');
       } catch (e) {
         if (!vivo) return;
@@ -309,8 +336,16 @@ export function FormularioIzipay({
 
         <div className="mt-5">
           {estado === 'cargando' && (
-            <div className="flex items-center justify-center gap-2 py-10 text-sm text-slate-500">
-              <Loader2 className="h-4 w-4 animate-spin" /> Preparando el pago seguro…
+            <div className="flex flex-col items-center gap-2 py-10 text-sm text-slate-500">
+              <span className="flex items-center gap-2">
+                <Loader2 className="h-4 w-4 animate-spin" /> Preparando el pago seguro…
+              </span>
+              {tardando && (
+                <span className="text-center text-xs text-slate-400">
+                  Está tardando más de lo normal. No cierres esta página: tu pedido ya está
+                  guardado y el pago todavía no se hizo.
+                </span>
+              )}
             </div>
           )}
 
