@@ -112,6 +112,19 @@ describe('el papel y la máquina', () => {
     expect(primero).not.toContain('^FO');
   });
 
+  it('un rollo de una sola columna saca una etiqueta por fila', () => {
+    // El selector del ERP ofrece rollos de una y de dos columnas; el de una
+    // no puede terminar con dos códigos pegados en el mismo sticker.
+    const zpl = construirEtiquetasZpl([{ ...UNA, cantidad: 3 }], {
+      formato: { anchoEtiquetaMm: 50, altoEtiquetaMm: 30, columnas: 1, separacionMm: 0, margenIzquierdoMm: 2 },
+    });
+    const f = filas(zpl);
+    expect(f.length).toBe(3);
+    for (const fila of f) expect([...new Set(equis(fila))].length).toBe(1);
+    expect(zpl).toContain(`^PW${aPuntos(52)}`);   // margen + una etiqueta
+    expect(zpl).toContain(`^LL${aPuntos(30)}`);
+  });
+
   it('se puede ajustar la separación entre columnas sin tocar el código', () => {
     // Cada fabricante troquela distinto; un milímetro corre toda la segunda
     // columna.

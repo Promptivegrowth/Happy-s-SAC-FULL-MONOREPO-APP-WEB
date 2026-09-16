@@ -48,16 +48,26 @@ export type Formato = {
   alto: number;
   /** 'rollo' = una por página; 'a4' = varias por hoja. */
   soporte: 'rollo' | 'a4';
+  /**
+   * Cuántas etiquetas hay a lo ancho del rollo.
+   *
+   * Casi todos los rollos son de una sola columna, pero el del almacén viene
+   * troquelado de a dos. Es el dato que decide si la Zebra pone un código por
+   * avance de papel o dos, uno al lado del otro; medirlo mal es exactamente el
+   * error que hacía salir un código estirado sobre los dos stickers.
+   */
+  columnas: number;
 };
 
 /** Medidas de rollo habituales, más la variante en hoja A4. */
 export const FORMATOS: Formato[] = [
-  { id: 'r50x25', nombre: 'Rollo 50 × 25 mm (Zebra)', ancho: 50, alto: 25, soporte: 'rollo' },
-  { id: 'r50x30', nombre: 'Rollo 50 × 30 mm (Zebra)', ancho: 50, alto: 30, soporte: 'rollo' },
-  { id: 'r40x25', nombre: 'Rollo 40 × 25 mm (Zebra)', ancho: 40, alto: 25, soporte: 'rollo' },
-  { id: 'r60x40', nombre: 'Rollo 60 × 40 mm (Zebra)', ancho: 60, alto: 40, soporte: 'rollo' },
-  { id: 'r100x50', nombre: 'Rollo 100 × 50 mm (Zebra)', ancho: 100, alto: 50, soporte: 'rollo' },
-  { id: 'a4_50x30', nombre: 'Hoja A4 · etiquetas de 50 × 30 mm', ancho: 50, alto: 30, soporte: 'a4' },
+  { id: 'r50x25d', nombre: 'Rollo 50 × 25 mm · DOS por fila (Zebra)', ancho: 50, alto: 25, soporte: 'rollo', columnas: 2 },
+  { id: 'r50x25', nombre: 'Rollo 50 × 25 mm (Zebra)', ancho: 50, alto: 25, soporte: 'rollo', columnas: 1 },
+  { id: 'r50x30', nombre: 'Rollo 50 × 30 mm (Zebra)', ancho: 50, alto: 30, soporte: 'rollo', columnas: 1 },
+  { id: 'r40x25', nombre: 'Rollo 40 × 25 mm (Zebra)', ancho: 40, alto: 25, soporte: 'rollo', columnas: 1 },
+  { id: 'r60x40', nombre: 'Rollo 60 × 40 mm (Zebra)', ancho: 60, alto: 40, soporte: 'rollo', columnas: 1 },
+  { id: 'r100x50', nombre: 'Rollo 100 × 50 mm (Zebra)', ancho: 100, alto: 50, soporte: 'rollo', columnas: 1 },
+  { id: 'a4_50x30', nombre: 'Hoja A4 · etiquetas de 50 × 30 mm', ancho: 50, alto: 30, soporte: 'a4', columnas: 1 },
 ];
 
 /** Altura mínima de barras para que la pistola enganche cómodamente. */

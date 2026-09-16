@@ -33,7 +33,11 @@ export type ProductoEtiqueta = {
 };
 
 /** Rollo de 50 × 30 mm: el que más se parece a la etiqueta que ya usan. */
-const FORMATO_POR_DEFECTO = 'r50x30';
+/*
+ * El rollo que hay puesto en la Zebra del almacén: 50 × 25 mm troquelado de a
+ * dos. Es el que se usa todos los días; los demás quedan para casos sueltos.
+ */
+const FORMATO_POR_DEFECTO = 'r50x25d';
 
 /** Tope de productos dibujados a la vez: sin esto, 700 tarjetas cuelgan la vista. */
 const MAX_VISIBLES = 40;
@@ -177,6 +181,10 @@ export function SelectorEtiquetas({ productos }: { productos: ProductoEtiqueta[]
       toast.error('Elige la computadora que tiene la Zebra');
       return;
     }
+    if (formato.soporte === 'a4') {
+      toast.error('La hoja A4 va por el PDF, no por la Zebra. Elige un rollo.');
+      return;
+    }
     if (total > LOTE_GRANDE && !confirm(`Vas a imprimir ${total} etiquetas. ¿Continuamos?`)) return;
 
     setEnviando(true);
@@ -192,10 +200,31 @@ export function SelectorEtiquetas({ productos }: { productos: ProductoEtiqueta[]
         toast.error('Ninguna de las tallas elegidas tiene un código imprimible');
         return;
       }
+      /*
+       * El tamaño que se eligió arriba manda también acá.
+       *
+       * Antes el ZPL salía siempre con las medidas fijas del rollo del
+       * almacén: si alguien elegía otro tamaño, el PDF le cambiaba y la Zebra
+       * no, y no había manera de darse cuenta salvo mirando la tira impresa.
+       *
+       * La separación entre columnas solo tiene sentido si hay dos: 3 mm es lo
+       * habitual en este troquelado, y es el número a corregir si el texto de
+       * la segunda columna sale corrido.
+       */
+      const zpl = construirEtiquetasZpl(datos, {
+        formato: {
+          anchoEtiquetaMm: formato.ancho,
+          altoEtiquetaMm: formato.alto,
+          columnas: formato.columnas,
+          separacionMm: formato.columnas > 1 ? 3 : 0,
+          margenIzquierdoMm: 2,
+        },
+      });
+
       const r = await encolarEtiquetas(
         equipoZebra,
-        etiquetasABase64(construirEtiquetasZpl(datos)),
-        `Etiquetas · ${total} unidad(es)`,
+        etiquetasABase64(zpl),
+        `Etiquetas · ${total} unidad(es) · ${formato.nombre}`,
       );
       if (!r.ok) {
         toast.error(r.error ?? 'No se pudo enviar a la impresora');
@@ -417,7 +446,11 @@ export function SelectorEtiquetas({ productos }: { productos: ProductoEtiqueta[]
             <span className="font-semibold">{total}</span> etiqueta{total === 1 ? '' : 's'}
             <span className="text-slate-500">
               {' '}· {formato.nombre}
-              {formato.soporte === 'a4' ? '' : ' · una por página'}
+              {formato.soporte === 'a4'
+                ? ''
+                : formato.columnas > 1
+                  ? ` · ${formato.columnas} por fila`
+                  : ' · una por fila'}
             </span>
           </div>
           <div className="flex flex-wrap items-center gap-2">
