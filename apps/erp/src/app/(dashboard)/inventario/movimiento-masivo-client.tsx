@@ -27,7 +27,14 @@ import { registrarMovimientoStockBatch, ajustarStockBatch, obtenerStockVariantes
 import { formatTallaChip } from '@happy/lib';
 
 type Almacen = { id: string; nombre: string; codigo: string };
-type Variante = { id: string; sku: string; talla: string; producto_nombre: string };
+type Variante = {
+  id: string;
+  sku: string;
+  /** Lo que está impreso en la etiqueta, que no es el SKU. */
+  codigo_barras?: string | null;
+  talla: string;
+  producto_nombre: string;
+};
 
 type Modo = 'CONTEO' | 'MOVIMIENTO';
 const TIPOS = [
@@ -91,6 +98,7 @@ export function MovimientoMasivoButton({
     return variantes
       .filter((v) =>
         v.sku.toLowerCase().includes(q) ||
+        (v.codigo_barras ?? '').toLowerCase().includes(q) ||
         v.producto_nombre.toLowerCase().includes(q) ||
         v.talla.toLowerCase().includes(q),
       )
@@ -111,10 +119,29 @@ export function MovimientoMasivoButton({
     if (!o) reset();
   }
 
+  /**
+   * Encuentra la prenda por lo que sea que venga: etiqueta o SKU.
+   *
+   * Solo se comparaba contra el SKU, y en este catálogo el código de barras
+   * NUNCA es el SKU: la prenda PR0307 se etiqueta DT695. Así que escanear una
+   * etiqueta real daba "código no encontrado" siempre, mientras que escribir
+   * el nombre funcionaba — que es exactamente lo que reportó el cliente.
+   *
+   * Primero la etiqueta y después el SKU, porque escanear es el camino
+   * masivo: en una toma física se pasan cientos de prendas con la pistola y
+   * el SKU se escribe a mano solo cuando la etiqueta no lee.
+   *
+   * Sin distinguir mayúsculas, igual que en el POS: algunas pistolas mandan
+   * todo en mayúscula y un conteo no se puede caer por eso.
+   */
   function buscarPorCodigo(codigo: string): Variante | null {
     const c = codigo.trim().toUpperCase();
     if (!c) return null;
-    return variantes.find((v) => v.sku.toUpperCase() === c) ?? null;
+    return (
+      variantes.find((v) => (v.codigo_barras ?? '').trim().toUpperCase() === c) ??
+      variantes.find((v) => v.sku.trim().toUpperCase() === c) ??
+      null
+    );
   }
 
   // Añade la línea si no existe. `set` fija el valor; si no, incrementa en `by`.
@@ -170,7 +197,11 @@ export function MovimientoMasivoButton({
     }
     setBulkText('');
     if (ok > 0) toast.success(`${ok} cargados`);
-    if (noEnc.length > 0) toast.warning(`Código no encontrado: ${noEnc.join(', ')}`);
+    if (noEnc.length > 0) {
+      toast.warning(`Sin prenda para: ${noEnc.join(', ')}`, {
+        description: 'Se buscó por código de barras y por SKU.',
+      });
+    }
     if (cantMala.length > 0) toast.error(`Cantidad inválida en: ${cantMala.join(', ')}`);
     if (formato.length > 0) toast.error(`Formato incorrecto (usa "CÓDIGO CANTIDAD", 1 por línea): ${formato.join(' | ')}`);
   }
@@ -190,7 +221,9 @@ export function MovimientoMasivoButton({
       }
       setScanInput('');
     } else {
-      toast.error(`Código no encontrado: ${c}`);
+      toast.error(`No hay ninguna prenda con el código ${c}`, {
+        description: 'Se buscó por código de barras y por SKU. Si la prenda es nueva, puede que todavía no tenga su etiqueta cargada.',
+      });
       setScanInput('');
     }
   }
@@ -349,7 +382,7 @@ export function MovimientoMasivoButton({
                   <Input
                     value={search}
                     onChange={(e) => { setSearch(e.target.value); setShowResults(true); }}
-                    placeholder="SKU / nombre / talla"
+                    placeholder="Código de barras / SKU / nombre / talla"
                     className="h-8 pl-7 text-xs"
                   />
                 </div>
@@ -363,6 +396,18 @@ export function MovimientoMasivoButton({
                         className="block w-full px-2 py-1 text-left text-[11px] hover:bg-slate-50"
                       >
                         <span className="font-mono text-slate-500">{v.sku}</span> · {v.producto_nombre} · {formatTallaChip(v.talla)}
+                        {/*
+                          El código de barras a la vista: es lo que dice la
+                          etiqueta y lo único que se puede comparar con la
+                          prenda que uno tiene en la mano. Las prendas sin
+                          etiqueta cargada quedan marcadas, porque esas son
+                          las que después no van a leer con la pistola.
+                        */}
+                        {(v.codigo_barras ?? '').trim() ? (
+                          <span className="ml-1 font-mono text-[10px] text-sky-700">{v.codigo_barras}</span>
+                        ) : (
+                          <span className="ml-1 text-[10px] text-amber-600">sin etiqueta</span>
+                        )}
                       </button>
                     ))}
                   </div>
@@ -387,7 +432,7 @@ export function MovimientoMasivoButton({
                 <Label className="text-[10px] uppercase text-violet-700">Pegar lista</Label>
                 <p className="text-[9px] leading-tight text-violet-700/90">
                   Orden: <b>CÓDIGO</b> y luego <b>CANTIDAD</b>, un producto por línea.
-                  El código es el SKU exacto; la cantidad va en enteros.
+                  El código puede ser el de barras o el SKU; la cantidad va en enteros.
                 </p>
                 <Textarea
                   value={bulkText}

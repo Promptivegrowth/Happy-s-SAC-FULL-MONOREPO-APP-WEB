@@ -53,7 +53,7 @@ export default async function InventarioPage({ searchParams }: { searchParams: P
       .order('nombre'),
     sb
       .from('productos_variantes')
-      .select('id, sku, talla, productos(nombre)')
+      .select('id, sku, codigo_barras, talla, productos(nombre)')
       .eq('activo', true)
       .order('sku')
       // OJO: además del limit, Supabase capa las filas por request con
@@ -88,7 +88,21 @@ export default async function InventarioPage({ searchParams }: { searchParams: P
   // Lista plana de variantes para el modal "Nuevo movimiento"
   const variantesParaModal = (variantesIndex ?? []).map((v) => {
     const prodNombre = (v as unknown as { productos?: { nombre: string } }).productos?.nombre ?? '';
-    return { id: v.id as string, sku: v.sku as string, talla: v.talla as string, producto_nombre: prodNombre };
+    return {
+      id: v.id as string,
+      sku: v.sku as string,
+      /*
+       * El código de barras es OTRA cosa que el SKU.
+       *
+       * En el catálogo del cliente no coinciden en ninguna variante: el SKU
+       * PR0307 se etiqueta DT695. Sin esta columna, escanear una prenda en el
+       * modal de stock decía "código no encontrado" para las 2141 variantes
+       * que tienen etiqueta — o sea casi todas.
+       */
+      codigo_barras: ((v as unknown as { codigo_barras?: string | null }).codigo_barras ?? null),
+      talla: v.talla as string,
+      producto_nombre: prodNombre,
+    };
   });
 
   function chipUrl(params: Record<string, string | undefined>) {
