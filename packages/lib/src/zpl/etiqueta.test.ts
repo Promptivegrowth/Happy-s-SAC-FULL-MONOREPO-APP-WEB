@@ -29,9 +29,22 @@ function filas(zpl: string): string[] {
     .filter((b) => b.includes('^FO'));
 }
 
-/** Las coordenadas X de los orígenes de campo de una fila. */
+/** Las coordenadas X de TODOS los orígenes de campo de una fila. */
 function equis(fila: string): number[] {
   return [...fila.matchAll(/\^FO(\d+),/g)].map((m) => Number(m[1]));
+}
+
+/**
+ * Dónde empieza cada etiqueta de la fila, una vez por columna.
+ *
+ * Se mira el texto y no las barras: el texto arranca en el borde de su
+ * etiqueta, mientras que las barras van centradas y por lo tanto corridas una
+ * distancia que depende de cuántos caracteres tenga el código.
+ */
+function columnas(fila: string): number[] {
+  return [...new Set(
+    [...fila.matchAll(/\^FO(\d+),\d+\^A0N/g)].map((m) => Number(m[1])),
+  )].sort((a, b) => a - b);
 }
 
 describe('las dos columnas del rollo', () => {
@@ -47,7 +60,7 @@ describe('las dos columnas del rollo', () => {
   it('dos etiquetas entran en UNA sola fila, una por columna', () => {
     const f = filas(construirEtiquetasZpl([{ ...UNA, cantidad: 2 }]));
     expect(f.length).toBe(1);
-    const xs = [...new Set(equis(f[0] ?? ''))].sort((a, b) => a - b);
+    const xs = columnas(f[0] ?? '');
     expect(xs.length).toBe(2);
     // La segunda columna arranca después del ancho de la primera.
     expect(xs[1]).toBeGreaterThanOrEqual(aPuntos(ROLLO_2X1_DOBLE.anchoEtiquetaMm));
@@ -62,7 +75,7 @@ describe('las dos columnas del rollo', () => {
     // en la tanda una etiqueta de otro producto.
     const f = filas(construirEtiquetasZpl([{ ...UNA, cantidad: 3 }]));
     expect(f.length).toBe(2);
-    expect([...new Set(equis(f[1] ?? ''))].length).toBe(1);
+    expect(columnas(f[1] ?? '').length).toBe(1);
   });
 
   it('productos distintos se reparten en orden, sin mezclarse dentro de una etiqueta', () => {
@@ -120,7 +133,7 @@ describe('el papel y la máquina', () => {
     });
     const f = filas(zpl);
     expect(f.length).toBe(3);
-    for (const fila of f) expect([...new Set(equis(fila))].length).toBe(1);
+    for (const fila of f) expect(columnas(fila).length).toBe(1);
     expect(zpl).toContain(`^PW${aPuntos(52)}`);   // margen + una etiqueta
     expect(zpl).toContain(`^LL${aPuntos(30)}`);
   });
@@ -131,7 +144,7 @@ describe('el papel y la máquina', () => {
     const zpl = construirEtiquetasZpl([{ ...UNA, cantidad: 2 }], {
       formato: { ...ROLLO_2X1_DOBLE, separacionMm: 6 },
     });
-    const xs = [...new Set(equis(filas(zpl)[0] ?? ''))].sort((a, b) => a - b);
+    const xs = columnas(filas(zpl)[0] ?? '');
     expect(xs[1]! - xs[0]!).toBe(aPuntos(50.8 + 6));
   });
 });
@@ -151,6 +164,24 @@ describe('el contenido de cada etiqueta', () => {
     expect(filas(construirEtiquetasZpl([UNA]))[0]).toMatch(/\^BCN,\d+,N,N,N/);
   });
 
+  it('el color entra en el nombre, que es lo que distingue una prenda de otra', () => {
+    // Con el título en un solo renglón salía "ALA DE MARIPOSA SIN LUCES AMA":
+    // idéntica a la fucsia hasta la última palabra.
+    const texto = (t: string) => {
+      const f = filas(construirEtiquetasZpl([{ ...UNA, titulo: t }]))[0] ?? '';
+      return /\^FD([^^]*)\^FS/.exec(f)?.[1] ?? '';
+    };
+    expect(texto('ala de mariposa sin luces amarillo brasil')).toContain('AMARILLO BRASIL');
+    expect(texto('ala de mariposa sin luces fucsia')).toContain('FUCSIA');
+  });
+
+  it('las barras siguen siendo legibles con el nombre en dos renglones', () => {
+    // El nombre no puede comerse las barras: menos de 7 mm y la pistola falla.
+    const f = filas(construirEtiquetasZpl([UNA]))[0] ?? '';
+    const alto = Number(/\^BCN,(\d+),/.exec(f)?.[1] ?? 0);
+    expect(alto).toBeGreaterThanOrEqual(aPuntos(7));
+  });
+
   it('un título larguísimo se corta en vez de invadir la etiqueta vecina', () => {
     const largo = 'DISFRAZ DE MUJER MARAVILLA CON CAPA Y ACCESORIOS COMPLETOS PARA NINA #6';
     const f = filas(construirEtiquetasZpl([{ ...UNA, titulo: largo }]))[0] ?? '';
@@ -161,6 +192,49 @@ describe('el contenido de cada etiqueta', () => {
   it('sin etiquetas no genera nada', () => {
     expect(construirEtiquetasZpl([])).toBe('');
     expect(construirEtiquetasZpl([{ ...UNA, cantidad: 0 }])).toBe('');
+  });
+});
+
+describe('las barras centradas', () => {
+  /** El ^FO de las barras y el del texto de arriba, en una fila. */
+  function xDeBarras(zpl: string): number {
+    return Number(/\^FO(\d+),\d+\^BCN/.exec(zpl)?.[1] ?? -1);
+  }
+
+  it('el código queda centrado, no pegado al margen', () => {
+    // Esto salió mal en el almacén: ^FB centra texto pero no centra barras,
+    // así que el código arrancaba en el margen mientras el nombre y el número
+    // sí quedaban centrados. Se veía torcido aunque cada cosa estuviera dentro
+    // de su etiqueta.
+    const f = filas(construirEtiquetasZpl([UNA]))[0] ?? '';
+    const xBarras = xDeBarras(f);
+    const xTexto = Number(/\^FO(\d+),/.exec(f)?.[1] ?? -1);
+    expect(xBarras).toBeGreaterThan(xTexto);
+
+    // El sobrante a cada lado tiene que ser el mismo, con un punto de holgura
+    // por el redondeo.
+    const modulos = 11 * (UNA.codigo.length + 2) + 13;
+    const modulo = Number(/\^BY(\d+),/.exec(f)?.[1] ?? 0);
+    const anchoUtil = aPuntos(ROLLO_2X1_DOBLE.anchoEtiquetaMm - 1.5 * 2);
+    const izquierda = xBarras - xTexto;
+    const derecha = anchoUtil - modulos * modulo - izquierda;
+    expect(Math.abs(izquierda - derecha)).toBeLessThanOrEqual(1);
+  });
+
+  it('las barras entran en la etiqueta, no invaden la de al lado', () => {
+    const largo = { titulo: 'GORRO', codigo: 'PRDM0018-XL-2026', cantidad: 1 };
+    const f = filas(construirEtiquetasZpl([largo]))[0] ?? '';
+    const modulo = Number(/\^BY(\d+),/.exec(f)?.[1] ?? 0);
+    const ancho = (11 * (largo.codigo.length + 2) + 13) * modulo;
+    expect(ancho).toBeLessThanOrEqual(aPuntos(ROLLO_2X1_DOBLE.anchoEtiquetaMm - 1.5 * 2));
+  });
+
+  it('un código corto usa barras más gruesas, que la pistola lee mejor', () => {
+    const corto = filas(construirEtiquetasZpl([{ ...UNA, codigo: 'PF176' }]))[0] ?? '';
+    const largo = filas(construirEtiquetasZpl([{ ...UNA, codigo: 'PRDM0018-XL-2026' }]))[0] ?? '';
+    const modulo = (f: string) => Number(/\^BY(\d+),/.exec(f)?.[1] ?? 0);
+    expect(modulo(corto)).toBeGreaterThan(modulo(largo));
+    expect(modulo(largo)).toBeGreaterThanOrEqual(1);
   });
 });
 

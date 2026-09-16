@@ -131,29 +131,72 @@ function bloqueEtiqueta(
    * tipea y el POS igual encuentra la prenda, porque busca por código de
    * barras y por SKU.
    */
-  const altoTexto = aPuntos(3);                      // ~3 mm de altura de letra
-  const yTitulo = aPuntos(margenMm);
-  const yBarras = aPuntos(margenMm + 4);
-  const altoBarras = aPuntos(formato.altoEtiquetaMm - margenMm * 2 - 9);
-  const yCodigo = aPuntos(formato.altoEtiquetaMm - margenMm - 3.2);
 
-  // A razón de ~1,6 mm por carácter con esta altura de fuente.
-  const maxCaracteres = Math.max(8, Math.floor(anchoUtilMm / 1.6));
+  /*
+   * El nombre va en DOS renglones, con letra más chica.
+   *
+   * En un solo renglón entraban 30 caracteres y el catálogo no perdona: de
+   * "ala de mariposa sin luces amarillo brasil" salía "ALA DE MARIPOSA SIN
+   * LUCES AMA", y la de fucsia salía igual hasta la última palabra. Dos
+   * prendas distintas con la misma etiqueta a la vista; el color, que es lo
+   * que las diferencia, era justo lo que se cortaba.
+   *
+   * Los 3 mm de barras que cuesta salen de sobra: quedan cerca de 13 y con 7
+   * ya lee cómodo.
+   */
+  const LINEAS_TITULO = 2;
+  const ALTO_TITULO_MM = 2.6;
+  const altoTitulo = aPuntos(ALTO_TITULO_MM);
+  const altoTexto = aPuntos(3);                      // ~3 mm para el código
+  const yTitulo = aPuntos(margenMm);
+  const yBarras = aPuntos(margenMm + ALTO_TITULO_MM * LINEAS_TITULO + 0.8);
+  const yCodigo = aPuntos(formato.altoEtiquetaMm - margenMm - 3.2);
+  // Lo que sobra entre el título y el código legible, menos un respiro.
+  const altoBarras = Math.max(aPuntos(7), yCodigo - yBarras - aPuntos(0.8));
+
+  // A razón de ~1,4 mm por carácter con esta altura de letra, por dos renglones.
+  const maxCaracteres = Math.max(8, Math.floor(anchoUtilMm / 1.4) * LINEAS_TITULO);
   const titulo = escaparZpl(recortar(aFuenteZebra(dato.titulo), maxCaracteres));
   const codigo = escaparZpl(aFuenteZebra(dato.codigo));
 
+  /*
+   * El centrado de las barras se calcula acá, a mano.
+   *
+   * ^FB centra texto y NO centra códigos de barras: la Zebra lo ignora y
+   * arranca el código pegado al margen izquierdo. Salía así en la primera
+   * tanda del almacén, con el nombre y el código legible bien centrados
+   * arriba y abajo y las barras corridas hacia un costado.
+   *
+   * El ancho de un CODE 128 es calculable: 11 módulos por carácter, más el de
+   * arranque, más el de control, más 13 del patrón de fin. Es exacto porque no
+   * dejamos que la impresora cambie de subconjunto —el sexto parámetro de ^BC
+   * queda en su valor normal—, así que cada carácter ocupa siempre lo mismo.
+   */
+  const modulos = 11 * (aFuenteZebra(dato.codigo).length + 2) + 13;
+
+  /*
+   * Y de paso se elige el módulo más ancho que entre.
+   *
+   * Barras más gruesas se leen mejor y perdonan una etiqueta arrugada o un
+   * cabezal con algo de polvo. Con códigos cortos como ACX0011 sobra lugar
+   * para el triple de grosor; antes iba fijo en el mínimo cómodo.
+   */
+  let modulo = 3;
+  while (modulo > 1 && modulos * modulo > anchoUtil) modulo--;
+  const anchoBarras = modulos * modulo;
+  const xBarras = x + Math.max(0, Math.round((anchoUtil - anchoBarras) / 2));
+
   return [
-    // Título centrado en el ancho de la etiqueta (^FB centra y limita).
-    `^FO${x},${yTitulo}^A0N,${altoTexto},${altoTexto}^FB${anchoUtil},1,0,C,0^FD${titulo}^FS`,
+    // Título centrado en el ancho de la etiqueta (^FB centra, parte y limita).
+    `^FO${x},${yTitulo}^A0N,${altoTitulo},${altoTitulo}^FB${anchoUtil},${LINEAS_TITULO},0,C,0^FD${titulo}^FS`,
     /*
      * CODE 128: admite letras y números —los códigos son del tipo PF176— no
      * exige comprar un rango a GS1 y lo lee cualquier pistola.
-     * ^BY2 = módulo de 2 puntos (0,25 mm), que es lo mínimo cómodo a 203 dpi.
      * La "N" final apaga el texto de la propia Zebra: lo ponemos nosotros
      * debajo, centrado y con el tamaño que queremos.
      */
-    `^BY2,3,${altoBarras}`,
-    `^FO${x},${yBarras}^FB${anchoUtil},1,0,C,0^BCN,${altoBarras},N,N,N^FD${codigo}^FS`,
+    `^BY${modulo},3,${altoBarras}`,
+    `^FO${xBarras},${yBarras}^BCN,${altoBarras},N,N,N^FD${codigo}^FS`,
     // El código legible, centrado.
     `^FO${x},${yCodigo}^A0N,${altoTexto},${altoTexto}^FB${anchoUtil},1,0,C,0^FD${codigo}^FS`,
   ].join('\n');

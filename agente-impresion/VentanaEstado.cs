@@ -35,6 +35,8 @@ public class VentanaEstado : Form
         public string Sistema;
         public string Impresora;
         public string DeDonde;
+        /** La Zebra, si esta computadora tiene una. */
+        public string Etiquetas;
         public string RutaConfig;
     }
 
@@ -79,9 +81,23 @@ public class VentanaEstado : Form
         y = Dato("Último contacto", d.UltimoContacto, y, Pizarra);
         y = Dato("Tickets impresos", d.Impresos.ToString() + (d.Fallidos > 0 ? "   ·   con problemas: " + d.Fallidos : ""),
                  y, d.Fallidos > 0 ? Rojo : Pizarra);
-        y = Dato("Imprime por",
-                 d.Impresora == null ? "ninguna encontrada" : d.Impresora + "   (" + d.DeDonde + ")",
-                 y, d.Impresora == null ? Rojo : Pizarra);
+        /*
+         * Las dos impresoras van en renglones distintos aunque sean la misma
+         * marca de problema: son dos maquinas y dos idiomas, y verlas juntas
+         * era lo que hacia creer que la Zebra imprimia los tickets.
+         *
+         * En la computadora del almacen no hay ticketera, y eso no es un error:
+         * solo se pinta en rojo si tampoco hay Zebra, porque ahi si no imprime
+         * nada.
+         */
+        bool hayAlguna = d.Impresora != null || d.Etiquetas != null;
+        y = Dato("Tickets por",
+                 d.Impresora == null
+                     ? (d.Etiquetas == null ? "ninguna encontrada" : "esta computadora no tiene ticketera")
+                     : d.Impresora + "   (" + d.DeDonde + ")",
+                 y, d.Impresora == null ? (hayAlguna ? Gris : Rojo) : Pizarra);
+        if (d.Etiquetas != null)
+            y = Dato("Etiquetas por", d.Etiquetas + "   (elegida desde el ERP)", y, Pizarra);
         y = Dato("Sistema", d.Sistema, y, Gris);
 
         var linea = new Panel();
@@ -90,7 +106,7 @@ public class VentanaEstado : Form
         Controls.Add(linea);
 
         var queHacer = new Label();
-        queHacer.Text = "Si los tickets no salen o salen por otra impresora:";
+        queHacer.Text = "Si no sale nada o sale por otra impresora:";
         queHacer.ForeColor = Gris;
         queHacer.Bounds = new Rectangle(20, y + 18, 430, 18);
         Controls.Add(queHacer);

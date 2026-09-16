@@ -52,7 +52,7 @@ class Agente
      * en la ventana del agente ni en el ERP—. Se perdio tiempo revisando
      * maquinas que tenian una version vieja sin que nadie lo notara.
      */
-    const string VERSION = "3.0";
+    const string VERSION = "3.1";
     const string MARCA = "Promptive";
     /** Salto de linea de Windows, para los mensajes en pantalla. */
     static readonly string SALTO = Environment.NewLine;
@@ -158,6 +158,32 @@ class Agente
      * desde el menu del agente. Mandar un ticket a la impresora equivocada es
      * peor que no imprimirlo.
      */
+    /**
+     * Si esa impresora es la Zebra de etiquetas y no una ticketera.
+     *
+     * Importa porque las dos cosas se ven igual en la lista de Windows y en
+     * cambio no entienden el mismo idioma. Un ESC/POS en la Zebra no sale
+     * "torcido": sale como basura y con el papel avanzando.
+     *
+     * Se mira primero lo que dijo el ERP, que es el dato bueno. Las pistas del
+     * nombre son el respaldo para cuando el ERP todavia no contesto —al
+     * arrancar, o sin internet— que es justo cuando alguien aprieta el boton de
+     * prueba para ver que pasa.
+     */
+    static bool EsDeEtiquetas(string nombre)
+    {
+        if (string.IsNullOrEmpty(nombre)) return false;
+        if (!string.IsNullOrEmpty(impresoraEtiquetas) &&
+            nombre.Trim().Equals(impresoraEtiquetas.Trim(), StringComparison.OrdinalIgnoreCase))
+            return true;
+
+        string bajo = nombre.ToLowerInvariant();
+        string[] pistas = { "zebra", "zdesigner", "zpl", "zd4", "zd2", "gk420", "gx420", "gc420", "tlp", "eltron" };
+        foreach (string pista in pistas)
+            if (bajo.Contains(pista)) return true;
+        return false;
+    }
+
     static string AdivinarTicketera()
     {
         string[] pistas = {
@@ -165,7 +191,17 @@ class Agente
             "receipt", "ticket", "80mm", "58mm", "pos ", "tek", "xprinter",
             "zjiang", "zj-", "rp80", "t80", "tm-t", "ep-", "gprinter",
         };
-        var reales = ImpresorasRealesEnCache();
+        /*
+         * La de etiquetas queda fuera antes de empezar.
+         *
+         * En el almacen es la unica impresora instalada, asi que la regla de
+         * "si hay una sola, esa es" la elegia a ella y le habria mandado los
+         * ESC/POS de la prueba.
+         */
+        var reales = new System.Collections.Generic.List<string>();
+        foreach (string n in ImpresorasRealesEnCache())
+            if (!EsDeEtiquetas(n)) reales.Add(n);
+
         foreach (string n in reales)
         {
             string bajo = n.ToLowerInvariant();
@@ -455,6 +491,25 @@ class Agente
                             continue;
                         }
 
+                        /*
+                         * La otra mitad de la proteccion, la que faltaba.
+                         *
+                         * Arriba se decide a que impresora va cada tipo, pero
+                         * nada impedia que la ticketera configurada FUERA la
+                         * Zebra: en el almacen quedo elegida en los dos campos
+                         * del ERP porque es la unica impresora de esa PC. Un
+                         * ticket ahi es ESC/POS entrando a una maquina que
+                         * habla ZPL.
+                         */
+                        if (!esEtiqueta && EsDeEtiquetas(destino))
+                        {
+                            Confirmar(id, false,
+                                "la impresora elegida para tickets (" + destino + ") es la de etiquetas; " +
+                                "un ticket no se puede imprimir ahi");
+                            fallidos++;
+                            continue;
+                        }
+
                         byte[] datos;
                         try { datos = Convert.FromBase64String(contenido); }
                         catch { Confirmar(id, false, "el trabajo llego mal codificado"); fallidos++; continue; }
@@ -713,6 +768,9 @@ class Agente
         else if (!string.IsNullOrEmpty(impresoraDelErp)) { cual = impresoraDelErp; deDonde = "elegida desde el ERP"; }
         else { cual = AdivinarTicketera(); deDonde = "detectada sola"; }
 
+        // Decir "imprime los tickets por la Zebra" seria mentira: no los imprime.
+        if (EsDeEtiquetas(cual)) { cual = null; deDonde = null; }
+
         var datos = new VentanaEstado.Datos();
         datos.Version = VERSION;
         datos.Estado = ultimoEstado;
@@ -723,6 +781,7 @@ class Agente
         datos.Sistema = urlBase;
         datos.Impresora = cual;
         datos.DeDonde = deDonde;
+        datos.Etiquetas = impresoraEtiquetas;
         datos.RutaConfig = RutaConfig();
 
         using (var v = new VentanaEstado(datos))
@@ -770,12 +829,65 @@ class Agente
     }
 
     /** Saca un ticket corto para confirmar que sale por donde tiene que salir. */
+    /**
+     * La prueba de la Zebra: una etiqueta, en ZPL.
+     *
+     * Lleva codigo de barras a proposito. La prueba no es solo ver si sale
+     * papel: es pasarle la pistola y comprobar que engancha, que es lo que
+     * decide si las etiquetas sirven para la caja.
+     *
+     * No se le mandan ^PW ni ^LL: la impresora ya tiene guardado el tamano de
+     * su rollo y una prueba no es el lugar para cambiarselo.
+     */
+    static void ImprimirPruebaEtiqueta(System.Windows.Forms.IWin32Window duenio, string zebra)
+    {
+        string zpl =
+            "^XA" + SALTO +
+            "^LH0,0" + SALTO +
+            "^CI28" + SALTO +
+            "^FO15,10^A0N,22,22^FDHAPPY SAC^FS" + SALTO +
+            "^BY2,3,70" + SALTO +
+            "^FO15,38^BCN,70,N,N,N^FDPRUEBA^FS" + SALTO +
+            "^FO15,115^A0N,20,20^FDPRUEBA " + DateTime.Now.ToString("dd/MM HH:mm") + "^FS" + SALTO +
+            "^XZ" + SALTO;
+
+        string err = ImprimirRaw(zebra, Encoding.ASCII.GetBytes(zpl));
+        System.Windows.Forms.MessageBox.Show(duenio,
+            err == null
+                ? "Se mando una etiqueta de prueba a:" + SALTO + SALTO + zebra + SALTO + SALTO +
+                  "Tiene que salir un solo sticker con el codigo PRUEBA." + SALTO +
+                  "Pasale la pistola: si lo lee, la impresora quedo lista." + SALTO + SALTO +
+                  "Si sale corrida o partida entre dos stickers, el tamano de rollo" + SALTO +
+                  "elegido en el ERP no es el que esta puesto."
+                : "No se pudo imprimir en:" + SALTO + zebra + SALTO + SALTO + err,
+            "Agente de impresion - " + MARCA);
+    }
+
     static void ImprimirPrueba(System.Windows.Forms.IWin32Window duenio)
     {
-        string usar = !string.IsNullOrEmpty(impresora) ? impresora
-                    : (!string.IsNullOrEmpty(impresoraDelErp) ? impresoraDelErp : AdivinarTicketera());
+        string elegida = !string.IsNullOrEmpty(impresora) ? impresora
+                       : (!string.IsNullOrEmpty(impresoraDelErp) ? impresoraDelErp : null);
+
+        /*
+         * Antes esta prueba mandaba ESC/POS a lo que hubiera elegido, y en el
+         * almacen lo que hay elegido es la Zebra —es la unica impresora de esa
+         * computadora, quedo puesta en los dos campos del ERP—. O sea que el
+         * boton de "probar que todo anda" era justo el que le metia a la Zebra
+         * el idioma equivocado.
+         *
+         * Ahora la prueba se adapta a lo que hay: si el destino es de
+         * etiquetas, sale una etiqueta.
+         */
+        if (EsDeEtiquetas(elegida)) { ImprimirPruebaEtiqueta(duenio, elegida); return; }
+
+        string usar = !string.IsNullOrEmpty(elegida) ? elegida : AdivinarTicketera();
         if (string.IsNullOrEmpty(usar))
         {
+            if (!string.IsNullOrEmpty(impresoraEtiquetas))
+            {
+                ImprimirPruebaEtiqueta(duenio, impresoraEtiquetas);
+                return;
+            }
             System.Windows.Forms.MessageBox.Show(duenio,
                 "No hay ninguna ticketera elegida." + SALTO + SALTO +
                 "Usa el boton \"Elegir impresora\" y marca cual es.",
