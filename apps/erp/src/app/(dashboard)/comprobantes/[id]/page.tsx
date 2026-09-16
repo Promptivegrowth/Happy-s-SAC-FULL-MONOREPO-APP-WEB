@@ -7,6 +7,7 @@ import { Button } from '@happy/ui/button';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@happy/ui/table';
 import { PageShell } from '@/components/page-shell';
 import { EmitirSunatButton } from './client';
+import { AnularBoletaButton } from './anular-client';
 import { VerComprobanteButton } from '../../ventas/ver-comprobante-button';
 import { formatDateTime, formatPEN } from '@happy/lib';
 import { Download } from 'lucide-react';
@@ -62,6 +63,15 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
           )}
           {comp.estado !== 'ACEPTADO' && comp.estado !== 'ANULADO' && (
             <EmitirSunatButton comprobanteId={id} estado={comp.estado} />
+          )}
+          {/* Solo boletas: una factura ya está en SUNAT desde que se emitió y
+              se da de baja desde el portal. Ver anular-comprobante.ts. */}
+          {comp.tipo === 'BOLETA' && comp.estado !== 'ANULADO' && (
+            <AnularBoletaButton
+              comprobanteId={id}
+              numero={comp.numero_completo ?? `${comp.serie}-${comp.numero}`}
+              yaAceptada={comp.estado === 'ACEPTADO'}
+            />
           )}
         </div>
       }

@@ -166,11 +166,30 @@ export async function GET(request: Request) {
   try {
     const { hasta, motivo } = fechaMaximaInformable();
 
+    /*
+     * Hay dos motivos para armar un resumen de un día: boletas nuevas sin
+     * informar, y boletas anuladas cuya baja SUNAT todavía no conoce.
+     *
+     * El segundo caso es fácil de olvidar: una boleta de anteayer que se anula
+     * hoy obliga a mandar un resumen de anteayer. Si solo se miraran las
+     * pendientes de informar, esa baja no saldría nunca.
+     */
     const { data: boletasPendientes } = await sb
       .from('comprobantes')
       .select('fecha_emision')
       .eq('tipo', 'BOLETA')
       .in('estado', ['BORRADOR', 'EMITIDO', 'RECHAZADO'])
+      .order('fecha_emision', { ascending: true })
+      .limit(500);
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const sbBajas = sb as unknown as { from: (t: string) => any };
+    const { data: bajasPendientes } = await sbBajas
+      .from('comprobantes')
+      .select('fecha_emision')
+      .eq('tipo', 'BOLETA')
+      .eq('estado', 'ANULADO')
+      .is('anulacion_informada_en', null)
       .order('fecha_emision', { ascending: true })
       .limit(500);
 
@@ -192,14 +211,19 @@ export async function GET(request: Request) {
         .map((r) => String(r.fecha_referencia).slice(0, 10)),
     );
 
-    const fechas = [...new Set(((boletasPendientes ?? []) as Array<{ fecha_emision: string }>)
-      .map((b) => fechaLima(b.fecha_emision)))]
+    const fechas = [...new Set([
+      ...((boletasPendientes ?? []) as Array<{ fecha_emision: string }>),
+      ...((bajasPendientes ?? []) as Array<{ fecha_emision: string }>),
+    ].map((b) => fechaLima(b.fecha_emision)))]
       .filter((f) => f <= hasta)
       .filter((f) => !esperandoCDR.has(f))
       .slice(0, 3); // máximo 3 días por corrida
 
     if (esperandoCDR.size > 0) {
       detalle.push(`esperando CDR de: ${[...esperandoCDR].join(', ')}`);
+    }
+    if ((bajasPendientes ?? []).length > 0) {
+      detalle.push(`${(bajasPendientes ?? []).length} anulación(es) por comunicar`);
     }
     if (fechas.length === 0) detalle.push(`sin boletas por informar (${motivo})`);
 

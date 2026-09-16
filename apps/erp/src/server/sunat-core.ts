@@ -261,18 +261,34 @@ export async function generarResumenDiarioConCliente(
 
     const fechaRef = fechaReferencia || fechaPeru();
 
-    const { data: boletas } = await sb.from('comprobantes')
-      .select('id, serie, numero, numero_completo, tipo_documento_cliente, numero_documento_cliente, sub_total, igv, total, estado')
+    /*
+     * En el resumen entran dos cosas distintas.
+     *
+     *  - Las boletas del día que todavía no se informaron  -> condición 1.
+     *  - Las anuladas cuya baja SUNAT todavía no conoce    -> condición 3.
+     *
+     * Las boletas no se dan de baja de a una: la anulación se comunica dentro
+     * de este mismo resumen. Una boleta anulada ANTES de informarse igual
+     * tiene que viajar marcada como anulada; si simplemente no se mandara,
+     * quedaría un hueco en la numeración que nadie puede explicar.
+     */
+    const { data: boletas } = await sbAny.from('comprobantes')
+      .select('id, serie, numero, numero_completo, tipo_documento_cliente, numero_documento_cliente, sub_total, igv, total, estado, anulacion_informada_en')
       .eq('tipo', 'BOLETA')
       .gte('fecha_emision', ventanaDiaPeru(fechaRef).desde)
       .lt('fecha_emision', ventanaDiaPeru(fechaRef).hasta)
-      .neq('estado', 'ACEPTADO')
-      .neq('estado', 'ANULADO');
-    const lista = (boletas ?? []) as Array<{
+      .neq('estado', 'ACEPTADO');
+    const todas = (boletas ?? []) as Array<{
       id: string; serie: string; numero: number; numero_completo: string | null;
       tipo_documento_cliente: string | null; numero_documento_cliente: string | null;
       sub_total: number | null; igv: number | null; total: number | null; estado: string;
+      anulacion_informada_en: string | null;
     }>;
+    // Una anulada que ya se informó no vuelve a mandarse: SUNAT la rechazaría
+    // por repetida.
+    const lista = todas.filter(
+      (b) => b.estado !== 'ANULADO' || b.anulacion_informada_en === null,
+    );
     if (lista.length === 0) throw new Error(`No hay boletas por informar en ${fechaRef}.`);
 
     const lineas: ResumenBoletaLinea[] = lista.map((b) => ({
@@ -280,11 +296,14 @@ export async function generarResumenDiarioConCliente(
       serieNumero: b.numero_completo ?? formatearNumeroComprobante(b.serie, b.numero),
       clienteTipoDoc: tipoDocClienteSunat(b.tipo_documento_cliente),
       clienteNumeroDoc: b.numero_documento_cliente || '0',
-      condicion: '1',
+      condicion: b.estado === 'ANULADO' ? '3' : '1',
       total: Number(b.total ?? 0),
       gravado: Number(b.sub_total ?? 0),
       igv: Number(b.igv ?? 0),
     }));
+
+    // Qué bajas viajan en este resumen: se marcan recién cuando SUNAT lo acepte.
+    const bajasEnviadas = lista.filter((b) => b.estado === 'ANULADO').map((b) => b.id);
 
     // El identificador del resumen es RC-{fechaGeneracion}-{correlativo}, así que
     // el correlativo tiene que ser único por DÍA DE ENVÍO, no por día informado.
@@ -322,6 +341,9 @@ export async function generarResumenDiarioConCliente(
       empresa_id: empresa.id, resumen_id: resumenId, fecha_referencia: fechaRef,
       fecha_generacion: fechaGen, correlativo, ticket: snd.ticket, estado: 'EN_PROCESO',
       cantidad_boletas: lineas.length, xml_zip_path: zipPath,
+      // Las bajas que viajan en este resumen. Se anotan acá y no se dan por
+      // informadas hasta que SUNAT responda que aceptó el resumen.
+      observaciones: bajasEnviadas.length > 0 ? { bajas: bajasEnviadas } : null,
     }).select('id').single();
 
     return { rowId: insRow?.id as string, resumenId, ticket: snd.ticket, cantidad: lineas.length };
@@ -380,6 +402,21 @@ export async function consultarResumenConCliente(
           .gte('fecha_emision', ventanaDiaPeru(res.fecha_referencia as string).desde)
           .lt('fecha_emision', ventanaDiaPeru(res.fecha_referencia as string).hasta)
           .neq('estado', 'ANULADO');
+
+        /*
+         * Las bajas que viajaron en este resumen quedan informadas.
+         *
+         * Se marcan SOLO acá, con el resumen ya aceptado. Si se marcaran al
+         * enviarlo y SUNAT lo rechazara, la baja quedaría dada por comunicada
+         * sin estarlo, y no volvería a intentarse nunca.
+         */
+        const bajas = (res.observaciones as { bajas?: string[] } | null)?.bajas ?? [];
+        if (bajas.length > 0) {
+          await sbAny.from('comprobantes').update({
+            anulacion_informada_en: new Date().toISOString(),
+            sunat_mensaje: `Anulación comunicada en Resumen Diario ${res.resumen_id}`,
+          }).in('id', bajas);
+        }
       }
     }
 
