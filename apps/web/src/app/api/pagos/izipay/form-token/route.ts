@@ -9,7 +9,7 @@
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
 import { createServiceClient } from '@happy/db/service';
-import { crearFormToken, configIzipayDesdeEntorno } from '@happy/lib/pagos/izipay';
+import { crearFormToken, configIzipayDesdeEntorno, ErrorIzipay } from '@happy/lib/pagos/izipay';
 import { aCentimos } from '@/lib/precios';
 
 export const runtime = 'nodejs';
@@ -112,8 +112,14 @@ export async function POST(req: Request) {
     return NextResponse.json({ formToken, publicKey, numero: pedido.numero });
   } catch (e) {
     console.error('[izipay] CreatePayment falló:', (e as Error).message);
+    // Al comprador se le habla en claro; el código de izipay va aparte, para
+    // que quien tenga que arreglarlo sepa qué mirar sin entrar a los registros
+    // del servidor. Es un código público: no revela nada de las claves.
     return NextResponse.json(
-      { error: 'No pudimos abrir el pago con tarjeta. Intenta de nuevo en un momento.' },
+      {
+        error: 'No pudimos abrir el pago con tarjeta. Intenta de nuevo en un momento.',
+        codigoIzipay: e instanceof ErrorIzipay ? e.codigo : 'SIN_RESPUESTA',
+      },
       { status: 502 },
     );
   }

@@ -80,6 +80,26 @@ export function configIzipayDesdeEntorno(
 // 1. Pedir el formToken (servidor)
 // ===========================================================================
 
+/**
+ * Izipay rechazó la solicitud, y con su código de error.
+ *
+ * El código (por ejemplo `INT_905`, credenciales inválidas) es público y no
+ * dice nada de las claves, pero es lo único que distingue "la contraseña está
+ * mal cargada" de "la tienda no está habilitada" o "el monto no se acepta".
+ * Sin él, cuando esto falla a las once de la noche, alguien tiene que entrar a
+ * buscar los registros del servidor para enterarse de algo que el propio
+ * sistema ya sabía.
+ */
+export class ErrorIzipay extends Error {
+  constructor(
+    mensaje: string,
+    readonly codigo: string,
+  ) {
+    super(mensaje);
+    this.name = 'ErrorIzipay';
+  }
+}
+
 export type DatosFormToken = {
   /** Referencia del pedido. Es lo que el comercio ve en el Back Office. */
   orderId: string;
@@ -153,13 +173,17 @@ export async function crearFormToken(
   });
 
   const json = (await res.json().catch(() => null)) as RespuestaRest<{ formToken?: string }> | null;
-  if (!json) throw new Error(`Izipay respondió algo ilegible (HTTP ${res.status})`);
+  if (!json) {
+    throw new ErrorIzipay(`Izipay respondió algo ilegible (HTTP ${res.status})`, `HTTP_${res.status}`);
+  }
   if (json.status !== 'SUCCESS' || !json.answer?.formToken) {
     const a = json.answer ?? {};
-    throw new Error(
-      `Izipay rechazó la solicitud: ${a.errorCode ?? res.status} ${a.errorMessage ?? ''} ${
+    const codigo = a.errorCode ?? `HTTP_${res.status}`;
+    throw new ErrorIzipay(
+      `Izipay rechazó la solicitud: ${codigo} ${a.errorMessage ?? ''} ${
         a.detailedErrorMessage ?? ''
       }`.trim(),
+      codigo,
     );
   }
   return json.answer.formToken;
