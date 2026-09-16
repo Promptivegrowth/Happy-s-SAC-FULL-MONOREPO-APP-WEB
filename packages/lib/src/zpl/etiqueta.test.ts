@@ -149,6 +149,60 @@ describe('el papel y la máquina', () => {
   });
 });
 
+describe('el reparto vertical', () => {
+  /** Las coordenadas Y de una fila, en orden de aparición. */
+  function yes(fila: string): number[] {
+    return [...fila.matchAll(/\^FO\d+,(\d+)/g)].map((m) => Number(m[1]));
+  }
+
+  it('el nombre arranca despegado del borde de arriba', () => {
+    /*
+     * En la primera tanda del almacén salió cortada la parte de arriba de los
+     * nombres: la Zebra empieza a imprimir un poco después del borde del
+     * sticker y la primera línea quedaba medio renglón afuera.
+     */
+    const f = filas(construirEtiquetasZpl([UNA]))[0] ?? '';
+    expect(Math.min(...yes(f))).toBeGreaterThanOrEqual(aPuntos(2.5));
+  });
+
+  it('el aire de arriba es mayor que el de los costados', () => {
+    // Abajo sobraba papel y arriba faltaba: el sobrante se movió de lado.
+    const f = filas(construirEtiquetasZpl([UNA]))[0] ?? '';
+    const xIzq = Math.min(...[...f.matchAll(/\^FO(\d+),/g)].map((m) => Number(m[1])));
+    const margenIzquierdo = xIzq - aPuntos(ROLLO_2X1_DOBLE.margenIzquierdoMm);
+    expect(Math.min(...yes(f))).toBeGreaterThan(margenIzquierdo);
+  });
+
+  it('el aire de arriba se puede ajustar sin tocar el código', () => {
+    // Cada impresora arranca en un punto un poco distinto; esta es la perilla
+    // para corregirlo mirando una tira impresa.
+    const y = (extra: number) => {
+      const f = filas(construirEtiquetasZpl([UNA], { margenSuperiorExtraMm: extra }))[0] ?? '';
+      return Math.min(...[...f.matchAll(/\^FO\d+,(\d+)/g)].map((m) => Number(m[1])));
+    };
+    expect(y(3)).toBeGreaterThan(y(1.3));
+    expect(y(3) - y(1.3)).toBe(aPuntos(3) - aPuntos(1.3));
+  });
+
+  it('nada se pasa del alto de la etiqueta', () => {
+    for (const alto of [25, 25.4, 30, 40]) {
+      const zpl = construirEtiquetasZpl([UNA], {
+        formato: { ...ROLLO_2X1_DOBLE, altoEtiquetaMm: alto },
+      });
+      const f = filas(zpl)[0] ?? '';
+      const altoBarras = Number(/\^BCN,(\d+),/.exec(f)?.[1] ?? 0);
+      const ultimo = Math.max(...yes(f));
+      expect(Math.max(ultimo, altoBarras)).toBeLessThan(aPuntos(alto));
+    }
+  });
+
+  it('las barras siguen leyéndose aunque el nombre ocupe más', () => {
+    const f = filas(construirEtiquetasZpl([UNA]))[0] ?? '';
+    const altoBarras = Number(/\^BCN,(\d+),/.exec(f)?.[1] ?? 0);
+    expect(altoBarras).toBeGreaterThanOrEqual(aPuntos(7));
+  });
+});
+
 describe('el contenido de cada etiqueta', () => {
   it('lleva el nombre, las barras y el código legible', () => {
     const f = filas(construirEtiquetasZpl([UNA]))[0] ?? '';

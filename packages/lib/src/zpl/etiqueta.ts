@@ -66,6 +66,14 @@ export type OpcionesEtiqueta = {
   /** Margen interno de cada etiqueta, para que nada quede pegado al borde. */
   margenInternoMm?: number;
   /**
+   * Milímetros extra arriba, además del margen interno.
+   *
+   * Es la perilla para corregir cuánto tarda la impresora en empezar a
+   * imprimir después del borde del sticker. Se ajusta mirando una tira: si el
+   * nombre sale cortado arriba, sube; si queda demasiado aire, baja.
+   */
+  margenSuperiorExtraMm?: number;
+  /**
    * Oscurecimiento del cabezal (0 a 30). Con transferencia térmica y cinta,
    * demasiado poco deja las barras grises y la pistola falla.
    */
@@ -119,6 +127,7 @@ function bloqueEtiqueta(
   xMm: number,
   formato: FormatoRollo,
   margenMm: number,
+  extraArribaMm: number,
 ): string {
   const x = aPuntos(xMm + margenMm);
   const anchoUtilMm = formato.anchoEtiquetaMm - margenMm * 2;
@@ -148,8 +157,25 @@ function bloqueEtiqueta(
   const ALTO_TITULO_MM = 2.6;
   const altoTitulo = aPuntos(ALTO_TITULO_MM);
   const altoTexto = aPuntos(3);                      // ~3 mm para el código
-  const yTitulo = aPuntos(margenMm);
-  const yBarras = aPuntos(margenMm + ALTO_TITULO_MM * LINEAS_TITULO + 0.8);
+
+  /*
+   * Arriba se deja más aire que a los costados.
+   *
+   * El margen lateral y el de arriba eran el mismo, y en la primera tanda del
+   * almacén salió cortada la parte de arriba de los nombres mientras abajo
+   * sobraba papel en blanco. No es un error de la cuenta —el reparto estaba
+   * balanceado— sino de dónde arranca a imprimir la máquina: la Zebra empieza
+   * la etiqueta un poco después del borde del sticker, así que la primera
+   * línea de texto queda medio renglón afuera.
+   *
+   * Eso no se puede calcular desde acá, se corrige dando margen. El milímetro
+   * y medio extra sale del sobrante de abajo, así que las barras casi no se
+   * tocan: quedan cerca de 11 mm y con 7 ya lee cómodo.
+   */
+  const margenSuperiorMm = margenMm + extraArribaMm;
+
+  const yTitulo = aPuntos(margenSuperiorMm);
+  const yBarras = aPuntos(margenSuperiorMm + ALTO_TITULO_MM * LINEAS_TITULO + 0.8);
   const yCodigo = aPuntos(formato.altoEtiquetaMm - margenMm - 3.2);
   // Lo que sobra entre el título y el código legible, menos un respiro.
   const altoBarras = Math.max(aPuntos(7), yCodigo - yBarras - aPuntos(0.8));
@@ -216,6 +242,7 @@ export function construirEtiquetasZpl(
 ): string {
   const formato = opciones.formato ?? ROLLO_2X1_DOBLE;
   const margen = opciones.margenInternoMm ?? 1.5;
+  const extraArriba = opciones.margenSuperiorExtraMm ?? 1.3;
   const oscuridad = opciones.oscuridad ?? 15;
   const velocidad = opciones.velocidad ?? 3;
 
@@ -262,6 +289,7 @@ export function construirEtiquetasZpl(
         formato.margenIzquierdoMm + col * (formato.anchoEtiquetaMm + formato.separacionMm),
         formato,
         margen,
+        extraArriba,
       ),
     );
     partes.push(
