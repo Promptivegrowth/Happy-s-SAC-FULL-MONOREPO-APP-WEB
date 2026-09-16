@@ -5,6 +5,7 @@ import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 import { DIGITOS_CORRELATIVO } from '@happy/lib/sunat-ubl';
 import { createClient } from '@happy/db/server';
+import { descontarVuelto } from '@happy/lib/pagos/vuelto';
 import { formatTallaChip } from '@happy/lib';
 
 // Datos de exportación (Art. 33 Ley IGV): cuando la venta es exportación,
@@ -101,6 +102,21 @@ export async function registrarVenta(input: VentaInput): Promise<VentaResultado>
   if (totalPagado < subTotal - 0.01) {
     return { ok: false, error: `Pago insuficiente: faltan ${(subTotal - totalPagado).toFixed(2)}` };
   }
+
+  /*
+   * Lo que sobra por encima del total es el vuelto: se descuenta del efectivo
+   * antes de guardar. El porqué y los casos raros están en la función.
+   */
+  const ajuste = descontarVuelto(parsed.pagos, subTotal);
+  if (!ajuste.ok) {
+    return {
+      ok: false,
+      error:
+        `Los pagos superan el total de la venta en S/ ${ajuste.sobra.toFixed(2)}. ` +
+        'Revisa los montos: solo el efectivo admite vuelto.',
+    };
+  }
+  parsed.pagos = ajuste.pagos;
 
   // VALIDACIÓN DE STOCK — NO permitir vender sin stock en el almacén de la caja.
   // Sumamos cantidad por variante (por si se agregó el mismo SKU dos veces) y

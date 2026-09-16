@@ -46,7 +46,17 @@ export function CerrarCajaModal({
   onCerrada: () => void;
 }) {
   const [balance, setBalance] = useState<BalanceCajaDTO>(balanceInicial);
-  const [contado, setContado] = useState<string>(balanceInicial.esperado_efectivo.toFixed(2));
+  /*
+   * El monto contado arranca VACÍO, a propósito.
+   *
+   * Antes venía puesto con lo que el sistema esperaba, así que confirmar sin
+   * contar daba siempre "cuadre perfecto" y el control no controlaba nada: un
+   * faltante o un sobrante pasaban sin que nadie los viera. El 15/09/2026 se
+   * cerró una caja con diferencia cero teniendo un pago mal registrado.
+   *
+   * Contar el efectivo y escribir lo que hay es todo el sentido de este paso.
+   */
+  const [contado, setContado] = useState<string>('');
   const [obs, setObs] = useState('');
   const [pending, start] = useTransition();
   const [refreshing, setRefreshing] = useState(false);
@@ -71,7 +81,10 @@ export function CerrarCajaModal({
   const sesionLarga = Number.isFinite(horasAbierta) && horasAbierta > 24;
 
   const contadoNum = Number(contado);
-  const diferencia = Number.isFinite(contadoNum) ? contadoNum - balance.esperado_efectivo : 0;
+  // Sin monto escrito no hay diferencia que mostrar: mostrar 0.00 se lee como
+  // "cuadra" cuando en realidad todavía no se contó nada.
+  const hayConteo = contado.trim() !== '' && Number.isFinite(contadoNum);
+  const diferencia = hayConteo ? contadoNum - balance.esperado_efectivo : 0;
   const tone: 'ok' | 'sobrante' | 'faltante' = Math.abs(diferencia) < 0.01 ? 'ok' : diferencia > 0 ? 'sobrante' : 'faltante';
 
   // Refresco automático al montar — por si llegaron ventas mientras tenía el modal cerrado
@@ -86,10 +99,8 @@ export function CerrarCajaModal({
       const b = await balanceCajaActiva();
       if (b) {
         setBalance(b);
-        // si el usuario no había tocado el monto contado, ajustar al nuevo esperado
-        if (Number(contado) === Number(balance.esperado_efectivo.toFixed(2))) {
-          setContado(b.esperado_efectivo.toFixed(2));
-        }
+        // El monto contado no se toca al refrescar: lo escribió una persona
+        // después de contar la plata.
       }
     } finally {
       setRefreshing(false);
@@ -188,8 +199,9 @@ export function CerrarCajaModal({
   }
 
   function confirmarCierre() {
-    if (!Number.isFinite(contadoNum) || contadoNum < 0) {
-      toast.error('Ingresa un monto válido');
+    if (!hayConteo || contadoNum < 0) {
+      // Vacío ya no significa "lo esperado": hay que contar y escribirlo.
+      toast.error('Cuenta el efectivo de la caja y escribe cuánto hay');
       return;
     }
     if (Math.abs(diferencia) > 5 && !confirm(`Diferencia de ${formatPEN(diferencia)}. ¿Confirmar cierre?`)) return;
@@ -362,27 +374,33 @@ export function CerrarCajaModal({
                 min={0}
                 value={contado}
                 onChange={(e) => setContado(e.target.value)}
+                placeholder="0.00"
                 className="mt-1 h-12 text-xl font-display"
               />
               <p className="mt-1 text-[11px] text-slate-500">
-                Cuenta el efectivo físico e ingrésalo aquí.
+                Cuenta el efectivo físico e ingrésalo aquí. El sistema espera{' '}
+                <strong>{formatPEN(balance.esperado_efectivo)}</strong>.
               </p>
             </div>
             <div>
               <Label className="text-xs">Diferencia</Label>
+              {/* Mientras no se haya contado, no se muestra S/ 0.00: un cero
+                  se lee como "cuadra" y todavía no hay nada que cuadre. */}
               <div className={`mt-1 flex h-12 items-center rounded-md border px-3 font-display text-xl font-semibold ${
+                !hayConteo ? 'border-dashed border-slate-200 bg-slate-50 text-slate-400' :
                 tone === 'ok' ? 'border-slate-200 bg-slate-50 text-slate-700' :
                 tone === 'sobrante' ? 'border-emerald-300 bg-emerald-50 text-emerald-700' :
                 'border-red-300 bg-red-50 text-red-700'
               }`}>
-                {tone === 'ok' && <CheckCircle2 className="mr-1.5 h-4 w-4" />}
-                {tone === 'faltante' && <AlertTriangle className="mr-1.5 h-4 w-4 text-amber-500" />}
-                {diferencia > 0 ? '+' : ''}{formatPEN(diferencia)}
+                {hayConteo && tone === 'ok' && <CheckCircle2 className="mr-1.5 h-4 w-4" />}
+                {hayConteo && tone === 'faltante' && <AlertTriangle className="mr-1.5 h-4 w-4 text-amber-500" />}
+                {hayConteo ? `${diferencia > 0 ? '+' : ''}${formatPEN(diferencia)}` : '—'}
               </div>
               <p className="mt-1 text-[11px] text-slate-500">
-                {tone === 'ok' && 'Cuadre perfecto'}
-                {tone === 'sobrante' && 'Hay más efectivo del esperado'}
-                {tone === 'faltante' && 'Hay menos efectivo del esperado'}
+                {!hayConteo && 'Escribe el efectivo contado para ver la diferencia'}
+                {hayConteo && tone === 'ok' && 'Cuadre perfecto'}
+                {hayConteo && tone === 'sobrante' && 'Hay más efectivo del esperado'}
+                {hayConteo && tone === 'faltante' && 'Hay menos efectivo del esperado'}
               </p>
             </div>
           </div>

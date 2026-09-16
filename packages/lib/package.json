@@ -13,6 +13,7 @@
     "./sunat-ubl": "./src/sunat-ubl/index.ts",
     "./pagos": "./src/pagos/index.ts",
     "./pagos/izipay": "./src/pagos/izipay.ts",
+    "./pagos/vuelto": "./src/pagos/vuelto.ts",
     "./whatsapp": "./src/whatsapp/index.ts",
     "./validators": "./src/validators/index.ts",
     "./format": "./src/format/index.ts",

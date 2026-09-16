@@ -23,11 +23,9 @@ import {
   toggleCuentaActiva,
 } from '@/server/actions/cuentas-bancarias';
 import type { Cuenta } from './page';
+import { avisoDeMetodo, METODOS_DE_COBRO, nombreDelMetodo } from '@/server/metodo-de-la-cuenta';
 
-const METODOS = [
-  'EFECTIVO', 'YAPE', 'PLIN', 'TARJETA_DEBITO', 'TARJETA_CREDITO',
-  'TRANSFERENCIA', 'DEPOSITO', 'CREDITO', 'WHATSAPP_PENDIENTE',
-] as const;
+const METODOS = METODOS_DE_COBRO;
 
 function FormModal({
   initial,
@@ -175,8 +173,24 @@ function FormModal({
               className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
               disabled={pending}
             >
-              {METODOS.map((m) => <option key={m} value={m}>{m}</option>)}
+              {METODOS.map((m) => (
+                <option key={m} value={m}>{nombreDelMetodo(m)}</option>
+              ))}
             </select>
+            <p className="text-[11px] text-slate-500">
+              Con esto se suman los cobros en el cierre de caja. El ticket muestra el nombre
+              de la cuenta, así que un método mal puesto no se nota hasta cuadrar.
+            </p>
+            {/* El aviso cuando el nombre y el método no concuerdan. El porqué
+                está en @/server/metodo-de-la-cuenta. */}
+            {(() => {
+              const aviso = avisoDeMetodo(nombre, banco, metodoDefault);
+              return aviso ? (
+                <p className="rounded-md border border-amber-300 bg-amber-50 px-2.5 py-2 text-[11px] leading-snug text-amber-900">
+                  {aviso}
+                </p>
+              ) : null;
+            })()}
           </div>
           <div className="space-y-1.5">
             <Label htmlFor="orden">Orden</Label>
