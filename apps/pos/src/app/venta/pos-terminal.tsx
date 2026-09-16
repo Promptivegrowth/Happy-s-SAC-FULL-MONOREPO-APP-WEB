@@ -1,6 +1,8 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useRouter } from 'next/navigation';
+import { createClient } from '@happy/db/browser';
 import Image from 'next/image';
 import { Card } from '@happy/ui/card';
 import { Input } from '@happy/ui/input';
@@ -167,6 +169,109 @@ export function PosTerminal({
   const [historialOpen, setHistorialOpen] = useState(false);
   const [pruebaImpresionOpen, setPruebaImpresionOpen] = useState(false);
   const [gastosOpen, setGastosOpen] = useState(false);
+
+  /*
+   * El POS se entera solo de los cambios, sin que nadie apriete nada.
+   *
+   * Todo lo que le llega del servidor —stock, precios, productos, cuentas de
+   * pago, vendedores— es de cuando se cargó la página, y esta pantalla queda
+   * abierta toda la jornada. El almacén recibía un traslado y la cajera seguía
+   * viendo "sin stock" hasta recargar a mano; lo reportaron el 16/09/2026, y
+   * pasa varias veces al día. Con los precios es peor: seguir cobrando el
+   * precio viejo no se nota hasta que alguien revisa.
+   *
+   * Supabase avisa en el momento en que cambian `stock_actual` (traslados,
+   * compras, ajustes, ventas de la otra caja) o `productos_variantes`
+   * (precios), y ahí se vuelven a pedir los datos.
+   *
+   * `router.refresh()` los trae SIN tirar abajo lo que hay en pantalla: el
+   * carrito, el cliente, los pagos cargados y la sesión de caja siguen donde
+   * estaban. Por eso puede correr en cualquier momento, incluso con una venta
+   * a medio armar.
+   */
+  const router = useRouter();
+
+  /*
+   * Los avisos se juntan antes de actuar.
+   *
+   * Un traslado de cincuenta artículos son cincuenta avisos en dos segundos.
+   * Sin esperar un poco, serían cincuenta recargas del catálogo entero.
+   */
+  const refrescoPendiente = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const refrescarCatalogo = useCallback(() => {
+    if (refrescoPendiente.current) clearTimeout(refrescoPendiente.current);
+    refrescoPendiente.current = setTimeout(() => {
+      refrescoPendiente.current = null;
+      router.refresh();
+    }, 700);
+  }, [router]);
+
+  const almacenEnUso = sesionActiva?.almacen_id ?? cajaDefault?.almacen_id ?? null;
+
+  useEffect(() => {
+    const sb = createClient();
+    let vivo = true;
+    let canal: ReturnType<typeof sb.channel> | null = null;
+
+    void (async () => {
+      /*
+       * El canal necesita el token del cajero, no la clave anónima del sitio.
+       *
+       * `stock_actual` solo deja leer a quien tiene sesión y rol, y el aviso
+       * de realtime pasa por esa misma regla. Sin el token, el canal se
+       * conecta igual y hasta dice SUBSCRIBED —parece que anda— pero no llega
+       * ni un evento. Falla en silencio, que es la peor manera de fallar: se
+       * comprobó midiendo, porque desde afuera no se nota.
+       */
+      const { data } = await sb.auth.getSession();
+      if (!vivo) return;
+      await sb.realtime.setAuth(data.session?.access_token ?? null);
+      if (!vivo) return;
+
+      canal = sb
+        .channel('pos-catalogo')
+        // Solo el stock de ESTA tienda: lo que se mueva en la otra no cambia
+        // nada de lo que ve esta caja.
+        .on(
+          'postgres_changes',
+          {
+            event: '*',
+            schema: 'public',
+            table: 'stock_actual',
+            ...(almacenEnUso ? { filter: `almacen_id=eq.${almacenEnUso}` } : {}),
+          },
+          refrescarCatalogo,
+        )
+        // Precios y altas o bajas del catálogo.
+        .on(
+          'postgres_changes',
+          { event: '*', schema: 'public', table: 'productos_variantes' },
+          refrescarCatalogo,
+        )
+        .subscribe();
+    })();
+
+    /*
+     * Red de seguridad: al volver a la pestaña también se refresca.
+     *
+     * La conexión puede caerse —se duerme la computadora, se corta el wifi— y
+     * mientras está caída no llega ningún aviso. Volver a la pestaña es
+     * justamente el momento en que la cajera acaba de hacer algo en el ERP.
+     */
+    const alVolver = () => {
+      if (document.visibilityState === 'visible') refrescarCatalogo();
+    };
+    document.addEventListener('visibilitychange', alVolver);
+    window.addEventListener('focus', alVolver);
+
+    return () => {
+      vivo = false;
+      if (refrescoPendiente.current) clearTimeout(refrescoPendiente.current);
+      document.removeEventListener('visibilitychange', alVolver);
+      window.removeEventListener('focus', alVolver);
+      if (canal) void sb.removeChannel(canal);
+    };
+  }, [almacenEnUso, refrescarCatalogo]);
 
   /*
    * Quién, dónde y en qué caja: la cabecera de los papeles de caja.
@@ -1004,6 +1109,9 @@ export function PosTerminal({
       // NO reseteamos vendedorId / tipoDoc / formato — persisten por sesión.
       // Refrescar balance para que el cierre vea la venta
       void refrescarSesion();
+      // El stock acaba de bajar: que la pantalla lo muestre sin esperar al
+      // refresco de cada minuto.
+      refrescarCatalogo();
     } finally {
       setCobrando(false);
     }
