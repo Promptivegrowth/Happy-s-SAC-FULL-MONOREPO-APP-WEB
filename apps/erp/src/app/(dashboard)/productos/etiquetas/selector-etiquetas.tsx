@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Button } from '@happy/ui/button';
 import { Input } from '@happy/ui/input';
 import { Badge } from '@happy/ui/badge';
@@ -13,8 +13,11 @@ import {
   contarEtiquetas,
   generarEtiquetasPDF,
   nombreCorto,
+  tituloEtiqueta,
   type EtiquetaItem,
 } from './etiquetas-pdf';
+import { construirEtiquetasZpl, etiquetasABase64 } from '@happy/lib/zpl';
+import { encolarEtiquetas, equiposConEtiquetas } from '@/server/actions/impresion';
 
 export type VarianteEtiqueta = {
   sku: string;
@@ -137,6 +140,73 @@ export function SelectorEtiquetas({ productos }: { productos: ProductoEtiqueta[]
       for (const v of p.variantes) delete sig[v.sku];
       return sig;
     });
+  }
+
+  /*
+   * Las computadoras que tienen la Zebra lista.
+   *
+   * Se piden al abrir la pantalla: si no hay ninguna, el botón de imprimir
+   * directo no aparece y queda solo el PDF, que es el camino de siempre.
+   */
+  const [equiposZebra, setEquiposZebra] = useState<Array<{ id: string; nombre: string; impresora: string }>>([]);
+  const [equipoZebra, setEquipoZebra] = useState<string>('');
+  const [enviando, setEnviando] = useState(false);
+
+  useEffect(() => {
+    void equiposConEtiquetas()
+      .then((lista) => {
+        setEquiposZebra(lista);
+        if (lista.length === 1) setEquipoZebra(lista[0]!.id);
+      })
+      .catch(() => setEquiposZebra([]));
+  }, []);
+
+  /**
+   * Manda las etiquetas a la Zebra por el agente.
+   *
+   * El PDF sigue existiendo, pero por el navegador el rollo de dos columnas
+   * sale mal: Windows estira el diseño de una etiqueta sobre las dos. Por acá
+   * el ZPL llega tal cual y la impresora ubica cada código en su columna.
+   */
+  async function imprimirEnZebra() {
+    if (total === 0) {
+      toast.error('Elige al menos una talla y su cantidad');
+      return;
+    }
+    if (!equipoZebra) {
+      toast.error('Elige la computadora que tiene la Zebra');
+      return;
+    }
+    if (total > LOTE_GRANDE && !confirm(`Vas a imprimir ${total} etiquetas. ¿Continuamos?`)) return;
+
+    setEnviando(true);
+    try {
+      const datos = items
+        .filter((i) => (i.codigo ?? '').trim() !== '')
+        .map((i) => ({
+          titulo: tituloEtiqueta(i.nombre, i.talla),
+          codigo: i.codigo,
+          cantidad: i.cantidad,
+        }));
+      if (datos.length === 0) {
+        toast.error('Ninguna de las tallas elegidas tiene un código imprimible');
+        return;
+      }
+      const r = await encolarEtiquetas(
+        equipoZebra,
+        etiquetasABase64(construirEtiquetasZpl(datos)),
+        `Etiquetas · ${total} unidad(es)`,
+      );
+      if (!r.ok) {
+        toast.error(r.error ?? 'No se pudo enviar a la impresora');
+        return;
+      }
+      toast.success(`${total} etiqueta(s) enviadas a la Zebra`, { duration: 7000 });
+    } catch (e) {
+      toast.error((e as Error).message ?? 'No se pudo enviar a la impresora');
+    } finally {
+      setEnviando(false);
+    }
   }
 
   async function generar() {
@@ -350,10 +420,45 @@ export function SelectorEtiquetas({ productos }: { productos: ProductoEtiqueta[]
               {formato.soporte === 'a4' ? '' : ' · una por página'}
             </span>
           </div>
-          <Button variant="premium" onClick={generar} disabled={generando || total === 0}>
-            {generando ? <Loader2 className="h-4 w-4 animate-spin" /> : <Printer className="h-4 w-4" />}
-            Generar PDF e imprimir
-          </Button>
+          <div className="flex flex-wrap items-center gap-2">
+            {/*
+              El camino recomendado: directo a la Zebra.
+              Solo aparece si hay una computadora con la impresora configurada
+              y con el agente que sabe imprimirlas. Si no, queda el PDF.
+            */}
+            {equiposZebra.length > 0 && (
+              <>
+                {equiposZebra.length > 1 && (
+                  <select
+                    value={equipoZebra}
+                    onChange={(e) => setEquipoZebra(e.target.value)}
+                    className="h-9 rounded-md border border-input bg-background px-2 text-sm"
+                  >
+                    <option value="">¿En qué computadora?</option>
+                    {equiposZebra.map((eq) => (
+                      <option key={eq.id} value={eq.id}>{eq.nombre}</option>
+                    ))}
+                  </select>
+                )}
+                <Button
+                  variant="premium"
+                  onClick={() => void imprimirEnZebra()}
+                  disabled={enviando || total === 0}
+                >
+                  {enviando ? <Loader2 className="h-4 w-4 animate-spin" /> : <Printer className="h-4 w-4" />}
+                  Imprimir en la Zebra
+                </Button>
+              </>
+            )}
+            <Button
+              variant={equiposZebra.length > 0 ? 'outline' : 'premium'}
+              onClick={generar}
+              disabled={generando || total === 0}
+            >
+              {generando ? <Loader2 className="h-4 w-4 animate-spin" /> : <Printer className="h-4 w-4" />}
+              Generar PDF
+            </Button>
+          </div>
         </div>
       </div>
     </div>

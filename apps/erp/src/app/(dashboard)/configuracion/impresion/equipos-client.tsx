@@ -8,7 +8,7 @@ import { Badge } from '@happy/ui/badge';
 import { Card, CardContent } from '@happy/ui/card';
 import {
   Printer, Plus, Copy, Check, Loader2, RefreshCw, Power, Trash2,
-  AlertTriangle, Scissors,
+  AlertTriangle, Scissors, Tags,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import {
@@ -201,7 +201,13 @@ function EquipoCard({
   copiado: boolean;
   pendiente: boolean;
   onCopiar: () => void;
-  onEditar: (cambios: { impresora?: string | null; avance_corte_mm?: number; activo?: boolean; almacen_id?: string | null }) => void;
+  onEditar: (cambios: {
+    impresora?: string | null;
+    impresora_etiquetas?: string | null;
+    avance_corte_mm?: number;
+    activo?: boolean;
+    almacen_id?: string | null;
+  }) => void;
   onRegenerar: () => void;
   onEliminar: () => void;
   onOlvidarMaquinas: () => void;
@@ -308,6 +314,39 @@ function EquipoCard({
                 <option value={e.impresora}>{e.impresora}</option>
               )}
             </select>
+          </div>
+
+          {/*
+            La impresora de etiquetas: otra máquina, otro idioma.
+            Solo aparece si el agente instalado sabe imprimirlas. Con un agente
+            antiguo no se muestra, porque elegir acá una Zebra que ese agente no
+            va a usar solo haría creer que quedó configurada.
+          */}
+          <div>
+            <label className="mb-1 flex items-center gap-1 text-xs font-semibold uppercase tracking-wide text-slate-500">
+              <Tags className="h-3 w-3" /> Etiquetas (Zebra)
+            </label>
+            {e.sabeEtiquetas ? (
+              <select
+                value={e.impresoraEtiquetas ?? ''}
+                onChange={(ev) => onEditar({ impresora_etiquetas: ev.target.value || null })}
+                disabled={pendiente}
+                className="h-9 w-full rounded-md border border-input bg-background px-2 text-sm"
+              >
+                <option value="">No imprime etiquetas</option>
+                {e.impresoras_disponibles.map((n) => (
+                  <option key={n} value={n}>{n}</option>
+                ))}
+                {e.impresoraEtiquetas && !e.impresoras_disponibles.includes(e.impresoraEtiquetas) && (
+                  <option value={e.impresoraEtiquetas}>{e.impresoraEtiquetas}</option>
+                )}
+              </select>
+            ) : (
+              <p className="rounded-md border border-dashed border-slate-200 bg-slate-50 px-2 py-2 text-[11px] leading-snug text-slate-500">
+                El agente de esta computadora es anterior y no imprime etiquetas.
+                Actualízalo para poder elegirla.
+              </p>
+            )}
           </div>
 
           <div>

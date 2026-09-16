@@ -78,12 +78,23 @@ export function nombreCorto(nombre: string): string {
 }
 
 /**
+ * Lo que va rotulado arriba de la etiqueta.
+ *
+ * Vive acá y no en cada generador para que el PDF y la impresión directa a la
+ * Zebra rotulen exactamente igual: una misma prenda no puede llamarse distinto
+ * según por dónde se imprimió.
+ */
+export function tituloEtiqueta(nombre: string, talla: string): string {
+  return `${nombreCorto(nombre)}${sufijoTalla(talla)}`;
+}
+
+/**
  * Cómo se escribe la talla junto al nombre.
  *   6, 10   -> "ABEJITA #6"       (es como rotula la tienda)
  *   S, AD   -> "ABEJITA T-S"      (el "#" delante de una letra se lee raro)
  *   Única   -> se omite            (un accesorio tiene una sola talla: no aporta)
  */
-function sufijoTalla(talla: string): string {
+export function sufijoTalla(talla: string): string {
   const t = (talla ?? '').trim();
   if (!t || /^(única|unica)$/i.test(t)) return '';
   if (/^\d+$/.test(t)) return ` #${t}`;

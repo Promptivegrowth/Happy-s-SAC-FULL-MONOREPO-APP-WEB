@@ -55,6 +55,26 @@ export async function GET(request: Request) {
    */
   const maquina = url.searchParams.get('maquina')?.trim().slice(0, 100) || null;
 
+  /*
+   * Qué sabe imprimir este agente: "ticket", "etiqueta", o las dos.
+   *
+   * Esta es la protección que impide un desastre concreto. En la cola conviven
+   * tickets ESC/POS para la térmica y etiquetas ZPL para la Zebra, que son
+   * idiomas distintos. El agente 2.3 que está instalado en las cajas no
+   * distingue: le manda a su ticketera lo que le den. Un ZPL en una térmica
+   * imprime basura y la deja sacando papel hasta que alguien la apaga —ya pasó
+   * una vez por otra vía y no se puede repetir.
+   *
+   * Un agente que no declara nada es un agente viejo, y solo recibe tickets.
+   * No se usa el número de versión: una capacidad declarada dice exactamente
+   * lo que hay, y no se rompe si mañana alguien numera distinto.
+   */
+  const capacidades = (url.searchParams.get('capacidades') ?? '')
+    .split(',')
+    .map((c) => c.trim().toLowerCase())
+    .filter(Boolean);
+  const sabeEtiquetas = capacidades.includes('etiqueta');
+
   if (!token) {
     return NextResponse.json({ ok: false, error: 'falta el token del equipo' }, { status: 400 });
   }
@@ -63,7 +83,7 @@ export async function GET(request: Request) {
 
   const { data: equipo } = await sb
     .from('equipos_impresion')
-    .select('id, nombre, impresora, avance_corte_mm, activo, maquinas_vistas')
+    .select('id, nombre, impresora, impresora_etiquetas, avance_corte_mm, activo, maquinas_vistas')
     .eq('token', token)
     .maybeSingle();
 
@@ -86,6 +106,7 @@ export async function GET(request: Request) {
       impresora_detectada: detectada,
       ...(maquina ? { maquina, maquinas_vistas: vistas.join('|') } : {}),
       ...(disponibles ? { impresoras_disponibles: disponibles } : {}),
+      capacidades: capacidades.length > 0 ? capacidades.join(',') : null,
     })
     .eq('id', equipo.id);
 
@@ -93,11 +114,23 @@ export async function GET(request: Request) {
     return NextResponse.json({ ok: true, equipo: equipo.nombre, trabajos: [] });
   }
 
+  /*
+   * Las etiquetas solo se entregan si el agente declaró saber imprimirlas, y
+   * si esta computadora tiene una impresora de etiquetas configurada.
+   *
+   * Lo segundo importa tanto como lo primero: un agente nuevo instalado en una
+   * caja que solo tiene ticketera no debe recibir etiquetas, porque no tendría
+   * dónde mandarlas y terminaría usando la térmica.
+   */
+  const puedeEtiquetas = sabeEtiquetas && Boolean(equipo.impresora_etiquetas);
+  const tiposPermitidos = puedeEtiquetas ? ['TICKET', 'ETIQUETA'] : ['TICKET'];
+
   const { data: trabajos, error } = await sb
     .from('cola_impresion')
-    .select('id, contenido, descripcion')
+    .select('id, contenido, descripcion, tipo')
     .eq('equipo_id', equipo.id)
     .eq('estado', 'pendiente')
+    .in('tipo', tiposPermitidos)
     .order('created_at', { ascending: true })
     .limit(MAXIMO_POR_VEZ);
 
@@ -115,6 +148,10 @@ export async function GET(request: Request) {
     ok: true,
     equipo: equipo.nombre,
     impresora: equipo.impresora ?? null,
-    trabajos: trabajos ?? [],
+    // A dónde mandar las etiquetas. Nulo si esta computadora no imprime.
+    impresoraEtiquetas: equipo.impresora_etiquetas ?? null,
+    // Cada trabajo dice de qué tipo es; el agente no tiene que adivinarlo por
+    // el contenido.
+    trabajos: (trabajos ?? []).map((t) => ({ ...t, tipo: t.tipo ?? 'TICKET' })),
   });
 }

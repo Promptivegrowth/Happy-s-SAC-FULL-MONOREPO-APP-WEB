@@ -52,7 +52,7 @@ class Agente
      * en la ventana del agente ni en el ERP—. Se perdio tiempo revisando
      * maquinas que tenian una version vieja sin que nadie lo notara.
      */
-    const string VERSION = "2.4";
+    const string VERSION = "3.0";
     const string MARCA = "Promptive";
     /** Salto de linea de Windows, para los mensajes en pantalla. */
     static readonly string SALTO = Environment.NewLine;
@@ -66,6 +66,17 @@ class Agente
     static string impresora;
     /** La que el ERP indico para esta computadora, si es que indico alguna. */
     static string impresoraDelErp;
+    /*
+     * La impresora de etiquetas, que NO es la ticketera.
+     *
+     * Son dos maquinas distintas hablando idiomas distintos: la ticketera
+     * entiende ESC/POS y la Zebra entiende ZPL. Mandarle a una lo de la otra
+     * imprime basura y deja el papel saliendo hasta que alguien la apaga.
+     *
+     * Por eso esta nunca se adivina. Si el servidor no dice cual es, el
+     * trabajo falla con un mensaje y no se imprime en ningun lado.
+     */
+    static string impresoraEtiquetas;
 
     static System.Windows.Forms.NotifyIcon bandeja;
     static int impresos = 0;
@@ -387,13 +398,18 @@ class Agente
                              "&version=" + Uri.EscapeDataString(VERSION) +
                              "&maquina=" + Uri.EscapeDataString(maquina) +
                              "&impresora=" + Uri.EscapeDataString(usaAhora ?? "") +
-                             "&impresoras=" + Uri.EscapeDataString(string.Join("|", ImpresorasRealesEnCache().ToArray()));
+                             "&impresoras=" + Uri.EscapeDataString(string.Join("|", ImpresorasRealesEnCache().ToArray())) +
+                             // Lo que esta version sabe imprimir. El servidor
+                             // solo le entrega etiquetas a quien lo declara:
+                             // un agente viejo nunca recibe ZPL.
+                             "&capacidades=" + Uri.EscapeDataString("ticket,etiqueta");
                 string json = Pedir(url);
                 fallosSeguidos = 0;
                 ultimoContacto = DateTime.Now;
 
                 string impresoraDelServidor = Campo(json, "impresora");
                 impresoraDelErp = impresoraDelServidor;
+                impresoraEtiquetas = Campo(json, "impresoraEtiquetas");
                 string usar = !string.IsNullOrEmpty(impresora) ? impresora
                             : (!string.IsNullOrEmpty(impresoraDelServidor) ? impresoraDelServidor : AdivinarTicketera());
 
@@ -405,29 +421,49 @@ class Agente
                 else
                 {
                     ultimoEstado = "imprimiendo";
-                    Log("recibidos " + trabajos.Count + " ticket(s), impresora: " + (usar ?? "NINGUNA"));
+                    Log("recibidos " + trabajos.Count + " trabajo(s), ticketera: " + (usar ?? "NINGUNA") +
+                        ", etiquetas: " + (string.IsNullOrEmpty(impresoraEtiquetas) ? "NINGUNA" : impresoraEtiquetas));
                     foreach (string t in trabajos)
                     {
                         string id = Campo(t, "id");
                         string contenido = Campo(t, "contenido");
                         if (string.IsNullOrEmpty(id) || string.IsNullOrEmpty(contenido)) continue;
 
-                        if (string.IsNullOrEmpty(usar))
+                        /*
+                         * A que impresora va cada trabajo.
+                         *
+                         * El tipo lo dice el servidor; no se deduce mirando el
+                         * contenido. Un ZPL y un ESC/POS se parecen lo
+                         * suficiente como para que adivinar salga mal alguna
+                         * vez, y esa vez termina con la ticketera escupiendo
+                         * papel sin parar.
+                         *
+                         * Sin impresora de etiquetas configurada, la etiqueta
+                         * NO se imprime: falla y se dice por que. Jamas se cae
+                         * a la ticketera de respaldo.
+                         */
+                        string tipo = Campo(t, "tipo");
+                        bool esEtiqueta = tipo != null && tipo.Trim().ToUpperInvariant() == "ETIQUETA";
+                        string destino = esEtiqueta ? impresoraEtiquetas : usar;
+
+                        if (string.IsNullOrEmpty(destino))
                         {
-                            Confirmar(id, false, "no hay ninguna ticketera en esta computadora");
+                            Confirmar(id, false, esEtiqueta
+                                ? "esta computadora no tiene configurada la impresora de etiquetas"
+                                : "no hay ninguna ticketera en esta computadora");
                             fallidos++;
                             continue;
                         }
 
                         byte[] datos;
                         try { datos = Convert.FromBase64String(contenido); }
-                        catch { Confirmar(id, false, "el ticket llego mal codificado"); fallidos++; continue; }
+                        catch { Confirmar(id, false, "el trabajo llego mal codificado"); fallidos++; continue; }
 
-                        string fallo = ImprimirRaw(usar, datos);
+                        string fallo = ImprimirRaw(destino, datos);
                         if (fallo == null) { impresos++; Log("impreso " + id); Confirmar(id, true, null); }
                         else { fallidos++; Log("FALLO al imprimir " + id + ": " + fallo); Confirmar(id, false, fallo); }
 
-                        // Respiro entre tickets: el bufer de estas impresoras es
+                        // Respiro entre trabajos: el bufer de estas impresoras es
                         // chico y encimarlos hace que se pierda alguno.
                         Thread.Sleep(350);
                     }

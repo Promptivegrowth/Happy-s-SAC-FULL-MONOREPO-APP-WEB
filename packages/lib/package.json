@@ -22,6 +22,7 @@
     "./pdf": "./src/pdf/index.ts",
     "./demo-users": "./src/demo-users.ts",
     "./barcode": "./src/barcode/index.ts",
+    "./zpl": "./src/zpl/etiqueta.ts",
     "./escpos": "./src/escpos/index.ts",
     "./escpos/ticket": "./src/escpos/ticket-comprobante.ts",
     "./escpos/prueba": "./src/escpos/ticket-prueba.ts",
