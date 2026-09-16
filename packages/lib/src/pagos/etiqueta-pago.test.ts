@@ -39,6 +39,27 @@ describe('el nombre del pago', () => {
     expect(etiquetaPago('CREDITO', 'ADELANTO')).toBe('Crédito · ADELANTO');
   });
 
+  it('no repite el método cuando el nombre de la cuenta ya lo dice', () => {
+    /*
+     * La cuenta de Yape se llama "YAPE (BCP HAPPYS)" porque el botón del POS
+     * tiene que decir Yape para que la cajera lo encuentre. Pegado al método
+     * daría "Yape · YAPE (BCP HAPPYS)".
+     */
+    expect(etiquetaPago('YAPE', 'YAPE (BCP HAPPYS)')).toBe('Yape · BCP HAPPYS');
+    expect(cuentaDePago('YAPE', 'YAPE (BCP HAPPYS)')).toBe('BCP HAPPYS');
+  });
+
+  it('solo quita el método si está al principio del nombre', () => {
+    // Acá "PLIN" es parte del nombre de la cuenta, no un prefijo suelto.
+    expect(etiquetaPago('PLIN', 'CONTINENTAL - PLIN HAPPYS'))
+      .toBe('Plin · CONTINENTAL - PLIN HAPPYS');
+  });
+
+  it('un nombre que es solo el método no deja la cuenta vacía', () => {
+    expect(etiquetaPago('YAPE', 'YAPE')).toBe('Yape');
+    expect(etiquetaPago('YAPE', 'YAPE ()')).toBe('Yape');
+  });
+
   it('traduce los métodos a algo legible', () => {
     expect(nombreMetodo('TARJETA_CREDITO')).toBe('Tarjeta crédito');
     expect(nombreMetodo('DEPOSITO')).toBe('Depósito');

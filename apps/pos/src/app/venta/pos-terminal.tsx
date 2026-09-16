@@ -1989,7 +1989,7 @@ export function PosTerminal({
                       title={activo
                         ? `Click para deseleccionar ${c.nombre_corto} (${formatPEN(montoActivo)})`
                         : disabled
-                          ? 'Ya se cubrió el total — quitá algún pago para agregar otro'
+                          ? 'Ya se cubrió el total — quita algún pago para agregar otro'
                           : efectivoPendiente > 0
                             ? `Cobrará ${formatPEN(efectivoPendiente)} en efectivo + ${formatPEN(cobrariaAhora)} por ${c.nombre_corto}`
                             : `Cobrar ${formatPEN(cobrariaAhora)} por ${c.nombre_corto}`}
