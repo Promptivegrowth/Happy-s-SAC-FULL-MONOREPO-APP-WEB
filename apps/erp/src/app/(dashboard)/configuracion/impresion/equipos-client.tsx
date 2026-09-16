@@ -122,7 +122,9 @@ export function EquiposImpresionClient({
             />
           </div>
           <div>
-            <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-500">Tienda</label>
+            <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-500">
+              Dónde está
+            </label>
             <select
               value={almacenId}
               onChange={(e) => setAlmacenId(e.target.value)}
@@ -370,7 +372,9 @@ function EquipoCard({
           </div>
 
           <div>
-            <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-500">Tienda</label>
+            <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-500">
+              Dónde está
+            </label>
             <select
               value={e.almacen_id ?? ''}
               onChange={(ev) => onEditar({ almacen_id: ev.target.value || null })}

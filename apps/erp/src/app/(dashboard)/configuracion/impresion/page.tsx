@@ -13,7 +13,14 @@ export default async function Page() {
   const sb = await createClient();
   const [equipos, { data: almacenes }] = await Promise.all([
     listarEquiposImpresion(),
-    sb.from('almacenes').select('id, codigo, nombre').eq('activo', true).eq('es_tienda', true).order('codigo'),
+    /*
+     * Todos los locales, no solo las tiendas.
+     *
+     * Antes se listaban únicamente tiendas, porque una ticketera pertenece a
+     * una tienda. Con la Zebra de etiquetas dejó de ser cierto: está en el
+     * almacén, y al registrar esa computadora no había dónde ubicarla.
+     */
+    sb.from('almacenes').select('id, codigo, nombre').eq('activo', true).order('codigo'),
   ]);
 
   // La URL del POS viaja dentro del código de instalación: es el sistema al que
