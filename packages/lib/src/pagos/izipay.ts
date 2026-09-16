@@ -91,6 +91,8 @@ export class ErrorIzipay extends Error {
   constructor(
     mensaje: string,
     readonly codigo: string,
+    /** Lo que izipay explica además del código, cuando explica algo. */
+    readonly detalle?: string,
   ) {
     super(mensaje);
     this.name = 'ErrorIzipay';
@@ -194,6 +196,7 @@ export async function crearFormToken(
         a.detailedErrorMessage ?? ''
       }`.trim(),
       codigo,
+      [a.detailedErrorCode, a.detailedErrorMessage].filter(Boolean).join(' ') || undefined,
     );
   }
   return json.answer.formToken;

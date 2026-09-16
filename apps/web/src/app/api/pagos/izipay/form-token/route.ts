@@ -128,6 +128,8 @@ export async function POST(req: Request) {
     const cuerpo: Record<string, unknown> = {
       error: 'No pudimos abrir el pago con tarjeta. Intenta de nuevo en un momento.',
       codigoIzipay: codigo,
+      detalleIzipay: e instanceof ErrorIzipay ? (e.detalle ?? null) : null,
+      servidorIzipay: cfg.apiUrl,
     };
     return NextResponse.json(cuerpo, { status: 502 });
   }
