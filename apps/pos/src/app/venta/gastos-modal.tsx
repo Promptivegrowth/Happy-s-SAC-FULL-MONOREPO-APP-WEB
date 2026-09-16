@@ -448,16 +448,20 @@ export function GastosModal({
         </div>
 
         <div className="mt-5 flex flex-wrap items-center justify-end gap-2">
-          {movs.length > 0 && (
-            <Button
-              variant="outline"
-              onClick={() => void imprimir()}
-              disabled={imprimiendo}
-              className="border-corp-300 text-corp-700 hover:bg-corp-50"
-            >
-              <Printer className="h-4 w-4" /> Imprimir cuadre
-            </Button>
-          )}
+          {/* El botón está siempre, también sin movimientos.
+              Antes se escondía cuando la lista estaba vacía, y eso dejaba
+              afuera dos cosas: probar que la ticketera responde —justo cuando
+              no hay gastos cargados— y dejar constancia firmada de un turno en
+              el que no se sacó plata de la caja, que también es un dato. */}
+          <Button
+            variant="outline"
+            onClick={() => void imprimir()}
+            disabled={imprimiendo}
+            className="border-corp-300 text-corp-700 hover:bg-corp-50"
+          >
+            {imprimiendo ? <Loader2 className="h-4 w-4 animate-spin" /> : <Printer className="h-4 w-4" />}
+            Imprimir cuadre
+          </Button>
           <Button variant="outline" onClick={onClose}>
             Cerrar
           </Button>
