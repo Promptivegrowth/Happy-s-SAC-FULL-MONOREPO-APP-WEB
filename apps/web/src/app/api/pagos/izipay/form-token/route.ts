@@ -112,15 +112,33 @@ export async function POST(req: Request) {
     return NextResponse.json({ formToken, publicKey, numero: pedido.numero });
   } catch (e) {
     console.error('[izipay] CreatePayment falló:', (e as Error).message);
-    // Al comprador se le habla en claro; el código de izipay va aparte, para
-    // que quien tenga que arreglarlo sepa qué mirar sin entrar a los registros
-    // del servidor. Es un código público: no revela nada de las claves.
-    return NextResponse.json(
-      {
-        error: 'No pudimos abrir el pago con tarjeta. Intenta de nuevo en un momento.',
-        codigoIzipay: e instanceof ErrorIzipay ? e.codigo : 'SIN_RESPUESTA',
-      },
-      { status: 502 },
-    );
+    const codigo = e instanceof ErrorIzipay ? e.codigo : 'SIN_RESPUESTA';
+
+    /*
+     * Al comprador se le habla en claro; el código de izipay va aparte, para
+     * que quien tenga que arreglarlo sepa qué mirar sin entrar a los registros
+     * del servidor. Es un código público: no revela nada de las claves.
+     *
+     * Cuando el código es INT_905 —"usuario o contraseña inválidos"— se suma
+     * una huella de lo que hay cargado. Sin ella hay que adivinar cuál de las
+     * dos variables está mal, y cada intento cuesta un despliegue.
+     *
+     * La huella NO es la contraseña: son sus primeros cuatro caracteres y su
+     * largo. Alcanza para distinguir los tres errores que de verdad pasan
+     * —quedó la de test (`test`), se pegó la clave pública (`3123`), o está
+     * vencida (`prod` con el largo correcto)— y no sirve para reconstruirla.
+     * El usuario sí va entero: es el identificador de la tienda, que viaja al
+     * navegador dentro de la clave pública en cada cobro.
+     */
+    const cuerpo: Record<string, unknown> = {
+      error: 'No pudimos abrir el pago con tarjeta. Intenta de nuevo en un momento.',
+      codigoIzipay: codigo,
+    };
+    if (codigo === 'INT_905') {
+      cuerpo.usuarioConfigurado = cfg.usuario;
+      cuerpo.huellaContrasena = `${cfg.password.slice(0, 4)}…(${cfg.password.length})`;
+      cuerpo.huellaClavePublica = `${publicKey.slice(0, 13)}…(${publicKey.length})`;
+    }
+    return NextResponse.json(cuerpo, { status: 502 });
   }
 }
