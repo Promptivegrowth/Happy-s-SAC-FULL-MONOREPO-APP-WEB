@@ -19,6 +19,8 @@ import {
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { formatPEN } from '@happy/lib';
+import { construirTicketGastos, type EncabezadoCaja } from '@happy/lib/escpos/caja';
+import { imprimirDocumentoDeCaja } from './imprimir-ticket';
 import {
   listarCategoriasGasto,
   listarMovimientosCajaChicaSesion,
@@ -30,7 +32,13 @@ import {
 
 type Tipo = 'INGRESO' | 'EGRESO';
 
-export function GastosModal({ onClose }: { onClose: () => void }) {
+export function GastosModal({
+  cabecera,
+  onClose,
+}: {
+  cabecera: EncabezadoCaja | null;
+  onClose: () => void;
+}) {
   const [pending, start] = useTransition();
   const [categorias, setCategorias] = useState<CategoriaGasto[]>([]);
   const [movs, setMovs] = useState<MovimientoCajaChica[]>([]);
@@ -105,10 +113,61 @@ export function GastosModal({ onClose }: { onClose: () => void }) {
   const totalIngresos = movs.filter((m) => m.tipo === 'INGRESO').reduce((s, m) => s + m.monto, 0);
   const totalNeto = totalIngresos - totalEgresos;
 
-  // Imprime el listado en una ventana nueva con estilo tipo ticket 80mm.
-  // Cliente pidió (post-2026-07-08) tener boton imprimir para dejar copia
-  // fisica del cuadre de caja chica del turno.
-  function imprimir() {
+  const [imprimiendo, setImprimiendo] = useState(false);
+
+  /*
+   * Imprime el cuadre de caja chica del turno.
+   *
+   * Sale por la ticketera, igual que las boletas: se arma el ticket en ESC/POS
+   * y lo levanta el agente de esta computadora. Solo si no hay agente se cae
+   * al respaldo del navegador.
+   *
+   * El cliente lo pidió (post-2026-07-08) para dejar copia física del cuadre
+   * del turno.
+   */
+  async function imprimir() {
+    if (!cabecera) {
+      // Sin sesión de caja no hay de quién ni de qué caja es el papel.
+      imprimirPorNavegador();
+      return;
+    }
+    setImprimiendo(true);
+    try {
+      const r = await imprimirDocumentoDeCaja(
+        (avance) =>
+          construirTicketGastos(
+            cabecera,
+            movs.map((m) => ({
+              fecha: m.fecha,
+              tipo: m.tipo,
+              concepto: m.concepto,
+              categoria: m.categoria_nombre ?? null,
+              referencia: m.comprobante_ref ?? null,
+              monto: m.monto,
+            })),
+            { avanceCorteMm: avance },
+          ),
+        'Caja chica - movimientos del turno',
+      );
+      if (r.via === 'agente' && r.estado === 'impreso') {
+        toast.success(`Impreso en ${r.equipo}`);
+      } else if (r.via === 'agente' && r.estado === 'esperando') {
+        toast.info(`Enviado a ${r.equipo}. Si no sale, revisa que tenga papel.`);
+      } else if (r.via === 'agente') {
+        toast.error(`${r.equipo} no pudo imprimir. Revisa papel y conexión.`);
+      } else {
+        // Sin agente instalado: queda el camino de antes.
+        imprimirPorNavegador();
+      }
+    } catch {
+      imprimirPorNavegador();
+    } finally {
+      setImprimiendo(false);
+    }
+  }
+
+  // Respaldo: ventana del navegador. Solo se usa si no hay agente.
+  function imprimirPorNavegador() {
     const empresa = 'HAPPY SAC';
     const fecha = new Date().toLocaleString('es-PE');
     const filas = movs
@@ -126,7 +185,11 @@ export function GastosModal({ onClose }: { onClose: () => void }) {
       .join('');
     const html = `<!doctype html><html><head><meta charset="utf-8"><title>Caja chica ${fecha}</title>
       <style>
-        body{font-family:Arial,sans-serif;padding:12px;max-width:80mm;margin:0 auto;color:#0f172a}
+        /* El tamaño de la hoja tiene que decirse: en papel de rollo continuo,
+           sin esto el controlador de Windows asume una hoja A4 y la ticketera
+           saca 30 cm de papel por página. Pasó en tienda el 16/09/2026. */
+        @page { size: 80mm auto; margin: 3mm; }
+        body{font-family:Arial,sans-serif;padding:0;width:74mm;margin:0;color:#0f172a}
         h1{font-size:14px;text-align:center;margin:0 0 4px}
         .sub{text-align:center;font-size:10px;color:#666;margin-bottom:8px}
         .box{border:1px solid #ddd;padding:6px;margin:6px 0;border-radius:4px}
@@ -388,7 +451,8 @@ export function GastosModal({ onClose }: { onClose: () => void }) {
           {movs.length > 0 && (
             <Button
               variant="outline"
-              onClick={imprimir}
+              onClick={() => void imprimir()}
+              disabled={imprimiendo}
               className="border-corp-300 text-corp-700 hover:bg-corp-50"
             >
               <Printer className="h-4 w-4" /> Imprimir cuadre

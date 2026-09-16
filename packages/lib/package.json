@@ -24,6 +24,7 @@
     "./escpos": "./src/escpos/index.ts",
     "./escpos/ticket": "./src/escpos/ticket-comprobante.ts",
     "./escpos/prueba": "./src/escpos/ticket-prueba.ts",
+    "./escpos/caja": "./src/escpos/ticket-caja.ts",
     "./escpos/logo": "./src/escpos/logo.ts"
   },
   "scripts": {

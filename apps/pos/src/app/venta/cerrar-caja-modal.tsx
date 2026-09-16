@@ -17,7 +17,7 @@ import { Label } from '@happy/ui/label';
 import { Button } from '@happy/ui/button';
 import {
   AlertTriangle, Banknote, CheckCircle2, CreditCard, Building2, Loader2, LogOut,
-  Smartphone, X, FileSpreadsheet, RefreshCw, Users, UserCheck,
+  Smartphone, X, FileSpreadsheet, RefreshCw, Users, UserCheck, Printer,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { formatPEN, formatDateTime } from '@happy/lib';
@@ -26,6 +26,8 @@ import {
   cerrarParcialSesion, listarCajerosDisponibles,
 } from '@/server/actions/caja';
 import type { BalanceCajaDTO, SesionCajaDTO } from '@/server/actions/caja-helpers';
+import { construirTicketCierre, type EncabezadoCaja } from '@happy/lib/escpos/caja';
+import { imprimirDocumentoDeCaja } from './imprimir-ticket';
 
 type Cajero = { id: string; nombre: string };
 type ModoCierre = 'DEFINITIVO' | 'PARCIAL';
@@ -33,11 +35,13 @@ type ModoCierre = 'DEFINITIVO' | 'PARCIAL';
 export function CerrarCajaModal({
   sesion,
   balanceInicial,
+  cabecera,
   onClose,
   onCerrada,
 }: {
   sesion: SesionCajaDTO;
   balanceInicial: BalanceCajaDTO;
+  cabecera: EncabezadoCaja | null;
   onClose: () => void;
   onCerrada: () => void;
 }) {
@@ -47,6 +51,7 @@ export function CerrarCajaModal({
   const [pending, start] = useTransition();
   const [refreshing, setRefreshing] = useState(false);
   const [generandoExcel, setGenerandoExcel] = useState(false);
+  const [imprimiendo, setImprimiendo] = useState(false);
 
   // Modo: cierre PARCIAL (cambio de turno) vs DEFINITIVO (fin de día)
   const [modo, setModo] = useState<ModoCierre>('DEFINITIVO');
@@ -120,6 +125,68 @@ export function CerrarCajaModal({
     }
   }
 
+  /*
+   * Imprime el cuadre en la ticketera.
+   *
+   * Hasta ahora el cierre solo se podía bajar en Excel, y la cajera esperaba
+   * un papel para firmar y dejar en la caja —lo reportaron el 16/09/2026—.
+   * Sale por el agente, con su corte; si esa computadora no lo tiene
+   * instalado, se avisa en lugar de mandarlo por el navegador: con papel de
+   * rollo continuo, imprimir desde el navegador arrastra el papel sin parar.
+   */
+  async function imprimirCierre(): Promise<void> {
+    if (!cabecera) {
+      toast.error('Faltan los datos de la caja para imprimir');
+      return;
+    }
+    setImprimiendo(true);
+    try {
+      const r = await imprimirDocumentoDeCaja(
+        (avance) =>
+          construirTicketCierre(
+            cabecera,
+            {
+              aperturaEn: sesion.abierta_en,
+              montoApertura: balance.monto_apertura,
+              totalEfectivo: balance.total_efectivo,
+              totalYape: balance.total_yape,
+              totalPlin: balance.total_plin,
+              totalTarjeta: balance.total_tarjeta,
+              totalTransferencia: balance.total_transferencia,
+              totalOtros: balance.total_otros,
+              totalVentas: balance.total_ventas,
+              cantidadVentas: balance.cantidad_ventas,
+              totalGastos: balance.total_gastos,
+              totalIngresosExtra: balance.total_ingresos_extra,
+              esperadoEfectivo: balance.esperado_efectivo,
+              contadoEfectivo: Number.isFinite(contadoNum) ? contadoNum : balance.esperado_efectivo,
+              observaciones: obs || null,
+              parcial: modo === 'PARCIAL',
+              cajeroEntrante: cajeros.find((c) => c.id === cajeroEntranteId)?.nombre ?? null,
+            },
+            { avanceCorteMm: avance },
+          ),
+        `Cierre de caja ${sesion.caja_nombre}`,
+        sesion.almacen_id,
+      );
+      if (r.via === 'agente' && r.estado === 'impreso') {
+        toast.success(`Cierre impreso en ${r.equipo}`);
+      } else if (r.via === 'agente' && r.estado === 'esperando') {
+        toast.info(`Enviado a ${r.equipo}. Si no sale, revisa que tenga papel.`);
+      } else if (r.via === 'agente') {
+        toast.error(`${r.equipo} no pudo imprimir. Revisa papel y conexión.`);
+      } else if (r.motivo === 'sin-equipo') {
+        toast.error('Esta computadora no tiene la ticketera vinculada. Descarga el Excel.');
+      } else {
+        toast.error('No se pudo imprimir el cierre. Descarga el Excel.');
+      }
+    } catch (e) {
+      toast.error((e as Error).message ?? 'No se pudo imprimir el cierre');
+    } finally {
+      setImprimiendo(false);
+    }
+  }
+
   function confirmarCierre() {
     if (!Number.isFinite(contadoNum) || contadoNum < 0) {
       toast.error('Ingresa un monto válido');
@@ -139,6 +206,16 @@ export function CerrarCajaModal({
           toast.success(
             `Cierre parcial #${r.cierre_numero} registrado · ${r.total_ventas} venta${r.total_ventas === 1 ? '' : 's'} en el turno`,
           );
+          /*
+           * El papel sale solo, como con las boletas: nadie tiene que
+           * acordarse de pedirlo antes de entregar el turno.
+           *
+           * Sin esperarlo: el cierre ya quedó registrado y la impresión puede
+           * tardar unos segundos. Dejar a la cajera mirando una pantalla
+           * trabada después de confirmar es peor que avisarle por un mensaje
+           * cuando el ticket sale.
+           */
+          void imprimirCierre();
           onClose();  // cierra el modal pero la sesión sigue abierta
         } catch (e) {
           toast.error((e as Error).message ?? 'Error en el cierre parcial');
@@ -153,6 +230,8 @@ export function CerrarCajaModal({
         const r = await cerrarSesion({ monto_contado_efectivo: contadoNum, observacion: obs || null });
         if (!r.ok) { toast.error(r.error); return; }
         toast.success('Caja cerrada correctamente');
+        // Sin esperar: ver el comentario del cierre parcial.
+        void imprimirCierre();
         onCerrada();
       } catch (e) {
         toast.error((e as Error).message ?? 'Error al cerrar');
@@ -353,6 +432,16 @@ export function CerrarCajaModal({
           >
             {generandoExcel ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileSpreadsheet className="h-4 w-4" />}
             Generar Excel
+          </Button>
+          {/* Para tener el papel antes de confirmar, o para sacar otra copia. */}
+          <Button
+            variant="outline"
+            onClick={() => void imprimirCierre()}
+            disabled={imprimiendo || pending}
+            className="gap-2"
+          >
+            {imprimiendo ? <Loader2 className="h-4 w-4 animate-spin" /> : <Printer className="h-4 w-4" />}
+            Imprimir cuadre
           </Button>
           {modo === 'PARCIAL' ? (
             <Button

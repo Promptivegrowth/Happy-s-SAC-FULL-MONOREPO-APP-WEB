@@ -152,3 +152,35 @@ export async function imprimirPorAgente(
   const estado = await esperarImpresion(encolado.id, 12);
   return { via: 'agente', estado, equipo: equipo.nombre };
 }
+
+/**
+ * Manda a la ticketera un documento de caja: gastos, cierre de turno.
+ *
+ * No son comprobantes, así que no pasan por `construirTicket` ni llevan
+ * comprobante asociado en la cola. Lo que sí comparten con las boletas es el
+ * camino: van al agente de la computadora y salen por la ticketera, con su
+ * corte.
+ *
+ * Antes se imprimían abriendo una ventana del navegador y llamando a imprimir,
+ * o sea a través del controlador de Windows. Con papel de rollo continuo el
+ * controlador no sabe dónde termina la hoja: la máquina sigue sacando papel
+ * hasta que alguien la para. Pasó en tienda el 16/09/2026 al imprimir gastos.
+ *
+ * `armar` recibe el avance de corte configurado para ESA ticketera, que es
+ * distinto en cada modelo.
+ */
+export async function imprimirDocumentoDeCaja(
+  armar: (avanceCorteMm: number | undefined) => { aBase64: () => string },
+  descripcion: string,
+  almacenId?: string | null,
+): Promise<ResultadoImpresion> {
+  const equipo = await equipoParaImprimir(almacenId);
+  if (!equipo) return { via: 'pdf', motivo: 'sin-equipo' };
+
+  const ticket = armar(equipo.avance_corte_mm ?? undefined);
+  const encolado = await encolarTicket(ticket.aBase64(), equipo.id, { descripcion });
+  if (!encolado.ok) return { via: 'pdf', motivo: 'fallo', detalle: encolado.error };
+
+  const estado = await esperarImpresion(encolado.id, 12);
+  return { via: 'agente', estado, equipo: equipo.nombre };
+}

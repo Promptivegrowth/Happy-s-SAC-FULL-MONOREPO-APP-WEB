@@ -32,6 +32,7 @@ import { CerrarCajaModal } from './cerrar-caja-modal';
 import { CobrarModal, type CobrarPayload } from './cobrar-modal';
 import { generarTicket, generarA4, abrirPDF } from './comprobante-pdf';
 import { datosDelTicket, equipoParaImprimir, imprimirPorAgente, type EmpresaTicket } from './imprimir-ticket';
+import type { EncabezadoCaja } from '@happy/lib/escpos/caja';
 import { generarPdfCotizacion, siguienteNumeroCotizacion, type FormatoCotizacion } from './cotizacion-pdf';
 import { HistorialModal } from './historial-modal';
 import { GastosModal } from './gastos-modal';
@@ -166,6 +167,25 @@ export function PosTerminal({
   const [historialOpen, setHistorialOpen] = useState(false);
   const [pruebaImpresionOpen, setPruebaImpresionOpen] = useState(false);
   const [gastosOpen, setGastosOpen] = useState(false);
+
+  /*
+   * Quién, dónde y en qué caja: la cabecera de los papeles de caja.
+   *
+   * Un ticket de gastos o de cierre sin el nombre de la cajera y el de la caja
+   * no sirve para reclamarle nada a nadie, que es justo para lo que se
+   * imprime.
+   */
+  function cabeceraDeCaja(): EncabezadoCaja | null {
+    if (!empresaTicket || !sesionActiva) return null;
+    const tienda = almacenes.find((a) => a.id === sesionActiva.almacen_id);
+    return {
+      empresa: empresaTicket.nombre_comercial || empresaTicket.razon_social,
+      ruc: empresaTicket.ruc,
+      establecimiento: tienda?.nombre ?? null,
+      caja: sesionActiva.caja_nombre,
+      cajero: sesionActiva.cajero_nombre || cajeroNombre,
+    };
+  }
   const [adelantosOpen, setAdelantosOpen] = useState(false);
   const [stockAlmacenesVarianteId, setStockAlmacenesVarianteId] = useState<string | null>(null);
   // Modal de apertura de caja — solo se abre cuando el cajero clickea
@@ -2181,6 +2201,7 @@ export function PosTerminal({
         <CerrarCajaModal
           sesion={sesionActiva}
           balanceInicial={balanceActual}
+          cabecera={cabeceraDeCaja()}
           onClose={() => setCerrarOpen(false)}
           onCerrada={() => {
             setCerrarOpen(false);
@@ -2226,7 +2247,7 @@ export function PosTerminal({
 
       {/* MODAL — Gastos / Caja chica */}
       {gastosOpen && sesionActiva && (
-        <GastosModal onClose={() => setGastosOpen(false)} />
+        <GastosModal cabecera={cabeceraDeCaja()} onClose={() => setGastosOpen(false)} />
       )}
 
       {/* MODAL — Adelantos de cliente */}
