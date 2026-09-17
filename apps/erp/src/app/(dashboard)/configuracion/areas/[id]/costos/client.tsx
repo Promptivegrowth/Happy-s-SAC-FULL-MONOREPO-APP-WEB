@@ -261,7 +261,12 @@ export function TraerPlanillaButton({
   return (
     <div className="flex items-center gap-2">
       <span className="text-[11px] text-slate-500">
-        {operarios} operario(s) en el área{planilla > 0 ? ` · planilla ${formatPEN(planilla)}` : ' · sin sueldo base cargado'}
+        {/*
+          "sin sueldo base cargado" sonaba a error de carga aunque no lo fuera:
+          un operario de destajo no tiene sueldo mensual y nunca va a tenerlo.
+          El botón explica el motivo real al apretarlo.
+        */}
+        {operarios} operario(s) en el área{planilla > 0 ? ` · planilla ${formatPEN(planilla)}` : ' · sin sueldo mensual'}
       </span>
       <Button variant="outline" size="sm" onClick={traer} disabled={pending || operarios === 0} className="gap-1">
         {pending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Users className="h-4 w-4" />} Traer planilla

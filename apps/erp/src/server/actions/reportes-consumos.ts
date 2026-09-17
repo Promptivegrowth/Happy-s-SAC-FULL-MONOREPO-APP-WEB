@@ -244,7 +244,9 @@ export async function reporteConsumosYTiempos(
   if (refIds.length > 0) {
     const { data: kdxRaw } = await sb.from('kardex_movimientos')
       .select('tipo, material_id, cantidad, referencia_id')
-      .in('tipo', ['SALIDA_PRODUCCION'])
+      // Tela del corte y avíos despachados al taller: las dos cosas salen del
+      // almacén y las dos son consumo real de la OT.
+      .in('tipo', ['SALIDA_PRODUCCION', 'SALIDA_TALLER_SERVICIO'])
       .in('referencia_id', refIds)
       .not('material_id', 'is', null);
     for (const k of (kdxRaw ?? []) as { tipo: string; material_id: string; cantidad: number | string | null; referencia_id: string }[]) {

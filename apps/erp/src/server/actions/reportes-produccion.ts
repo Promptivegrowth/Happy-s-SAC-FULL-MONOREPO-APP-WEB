@@ -69,11 +69,11 @@ export async function reporteProduccionPeriodo(
   type LR = { ot_id: string; cantidad_planificada: number; cantidad_terminada: number; cantidad_fallas: number; producto: { nombre: string } | null };
   const lineas = (lineasRaw ?? []) as unknown as LR[];
 
-  // 3) Materiales consumidos (SALIDA_PRODUCCION)
+  // 3) Materiales consumidos: la tela del corte y los avíos que fueron al taller
   const { data: kdxRaw } = await sb
     .from('kardex_movimientos')
     .select('referencia_id, costo_total')
-    .eq('tipo', 'SALIDA_PRODUCCION')
+    .in('tipo', ['SALIDA_PRODUCCION', 'SALIDA_TALLER_SERVICIO'])
     .in('referencia_id', otIds);
   const costoMat = new Map<string, number>();
   for (const k of (kdxRaw ?? []) as { referencia_id: string; costo_total: number | string | null }[]) {
@@ -244,10 +244,19 @@ export async function reporteCosteoComparativo(
   for (const id of otIds) refToOt.set(id, id);
 
   const realMat = new Map<string, number>();
+  /*
+   * Los tres movimientos que forman el consumo real de material.
+   *
+   * Faltaba SALIDA_TALLER_SERVICIO, que es como se registran los avíos que se
+   * mandan al taller —cierres, elásticos, cintas—. Contar solo la tela del
+   * corte y restar las devoluciones daba costos reales NEGATIVOS: el reporte
+   * mostraba "-S/ 771,10 de costo real" y un ahorro del 100 %, que es lo que
+   * reportó el cliente el 16/09/2026.
+   */
   const { data: kdxRaw } = await sb
     .from('kardex_movimientos')
     .select('tipo, referencia_id, material_id, cantidad, costo_total')
-    .in('tipo', ['SALIDA_PRODUCCION', 'ENTRADA_DEVOLUCION_TALLER'])
+    .in('tipo', ['SALIDA_PRODUCCION', 'SALIDA_TALLER_SERVICIO', 'ENTRADA_DEVOLUCION_TALLER'])
     .in('referencia_id', [...refToOt.keys()])
     .not('material_id', 'is', null);
   type Kdx = { tipo: string; referencia_id: string; material_id: string; cantidad: number | string | null; costo_total: number | string | null };
@@ -266,8 +275,8 @@ export async function reporteCosteoComparativo(
     const costo = k.costo_total != null
       ? Number(k.costo_total)
       : Number(k.cantidad ?? 0) * (precioMat.get(k.material_id) ?? 0);
-    // La devolución de material desde el taller descuenta consumo.
-    const signo = k.tipo === 'SALIDA_PRODUCCION' ? 1 : -1;
+    // Lo que sale suma consumo; lo que el taller devuelve, lo descuenta.
+    const signo = k.tipo === 'ENTRADA_DEVOLUCION_TALLER' ? -1 : 1;
     realMat.set(otId, (realMat.get(otId) ?? 0) + signo * costo);
   }
 

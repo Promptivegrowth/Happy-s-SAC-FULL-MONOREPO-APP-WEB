@@ -140,14 +140,48 @@ export async function traerPlanillaDelArea(
 
     const { data: opsRaw } = await sbAny
       .from('operarios')
-      .select('id, sueldo_base')
+      .select('id, codigo, tipo_contrato, sueldo_base')
       .eq('area_id', areaId)
       .eq('activo', true);
-    const ops = (opsRaw ?? []) as { id: string; sueldo_base: number | string | null }[];
+    type Op = { id: string; codigo: string | null; tipo_contrato: string | null; sueldo_base: number | string | null };
+    const ops = (opsRaw ?? []) as Op[];
     const total = ops.reduce((s, o) => s + Number(o.sueldo_base ?? 0), 0);
+
+    /*
+     * Cuando no hay nada que sumar, el motivo importa.
+     *
+     * El mensaje anterior decía "cárgalo en Operarios" para cualquier caso, y
+     * mandaba a un lugar donde a veces no hay nada que cargar: un operario de
+     * destajo u honorarios no tiene sueldo mensual, y la ficha —con razón— ni
+     * siquiera le muestra el campo. El cliente lo reportó así: "el mensaje
+     * dice cargar sueldo base en operarios, pero en operario no hay campo"
+     * (16/09/2026).
+     *
+     * Ahora se distingue: sin operarios, con operarios sin sueldo cargado, o
+     * con operarios que por su forma de pago no llevan sueldo.
+     */
     if (total <= 0) {
+      if (ops.length === 0) {
+        throw new Error(
+          'Esta área no tiene operarios activos asignados. Asígnalos en Operarios, o escribe el costo de planilla a mano.',
+        );
+      }
+
+      const mensuales = ops.filter((o) => o.tipo_contrato === 'PLANILLA' || o.tipo_contrato === 'MIXTO');
+      if (mensuales.length === 0) {
+        const formas = [...new Set(ops.map((o) => (o.tipo_contrato ?? 'sin contrato').toLowerCase()))].join(', ');
+        throw new Error(
+          `Los ${ops.length} operarios de esta área son de ${formas}: no cobran un sueldo mensual, así que no hay planilla que traer. ` +
+          'Escribe a mano lo que le cuesta el área al mes, o cambia su tipo de contrato si alguno sí está en planilla.',
+        );
+      }
+
+      const sinSueldo = mensuales
+        .filter((o) => Number(o.sueldo_base ?? 0) <= 0)
+        .map((o) => o.codigo ?? '?')
+        .join(', ');
       throw new Error(
-        'Los operarios de esta área no tienen sueldo base cargado. Cárgalo en Operarios o escribe el costo de planilla a mano.',
+        `Falta el sueldo base de: ${sinSueldo}. Cárgalo en Operarios —en la ficha de cada uno, sección Contrato— o escribe el costo de planilla a mano.`,
       );
     }
 

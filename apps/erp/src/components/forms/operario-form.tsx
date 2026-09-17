@@ -248,9 +248,28 @@ export function OperarioForm({ initial, areas, jornadaEstandar }: {
           <FormRow label="Fecha de ingreso">
             <Input name="fecha_ingreso" type="date" defaultValue={initial?.fecha_ingreso ?? ''} />
           </FormRow>
-          {necesitaSueldo && (
-            <FormRow label="Sueldo base (S/)">
+          {necesitaSueldo ? (
+            <FormRow
+              label="Sueldo base (S/)"
+              hint="Mensual. Es lo que suma el botón «Traer planilla» al costo del área."
+            >
               <Input name="sueldo_base" type="number" step="0.01" min="0" defaultValue={initial?.sueldo_base ?? ''} placeholder="1025.00" />
+            </FormRow>
+          ) : (
+            /*
+             * Sin sueldo, pero dicho en voz alta.
+             *
+             * El campo no aparece porque un operario de destajo u honorarios no
+             * cobra un mensual. Antes simplemente no estaba, y quien venía del
+             * aviso de costos del área —"carga el sueldo base en Operarios"— se
+             * quedaba buscando un campo que no existe.
+             */
+            <FormRow label="Sueldo base (S/)">
+              <p className="rounded-md border border-dashed bg-slate-50 px-3 py-2 text-xs text-slate-500">
+                Con <b>{contratoSel?.l?.toLowerCase() ?? 'este contrato'}</b> no hay sueldo mensual.
+                Su costo entra por el trabajo que declara, no por planilla. Si además cobra un fijo,
+                cambia el contrato a <b>Mixto</b>.
+              </p>
             </FormRow>
           )}
           {necesitaDestajo && (
