@@ -49,23 +49,13 @@ export function cuentaDePago(metodo: string, referencia?: string | null): string
   if (rMayus === 'EFECTIVO') return null;
 
   /*
-   * Y la que EMPIEZA con el método tampoco lo repite.
+   * Se devuelve el nombre TAL CUAL, sin recortarle nada.
    *
-   * La cuenta de Yape del cliente se llama "YAPE (BCP HAPPYS)" —el nombre
-   * tiene que decir "Yape" para que la cajera encuentre el botón—, pero
-   * pegado al método daría "Yape · YAPE (BCP HAPPYS)". Se le quita el prefijo
-   * y queda "Yape · BCP HAPPYS", que es lo que se quiere leer: el medio y
-   * dónde cayó la plata.
-   *
-   * Solo aplica al principio del nombre: "CONTINENTAL - PLIN HAPPYS" lleva
-   * "PLIN" en el medio y ahí sí forma parte del nombre de la cuenta.
+   * Es el texto del botón que aprieta la cajera. Retocarlo —aunque sea para
+   * que lea mejor— rompe lo único que importa acá: que el papel, la pantalla y
+   * el botón digan exactamente lo mismo. "debe aparecer tal cual lo que se
+   * selecciona en la ventana de venta", pidió el cliente el 16/09/2026.
    */
-  if (rMayus.startsWith(m)) {
-    const resto = r.slice(m.length).replace(/^[\s\-–—:]+/, '').trim();
-    const sinParentesis = /^\((.*)\)$/.exec(resto)?.[1]?.trim() ?? resto;
-    return sinParentesis || null;
-  }
-
   return r;
 }
 
@@ -78,7 +68,20 @@ export function cuentaDePago(metodo: string, referencia?: string | null): string
 export function etiquetaPago(metodo: string, referencia?: string | null): string {
   const cuenta = cuentaDePago(metodo, referencia);
   const nombre = nombreMetodo(metodo);
-  return cuenta ? `${nombre} · ${cuenta}` : nombre;
+  if (!cuenta) return nombre;
+
+  /*
+   * Si el nombre de la cuenta ya empieza diciendo el método, alcanza con él.
+   *
+   * La cuenta de Yape se llama "YAPE (BCP HAPPYS)" —tiene que decir Yape para
+   * que se encuentre el botón—, y anteponerle el método daría "Yape · YAPE
+   * (BCP HAPPYS)". En cambio "BCP JAVIER" no dice por sí solo que es una
+   * transferencia, así que ahí el método sí aporta.
+   *
+   * En los dos casos el nombre del botón aparece entero y sin retocar.
+   */
+  if (cuenta.toUpperCase().startsWith((metodo ?? '').trim().toUpperCase())) return cuenta;
+  return `${nombre} · ${cuenta}`;
 }
 
 export type PagoAgrupable = {
@@ -91,6 +94,13 @@ export type TotalPorCuenta = {
   metodo: string;
   /** Nombre de la cuenta, o null si el cobro no entró a ninguna (efectivo). */
   cuenta: string | null;
+  /**
+   * El nombre del botón, tal cual está guardado: "YAPE (BCP HAPPYS)".
+   *
+   * `cuenta` está pulido para leerse al lado del método; este es el crudo, y
+   * es el que sirve para cruzar contra el catálogo de cuentas del POS.
+   */
+  referencia: string | null;
   /** Ya listo para imprimir: "Plin · CONTINENTAL - PLIN HAPPYS". */
   etiqueta: string;
   monto: number;
@@ -126,6 +136,7 @@ export function agruparPorCuenta(pagos: PagoAgrupable[]): TotalPorCuenta[] {
       mapa.set(clave, {
         metodo,
         cuenta,
+        referencia: (p.referencia ?? '').trim() || null,
         etiqueta: etiquetaPago(metodo, p.referencia),
         monto,
         cantidad: 1,
@@ -134,4 +145,84 @@ export function agruparPorCuenta(pagos: PagoAgrupable[]): TotalPorCuenta[] {
   }
 
   return [...mapa.values()];
+}
+
+
+export type CuentaPos = {
+  /** El texto del botón en la ventana de venta: "CONTINENTAL - PLIN HAPPYS". */
+  nombre_corto: string;
+  /** El método que ese botón registra: YAPE, PLIN, TRANSFERENCIA, EFECTIVO… */
+  metodo_default: string;
+};
+
+/**
+ * El arqueo de caja, con los MISMOS renglones que los botones de cobro.
+ *
+ * Pedido del cliente (16/09/2026), textual: "los medios de pago están mal,
+ * debe aparecer los medios de pago que muestra la ventana de venta… debe
+ * aparecer tal cual lo que se selecciona en la ventana de venta y eso debe
+ * tener trazabilidad total".
+ *
+ * Antes el cierre mostraba cinco renglones fijos —Efectivo, Yape, Plin,
+ * Tarjeta, Transferencia— que no son lo que la cajera toca. Ella aprieta
+ * "BCP JAVIER" o "CONTINENTAL - PLIN HAPPYS"; que el arqueo hable de
+ * "Transferencia" la obliga a traducir de memoria, y con dos cuentas de
+ * transferencia la traducción es imposible: el papel decía 810 sin decir a
+ * cuál de los dos bancos.
+ *
+ * Van TODOS los botones, incluso los que no se usaron, en el mismo orden de la
+ * pantalla: un renglón en cero dice "por acá no entró nada", que es
+ * información, y deja el papel comparable entre dos turnos distintos.
+ *
+ * Y al final se agregan los cobros que no correspondan a ningún botón actual
+ * —una cuenta que después se ocultó, un saldo a favor aplicado—: si entró
+ * plata, tiene que estar, aunque el botón ya no exista.
+ */
+export function arqueoPorCuenta(
+  cuentasPos: CuentaPos[],
+  pagos: PagoAgrupable[],
+): TotalPorCuenta[] {
+  const totales = agruparPorCuenta(pagos);
+  const usados = new Set<number>();
+  const clave = (s: string) => s.trim().toUpperCase();
+
+  const filas: TotalPorCuenta[] = (cuentasPos ?? []).map((c) => {
+    const nombre = (c.nombre_corto ?? '').trim();
+    const metodo = (c.metodo_default ?? '').trim().toUpperCase();
+
+    /*
+     * Un cobro es de este botón cuando coincide el nombre de la cuenta. El
+     * efectivo es el caso aparte: se guarda con la referencia "EFECTIVO" o sin
+     * ninguna, y en los dos casos es el mismo botón.
+     */
+    let monto = 0;
+    let cantidad = 0;
+    totales.forEach((t, i) => {
+      if (usados.has(i)) return;
+      const coincide = t.referencia
+        ? clave(t.referencia) === clave(nombre)
+        : t.metodo === metodo && metodo === 'EFECTIVO';
+      if (!coincide) return;
+      usados.add(i);
+      monto += t.monto;
+      cantidad += t.cantidad;
+    });
+
+    return {
+      metodo,
+      cuenta: metodo === 'EFECTIVO' ? null : nombre,
+      referencia: nombre,
+      etiqueta: nombre,
+      monto,
+      cantidad,
+    };
+  });
+
+  // Lo que entró por un botón que ya no está en la pantalla no se puede perder.
+  totales.forEach((t, i) => {
+    if (usados.has(i)) return;
+    filas.push({ ...t, etiqueta: t.referencia ?? nombreMetodo(t.metodo) });
+  });
+
+  return filas;
 }

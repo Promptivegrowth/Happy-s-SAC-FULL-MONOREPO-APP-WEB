@@ -168,6 +168,7 @@ export type DatosCierre = {
    * seguir saliendo igual que antes en vez de romperse.
    */
   porCuenta?: Array<{ etiqueta: string; monto: number; cantidad: number }>;
+  /* (la etiqueta es el texto del botón de cobro, tal cual: "BCP JAVIER") */
   /** Cierre de fin de día o cambio de turno. */
   parcial?: boolean;
   /** A quién se le entrega la caja, en un cierre parcial. */
@@ -193,33 +194,52 @@ export function construirTicketCierre(
   if (d.parcial && d.cajeroEntrante) t.lineaDoble('Entra:', d.cajeroEntrante);
   t.separador();
 
-  t.negrita(true).linea('VENTAS POR MEDIO DE PAGO').negrita(false);
-  t.lineaDoble('Efectivo', soles(d.totalEfectivo));
-  t.lineaDoble('Yape', soles(d.totalYape));
-  t.lineaDoble('Plin', soles(d.totalPlin));
-  t.lineaDoble('Tarjeta', soles(d.totalTarjeta));
-  t.lineaDoble('Transferencia', soles(d.totalTransferencia));
-  if (d.totalOtros > 0) t.lineaDoble('Otros', soles(d.totalOtros));
-
   /*
-   * El detalle por cuenta, debajo del resumen por método.
+   * Los mismos renglones que los botones de la ventana de venta.
    *
-   * Va después y no en lugar del otro: el resumen por método es el que se mira
-   * de un vistazo y el que la cajera compara con lo que tiene anotado. El
-   * detalle por cuenta es para quien concilia el banco, que necesita el
-   * renglón exacto.
+   * Antes eran cinco fijos —Efectivo, Yape, Plin, Tarjeta, Transferencia— que
+   * no son lo que la cajera toca: ella aprieta "BCP JAVIER" o "CONTINENTAL -
+   * PLIN HAPPYS". Con dos cuentas de transferencia el papel decía "S/ 810" sin
+   * decir a cuál de los dos bancos, y eso no hay forma de cuadrarlo al día
+   * siguiente.
    *
-   * El efectivo se salta: no entra a ninguna cuenta y ya está arriba, contado
-   * y cuadrado aparte.
+   * Los botones sin movimiento salen en cero a propósito: dicen "por acá no
+   * entró nada", y dejan dos cierres comparables entre sí.
    */
-  const porCuenta = (d.porCuenta ?? []).filter((c) => c.etiqueta !== 'Efectivo');
+  t.negrita(true).linea('VENTAS POR MEDIO DE PAGO').negrita(false);
+  const porCuenta = d.porCuenta ?? [];
   if (porCuenta.length > 0) {
-    t.salto();
-    t.negrita(true).linea('DETALLE POR CUENTA').negrita(false);
     for (const c of porCuenta) {
-      for (const l of envolver(`${c.etiqueta} (${c.cantidad})`, COLUMNAS)) t.linea(l);
-      t.lineaDoble('', soles(c.monto));
+      /*
+       * El nombre de la cuenta no entra en la misma línea que el importe: son
+       * hasta 25 caracteres y el papel tiene 42. Cuando no entra, el nombre va
+       * arriba solo y el importe en la línea de abajo, alineado a la derecha
+       * como todos los demás.
+       */
+      /*
+       * Cuántos cobros entraron por ese botón, entre paréntesis.
+       *
+       * No es decoración: si el papel dice "BCP JAVIER (9)" y la cajera tiene
+       * ocho vouchers en la mano, falta uno y se busca en el momento, no al
+       * mes siguiente cuando llega el extracto del banco.
+       */
+      const etiqueta = c.cantidad > 0 ? `${c.etiqueta} (${c.cantidad})` : c.etiqueta;
+      const importe = soles(c.monto);
+      if (etiqueta.length + importe.length + 1 <= COLUMNAS) {
+        t.lineaDoble(etiqueta, importe);
+      } else {
+        for (const l of envolver(etiqueta, COLUMNAS)) t.linea(l);
+        t.lineaDoble('', importe);
+      }
     }
+  } else {
+    // Cierres viejos, reimpresos: no tienen el detalle por cuenta guardado.
+    t.lineaDoble('Efectivo', soles(d.totalEfectivo));
+    t.lineaDoble('Yape', soles(d.totalYape));
+    t.lineaDoble('Plin', soles(d.totalPlin));
+    t.lineaDoble('Tarjeta', soles(d.totalTarjeta));
+    t.lineaDoble('Transferencia', soles(d.totalTransferencia));
+    if (d.totalOtros > 0) t.lineaDoble('Otros', soles(d.totalOtros));
   }
 
   t.separador();

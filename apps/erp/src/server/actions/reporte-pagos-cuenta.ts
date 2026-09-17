@@ -13,12 +13,15 @@
  *     HAPPYS), PLIN (INTERBANK HAPPYS), …) cuando el cajero eligió un botón
  *     de cuenta del catálogo.
  *
- * Este reporte agrupa por (cuenta destino, método) y suma montos — con eso
- * el cliente concilia contra el estado de cuenta de cada banco y ve el
- * volumen de Yape separado del de Plin.
+ * Este reporte muestra UNA FILA POR BOTÓN de la ventana de venta, en el mismo
+ * orden de la pantalla y aunque no haya entrado nada, igual que el cierre de
+ * caja. Con eso el cliente concilia contra el estado de cuenta de cada banco y
+ * ve el volumen de Yape separado del de Plin, sin tener que traducir de
+ * "Transferencia" a cuál de los dos bancos (pedido del 16/09/2026).
  */
 
 import { createClient } from '@happy/db/server';
+import { arqueoPorCuenta } from '@happy/lib/pagos/etiqueta';
 
 export type FilaPagoCuenta = {
   cuenta: string;          // referencia (nombre corto de la cuenta) o '(sin cuenta)'
@@ -65,35 +68,44 @@ export async function reportePagosPorCuenta(
     pagos.push(...((data ?? []) as PagoRow[]));
   }
 
-  // 3) Catálogo de cuentas para resolver el banco de cada referencia
+  // 3) Catálogo de cuentas: el banco de cada una y cuáles son botones del POS
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const sbAny = sb as unknown as { from: (t: string) => any };
   const { data: cuentas } = await sbAny
     .from('cuentas_bancarias')
-    .select('nombre_corto, banco');
+    .select('nombre_corto, banco, metodo_default, visible_pos, activo')
+    .order('orden');
+  type CuentaRow = {
+    nombre_corto: string; banco: string | null; metodo_default: string;
+    visible_pos: boolean; activo: boolean;
+  };
+  const catalogo = (cuentas ?? []) as CuentaRow[];
   const bancoPorCuenta = new Map<string, string | null>(
-    ((cuentas ?? []) as { nombre_corto: string; banco: string | null }[]).map((c) => [c.nombre_corto, c.banco]),
+    catalogo.map((c) => [c.nombre_corto.trim().toUpperCase(), c.banco]),
   );
 
-  // 4) Agrupar por (cuenta, metodo)
-  const grupos = new Map<string, FilaPagoCuenta>();
-  for (const p of pagos) {
-    const cuenta = p.referencia?.trim() || '(sin cuenta)';
-    const key = `${cuenta}::${p.metodo}`;
-    const cur = grupos.get(key) ?? {
-      cuenta,
-      banco: bancoPorCuenta.get(cuenta) ?? null,
-      metodo: p.metodo,
-      monto: 0,
-      cantidad: 0,
-    };
-    cur.monto += Number(p.monto);
-    cur.cantidad += 1;
-    grupos.set(key, cur);
-  }
-  const filas = Array.from(grupos.values()).sort((a, b) =>
-    (a.banco ?? 'zzz').localeCompare(b.banco ?? 'zzz') || a.cuenta.localeCompare(b.cuenta) || a.metodo.localeCompare(b.metodo),
-  );
+  /*
+   * 4) Una fila por cada botón de la ventana de venta, en el orden de la
+   *    pantalla, aunque no haya entrado nada.
+   *
+   * Es el mismo criterio que el cierre de caja: el reporte tiene que hablar el
+   * idioma de la cajera. Una cuenta en cero también dice algo —"este mes no
+   * entró nada por acá"— y deja dos meses comparables renglón contra renglón.
+   *
+   * Lo que se cobró por una cuenta que después se ocultó sigue apareciendo al
+   * final: la plata entró y tiene que estar.
+   */
+  const cuentasPos = catalogo
+    .filter((c) => c.activo && c.visible_pos)
+    .map((c) => ({ nombre_corto: c.nombre_corto, metodo_default: c.metodo_default }));
+
+  const filas: FilaPagoCuenta[] = arqueoPorCuenta(cuentasPos, pagos).map((t) => ({
+    cuenta: t.etiqueta,
+    banco: bancoPorCuenta.get((t.referencia ?? '').trim().toUpperCase()) ?? null,
+    metodo: t.metodo,
+    monto: t.monto,
+    cantidad: t.cantidad,
+  }));
 
   // 5) Totales por método y por banco
   const porMetodo = new Map<string, { monto: number; cantidad: number }>();

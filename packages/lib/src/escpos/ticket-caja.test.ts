@@ -200,6 +200,59 @@ describe('el ticket de cierre deja el cuadre a la vista', () => {
     expect(salida).toContain('TOTAL VENTAS (23)');
   });
 
+  it('los renglones son los botones de la ventana de venta', () => {
+    /*
+     * Pedido del cliente (16/09/2026): "debe aparecer tal cual lo que se
+     * selecciona en la ventana de venta". El ticket mostraba Efectivo, Yape,
+     * Plin, Tarjeta y Transferencia, que no es lo que la cajera toca.
+     */
+    const salida = texto(construirTicketCierre(CAB, {
+      ...CIERRE,
+      porCuenta: [
+        { etiqueta: 'EFECTIVO', monto: 803, cantidad: 12 },
+        { etiqueta: 'CONTINENTAL - PLIN HAPPYS', monto: 365, cantidad: 8 },
+        { etiqueta: 'BCP HAPPYS', monto: 0, cantidad: 0 },
+        { etiqueta: 'YAPE (BCP HAPPYS)', monto: 0, cantidad: 0 },
+        { etiqueta: 'BCP JAVIER', monto: 810, cantidad: 9 },
+        { etiqueta: 'INTERBANK JAVIER', monto: 0, cantidad: 0 },
+      ],
+    }));
+    expect(salida).toContain('CONTINENTAL - PLIN HAPPYS');
+    expect(salida).toContain('BCP JAVIER');
+    expect(salida).toContain('YAPE (BCP HAPPYS)');
+    expect(salida).toContain('INTERBANK JAVIER');
+    // Y ya no habla de medios de pago genéricos que nadie aprieta.
+    expect(salida).not.toContain('Transferencia');
+    expect(salida).not.toContain('Tarjeta');
+  });
+
+  it('un botón sin movimiento sale en cero, no se esconde', () => {
+    const salida = texto(construirTicketCierre(CAB, {
+      ...CIERRE,
+      porCuenta: [{ etiqueta: 'INTERBANK JAVIER', monto: 0, cantidad: 0 }],
+    }));
+    expect(salida).toContain('INTERBANK JAVIER');
+    expect(salida).toContain('0.00');
+  });
+
+  it('un nombre de cuenta largo no se come el importe', () => {
+    // 42 columnas: si el nombre y el monto no entran juntos, el monto baja.
+    const t = construirTicketCierre(CAB, {
+      ...CIERRE,
+      porCuenta: [{ etiqueta: 'CONTINENTAL - CUENTA CORRIENTE SOLES HAPPYS', monto: 1234.5, cantidad: 3 }],
+    });
+    expect(texto(t)).toContain('1234.50');
+    for (const l of renglones(t)) expect(l.length).toBeLessThanOrEqual(42);
+  });
+
+  it('un cierre viejo reimpreso sigue mostrando sus totales', () => {
+    // Sin el detalle por cuenta guardado, se cae a los cinco de siempre.
+    const salida = texto(construirTicketCierre(CAB, CIERRE));
+    expect(salida).toContain('Efectivo');
+    expect(salida).toContain('850.50');
+    expect(salida).toContain('TOTAL VENTAS (23)');
+  });
+
   it('dice a qué cuenta entró cada cobro, no solo el medio de pago', () => {
     /*
      * El pedido de la vendedora (16/09/2026): el arqueo decía "Transferencia
@@ -214,7 +267,6 @@ describe('el ticket de cierre deja el cuadre a la vista', () => {
         { etiqueta: 'Transferencia · BCP JAVIER', monto: 1165, cantidad: 16 },
       ],
     }));
-    expect(salida).toContain('DETALLE POR CUENTA');
     expect(salida).toContain('CONTINENTAL - PLIN HAPPYS');
     expect(salida).toContain('BCP JAVIER');
     expect(salida).toContain('715.00');
@@ -222,23 +274,6 @@ describe('el ticket de cierre deja el cuadre a la vista', () => {
     // Cuántos cobros hubo: sirve para saber si falta uno.
     expect(salida).toContain('(8)');
     expect(salida).toContain('(16)');
-  });
-
-  it('el efectivo no aparece en el detalle por cuenta', () => {
-    // No entra a ninguna cuenta y su cuadre es el de abajo, contado a mano.
-    const salida = texto(construirTicketCierre(CAB, {
-      ...CIERRE,
-      porCuenta: [{ etiqueta: 'Efectivo', monto: 850.5, cantidad: 12 }],
-    }));
-    expect(salida).not.toContain('DETALLE POR CUENTA');
-  });
-
-  it('un cierre sin el dato de cuentas sale como siempre', () => {
-    // Reimprimir un cierre viejo no puede romperse ni quedar a medias.
-    const salida = texto(construirTicketCierre(CAB, CIERRE));
-    expect(salida).not.toContain('DETALLE POR CUENTA');
-    expect(salida).toContain('TOTAL VENTAS (23)');
-    expect(salida).toContain('CUADRA');
   });
 
   it('muestra cómo se llega al efectivo esperado', () => {

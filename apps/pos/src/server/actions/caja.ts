@@ -15,7 +15,7 @@
 import { z } from 'zod';
 import { revalidatePath } from 'next/cache';
 import ExcelJS from 'exceljs';
-import { etiquetaPago, agruparPorCuenta } from '@happy/lib/pagos/etiqueta';
+import { etiquetaPago, agruparPorCuenta, arqueoPorCuenta, type CuentaPos } from '@happy/lib/pagos/etiqueta';
 import { DIGITOS_CORRELATIVO } from '@happy/lib/sunat-ubl';
 import { createClient } from '@happy/db/server';
 import { formatTallaChip } from '@happy/lib';
@@ -34,6 +34,24 @@ import {
 // ============================================================================
 
 type ServerClient = Awaited<ReturnType<typeof createClient>>;
+
+/**
+ * Los botones de cobro de la ventana de venta, en el orden en que se ven.
+ *
+ * El arqueo tiene que mostrar exactamente estos renglones. Es la misma
+ * consulta que hace la pantalla de venta para pintar los botones; si algún día
+ * cambian, el cierre cambia con ellos y no hay una lista que mantener al día
+ * en dos lugares.
+ */
+async function cuentasDelPos(sb: ServerClient): Promise<CuentaPos[]> {
+  const { data } = await sb
+    .from('cuentas_bancarias')
+    .select('nombre_corto, metodo_default')
+    .eq('activo', true)
+    .eq('visible_pos', true)
+    .order('orden');
+  return (data ?? []) as CuentaPos[];
+}
 
 async function requireUser(sb: ServerClient) {
   const { data: { user } } = await sb.auth.getUser();
@@ -245,7 +263,8 @@ async function calcularBalanceInterno(
       .select('metodo, monto, referencia, ventas!inner(caja_sesion_id, estado)')
       .eq('ventas.caja_sesion_id', sesionId)
       .eq('ventas.estado', 'COMPLETADA');
-    porCuenta = agruparPorCuenta(
+    porCuenta = arqueoPorCuenta(
+      await cuentasDelPos(sb),
       (pagos ?? []) as Array<{ metodo: string; monto: number | string; referencia: string | null }>,
     );
     for (const p of (pagos ?? []) as Array<{ metodo: string; monto: number | string }>) {
@@ -794,7 +813,8 @@ export async function generarExcelCierre(sesionId: string): Promise<{ base64: st
       });
       pagosByVenta.set(p.venta_id as string, arr);
     }
-    porCuentaExcel = agruparPorCuenta(
+    porCuentaExcel = arqueoPorCuenta(
+      await cuentasDelPos(sb),
       (pagos ?? []) as Array<{ metodo: string; monto: number | string; referencia: string | null }>,
     );
   }
@@ -953,6 +973,12 @@ export async function generarExcelCierre(sesionId: string): Promise<{ base64: st
     row++;
   };
 
+  /*
+   * Los cinco medios de pago fijos solo se imprimen si NO hay detalle por
+   * cuenta —un cierre viejo reimpreso—. Cuando lo hay, más abajo va la lista
+   * de botones de la ventana de venta, que es lo que el cliente pidió ver.
+   */
+  if (porCuentaExcel.length === 0) {
   seccionTitulo('TOTALES POR MÉTODO DE PAGO');
   metodosRows.forEach(([label, value], i) => {
     const c1 = ws.getCell(row, 1);
@@ -974,9 +1000,10 @@ export async function generarExcelCierre(sesionId: string): Promise<{ base64: st
     row++;
   });
   row++;
+  }
 
   /*
-   * ---- A QUÉ CUENTA ENTRÓ ----
+   * ---- VENTAS POR MEDIO DE PAGO ----
    *
    * El bloque de arriba dice cuánto entró por cada medio de pago; este dice a
    * qué cuenta. Van los dos porque responden preguntas distintas: uno es para
@@ -984,10 +1011,9 @@ export async function generarExcelCierre(sesionId: string): Promise<{ base64: st
    *
    * El efectivo se salta: no entra a ninguna cuenta y su cuadre es el de abajo.
    */
-  const cuentasConMovimiento = porCuentaExcel.filter((c) => c.cuenta);
-  if (cuentasConMovimiento.length > 0) {
-    seccionTitulo('A QUÉ CUENTA ENTRÓ');
-    cuentasConMovimiento.forEach((c, i) => {
+  if (porCuentaExcel.length > 0) {
+    seccionTitulo('VENTAS POR MEDIO DE PAGO');
+    porCuentaExcel.forEach((c, i) => {
       const c1 = ws.getCell(row, 1);
       c1.value = c.etiqueta;
       c1.font = { size: 10 };
@@ -1591,7 +1617,8 @@ export async function cerrarParcialSesion(input: {
       .from('ventas_pagos')
       .select('metodo, monto, referencia')
       .in('venta_id', ventaIds);
-    porCuenta = agruparPorCuenta(
+    porCuenta = arqueoPorCuenta(
+      await cuentasDelPos(sb),
       (pagos ?? []) as Array<{ metodo: string; monto: number | string; referencia: string | null }>,
     );
     for (const p of pagos ?? []) {
