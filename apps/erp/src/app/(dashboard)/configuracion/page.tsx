@@ -5,7 +5,7 @@ import { Badge } from '@happy/ui/badge';
 import { Button } from '@happy/ui/button';
 import { PageShell } from '@/components/page-shell';
 import { requireRol } from '@/server/session';
-import { Ruler, Receipt, Factory, Tags, FileText, Globe, Warehouse, ListOrdered, Landmark, Printer } from 'lucide-react';
+import { Ruler, Receipt, Factory, Tags, FileText, Globe, Warehouse, ListOrdered, Landmark, Printer, Clock } from 'lucide-react';
 
 export const metadata = { title: 'Configuración' };
 export const dynamic = 'force-dynamic';
@@ -41,6 +41,19 @@ export default async function ConfiguracionPage() {
               <div className="flex-1">
                 <p className="font-display text-sm font-semibold text-corp-900">Tarifas de servicios</p>
                 <p className="text-xs text-slate-500">Tarifa central por proceso/producto/talla — vale para todos los talleres</p>
+              </div>
+            </CardContent>
+          </Card>
+        </Link>
+        <Link href="/configuracion/jornada">
+          <Card className="group cursor-pointer transition hover:-translate-y-0.5 hover:border-happy-300 hover:shadow-md">
+            <CardContent className="flex items-center gap-3 p-4">
+              <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-happy-50 text-happy-600 transition group-hover:bg-happy-500 group-hover:text-white">
+                <Clock className="h-5 w-5" />
+              </div>
+              <div className="flex-1">
+                <p className="font-display text-sm font-semibold text-corp-900">Jornada de planta</p>
+                <p className="text-xs text-slate-500">Horario y refrigerio por día — se descuenta del avance de producción</p>
               </div>
             </CardContent>
           </Card>
