@@ -1,11 +1,21 @@
-'use client';
-
 import { MessageCircle } from 'lucide-react';
+import { obtenerContenidoWeb } from '@/lib/contenido-web';
+import { enlaceWhatsApp } from '@happy/lib/web/contenido';
 
-export function WhatsappFab() {
+/**
+ * El botón verde de WhatsApp, fijo abajo a la derecha.
+ *
+ * Toma el número y el saludo de Configuración → Web. Antes estaban escritos
+ * acá: cambiar de número —o el mensaje con que arranca la conversación— era
+ * tocar el código.
+ */
+export async function WhatsappFab() {
+  const { contacto } = await obtenerContenidoWeb();
+  if (!contacto.whatsapp) return null;
+
   return (
     <a
-      href={`https://wa.me/51903064120?text=${encodeURIComponent('Hola! Estoy en disfraceshappys.com y quisiera consultar...')}`}
+      href={enlaceWhatsApp(contacto.whatsapp, contacto.whatsapp_saludo)}
       target="_blank"
       rel="noopener noreferrer"
       aria-label="Hablar por WhatsApp"

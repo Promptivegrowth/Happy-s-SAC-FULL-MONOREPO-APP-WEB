@@ -1,6 +1,11 @@
-export const metadata = { title: 'Contacto' };
+import { obtenerContenidoWeb } from '@/lib/contenido-web';
+import { enlaceWhatsApp, telefonoLegible } from '@happy/lib/web/contenido';
 
-export default function Page() {
+export const metadata = { title: 'Contacto' };
+export const dynamic = 'force-dynamic';
+
+export default async function Page() {
+  const { contacto } = await obtenerContenidoWeb();
   return (
     <article className="container max-w-3xl px-4 py-14">
       <h1 className="font-display text-4xl font-semibold">Contacto</h1>
@@ -8,9 +13,9 @@ export default function Page() {
         Estamos para ayudarte. Escríbenos por WhatsApp o correo.
       </p>
       <ul className="mt-8 space-y-3 text-sm">
-        <li>📱 WhatsApp: <a href="https://wa.me/51903064120" className="text-happy-600 hover:underline">+51 903 064 120</a></li>
-        <li>📧 Email: <a href="mailto:ventas@disfraceshappys.com.pe" className="text-happy-600 hover:underline">ventas@disfraceshappys.com.pe</a></li>
-        <li>🏬 Tienda Huallaga · 🏬 Tienda La Quinta — Lima, Perú</li>
+        <li>📱 WhatsApp: <a href={enlaceWhatsApp(contacto.whatsapp)} className="text-happy-600 hover:underline">{telefonoLegible(contacto.whatsapp)}</a></li>
+        <li>📧 Email: <a href={`mailto:${contacto.email}`} className="text-happy-600 hover:underline">{contacto.email}</a></li>
+        <li>🏬 {contacto.direccion}</li>
       </ul>
     </article>
   );

@@ -45,6 +45,19 @@ export default async function ConfiguracionPage() {
             </CardContent>
           </Card>
         </Link>
+        <Link href="/configuracion/web">
+          <Card className="group cursor-pointer transition hover:-translate-y-0.5 hover:border-happy-300 hover:shadow-md">
+            <CardContent className="flex items-center gap-3 p-4">
+              <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-happy-50 text-happy-600 transition group-hover:bg-happy-500 group-hover:text-white">
+                <Globe className="h-5 w-5" />
+              </div>
+              <div className="flex-1">
+                <p className="font-display text-sm font-semibold text-corp-900">Contenido de la web</p>
+                <p className="text-xs text-slate-500">Carrusel de la portada, banner mayorista, teléfonos y redes</p>
+              </div>
+            </CardContent>
+          </Card>
+        </Link>
         <Link href="/configuracion/costos-generales">
           <Card className="group cursor-pointer transition hover:-translate-y-0.5 hover:border-happy-300 hover:shadow-md">
             <CardContent className="flex items-center gap-3 p-4">

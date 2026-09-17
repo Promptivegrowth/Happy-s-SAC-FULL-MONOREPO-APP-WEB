@@ -5,75 +5,22 @@ import Link from 'next/link';
 import Script from 'next/script';
 import { useEffect, useState } from 'react';
 import { ChevronLeft, ChevronRight, Heart, Gift, Sparkles, ArrowRight } from 'lucide-react';
+import type { SlideWeb } from '@happy/lib/web/contenido';
 
-type SlideLayout = 'izquierda-lottie' | 'derecha-lottie' | 'centro' | 'centro-amplio';
+/*
+ * Los slides ya no viven acá: se editan desde el ERP, en
+ * Configuración → Web, y llegan como propiedad.
+ *
+ * Antes cambiar la campaña de mayo por la de Halloween era editar este archivo
+ * y volver a publicar el sitio. Con eso, el contenido de la portada dependía de
+ * que hubiera un programador disponible.
+ */
+type Slide = SlideWeb;
 
-type Slide = {
-  src: string;
-  alt: string;
-  href: string;
-  layout: SlideLayout;
-  pretitulo: string;
-  titulo: string;
-  tituloAcento?: string;
-  subtitulo: string;
-  cta: string;
-  badgeIcon: 'heart' | 'gift' | 'sparkle';
-  /** Color del título principal — debe contrastar con el fondo del slide */
-  tituloColor: string;
-  /** Color del acento (segunda línea — color sólido fuerte) */
-  acentoColor: string;
-};
 
-const SLIDES: Slide[] = [
-  {
-    src: '/slider1.webp',
-    alt: 'Día de la Madre — disfraces típicos para mamá',
-    href: '/campanias/dia-de-la-madre-2026',
-    layout: 'derecha-lottie',
-    pretitulo: '✨ Mayo 2026',
-    titulo: '¡Feliz día,',
-    tituloAcento: 'Mami!',
-    subtitulo: 'Disfraces típicos y trajes especiales para que su show del Día de la Madre sea inolvidable.',
-    cta: 'Ver colección',
-    badgeIcon: 'heart',
-    tituloColor: '#231459', // azul oscuro corp-900 sobre fondo claro/rosa
-    acentoColor: '#EC1C24', // rojo danger fuerte — alto contraste
-  },
-  {
-    src: '/slider2.webp',
-    alt: 'Disfraces para el día de la madre — colección 2026',
-    href: '/campanias/dia-de-la-madre-2026',
-    layout: 'centro',
-    pretitulo: '🌸 Edición limitada',
-    titulo: 'Mamá merece',
-    tituloAcento: 'lo mejor',
-    subtitulo: 'Vestidos coloridos y trajes únicos\npara que mamá brille en cada presentación.',
-    cta: 'Comprar ahora',
-    badgeIcon: 'gift',
-    tituloColor: '#231459',
-    acentoColor: '#E15A25', // naranja oscuro happy-600
-  },
-  {
-    src: '/slider3.webp',
-    alt: 'Show del día de la madre — disfraces y accesorios',
-    href: '/campanias/dia-de-la-madre-2026',
-    layout: 'centro-amplio',
-    pretitulo: '💝 ¡Solo por mayo!',
-    titulo: 'Sorprende a',
-    tituloAcento: 'la reina del hogar',
-    subtitulo: 'Más de 200 modelos · 11 tallas · Yape · Plin · Tarjeta · Envío Lima 2-3 días',
-    cta: 'Descubrir más',
-    badgeIcon: 'sparkle',
-    tituloColor: '#231459',
-    acentoColor: '#EC1C24', // rojo danger
-  },
-];
-
-const LOTTIE_SRC = 'https://lottie.host/0be6f22b-54c5-4c84-bce8-5c7367018885/jmgIfyFbJo.lottie';
 const AUTO_ROTATE_MS = 8000;
 
-function BadgeIcon({ kind }: { kind: Slide['badgeIcon'] }) {
+function BadgeIcon({ kind }: { kind: Slide['badge'] }) {
   if (kind === 'heart') return <Heart className="h-4 w-4 fill-current" />;
   if (kind === 'gift') return <Gift className="h-4 w-4" />;
   return <Sparkles className="h-4 w-4" />;
@@ -121,7 +68,8 @@ function AnimatedText({
   );
 }
 
-export function HeroSlider() {
+export function HeroSlider({ slides }: { slides: Slide[] }) {
+  const SLIDES = slides;
   const [active, setActive] = useState(0);
   const [paused, setPaused] = useState(false);
 
@@ -201,14 +149,14 @@ export function HeroSlider() {
             const inactive = i !== active;
             return (
               <div
-                key={s.src}
+                key={s.imagen_url}
                 className={`absolute inset-0 transition-opacity duration-1000 ease-out ${
                   inactive ? 'pointer-events-none opacity-0' : 'opacity-100'
                 }`}
               >
                 <div className={`absolute inset-0 ${inactive ? '' : 'hero-kb-active'}`} key={`${i}-${active}`}>
                   <Image
-                    src={s.src}
+                    src={s.imagen_url}
                     alt={s.alt}
                     fill
                     priority={i === 0}
@@ -292,7 +240,7 @@ function SlideContent({ slide, keyForAnim }: { slide: Slide; keyForAnim: string 
   // Delay para empezar las letras del título DESPUÉS del badge
   const TITULO_DELAY = 300;
   const ACENTO_DELAY = TITULO_DELAY + slide.titulo.length * 50 + 100;
-  const SUBT_DELAY = ACENTO_DELAY + (slide.tituloAcento?.length ?? 0) * 50 + 200;
+  const SUBT_DELAY = ACENTO_DELAY + (slide.titulo_acento.length) * 50 + 200;
   const CTA_DELAY = SUBT_DELAY + 400;
 
   return (
@@ -305,7 +253,7 @@ function SlideContent({ slide, keyForAnim }: { slide: Slide; keyForAnim: string 
           }`}
           style={{ animation: 'hero-bounce-in 600ms cubic-bezier(0.34,1.56,0.64,1) both' }}
         >
-          <BadgeIcon kind={slide.badgeIcon} />
+          <BadgeIcon kind={slide.badge} />
           {slide.pretitulo}
         </div>
 
@@ -319,17 +267,17 @@ function SlideContent({ slide, keyForAnim }: { slide: Slide; keyForAnim: string 
                 ? 'text-3xl sm:text-5xl lg:text-7xl'
                 : 'text-3xl sm:text-5xl lg:text-6xl'
           }`}
-          style={{ color: slide.tituloColor }}
+          style={{ color: slide.titulo_color }}
         >
           <span className="hero-text-glow block whitespace-nowrap">
             <AnimatedText text={slide.titulo} delayBase={TITULO_DELAY} letterDelay={55} />
           </span>
-          {slide.tituloAcento && (
+          {slide.titulo_acento && (
             <span
               className="hero-text-glow block whitespace-nowrap"
-              style={{ color: slide.acentoColor }}
+              style={{ color: slide.acento_color }}
             >
-              <AnimatedText text={slide.tituloAcento} delayBase={ACENTO_DELAY} letterDelay={55} />
+              <AnimatedText text={slide.titulo_acento} delayBase={ACENTO_DELAY} letterDelay={55} />
             </span>
           )}
         </h2>
@@ -357,8 +305,13 @@ function SlideContent({ slide, keyForAnim }: { slide: Slide; keyForAnim: string 
         </div>
       </div>
 
-      {/* Lottie en layouts laterales: se ubica en el lado opuesto al texto. */}
-      {layoutLateral && (
+      {/*
+        La animación, en los diseños laterales y solo si la campaña trae una.
+        Sin esta condición, cambiar la foto del Día de la Madre por una de
+        Halloween dejaba los corazones flotando encima de las calabazas: quien
+        edita vacía el campo y la animación se va con la campaña.
+      */}
+      {layoutLateral && slide.lottie_url && (
         <div
           className={`pointer-events-none absolute top-1/2 hidden h-40 w-40 -translate-y-1/2 sm:block sm:h-52 sm:w-52 lg:h-72 lg:w-72 xl:h-80 xl:w-80 ${
             slide.layout === 'izquierda-lottie'
@@ -367,7 +320,7 @@ function SlideContent({ slide, keyForAnim }: { slide: Slide; keyForAnim: string 
           }`}
           style={{ animation: 'hero-bounce-in 900ms cubic-bezier(0.34,1.56,0.64,1) 600ms both' }}
         >
-          <dotlottie-wc src={LOTTIE_SRC} autoplay loop style={{ width: '100%', height: '100%' }} />
+          <dotlottie-wc src={slide.lottie_url} autoplay loop style={{ width: '100%', height: '100%' }} />
         </div>
       )}
     </div>

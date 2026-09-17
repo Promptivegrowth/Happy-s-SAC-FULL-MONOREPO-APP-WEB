@@ -9,13 +9,19 @@ import { Logo } from '@happy/ui/logo';
 import { useCart } from '@/store/cart';
 import { MegaMenu, MegaMenuMobile } from './mega-menu';
 import type { CampanaVigente, ProductoBusqueda } from '@/server/queries/header-data';
+import { enlaceWhatsApp, telefonoLegible, type ContactoWeb, type RedesWeb } from '@happy/lib/web/contenido';
 
 export function SiteHeader({
   campanaVigente = null,
   productosParaBusqueda = [],
+  contacto,
+  redes,
 }: {
   campanaVigente?: CampanaVigente | null;
   productosParaBusqueda?: ProductoBusqueda[];
+  /* Vienen del layout, que los lee de Configuración → Web en el ERP. */
+  contacto: ContactoWeb;
+  redes: RedesWeb;
 }) {
   const router = useRouter();
   const items = useCart((s) => s.items);
@@ -57,11 +63,11 @@ export function SiteHeader({
       <div className="bg-corp-gradient text-white">
         <div className="container flex h-9 items-center justify-between gap-2 px-4 text-xs font-medium">
           <div className="hidden items-center gap-3 sm:flex">
-            <a href="https://wa.me/51903064120" className="flex items-center gap-1 hover:text-happy-300">
-              <MessageCircle className="h-3 w-3" /> 903 064 120
+            <a href={enlaceWhatsApp(contacto.whatsapp)} className="flex items-center gap-1 hover:text-happy-300">
+              <MessageCircle className="h-3 w-3" /> {telefonoLegible(contacto.whatsapp).replace('+51 ', '')}
             </a>
-            <a href="mailto:ventas@disfraceshappys.com.pe" className="hidden items-center gap-1 hover:text-happy-300 md:flex">
-              ventas@disfraceshappys.com.pe
+            <a href={`mailto:${contacto.email}`} className="hidden items-center gap-1 hover:text-happy-300 md:flex">
+              {contacto.email}
             </a>
           </div>
           <div className="flex flex-1 items-center justify-center gap-2 sm:flex-none">
@@ -70,13 +76,23 @@ export function SiteHeader({
             <Sparkles className="h-3 w-3 animate-float text-happy-300" />
           </div>
           <div className="hidden items-center gap-2 sm:flex">
-            <a href="https://facebook.com" target="_blank" rel="noopener noreferrer" aria-label="Facebook" className="hover:text-happy-300">
-              <Facebook className="h-3.5 w-3.5" />
-            </a>
-            <a href="https://instagram.com" target="_blank" rel="noopener noreferrer" aria-label="Instagram" className="hover:text-happy-300">
-              <Instagram className="h-3.5 w-3.5" />
-            </a>
-            <a href="https://wa.me/51903064120" target="_blank" rel="noopener noreferrer" aria-label="WhatsApp" className="hover:text-happy-300">
+            {/*
+              Solo las redes que tienen enlace cargado, igual que en el pie.
+              Antes estos dos apuntaban a facebook.com e instagram.com a secas:
+              el visitante terminaba en la portada de la red social, no en la de
+              la tienda. Y una red que la tienda no usa no debe mostrar ícono.
+            */}
+            {redes.facebook && (
+              <a href={redes.facebook} target="_blank" rel="noopener noreferrer" aria-label="Facebook" className="hover:text-happy-300">
+                <Facebook className="h-3.5 w-3.5" />
+              </a>
+            )}
+            {redes.instagram && (
+              <a href={redes.instagram} target="_blank" rel="noopener noreferrer" aria-label="Instagram" className="hover:text-happy-300">
+                <Instagram className="h-3.5 w-3.5" />
+              </a>
+            )}
+            <a href={enlaceWhatsApp(contacto.whatsapp)} target="_blank" rel="noopener noreferrer" aria-label="WhatsApp" className="hover:text-happy-300">
               <MessageCircle className="h-3.5 w-3.5" />
             </a>
           </div>

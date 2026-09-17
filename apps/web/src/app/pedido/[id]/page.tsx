@@ -17,7 +17,8 @@ import { formatTallaChip } from '@happy/lib';
 import { Card } from '@happy/ui/card';
 import { Badge } from '@happy/ui/badge';
 import { CheckCircle2, Clock, XCircle, MessageCircle, CreditCard } from 'lucide-react';
-import { WHATSAPP_NUMERO, WHATSAPP_NUMERO_HUMAN } from '@/lib/contacto';
+import { obtenerContenidoWeb } from '@/lib/contenido-web';
+import { enlaceWhatsApp, telefonoLegible } from '@happy/lib/web/contenido';
 
 export const metadata = { title: 'Tu pedido' };
 export const dynamic = 'force-dynamic';
@@ -100,6 +101,7 @@ const ESTILO = {
 };
 
 export default async function PedidoPage({ params }: { params: Promise<{ id: string }> }) {
+  const { contacto } = await obtenerContenidoWeb();
   const { id } = await params;
   // Un id que no es UUID no puede existir: se corta antes de ir a la base.
   if (!/^[0-9a-f-]{36}$/i.test(id)) notFound();
@@ -126,7 +128,7 @@ export default async function PedidoPage({ params }: { params: Promise<{ id: str
   };
   const { borde, texto, Icono } = ESTILO[cartel.tono];
 
-  const waUrl = `https://wa.me/${WHATSAPP_NUMERO}?text=${encodeURIComponent(
+  const waUrl = `${enlaceWhatsApp(contacto.whatsapp)}?text=${encodeURIComponent(
     `Hola, consulto por mi pedido ${pedido.numero}`,
   )}`;
 
@@ -219,7 +221,7 @@ export default async function PedidoPage({ params }: { params: Promise<{ id: str
           rel="noreferrer"
           className="inline-flex items-center gap-2 rounded-md border border-emerald-300 bg-emerald-50 px-3 py-2 text-emerald-800"
         >
-          <MessageCircle className="h-4 w-4" /> Consultar por WhatsApp {WHATSAPP_NUMERO_HUMAN}
+          <MessageCircle className="h-4 w-4" /> Consultar por WhatsApp {telefonoLegible(contacto.whatsapp)}
         </a>
         <Link href="/productos" className="text-happy-600 underline">
           Seguir comprando

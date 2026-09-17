@@ -1,8 +1,25 @@
 import Link from 'next/link';
-import { Facebook, Instagram, MessageCircle, MapPin, Mail } from 'lucide-react';
+import { Facebook, Instagram, MessageCircle, MapPin, Mail, Music2, Youtube } from 'lucide-react';
 import { Logo } from '@happy/ui/logo';
+import { obtenerContenidoWeb } from '@/lib/contenido-web';
+import { enlaceWhatsApp, telefonoLegible } from '@happy/lib/web/contenido';
 
-export function SiteFooter() {
+export async function SiteFooter() {
+  const { contacto, redes } = await obtenerContenidoWeb();
+
+  /*
+   * Solo se pintan las redes que tienen enlace.
+   *
+   * Un ícono de TikTok que lleva a ningún lado es peor que no mostrarlo: el
+   * visitante hace clic, no pasa nada, y concluye que la página está rota.
+   */
+  const conEnlace = [
+    { url: redes.facebook, etiqueta: 'Facebook', Icono: Facebook },
+    { url: redes.instagram, etiqueta: 'Instagram', Icono: Instagram },
+    { url: redes.tiktok, etiqueta: 'TikTok', Icono: Music2 },
+    { url: redes.youtube, etiqueta: 'YouTube', Icono: Youtube },
+  ].filter((r) => r.url);
+
   return (
     <footer className="bg-corp-900 text-corp-100/80">
       <div className="container grid gap-10 px-4 py-14 md:grid-cols-4">
@@ -14,15 +31,23 @@ export function SiteFooter() {
             Fabricamos los mejores disfraces para niños y adultos en Perú desde 1995. Calidad, color y alegría en cada detalle.
           </p>
           <div className="mt-4 flex gap-2">
-            <a href="https://facebook.com/disfraceshappys" className="rounded-full bg-white/5 p-2 transition hover:bg-happy-500 hover:text-white" aria-label="Facebook">
-              <Facebook className="h-4 w-4" />
-            </a>
-            <a href="https://instagram.com/disfraceshappys" className="rounded-full bg-white/5 p-2 transition hover:bg-happy-500 hover:text-white" aria-label="Instagram">
-              <Instagram className="h-4 w-4" />
-            </a>
-            <a href="https://wa.me/51903064120" className="rounded-full bg-white/5 p-2 transition hover:bg-happy-500 hover:text-white" aria-label="WhatsApp">
-              <MessageCircle className="h-4 w-4" />
-            </a>
+            {conEnlace.map(({ url, etiqueta, Icono }) => (
+              <a
+                key={etiqueta}
+                href={url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="rounded-full bg-white/5 p-2 transition hover:bg-happy-500 hover:text-white"
+                aria-label={etiqueta}
+              >
+                <Icono className="h-4 w-4" />
+              </a>
+            ))}
+            {contacto.whatsapp && (
+              <a href={enlaceWhatsApp(contacto.whatsapp)} className="rounded-full bg-white/5 p-2 transition hover:bg-happy-500 hover:text-white" aria-label="WhatsApp">
+                <MessageCircle className="h-4 w-4" />
+              </a>
+            )}
           </div>
         </div>
 
@@ -57,15 +82,15 @@ export function SiteFooter() {
           <h4 className="mb-3 font-semibold text-white">Atención al cliente</h4>
           <p className="flex items-center gap-2 text-sm">
             <MessageCircle className="h-4 w-4 text-happy-400" />
-            <a href="https://wa.me/51903064120" className="hover:text-happy-400">+51 903 064 120</a>
+            <a href={enlaceWhatsApp(contacto.whatsapp)} className="hover:text-happy-400">{telefonoLegible(contacto.whatsapp)}</a>
           </p>
           <p className="mt-2 flex items-center gap-2 text-sm">
             <Mail className="h-4 w-4 text-happy-400" />
-            <a href="mailto:ventas@disfraceshappys.com.pe" className="hover:text-happy-400">ventas@disfraceshappys.com.pe</a>
+            <a href={`mailto:${contacto.email}`} className="hover:text-happy-400">{contacto.email}</a>
           </p>
           <p className="mt-4 flex items-start gap-2 text-xs">
             <MapPin className="mt-0.5 h-4 w-4 shrink-0 text-happy-400" />
-            <span>Tiendas físicas: Huallaga · La Quinta (Lima)</span>
+            <span>{contacto.direccion}</span>
           </p>
         </div>
       </div>

@@ -7,7 +7,7 @@ import { Badge } from '@happy/ui/badge';
 import { ShoppingBag, MessageCircle, Plus, Minus, Zap, AlertTriangle } from 'lucide-react';
 import { useCart, type CartItem } from '@/store/cart';
 import { toast } from 'sonner';
-import { WHATSAPP_NUMERO } from '@/lib/contacto';
+import { enlaceWhatsApp } from '@happy/lib/web/contenido';
 import { formatTallaChip } from '@happy/lib';
 import { ComoMedirme } from '@/components/como-medirme';
 
@@ -43,6 +43,7 @@ export function ProductoDetalleClient({
   stockTotal,
   agotado,
   slotTablaMedidas,
+  whatsapp,
 }: {
   productoId: string;
   nombre: string;
@@ -56,6 +57,8 @@ export function ProductoDetalleClient({
   /** Botón "Tabla de medidas" (se arma server-side con los datos de la ficha).
    *  Se renderiza junto al selector de tallas, al lado de "¿Cómo medirme?". */
   slotTablaMedidas?: React.ReactNode;
+  /** Número de WhatsApp, de Configuración → Web en el ERP. */
+  whatsapp: string;
 }) {
   const router = useRouter();
   const add = useCart((s) => s.add);
@@ -157,7 +160,7 @@ Talla: ${formatTallaChip(seleccionada.talla)}
 ${lineasPedido}${mensajeStock}
 
 ${esConsulta ? '¿Me das más información?' : '¿Cómo procedo con la compra?'}`;
-    window.open(`https://wa.me/${WHATSAPP_NUMERO}?text=${encodeURIComponent(msg)}`, '_blank');
+    window.open(enlaceWhatsApp(whatsapp, msg), '_blank');
   }
 
   function irAlCheckout() {

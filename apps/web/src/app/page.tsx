@@ -1,3 +1,5 @@
+import { obtenerContenidoWeb } from '@/lib/contenido-web';
+import { enlaceWhatsApp } from '@happy/lib/web/contenido';
 import Link from 'next/link';
 import Image from 'next/image';
 import { Card } from '@happy/ui/card';
@@ -47,6 +49,7 @@ async function loadCampaniasActivas(): Promise<CampaniaActiva[]> {
 }
 
 export default async function Home() {
+  const contenido = await obtenerContenidoWeb();
   const [destacados, campanias] = await Promise.all([
     loadPublicaciones({ destacado: true, limit: 8 }),
     loadCampaniasActivas(),
@@ -55,7 +58,7 @@ export default async function Home() {
   return (
     <>
       {/* HERO SLIDER (3 imágenes webp horizontales auto-rotate) */}
-      <HeroSlider />
+      <HeroSlider slides={contenido.hero_slides} />
 
       {/* Stats premium con counter animado */}
       <PremiumStats />
@@ -72,17 +75,20 @@ export default async function Home() {
           <div className="container relative px-4">
             <div className="mb-10 flex flex-col items-center text-center">
               <Badge className="mb-3 bg-gradient-to-r from-happy-500 to-danger text-white hover:from-happy-500">
-                <Sparkles className="mr-1 h-3 w-3" /> Selección destacada
+                <Sparkles className="mr-1 h-3 w-3" /> {contenido.destacados.etiqueta}
               </Badge>
               <div className="flex items-center justify-center gap-1 sm:gap-2">
-                <dotlottie-wc
-                  src="https://lottie.host/3a89ec89-700f-4765-a30e-9209e1133377/zdzFqqAyIg.lottie"
-                  autoplay
-                  loop
-                  style={{ width: '70px', height: '70px' }}
-                />
+                {/* Sin animación cargada, el título va solo y centrado. */}
+                {contenido.destacados.lottie_url && (
+                  <dotlottie-wc
+                    src={contenido.destacados.lottie_url}
+                    autoplay
+                    loop
+                    style={{ width: '70px', height: '70px' }}
+                  />
+                )}
                 <h2 className="font-display text-4xl font-semibold text-corp-900 sm:text-5xl">
-                  Lo más TOP
+                  {contenido.destacados.titulo}
                 </h2>
               </div>
               <p className="mt-2 text-slate-600">
@@ -120,19 +126,19 @@ export default async function Home() {
       {/* CTA WHATSAPP — fondo con efecto parallax + overlay para legibilidad */}
       <section
         className="relative overflow-hidden bg-corp-900 bg-cover bg-fixed bg-center py-28 text-white md:py-36"
-        style={{ backgroundImage: "url('/CTA.webp')" }}
+        style={{ backgroundImage: `url('${contenido.cta_mayorista.imagen_url}')` }}
       >
         {/* Overlay gradiente: oscurece el fondo lo suficiente para que el texto blanco resalte sin ocultar la foto */}
         <div className="absolute inset-0 bg-gradient-to-b from-corp-900/70 via-corp-900/55 to-corp-900/75" />
         <div className="container relative z-10 px-4 text-center">
-          <h2 className="font-display text-3xl font-semibold drop-shadow-lg md:text-4xl">¿Compra al por mayor o personalizada?</h2>
-          <p className="mt-3 text-lg text-white/95 drop-shadow-md">Hablemos por WhatsApp — atención directa con nuestro equipo</p>
+          <h2 className="font-display text-3xl font-semibold drop-shadow-lg md:text-4xl">{contenido.cta_mayorista.titulo}</h2>
+          <p className="mt-3 text-lg text-white/95 drop-shadow-md">{contenido.cta_mayorista.subtitulo}</p>
           <a
-            href="https://wa.me/51903064120"
+            href={enlaceWhatsApp(contenido.cta_mayorista.telefono)}
             className="mt-8 inline-flex items-center gap-2 rounded-full bg-white px-8 py-4 font-semibold text-corp-900 shadow-2xl transition hover:scale-105 hover:text-happy-600"
           >
             <MessageCircle className="h-5 w-5" />
-            Escribir al +51 903 064 120
+            {contenido.cta_mayorista.boton}
           </a>
         </div>
       </section>

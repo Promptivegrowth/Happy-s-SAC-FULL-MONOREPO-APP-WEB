@@ -8,7 +8,8 @@ import { TrustBadges } from '@/components/trust-badges';
 import { EnvioTimeline } from '@/components/envio-timeline';
 import { ResenasSection, type ResenaItem } from '@/components/resenas-section';
 import { ProductCard, type ProductCardData } from '@/components/product-card';
-import { WHATSAPP_NUMERO, WHATSAPP_NUMERO_HUMAN, CORREO_CONTACTO } from '@/lib/contacto';
+import { obtenerContenidoWeb } from '@/lib/contenido-web';
+import { enlaceWhatsApp, telefonoLegible } from '@happy/lib/web/contenido';
 import { TablaMedidas, type MedidaFila } from '@/components/tabla-medidas';
 import { ordenTalla } from '@happy/lib';
 import { GaleriaProducto } from '@/components/galeria-producto';
@@ -84,6 +85,7 @@ type ProductoDetalle = {
 };
 
 export default async function ProductoDetallePage({ params }: { params: Promise<{ slug: string }> }) {
+  const { contacto } = await obtenerContenidoWeb();
   const { slug } = await params;
   const sb = await createClient();
 
@@ -398,6 +400,7 @@ export default async function ProductoDetallePage({ params }: { params: Promise<
           )}
 
           <ProductoDetalleClient
+            whatsapp={contacto.whatsapp}
             productoId={prod.id}
             nombre={pub.titulo_web ?? prod.nombre}
             imagen={prod.imagen_principal_url}
@@ -500,7 +503,7 @@ export default async function ProductoDetallePage({ params }: { params: Promise<
         <h2 className="font-display text-2xl font-semibold">¿Tienes dudas sobre este disfraz?</h2>
         <p className="mt-2 text-white/90">Te asesoramos por WhatsApp en minutos</p>
         <a
-          href="https://wa.me/51903064120"
+          href={enlaceWhatsApp(contacto.whatsapp)}
           target="_blank"
           rel="noopener noreferrer"
           className="mt-5 inline-flex items-center gap-2 rounded-full bg-emerald-500 px-7 py-3 font-semibold shadow-xl transition hover:scale-105 hover:bg-emerald-400"

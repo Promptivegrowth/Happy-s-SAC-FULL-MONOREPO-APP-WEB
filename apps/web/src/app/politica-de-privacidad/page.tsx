@@ -1,6 +1,10 @@
-export const metadata = { title: 'Política de privacidad' };
+import { obtenerContenidoWeb } from '@/lib/contenido-web';
 
-export default function Page() {
+export const metadata = { title: 'Política de privacidad' };
+export const dynamic = 'force-dynamic';
+
+export default async function Page() {
+  const { contacto } = await obtenerContenidoWeb();
   return (
     <article className="container max-w-3xl px-4 py-14 prose prose-sm">
       <h1 className="font-display text-4xl font-semibold">Política de privacidad</h1>
@@ -23,7 +27,7 @@ export default function Page() {
         <li>Cumplir obligaciones legales (libro de reclamaciones, registros tributarios)</li>
       </ul>
       <h2>Tus derechos</h2>
-      <p>Puedes solicitar acceso, rectificación, oposición, cancelación o información sobre el uso de tus datos escribiéndonos a <a href="mailto:ventas@disfraceshappys.com.pe">ventas@disfraceshappys.com.pe</a>.</p>
+      <p>Puedes solicitar acceso, rectificación, oposición, cancelación o información sobre el uso de tus datos escribiéndonos a <a href={`mailto:${contacto.email}`}>{contacto.email}</a>.</p>
     </article>
   );
 }

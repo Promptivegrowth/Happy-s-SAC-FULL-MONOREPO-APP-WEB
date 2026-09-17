@@ -7,6 +7,7 @@ import { SiteHeader } from '@/components/site-header';
 import { SiteFooter } from '@/components/site-footer';
 import { WhatsappFab } from '@/components/whatsapp-fab';
 import { cargarDatosHeader } from '@/server/queries/header-data';
+import { obtenerContenidoWeb } from '@/lib/contenido-web';
 
 // Incluimos latin-ext además de latin — sin él Google Fonts omite el rango
 // de acentos españoles (í, á, é, ó, ú, ñ) y los renderiza como rombos ◇.
@@ -54,13 +55,18 @@ export default async function RootLayout({ children }: { children: React.ReactNo
   // Datos server-side para el header: campaña vigente por fecha (reemplaza el
   // link hardcoded de "Día de la Madre 2026" que ya venció) + índice de
   // productos para el autocomplete del buscador.
-  const { campanaVigente, productosParaBusqueda } = await cargarDatosHeader();
+  const [{ campanaVigente, productosParaBusqueda }, contenido] = await Promise.all([
+    cargarDatosHeader(),
+    obtenerContenidoWeb(),
+  ]);
   return (
     <html lang="es-PE" className={`${inter.variable} ${fraunces.variable} ${fredoka.variable}`}>
       <body className="flex min-h-screen flex-col bg-white font-sans antialiased">
         <SiteHeader
           campanaVigente={campanaVigente}
           productosParaBusqueda={productosParaBusqueda}
+          contacto={contenido.contacto}
+          redes={contenido.redes}
         />
         <main className="flex-1">{children}</main>
         <SiteFooter />
