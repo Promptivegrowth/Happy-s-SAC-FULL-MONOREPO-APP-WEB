@@ -1,7 +1,7 @@
 'use server';
 
-import { minutosTrabajados, refrigerioSegunJornada } from '@happy/lib/produccion/jornada';
-import { getJornadaEstandar, refrigeriosPorDia } from '@/app/(dashboard)/operarios/_jornada';
+import { minutosTrabajados, horarioSegunJornada } from '@happy/lib/produccion/jornada';
+import { getJornadaEstandar, horariosPorDia } from '@/app/(dashboard)/operarios/_jornada';
 import { z } from 'zod';
 import { redirect } from 'next/navigation';
 import { runAction, requireUser, bumpPaths, esGerente, type ActionResult } from './_helpers';
@@ -732,12 +732,12 @@ export async function crearRegistroTiempoOT(
       const calculo = minutosTrabajados(
         new Date(data.fecha_inicio),
         new Date(data.fecha_fin),
-        refrigerioSegunJornada(refrigeriosPorDia(jornada)),
+        horarioSegunJornada(horariosPorDia(jornada)),
       );
       if (!(calculo.minutos > 0)) {
         throw new Error(
           calculo.minutosBrutos > 0
-            ? 'Todo el intervalo cae dentro del refrigerio: no hay tiempo que registrar'
+            ? 'Ese intervalo no cae dentro del horario de planta: no hay tiempo que registrar. Si el trabajo fue fuera de horario, cárgalo con "tiempo directo".'
             : 'El intervalo debe ser mayor a 0 minutos',
         );
       }

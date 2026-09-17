@@ -1,26 +1,37 @@
 /**
  * Cuánto se trabajó realmente entre dos horas.
  *
- * Producción carga el avance como "empecé 12:32, terminé 16:32" y el sistema
- * calculaba la resta pelada: 240 minutos. Pero en el medio hubo una hora de
- * refrigerio, así que la operación no costó 240 sino 180. Lo reportó el
- * cliente el 16/09/2026.
+ * Producción carga el avance como "empecé tal día a tal hora, terminé tal
+ * otra", y el sistema hacía la resta pelada. Eso se equivocaba de dos maneras,
+ * las dos reportadas por el cliente el 16/09/2026:
+ *
+ *   · Un turno de 12:32 a 16:32 daba 240 minutos, aunque una hora se fue en
+ *     almorzar.
+ *   · Un registro del 13/09 16:36 al 14/09 09:36 daba 1 020 minutos —17 horas
+ *     seguidas— porque contaba la noche entera: la planta cerrada, todo el
+ *     mundo en su casa, y el reloj corriendo.
  *
  * Que importe no es un detalle de nómina: ese tiempo se divide entre las
- * unidades para sacar el minuto por prenda, y ese número es el que alimenta el
- * costo de mano de obra y la comparación contra el tiempo estándar. Inflarlo
- * un 33% hace que toda prenda parezca más cara y más lenta de lo que es.
+ * unidades para sacar el minuto por prenda, y ese número alimenta el costo de
+ * mano de obra y la comparación contra el tiempo estándar. Inflarlo hace que
+ * la prenda parezca más lenta y más cara de lo que es.
  *
- * Se descuenta por SOLAPE, no de golpe: si alguien trabajó de 08:00 a 12:00 no
- * se le resta nada, porque no pasó por la hora de almuerzo. Restar una hora
- * fija sería cambiar un error por otro.
+ * La regla es una sola y se explica en una frase: se cuenta el tiempo que cae
+ * DENTRO del horario de trabajo, y de ahí se descuenta el refrigerio. Todo lo
+ * que quede fuera —la noche, un domingo, las horas antes de abrir— no se
+ * cobra a la operación. Para el trabajo que realmente ocurrió fuera de horario
+ * está el modo "tiempo directo", donde se escriben los minutos a mano.
  */
 
-export type Refrigerio = {
-  /** Hora de inicio, "HH:MM" en la zona horaria de la planta. */
+export type HorarioDia = {
+  /** Hora de entrada, "HH:MM". */
   inicio: string;
-  /** Cuánto dura. 0 = ese día no hay refrigerio (los sábados, por ejemplo). */
-  minutos: number;
+  /** Hora de salida, "HH:MM". */
+  fin: string;
+  /** Hora en que se para a comer, "HH:MM". */
+  refrigerioInicio: string;
+  /** Cuánto dura el refrigerio. 0 = ese día no se para. */
+  refrigerioMin: number;
 };
 
 /** Minutos desde la medianoche de un "HH:MM". null si no se entiende. */
@@ -39,62 +50,90 @@ function solape(aIni: number, aFin: number, bIni: number, bFin: number): number 
 }
 
 export type TiempoTrabajado = {
-  /** Lo que se va a cobrar a la operación. */
+  /** Lo que se le cobra a la operación. */
   minutos: number;
-  /** La resta pelada, sin descontar nada. */
+  /** La resta pelada entre las dos fechas, sin descontar nada. */
   minutosBrutos: number;
-  /** Cuánto se descontó por refrigerio. 0 si el turno no lo cruzó. */
+  /** Cuánto se descontó por caer en el refrigerio. */
   refrigerioDescontado: number;
+  /** Cuánto se descontó por caer fuera del horario: la noche, un domingo. */
+  fueraDeJornadaDescontado: number;
 };
 
+const MS_MIN = 60000;
 /**
- * Los minutos trabajados entre dos momentos, descontando el refrigerio.
+ * Tope de días que se recorren.
  *
- * El refrigerio se busca en CADA día que toca el intervalo: un registro que
- * cruza la medianoche —turno largo, o alguien que se equivocó de fecha— tiene
- * dos almuerzos posibles y hay que mirar los dos. Es raro, pero si pasa, la
- * alternativa es descontar de menos sin que nadie lo note.
+ * Es para no quedarse dando vueltas si llega un intervalo absurdo —alguien
+ * tecleó el año que no era—. Con 31 sobra: un registro de avance de más de un
+ * mes es un error de carga, no un turno.
+ */
+const MAX_DIAS = 31;
+
+/**
+ * Los minutos trabajados entre dos momentos, acotados al horario de planta.
  *
- * `refrigerioDe` recibe la fecha de cada día y devuelve el horario de ese día,
- * o null si ese día no se come (domingo, feriado, sábado corto).
+ * Se recorre día por día porque cada uno tiene su propio horario: el sábado es
+ * corto y no tiene refrigerio, el domingo no existe, y un registro que cruza la
+ * medianoche toca dos jornadas distintas.
+ *
+ * `horarioDe` recibe la fecha de cada día y devuelve su horario, o null si ese
+ * día no se trabaja.
  */
 export function minutosTrabajados(
   inicio: Date,
   fin: Date,
-  refrigerioDe: (dia: Date) => Refrigerio | null,
+  horarioDe: (dia: Date) => HorarioDia | null,
 ): TiempoTrabajado {
   const ti = inicio.getTime();
   const tf = fin.getTime();
-  if (!Number.isFinite(ti) || !Number.isFinite(tf) || tf <= ti) {
-    return { minutos: 0, minutosBrutos: 0, refrigerioDescontado: 0 };
-  }
+  const vacio = { minutos: 0, minutosBrutos: 0, refrigerioDescontado: 0, fueraDeJornadaDescontado: 0 };
+  if (!Number.isFinite(ti) || !Number.isFinite(tf) || tf <= ti) return vacio;
 
-  const minutosBrutos = (tf - ti) / 60000;
+  const minutosBrutos = (tf - ti) / MS_MIN;
 
-  let descontado = 0;
+  let dentroDeJornada = 0;
+  let refrigerio = 0;
+
   const dia = new Date(inicio.getFullYear(), inicio.getMonth(), inicio.getDate());
-  /*
-   * Un tope de días por si llega un intervalo absurdo —alguien tecleó 2026 en
-   * vez de 2025— para no quedarse dando vueltas. Con 31 sobra: un registro de
-   * avance de más de un mes es un error de carga, no un turno.
-   */
-  for (let i = 0; i < 31 && dia.getTime() <= tf; i++) {
-    const r = refrigerioDe(dia);
-    const desde = r ? minutosDelDia(r.inicio) : null;
-    if (r && r.minutos > 0 && desde !== null) {
-      const base = dia.getTime();
-      const refIni = base + desde * 60000;
-      const refFin = refIni + r.minutos * 60000;
-      descontado += solape(ti, tf, refIni, refFin) / 60000;
+  for (let i = 0; i < MAX_DIAS && dia.getTime() <= tf; i++) {
+    const h = horarioDe(dia);
+    const base = dia.getTime();
+    const desde = h ? minutosDelDia(h.inicio) : null;
+    const hasta = h ? minutosDelDia(h.fin) : null;
+
+    if (h && desde !== null && hasta !== null && hasta > desde) {
+      const jorIni = base + desde * MS_MIN;
+      const jorFin = base + hasta * MS_MIN;
+      const enJornada = solape(ti, tf, jorIni, jorFin);
+      dentroDeJornada += enJornada / MS_MIN;
+
+      /*
+       * El refrigerio se descuenta solo de lo que ya quedó dentro del horario.
+       *
+       * Si se restara del bruto, un turno que se pasó de la hora de salida
+       * pagaría el almuerzo dos veces: una al recortarlo a la jornada y otra
+       * al restar el refrigerio.
+       */
+      if (enJornada > 0 && h.refrigerioMin > 0) {
+        const refDesde = minutosDelDia(h.refrigerioInicio);
+        if (refDesde !== null) {
+          const refIni = Math.max(base + refDesde * MS_MIN, jorIni);
+          const refFin = Math.min(refIni + h.refrigerioMin * MS_MIN, jorFin);
+          refrigerio += solape(ti, tf, refIni, refFin) / MS_MIN;
+        }
+      }
     }
+
     dia.setDate(dia.getDate() + 1);
   }
 
   const redondear = (n: number) => Math.round(n * 100) / 100;
   return {
-    minutos: redondear(Math.max(0, minutosBrutos - descontado)),
+    minutos: redondear(Math.max(0, dentroDeJornada - refrigerio)),
     minutosBrutos: redondear(minutosBrutos),
-    refrigerioDescontado: redondear(descontado),
+    refrigerioDescontado: redondear(refrigerio),
+    fueraDeJornadaDescontado: redondear(Math.max(0, minutosBrutos - dentroDeJornada)),
   };
 }
 
@@ -107,15 +146,13 @@ export function claveDia(d: Date): string {
 }
 
 /**
- * El buscador de refrigerio a partir de la jornada configurada.
+ * El buscador de horario a partir de la jornada configurada.
  *
- * La jornada guarda el horario de cada día; de ahí salen la hora de almuerzo y
- * su duración. Un día que no está en la tabla —domingo— no tiene refrigerio
- * que descontar, y tampoco hace falta: si alguien cargó trabajo un domingo, lo
- * que hizo fue trabajar sin parar a comer.
+ * Un día que no está en la tabla —el domingo, mientras no haya campaña— no se
+ * trabaja, y por lo tanto no aporta minutos.
  */
-export function refrigerioSegunJornada(
-  horarios: Record<string, Refrigerio | null | undefined>,
-): (dia: Date) => Refrigerio | null {
+export function horarioSegunJornada(
+  horarios: Record<string, HorarioDia | null | undefined>,
+): (dia: Date) => HorarioDia | null {
   return (dia: Date) => horarios[claveDia(dia)] ?? null;
 }

@@ -1,4 +1,4 @@
-import { getJornadaEstandar, refrigeriosPorDia } from '../../operarios/_jornada';
+import { getJornadaEstandar, horariosPorDia } from '../../operarios/_jornada';
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { createClient } from '@happy/db/server';
@@ -72,13 +72,13 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const sbAny = sb as unknown as { from: (t: string) => any };
   /*
-   * A qué hora se para a comer cada día.
+   * El horario de planta de cada día.
    *
-   * Lo necesita el registro de avance por fecha/hora: sin esto, un turno de
-   * 12:32 a 16:32 se cobraba como 4 horas de trabajo cuando una se fue en
-   * almorzar.
+   * Lo necesita el registro de avance por fecha/hora, para dos cosas: acotar
+   * el intervalo al horario —un registro que cruza la noche no puede cobrar
+   * las horas con la planta cerrada— y descontar el refrigerio.
    */
-  const refrigerios = refrigeriosPorDia(await getJornadaEstandar());
+  const horariosJornada = horariosPorDia(await getJornadaEstandar());
 
   const [{ data: procesosRaw }, { data: registrosRaw }, { data: operariosRaw }, { data: osRaw }] = await Promise.all([
     productosEnLineas.length > 0
@@ -549,7 +549,7 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
         <TabsContent value="tiempos">
           <TiemposCostoTab
             otId={id}
-            refrigerios={refrigerios}
+            horariosJornada={horariosJornada}
             procesos={procesos}
             lineas={(lineas ?? []).map((l) => {
               const p = (l as unknown as { productos?: { codigo: string; nombre: string } }).productos;

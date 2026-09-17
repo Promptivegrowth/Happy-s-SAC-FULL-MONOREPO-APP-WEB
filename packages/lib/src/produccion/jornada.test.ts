@@ -1,98 +1,127 @@
 /**
  * Pruebas del tiempo trabajado.
  *
- * El caso que las motivó es el que reportó el cliente: un registro de 12:32 a
- * 16:32 que el sistema cobraba como 240 minutos sin descontar el almuerzo.
+ * Los dos casos que las motivaron son los que reportó el cliente: un registro
+ * de 12:32 a 16:32 que se cobraba entero sin descontar el almuerzo, y uno del
+ * 13/09 16:36 al 14/09 09:36 que cobraba las 17 horas de corrido, con la
+ * planta cerrada toda la noche.
  */
 
 import { describe, it, expect } from 'vitest';
 import {
   minutosTrabajados,
-  refrigerioSegunJornada,
+  horarioSegunJornada,
   claveDia,
-  type Refrigerio,
+  type HorarioDia,
 } from './jornada';
 
-/** La jornada de planta: 1 h de refrigerio de lunes a viernes, sábado sin. */
-const ALMUERZO: Refrigerio = { inicio: '13:00', minutos: 60 };
-const JORNADA = refrigerioSegunJornada({
-  LUN: ALMUERZO, MAR: ALMUERZO, MIE: ALMUERZO, JUE: ALMUERZO, VIE: ALMUERZO,
-  SAB: { inicio: '13:00', minutos: 0 },
+/** La jornada de planta: L-V 08:00-18:00 con 1 h, sábado corto sin refrigerio. */
+const LV: HorarioDia = { inicio: '08:00', fin: '18:00', refrigerioInicio: '13:00', refrigerioMin: 60 };
+const SAB: HorarioDia = { inicio: '08:00', fin: '13:00', refrigerioInicio: '13:00', refrigerioMin: 0 };
+const JORNADA = horarioSegunJornada({ LUN: LV, MAR: LV, MIE: LV, JUE: LV, VIE: LV, SAB });
+
+/** Fechas de la semana del 12/09/2026: sábado 12, domingo 13, lunes 14. */
+const f = (dia: number, hhmm: string) => {
+  const [h, m] = hhmm.split(':').map(Number);
+  return new Date(2026, 8, dia, h!, m!, 0, 0);
+};
+const lunes = (hhmm: string) => f(14, hhmm);
+
+describe('la semana está bien identificada', () => {
+  it('12 sábado, 13 domingo, 14 lunes', () => {
+    expect(claveDia(f(12, '10:00'))).toBe('SAB');
+    expect(claveDia(f(13, '10:00'))).toBe('DOM');
+    expect(claveDia(f(14, '10:00'))).toBe('LUN');
+  });
 });
 
-/** Un día de semana (lunes 14/09/2026) a la hora indicada. */
-const lunes = (hhmm: string) => {
-  const [h, m] = hhmm.split(':').map(Number);
-  return new Date(2026, 8, 14, h!, m!, 0, 0);
-};
-
 describe('el turno que cruza el almuerzo', () => {
-  it('descuenta la hora de refrigerio: el caso reportado', () => {
-    // 12:32 → 16:32 son 4 horas de reloj, pero una se fue en almorzar.
+  it('descuenta la hora de refrigerio: el primer caso reportado', () => {
     const r = minutosTrabajados(lunes('12:32'), lunes('16:32'), JORNADA);
     expect(r.minutosBrutos).toBe(240);
     expect(r.refrigerioDescontado).toBe(60);
     expect(r.minutos).toBe(180);
   });
 
-  it('un turno completo descuenta una sola hora', () => {
-    const r = minutosTrabajados(lunes('08:00'), lunes('18:00'), JORNADA);
-    expect(r.minutos).toBe(540);   // 10 h de reloj, 9 efectivas
+  it('un turno completo deja 9 horas efectivas', () => {
+    expect(minutosTrabajados(lunes('08:00'), lunes('18:00'), JORNADA).minutos).toBe(540);
   });
-});
 
-describe('el turno que NO cruza el almuerzo', () => {
-  it('la mañana se cobra entera', () => {
-    // Restar una hora fija acá sería cambiar un error por otro.
+  it('la mañana sola se cobra entera', () => {
     const r = minutosTrabajados(lunes('08:00'), lunes('12:00'), JORNADA);
     expect(r.minutos).toBe(240);
     expect(r.refrigerioDescontado).toBe(0);
   });
 
-  it('la tarde después de comer se cobra entera', () => {
-    const r = minutosTrabajados(lunes('14:00'), lunes('18:00'), JORNADA);
-    expect(r.minutos).toBe(240);
-  });
-
-  it('terminar justo cuando empieza el almuerzo no descuenta nada', () => {
-    const r = minutosTrabajados(lunes('11:00'), lunes('13:00'), JORNADA);
-    expect(r.minutos).toBe(120);
-  });
-
-  it('empezar justo cuando termina no descuenta nada', () => {
-    const r = minutosTrabajados(lunes('14:00'), lunes('15:00'), JORNADA);
-    expect(r.minutos).toBe(60);
-  });
-});
-
-describe('cuando el turno cruza el almuerzo a medias', () => {
-  it('solo se descuenta la parte que se solapa', () => {
-    // 12:30 → 13:30: media hora de trabajo y media de almuerzo.
+  it('solo se descuenta la parte del almuerzo que se solapa', () => {
     const r = minutosTrabajados(lunes('12:30'), lunes('13:30'), JORNADA);
     expect(r.refrigerioDescontado).toBe(30);
     expect(r.minutos).toBe(30);
   });
+});
 
-  it('un registro entero dentro del almuerzo queda en cero, no en negativo', () => {
-    // Pasa cuando alguien se equivoca de hora. Cero es raro y se ve; un
-    // número negativo se propaga al costo y nadie lo nota.
-    const r = minutosTrabajados(lunes('13:10'), lunes('13:40'), JORNADA);
-    expect(r.minutos).toBe(0);
-    expect(r.refrigerioDescontado).toBe(30);
+describe('el registro que cruza la noche', () => {
+  it('no cobra la noche: el segundo caso reportado', () => {
+    /*
+     * 13/09 16:36 → 14/09 09:36 daba 1 020 minutos. El 13 es domingo, así que
+     * de todo eso lo único dentro de la jornada es el lunes de 08:00 a 09:36.
+     */
+    const r = minutosTrabajados(f(13, '16:36'), f(14, '09:36'), JORNADA);
+    expect(r.minutosBrutos).toBe(1020);
+    expect(r.minutos).toBe(96);
+    expect(r.fueraDeJornadaDescontado).toBe(924);
+  });
+
+  it('de viernes a lunes cuenta los dos días hábiles, no el fin de semana', () => {
+    // Viernes 11 a las 16:00 → lunes 14 a las 10:00.
+    const r = minutosTrabajados(f(11, '16:00'), f(14, '10:00'), JORNADA);
+    //  viernes 16:00-18:00 = 120  ·  sábado 08:00-13:00 = 300  ·  lunes 08:00-10:00 = 120
+    expect(r.minutos).toBe(540);
+  });
+
+  it('dos días seguidos completos son dos jornadas, no 48 horas', () => {
+    // Lunes 08:00 → martes 18:00: 34 h de reloj, 18 h efectivas.
+    const r = minutosTrabajados(f(14, '08:00'), f(15, '18:00'), JORNADA);
+    expect(r.minutosBrutos).toBe(2040);
+    expect(r.minutos).toBe(1080);
+    expect(r.refrigerioDescontado).toBe(120);
   });
 });
 
-describe('los días sin refrigerio', () => {
-  it('el sábado se cobra completo', () => {
-    // Sábado 12/09/2026, 08:00 a 13:00: la jornada corta no tiene almuerzo.
-    const sab = (h: number) => new Date(2026, 8, 12, h, 0, 0, 0);
-    expect(claveDia(sab(8))).toBe('SAB');
-    expect(minutosTrabajados(sab(8), sab(13), JORNADA).minutos).toBe(300);
+describe('lo que queda fuera del horario', () => {
+  it('empezar antes de abrir no suma tiempo de más', () => {
+    // Llegó 07:00 pero la planta abre 08:00.
+    const r = minutosTrabajados(lunes('07:00'), lunes('12:00'), JORNADA);
+    expect(r.minutos).toBe(240);
+    expect(r.fueraDeJornadaDescontado).toBe(60);
   });
 
-  it('un domingo, que no está en la jornada, no descuenta nada', () => {
-    const dom = (h: number) => new Date(2026, 8, 13, h, 0, 0, 0);
-    expect(minutosTrabajados(dom(9), dom(15), JORNADA).minutos).toBe(360);
+  it('quedarse después de cerrar tampoco', () => {
+    const r = minutosTrabajados(lunes('16:00'), lunes('20:00'), JORNADA);
+    expect(r.minutos).toBe(120);
+    expect(r.fueraDeJornadaDescontado).toBe(120);
+  });
+
+  it('un turno que se pasa de hora no paga el almuerzo dos veces', () => {
+    // 12:00 a 20:00: dentro de jornada 12:00-18:00 = 360, menos 60 de almuerzo.
+    const r = minutosTrabajados(lunes('12:00'), lunes('20:00'), JORNADA);
+    expect(r.minutos).toBe(300);
+    expect(r.refrigerioDescontado).toBe(60);
+  });
+
+  it('un domingo entero no aporta minutos', () => {
+    const r = minutosTrabajados(f(13, '09:00'), f(13, '18:00'), JORNADA);
+    expect(r.minutos).toBe(0);
+    expect(r.minutosBrutos).toBe(540);
+    expect(r.fueraDeJornadaDescontado).toBe(540);
+  });
+
+  it('el sábado corto se cobra completo y sin refrigerio', () => {
+    expect(minutosTrabajados(f(12, '08:00'), f(12, '13:00'), JORNADA).minutos).toBe(300);
+  });
+
+  it('el sábado por la tarde no cuenta: la planta ya cerró', () => {
+    expect(minutosTrabajados(f(12, '14:00'), f(12, '18:00'), JORNADA).minutos).toBe(0);
   });
 });
 
@@ -106,31 +135,27 @@ describe('entradas que podrían romper el cálculo', () => {
   });
 
   it('una fecha inválida no propaga NaN al costo', () => {
-    const r = minutosTrabajados(new Date('nada'), lunes('12:00'), JORNADA);
-    expect(r.minutos).toBe(0);
+    expect(minutosTrabajados(new Date('nada'), lunes('12:00'), JORNADA).minutos).toBe(0);
   });
 
-  it('una hora mal escrita en la configuración se ignora, no rompe', () => {
-    const rota = refrigerioSegunJornada({ LUN: { inicio: '25:99', minutos: 60 } });
-    const r = minutosTrabajados(lunes('12:00'), lunes('16:00'), rota);
-    expect(r.minutos).toBe(240);
-    expect(r.refrigerioDescontado).toBe(0);
+  it('una hora mal escrita en la configuración no rompe: ese día no cuenta', () => {
+    const rota = horarioSegunJornada({ LUN: { inicio: '25:99', fin: '18:00', refrigerioInicio: '13:00', refrigerioMin: 60 } });
+    expect(minutosTrabajados(lunes('12:00'), lunes('16:00'), rota).minutos).toBe(0);
   });
 
-  it('sin refrigerio configurado se comporta como antes del cambio', () => {
-    const sinNada = refrigerioSegunJornada({});
-    expect(minutosTrabajados(lunes('12:32'), lunes('16:32'), sinNada).minutos).toBe(240);
+  it('un horario invertido en la configuración tampoco', () => {
+    const rota = horarioSegunJornada({ LUN: { inicio: '18:00', fin: '08:00', refrigerioInicio: '13:00', refrigerioMin: 60 } });
+    expect(minutosTrabajados(lunes('12:00'), lunes('16:00'), rota).minutos).toBe(0);
   });
-});
 
-describe('un registro que cruza la medianoche', () => {
-  it('mira el almuerzo de los dos días', () => {
-    // Raro, pero si pasa, descontar uno solo sería cobrar de más.
-    const r = minutosTrabajados(
-      new Date(2026, 8, 14, 12, 0), // lunes 12:00
-      new Date(2026, 8, 15, 14, 0), // martes 14:00
-      JORNADA,
-    );
-    expect(r.refrigerioDescontado).toBe(120);
+  it('sin jornada configurada no inventa horas', () => {
+    expect(minutosTrabajados(lunes('12:32'), lunes('16:32'), horarioSegunJornada({})).minutos).toBe(0);
+  });
+
+  it('un intervalo absurdo de años no se cuelga', () => {
+    // Alguien tecleó 2027 en vez de 2026: se corta a 31 días y devuelve algo.
+    const r = minutosTrabajados(lunes('08:00'), new Date(2027, 8, 14, 18, 0), JORNADA);
+    expect(Number.isFinite(r.minutos)).toBe(true);
+    expect(r.minutos).toBeGreaterThan(0);
   });
 });

@@ -1,4 +1,5 @@
 import { createClient } from '@happy/db/server';
+import type { HorarioDia as HorarioTrabajo } from '@happy/lib/produccion/jornada';
 
 /**
  * JORNADA ESTÁNDAR DE PLANTA.
@@ -128,13 +129,24 @@ export async function getJornadaEstandar(): Promise<JornadaEstandar> {
 /**
  * La jornada, en el formato que entiende el cálculo de tiempos trabajados.
  *
- * Devuelve para cada día a qué hora se come y cuánto dura, que es lo que se le
- * descuenta a un registro de avance cuando lo cruza.
+ * Devuelve el horario de cada día: entrada, salida y refrigerio. Con eso el
+ * registro de avance sabe qué parte de un intervalo cae dentro del horario
+ * —lo demás es la noche, o un domingo— y cuánto descontar por el almuerzo.
+ *
+ * Solo van los días laborables: el resto no existe para el cálculo, que es
+ * exactamente lo que se quiere.
  */
-export function refrigeriosPorDia(j: JornadaEstandar): Record<string, { inicio: string; minutos: number }> {
-  const out: Record<string, { inicio: string; minutos: number }> = {};
-  for (const [dia, h] of Object.entries(j.horarios)) {
-    out[dia] = { inicio: h.refrigerio_inicio || '13:00', minutos: h.refrigerio_min ?? 0 };
+export function horariosPorDia(j: JornadaEstandar): Record<string, HorarioTrabajo> {
+  const out: Record<string, HorarioTrabajo> = {};
+  for (const dia of j.dias) {
+    const h = j.horarios[dia];
+    if (!h) continue;
+    out[dia] = {
+      inicio: h.inicio,
+      fin: h.fin,
+      refrigerioInicio: h.refrigerio_inicio || '13:00',
+      refrigerioMin: h.refrigerio_min ?? 0,
+    };
   }
   return out;
 }

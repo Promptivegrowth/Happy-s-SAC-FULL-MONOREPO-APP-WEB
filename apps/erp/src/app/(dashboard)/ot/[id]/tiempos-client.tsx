@@ -10,7 +10,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Loader2, Plus, Trash2, Clock, X, Scissors, ExternalLink } from 'lucide-react';
 import { toast } from 'sonner';
 import { crearRegistroTiempoOT, eliminarRegistroTiempoOT } from '@/server/actions/ot';
-import { minutosTrabajados, refrigerioSegunJornada } from '@happy/lib/produccion/jornada';
+import { minutosTrabajados, horarioSegunJornada, type HorarioDia } from '@happy/lib/produccion/jornada';
 import { formatTallaChip } from '@happy/lib';
 
 /** Resumen (solo lectura) de la liquidación de tiempos del área de corte, que
@@ -107,12 +107,12 @@ type Props = {
    * "empecé a tal hora, terminé a tal otra": de 12:32 a 16:32 hay 4 horas de
    * reloj pero se trabajaron 3.
    */
-  refrigerios?: Record<string, { inicio: string; minutos: number }>;
+  horariosJornada?: Record<string, HorarioDia>;
 };
 
 const PEN = (n: number) => `S/ ${n.toFixed(2)}`;
 
-export function TiemposCostoTab({ otId, procesos, lineas, registros, operarios, disabled, ordenConfeccion = -1, osRetornada = false, hayOs = false, corteResumen, corteAbierto = false, refrigerios = {} }: Props) {
+export function TiemposCostoTab({ otId, procesos, lineas, registros, operarios, disabled, ordenConfeccion = -1, osRetornada = false, hayOs = false, corteResumen, corteAbierto = false, horariosJornada = {} }: Props) {
   // Productos únicos en las líneas de la OT
   const productos = useMemo(() => {
     const map = new Map<string, { id: string; nombre: string; codigo: string }>();
@@ -313,7 +313,7 @@ export function TiemposCostoTab({ otId, procesos, lineas, registros, operarios, 
                         registros={registros.filter((r) => r.proceso_id === p.id)}
                         operarios={operarios}
                         esAreaCorte={areaCodigo === 'CORTE'}
-                        refrigerios={refrigerios}
+                        horariosJornada={horariosJornada}
                         disabled={disabled}
                         bloqueado={bloqueoPorProceso.get(p.id)?.bloqueado ?? false}
                         operacionAnterior={bloqueoPorProceso.get(p.id)?.prevNombre ?? ''}
@@ -746,7 +746,7 @@ function CorteAreaInfo({ procesos, resumen }: { procesos: Proceso[]; resumen?: C
 function OperacionBlock({
   otId, proceso, tallaActual, tallasDisponibles, registros, operarios, esAreaCorte, disabled,
   bloqueado = false, operacionAnterior = '', faltanAnterior = 0,
-  esperandoTaller = false, hayOs = false, corteSinCerrar = false, refrigerios = {},
+  esperandoTaller = false, hayOs = false, corteSinCerrar = false, horariosJornada = {},
 }: {
   otId: string;
   proceso: Proceso;
@@ -766,8 +766,8 @@ function OperacionBlock({
   hayOs?: boolean;
   /** La OT tiene un corte SIN CERRAR: bloquea el registro (pedido 2026-09-04). */
   corteSinCerrar?: boolean;
-  /** Horario de refrigerio por día, para descontarlo del intervalo. */
-  refrigerios?: Record<string, { inicio: string; minutos: number }>;
+  /** Horario de planta por día: acota el intervalo y descuenta el refrigerio. */
+  horariosJornada?: Record<string, HorarioDia>;
 }) {
   const [openForm, setOpenForm] = useState(false);
   const totalMin = registros.reduce((s, r) => s + Number(r.tiempo_total_min), 0);
@@ -844,7 +844,7 @@ function OperacionBlock({
           tallasDisponibles={tallasDisponibles}
           operarios={operarios}
           esAreaCorte={esAreaCorte}
-          refrigerios={refrigerios}
+          horariosJornada={horariosJornada}
           onSaved={() => setOpenForm(false)}
         />
       )}
@@ -861,7 +861,7 @@ function OperacionBlock({
 }
 
 function FormRegistro({
-  otId, procesoId, tallaActual, tallasDisponibles, operarios, esAreaCorte, onSaved, refrigerios = {},
+  otId, procesoId, tallaActual, tallasDisponibles, operarios, esAreaCorte, onSaved, horariosJornada = {},
 }: {
   otId: string;
   procesoId: string;
@@ -870,7 +870,7 @@ function FormRegistro({
   operarios: Operario[];
   esAreaCorte: boolean;
   onSaved: () => void;
-  refrigerios?: Record<string, { inicio: string; minutos: number }>;
+  horariosJornada?: Record<string, HorarioDia>;
 }) {
   const [pending, start] = useTransition();
   const [modo, setModo] = useState<'intervalo' | 'directo'>('intervalo');
@@ -888,9 +888,9 @@ function FormRegistro({
     () => minutosTrabajados(
       new Date(fechaInicio),
       new Date(fechaFin),
-      refrigerioSegunJornada(refrigerios),
+      horarioSegunJornada(horariosJornada),
     ),
-    [fechaInicio, fechaFin, refrigerios],
+    [fechaInicio, fechaFin, horariosJornada],
   );
   // Fecha en que se REALIZÓ el trabajo (modo directo). Arranca en hoy, pero
   // se puede cambiar para cargar producción de días anteriores — antes el
@@ -995,8 +995,11 @@ function FormRegistro({
       if (!(totalMin > 0)) {
         return toast.error(
           calculo.minutosBrutos > 0
-            ? 'Todo el intervalo cae dentro del refrigerio: no hay tiempo que registrar'
+            ? 'Ese intervalo no cae dentro del horario de planta'
             : 'El intervalo debe ser mayor a 0 minutos',
+          calculo.minutosBrutos > 0
+            ? { description: 'Revisa las fechas. Si el trabajo fue realmente fuera de horario, cárgalo con "Tiempo directo".' }
+            : undefined,
         );
       }
     }
@@ -1106,20 +1109,31 @@ function FormRegistro({
             quien carga tiene que poder revisar el número contra su cuaderno.
           */}
           {calculo.minutosBrutos > 0 && (
-            <div className="col-span-2 rounded-md border border-sky-200 bg-sky-50 px-2 py-1.5 text-[11px] text-sky-900">
-              {calculo.refrigerioDescontado > 0 ? (
-                <>
-                  <b>{calculo.minutos} min</b> de trabajo
-                  <span className="text-sky-700">
-                    {' '}— del intervalo de {calculo.minutosBrutos} min se descontaron{' '}
-                    {calculo.refrigerioDescontado} min de refrigerio.
-                  </span>
-                </>
+            <div
+              className={`col-span-2 rounded-md border px-2 py-1.5 text-[11px] ${
+                calculo.minutos > 0
+                  ? 'border-sky-200 bg-sky-50 text-sky-900'
+                  : 'border-amber-300 bg-amber-50 text-amber-900'
+              }`}
+            >
+              <b>{calculo.minutos} min</b> de trabajo
+              {calculo.minutos === 0 ? (
+                <span> — ese intervalo queda fuera del horario de planta. Revisa las fechas.</span>
               ) : (
-                <>
-                  <b>{calculo.minutos} min</b> de trabajo
-                  <span className="text-sky-700"> — el intervalo no cruza el refrigerio.</span>
-                </>
+                <span className="opacity-80">
+                  {' '}— del intervalo de {calculo.minutosBrutos} min
+                  {calculo.fueraDeJornadaDescontado > 0 && (
+                    <> se descontaron {calculo.fueraDeJornadaDescontado} min fuera de horario</>
+                  )}
+                  {calculo.fueraDeJornadaDescontado > 0 && calculo.refrigerioDescontado > 0 && ' y'}
+                  {calculo.refrigerioDescontado > 0 && (
+                    <> {calculo.fueraDeJornadaDescontado > 0 ? '' : 'se descontaron '}
+                      {calculo.refrigerioDescontado} min de refrigerio</>
+                  )}
+                  {calculo.fueraDeJornadaDescontado === 0 && calculo.refrigerioDescontado === 0
+                    && ' no se descontó nada'}
+                  .
+                </span>
               )}
             </div>
           )}
