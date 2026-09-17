@@ -10,6 +10,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Loader2, Plus, Trash2, Clock, X, Scissors, ExternalLink } from 'lucide-react';
 import { toast } from 'sonner';
 import { crearRegistroTiempoOT, eliminarRegistroTiempoOT } from '@/server/actions/ot';
+import { minutosTrabajados, refrigerioSegunJornada } from '@happy/lib/produccion/jornada';
 import { formatTallaChip } from '@happy/lib';
 
 /** Resumen (solo lectura) de la liquidación de tiempos del área de corte, que
@@ -99,11 +100,19 @@ type Props = {
   /** ¿La OT tiene algún corte SIN CERRAR (ABIERTO/EN_PROCESO)? Mientras lo haya
    *  no se pueden registrar operaciones aguas abajo. */
   corteAbierto?: boolean;
+  /**
+   * A qué hora se para a comer cada día y cuánto dura, según la jornada.
+   *
+   * Sirve para descontar el refrigerio cuando el avance se carga como
+   * "empecé a tal hora, terminé a tal otra": de 12:32 a 16:32 hay 4 horas de
+   * reloj pero se trabajaron 3.
+   */
+  refrigerios?: Record<string, { inicio: string; minutos: number }>;
 };
 
 const PEN = (n: number) => `S/ ${n.toFixed(2)}`;
 
-export function TiemposCostoTab({ otId, procesos, lineas, registros, operarios, disabled, ordenConfeccion = -1, osRetornada = false, hayOs = false, corteResumen, corteAbierto = false }: Props) {
+export function TiemposCostoTab({ otId, procesos, lineas, registros, operarios, disabled, ordenConfeccion = -1, osRetornada = false, hayOs = false, corteResumen, corteAbierto = false, refrigerios = {} }: Props) {
   // Productos únicos en las líneas de la OT
   const productos = useMemo(() => {
     const map = new Map<string, { id: string; nombre: string; codigo: string }>();
@@ -304,6 +313,7 @@ export function TiemposCostoTab({ otId, procesos, lineas, registros, operarios, 
                         registros={registros.filter((r) => r.proceso_id === p.id)}
                         operarios={operarios}
                         esAreaCorte={areaCodigo === 'CORTE'}
+                        refrigerios={refrigerios}
                         disabled={disabled}
                         bloqueado={bloqueoPorProceso.get(p.id)?.bloqueado ?? false}
                         operacionAnterior={bloqueoPorProceso.get(p.id)?.prevNombre ?? ''}
@@ -736,7 +746,7 @@ function CorteAreaInfo({ procesos, resumen }: { procesos: Proceso[]; resumen?: C
 function OperacionBlock({
   otId, proceso, tallaActual, tallasDisponibles, registros, operarios, esAreaCorte, disabled,
   bloqueado = false, operacionAnterior = '', faltanAnterior = 0,
-  esperandoTaller = false, hayOs = false, corteSinCerrar = false,
+  esperandoTaller = false, hayOs = false, corteSinCerrar = false, refrigerios = {},
 }: {
   otId: string;
   proceso: Proceso;
@@ -756,6 +766,8 @@ function OperacionBlock({
   hayOs?: boolean;
   /** La OT tiene un corte SIN CERRAR: bloquea el registro (pedido 2026-09-04). */
   corteSinCerrar?: boolean;
+  /** Horario de refrigerio por día, para descontarlo del intervalo. */
+  refrigerios?: Record<string, { inicio: string; minutos: number }>;
 }) {
   const [openForm, setOpenForm] = useState(false);
   const totalMin = registros.reduce((s, r) => s + Number(r.tiempo_total_min), 0);
@@ -832,6 +844,7 @@ function OperacionBlock({
           tallasDisponibles={tallasDisponibles}
           operarios={operarios}
           esAreaCorte={esAreaCorte}
+          refrigerios={refrigerios}
           onSaved={() => setOpenForm(false)}
         />
       )}
@@ -848,7 +861,7 @@ function OperacionBlock({
 }
 
 function FormRegistro({
-  otId, procesoId, tallaActual, tallasDisponibles, operarios, esAreaCorte, onSaved,
+  otId, procesoId, tallaActual, tallasDisponibles, operarios, esAreaCorte, onSaved, refrigerios = {},
 }: {
   otId: string;
   procesoId: string;
@@ -857,12 +870,28 @@ function FormRegistro({
   operarios: Operario[];
   esAreaCorte: boolean;
   onSaved: () => void;
+  refrigerios?: Record<string, { inicio: string; minutos: number }>;
 }) {
   const [pending, start] = useTransition();
   const [modo, setModo] = useState<'intervalo' | 'directo'>('intervalo');
   const [fechaInicio, setFechaInicio] = useState('');
   const [fechaFin, setFechaFin] = useState('');
   const [tiempoDirecto, setTiempoDirecto] = useState('');
+
+  /*
+   * Lo que se va a cobrar, calculado mientras se escribe.
+   *
+   * Descontar tiempo en silencio sería peor que no descontarlo: quien carga
+   * tiene que ver el número antes de guardar, y de dónde salió.
+   */
+  const calculo = useMemo(
+    () => minutosTrabajados(
+      new Date(fechaInicio),
+      new Date(fechaFin),
+      refrigerioSegunJornada(refrigerios),
+    ),
+    [fechaInicio, fechaFin, refrigerios],
+  );
   // Fecha en que se REALIZÓ el trabajo (modo directo). Arranca en hoy, pero
   // se puede cambiar para cargar producción de días anteriores — antes el
   // registro quedaba con la fecha de digitación (pedido del cliente 21/07/2026).
@@ -957,8 +986,19 @@ function FormRegistro({
       const tf = new Date(fechaFin).getTime();
       if (Number.isNaN(ti) || Number.isNaN(tf)) return toast.error('Fechas inválidas');
       if (tf < ti) return toast.error('La fecha de fin no puede ser anterior al inicio');
-      totalMin = Math.round(((tf - ti) / 60000) * 100) / 100;
-      if (!(totalMin > 0)) return toast.error('El intervalo debe ser mayor a 0 minutos');
+      /*
+       * El refrigerio no se trabaja, así que no se cobra a la operación.
+       * El mismo cálculo lo rehace el servidor al guardar; acá se hace para
+       * poder mostrarlo antes de apretar Guardar.
+       */
+      totalMin = calculo.minutos;
+      if (!(totalMin > 0)) {
+        return toast.error(
+          calculo.minutosBrutos > 0
+            ? 'Todo el intervalo cae dentro del refrigerio: no hay tiempo que registrar'
+            : 'El intervalo debe ser mayor a 0 minutos',
+        );
+      }
     }
     // Fecha de trabajo: en directo la elegida; en intervalo, el día del inicio.
     const fechaTrabajoEnvio =
@@ -1058,6 +1098,31 @@ function FormRegistro({
             Fin
             <Input type="datetime-local" value={fechaFin} onChange={(e) => setFechaFin(e.target.value)} className="h-8 text-xs" />
           </label>
+
+          {/*
+            Lo que se va a cobrar, a la vista antes de guardar.
+            Si el turno cruzó el almuerzo, acá se ve cuánto se descontó y por
+            qué. Descontar tiempo sin decirlo sería peor que no descontarlo:
+            quien carga tiene que poder revisar el número contra su cuaderno.
+          */}
+          {calculo.minutosBrutos > 0 && (
+            <div className="col-span-2 rounded-md border border-sky-200 bg-sky-50 px-2 py-1.5 text-[11px] text-sky-900">
+              {calculo.refrigerioDescontado > 0 ? (
+                <>
+                  <b>{calculo.minutos} min</b> de trabajo
+                  <span className="text-sky-700">
+                    {' '}— del intervalo de {calculo.minutosBrutos} min se descontaron{' '}
+                    {calculo.refrigerioDescontado} min de refrigerio.
+                  </span>
+                </>
+              ) : (
+                <>
+                  <b>{calculo.minutos} min</b> de trabajo
+                  <span className="text-sky-700"> — el intervalo no cruza el refrigerio.</span>
+                </>
+              )}
+            </div>
+          )}
         </div>
       ) : (
         <div className="grid grid-cols-2 gap-2">

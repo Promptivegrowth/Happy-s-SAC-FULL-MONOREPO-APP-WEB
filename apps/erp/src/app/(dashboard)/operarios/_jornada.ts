@@ -12,7 +12,20 @@ import { createClient } from '@happy/db/server';
  * calcular las horas efectivas.
  */
 
-export type HorarioDia = { inicio: string; fin: string; refrigerio_min: number };
+export type HorarioDia = {
+  inicio: string;
+  fin: string;
+  refrigerio_min: number;
+  /**
+   * A qué hora se para a comer, "HH:MM".
+   *
+   * Antes solo se guardaba CUÁNTO dura el refrigerio, que alcanza para contar
+   * las horas disponibles de un mes. No alcanza para descontarlo de un
+   * registro de avance concreto: de 12:32 a 16:32 hay que saber si el
+   * almuerzo cayó dentro o no, y eso depende de la hora, no de la duración.
+   */
+  refrigerio_inicio: string;
+};
 
 export type JornadaEstandar = {
   /** Días laborables. */
@@ -24,8 +37,8 @@ export type JornadaEstandar = {
   fin: string;
 };
 
-const LV: HorarioDia = { inicio: '08:00', fin: '18:00', refrigerio_min: 60 };
-const SABADO: HorarioDia = { inicio: '08:00', fin: '13:00', refrigerio_min: 0 };
+const LV: HorarioDia = { inicio: '08:00', fin: '18:00', refrigerio_min: 60, refrigerio_inicio: '13:00' };
+const SABADO: HorarioDia = { inicio: '08:00', fin: '13:00', refrigerio_min: 0, refrigerio_inicio: '13:00' };
 
 const DEFAULT: JornadaEstandar = {
   dias: ['LUN', 'MAR', 'MIE', 'JUE', 'VIE', 'SAB'],
@@ -98,10 +111,30 @@ export async function getJornadaEstandar(): Promise<JornadaEstandar> {
   for (const d of dias) {
     const g = guardados?.[d];
     horarios[d] = g?.inicio && g?.fin
-      ? { inicio: g.inicio, fin: g.fin, refrigerio_min: Number(g.refrigerio_min ?? 0) }
-      : (DEFAULT.horarios[d] ?? { inicio: inicioLegacy, fin: finLegacy, refrigerio_min: 0 });
+      ? {
+          inicio: g.inicio,
+          fin: g.fin,
+          refrigerio_min: Number(g.refrigerio_min ?? 0),
+          refrigerio_inicio: g.refrigerio_inicio || '13:00',
+        }
+      : (DEFAULT.horarios[d] ?? { inicio: inicioLegacy, fin: finLegacy, refrigerio_min: 0, refrigerio_inicio: '13:00' });
   }
 
   const primero = horarios[dias[0] ?? 'LUN'] ?? DEFAULT.horarios.LUN!;
   return { dias, horarios, inicio: primero.inicio, fin: primero.fin };
+}
+
+
+/**
+ * La jornada, en el formato que entiende el cálculo de tiempos trabajados.
+ *
+ * Devuelve para cada día a qué hora se come y cuánto dura, que es lo que se le
+ * descuenta a un registro de avance cuando lo cruza.
+ */
+export function refrigeriosPorDia(j: JornadaEstandar): Record<string, { inicio: string; minutos: number }> {
+  const out: Record<string, { inicio: string; minutos: number }> = {};
+  for (const [dia, h] of Object.entries(j.horarios)) {
+    out[dia] = { inicio: h.refrigerio_inicio || '13:00', minutos: h.refrigerio_min ?? 0 };
+  }
+  return out;
 }

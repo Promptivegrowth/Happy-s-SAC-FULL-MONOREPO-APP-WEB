@@ -15,6 +15,7 @@
     "./pagos/izipay": "./src/pagos/izipay.ts",
     "./pagos/vuelto": "./src/pagos/vuelto.ts",
     "./pagos/etiqueta": "./src/pagos/etiqueta-pago.ts",
+    "./produccion/jornada": "./src/produccion/jornada.ts",
     "./whatsapp": "./src/whatsapp/index.ts",
     "./validators": "./src/validators/index.ts",
     "./format": "./src/format/index.ts",

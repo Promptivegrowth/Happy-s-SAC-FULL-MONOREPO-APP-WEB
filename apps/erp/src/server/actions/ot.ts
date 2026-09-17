@@ -1,5 +1,7 @@
 'use server';
 
+import { minutosTrabajados, refrigerioSegunJornada } from '@happy/lib/produccion/jornada';
+import { getJornadaEstandar, refrigeriosPorDia } from '@/app/(dashboard)/operarios/_jornada';
 import { z } from 'zod';
 import { redirect } from 'next/navigation';
 import { runAction, requireUser, bumpPaths, esGerente, type ActionResult } from './_helpers';
@@ -712,7 +714,34 @@ export async function crearRegistroTiempoOT(
       const tf = new Date(data.fecha_fin).getTime();
       if (Number.isNaN(ti) || Number.isNaN(tf)) throw new Error('Fechas inválidas');
       if (tf < ti) throw new Error('La fecha de fin no puede ser anterior al inicio');
-      tiempoTotal = Math.round(((tf - ti) / 1000 / 60) * 100) / 100;
+      /*
+       * El refrigerio no se trabaja, así que no se le cobra a la operación.
+       *
+       * Hasta ahora se guardaba la resta pelada: un avance de 12:32 a 16:32
+       * entraba como 240 minutos aunque una hora se fuera en almorzar. Ese
+       * número se divide entre las unidades para sacar el minuto por prenda,
+       * que es la base del costo de mano de obra y de la comparación contra el
+       * tiempo estándar; inflarlo hace que toda la prenda parezca más lenta y
+       * más cara de lo que es. Lo reportó el cliente el 16/09/2026.
+       *
+       * Se calcula acá y no solo en el navegador porque este es el único lado
+       * en el que se puede confiar: la pantalla lo muestra antes de guardar,
+       * pero lo que queda registrado lo decide el servidor.
+       */
+      const jornada = await getJornadaEstandar();
+      const calculo = minutosTrabajados(
+        new Date(data.fecha_inicio),
+        new Date(data.fecha_fin),
+        refrigerioSegunJornada(refrigeriosPorDia(jornada)),
+      );
+      if (!(calculo.minutos > 0)) {
+        throw new Error(
+          calculo.minutosBrutos > 0
+            ? 'Todo el intervalo cae dentro del refrigerio: no hay tiempo que registrar'
+            : 'El intervalo debe ser mayor a 0 minutos',
+        );
+      }
+      tiempoTotal = calculo.minutos;
       inicio = data.fecha_inicio;
       fin = data.fecha_fin;
     } else if (typeof data.tiempo_total_min === 'number' && data.tiempo_total_min > 0) {
@@ -726,7 +755,7 @@ export async function crearRegistroTiempoOT(
         inicio = data.fecha_trabajo;
       }
     } else {
-      throw new Error('Ingresá fecha inicio + fin O tiempo directo (> 0)');
+      throw new Error('Ingresa fecha inicio + fin, o el tiempo directo en minutos');
     }
 
     // Producto + área del proceso (para el gate de corte y el tope de unidades).

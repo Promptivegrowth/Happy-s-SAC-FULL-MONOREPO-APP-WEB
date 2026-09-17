@@ -1,3 +1,4 @@
+import { getJornadaEstandar, refrigeriosPorDia } from '../../operarios/_jornada';
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { createClient } from '@happy/db/server';
@@ -70,6 +71,15 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
   // de esta OT (mig 43) + operarios activos para el dropdown.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const sbAny = sb as unknown as { from: (t: string) => any };
+  /*
+   * A qué hora se para a comer cada día.
+   *
+   * Lo necesita el registro de avance por fecha/hora: sin esto, un turno de
+   * 12:32 a 16:32 se cobraba como 4 horas de trabajo cuando una se fue en
+   * almorzar.
+   */
+  const refrigerios = refrigeriosPorDia(await getJornadaEstandar());
+
   const [{ data: procesosRaw }, { data: registrosRaw }, { data: operariosRaw }, { data: osRaw }] = await Promise.all([
     productosEnLineas.length > 0
       ? sbAny
@@ -539,6 +549,7 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
         <TabsContent value="tiempos">
           <TiemposCostoTab
             otId={id}
+            refrigerios={refrigerios}
             procesos={procesos}
             lineas={(lineas ?? []).map((l) => {
               const p = (l as unknown as { productos?: { codigo: string; nombre: string } }).productos;

@@ -456,7 +456,18 @@ export async function generarOTsDelPlan(planId: string): Promise<ActionResult<{ 
           almacen_produccion: alm?.id ?? null,
           responsable_usuario_id: userId,
           prioridad: Math.min(...items.map((i) => i.prioridad ?? 100)),
-          observacion: `Plan ${planCodigo} · ${nombreProducto.get(productoId) ?? 'Producto'}`,
+          /*
+           * Solo el número de plan.
+           *
+           * Antes se le pegaba el código y el nombre del producto, y la lista
+           * de OT ya tiene su propia columna de producto: la observación
+           * repetía el dato y encima se cortaba con "…", así que el número de
+           * plan —lo único que no está en otra columna— quedaba escondido
+           * detrás de los puntos suspensivos. Lo reportó el cliente el
+           * 16/09/2026: "que solo salga el número de plan, no la descripción
+           * del producto porque eso ya está".
+           */
+          observacion: `Plan ${planCodigo}`,
         }).select('id').single();
         if (errOt) throw new Error(errOt.message);
 

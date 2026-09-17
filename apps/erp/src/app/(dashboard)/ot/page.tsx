@@ -28,6 +28,27 @@ const ESTADOS_ACTIVOS = [
   'EN_CONTROL_CALIDAD',
 ] as const;
 
+/**
+ * De la observación deja solo el número de plan.
+ *
+ * Las OT creadas desde el plan traían "Plan PM-2026-S38-025 · PRM0038 disfraz
+ * de Chucky para niño". El producto ya tiene su columna en esta misma tabla,
+ * así que el nombre se repetía y encima empujaba al número de plan fuera del
+ * ancho visible: la celda se cortaba con "…" justo en lo único que no estaba
+ * en ninguna otra parte.
+ *
+ * Se recorta al mostrar, no solo al crear, porque las OT que ya existen
+ * siguen teniendo el texto largo guardado y también tienen que verse bien.
+ * Una observación escrita a mano, que no sigue este formato, se muestra
+ * entera.
+ */
+function soloPlan(observacion: string | null): string {
+  const t = (observacion ?? '').trim();
+  if (!t.startsWith('Plan ')) return t;
+  const corte = t.indexOf('·');
+  return corte === -1 ? t : t.slice(0, corte).trim();
+}
+
 export default async function OtPage({ searchParams }: { searchParams: Promise<SP> }) {
   const sp = await searchParams;
   const sb = await createClient();
@@ -268,7 +289,7 @@ async function OtTable({ q, estado, prioridad }: SP) {
                       <span className="text-xs text-slate-400">sin líneas</span>
                     )}
                   </TableCell>
-                  <TableCell className="max-w-xs truncate text-xs text-slate-500">{o.observacion}</TableCell>
+                  <TableCell className="max-w-xs truncate text-xs text-slate-500">{soloPlan(o.observacion)}</TableCell>
                   <TableCell className="text-right">
                     <Link href={`/ot/${o.id}`}>
                       <Button variant="outline" size="sm" className="gap-1">
