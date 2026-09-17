@@ -66,7 +66,7 @@ export default async function Page({
 
   const { data: area } = await sbAny
     .from('areas_produccion')
-    .select('id, codigo, nombre, valor_minuto, activa')
+    .select('id, codigo, nombre, valor_minuto, activa, prorrateo_pct')
     .eq('id', id)
     .maybeSingle();
   if (!area) notFound();
@@ -112,9 +112,32 @@ export default async function Page({
   const minutosJornada = minutosPorOperario * operarios.length;
   const minutosProductivos = minutosOverride ?? Math.round((minutosJornada * ocupacionPct) / 100);
 
-  const totalCostos = costos.reduce((s, c) => s + Number(c.monto), 0);
+  /*
+   * La parte de los costos generales que carga esta área.
+   *
+   * La luz y el agua llegan en un recibo por todo el local; se cargan una sola
+   * vez en Configuración → Costos generales y cada área toma su porcentaje. Sin
+   * esto había que partir el recibo a mano y tipearlo una vez por área todos
+   * los meses, que es justo lo que pidió evitar el cliente (16/09/2026).
+   */
+  const { data: generalesRaw } = await sbAny
+    .from('costos_generales_mensuales')
+    .select('categoria, concepto, monto')
+    .eq('periodo', periodo);
+  const generales = (generalesRaw ?? []) as { categoria: string; concepto: string; monto: number | string }[];
+  const totalGenerales = generales.reduce((s, g) => s + Number(g.monto ?? 0), 0);
+  const prorrateoPct = Number(area.prorrateo_pct ?? 0);
+  const costoGeneralProrrateado = (totalGenerales * prorrateoPct) / 100;
+
+  const costosPropios = costos.reduce((s, c) => s + Number(c.monto), 0);
+  const totalCostos = costosPropios + costoGeneralProrrateado;
   const porCategoria = new Map<string, number>();
   for (const c of costos) porCategoria.set(c.categoria, (porCategoria.get(c.categoria) ?? 0) + Number(c.monto));
+  // Los generales entran en su categoría, para que el desglose siga cuadrando.
+  for (const g of generales) {
+    const parte = (Number(g.monto ?? 0) * prorrateoPct) / 100;
+    if (parte > 0) porCategoria.set(g.categoria, (porCategoria.get(g.categoria) ?? 0) + parte);
+  }
 
   const valorCalculado = minutosProductivos > 0 ? totalCostos / minutosProductivos : 0;
   const valorActual = Number(area.valor_minuto ?? 0);
@@ -122,7 +145,10 @@ export default async function Page({
 
   const notaCalculo =
     `${nombreMes(periodo)}: ${formatPEN(totalCostos)} de costos ÷ ${formatNumber(minutosProductivos, 0)} min productivos ` +
-    `(${operarios.length} operario(s), ${diasHabiles} días, ${ocupacionPct}% de ocupación)`;
+    `(${operarios.length} operario(s), ${diasHabiles} días, ${ocupacionPct}% de ocupación)` +
+    (costoGeneralProrrateado > 0
+      ? ` · incluye ${formatPEN(costoGeneralProrrateado)} de costos generales (${prorrateoPct}%)`
+      : '');
 
   const periodos: string[] = [];
   {
@@ -186,7 +212,24 @@ export default async function Page({
         <Card className="p-4">
           <p className="text-xs text-slate-500">Costos del mes</p>
           <p className="mt-1 font-display text-2xl font-semibold text-corp-900">{formatPEN(totalCostos)}</p>
-          <p className="mt-0.5 text-[10px] text-slate-500">{costos.length} concepto(s) registrado(s)</p>
+          {/*
+            Se abre en dos: lo del área y lo que le toca de los generales.
+            Ver un total sin saber que adentro hay luz prorrateada lleva a
+            cargarla otra vez a mano y contarla dos veces.
+          */}
+          <p className="mt-0.5 text-[10px] text-slate-500">
+            {costos.length} concepto(s) del área
+            {costoGeneralProrrateado > 0 ? ` · ${formatPEN(costosPropios)}` : ''}
+          </p>
+          {costoGeneralProrrateado > 0 ? (
+            <p className="mt-0.5 text-[10px] text-corp-700">
+              + {formatPEN(costoGeneralProrrateado)} de costos generales ({prorrateoPct}% de {formatPEN(totalGenerales)})
+            </p>
+          ) : totalGenerales > 0 ? (
+            <Link href="/configuracion/costos-generales" className="mt-0.5 block text-[10px] text-amber-700 underline">
+              Hay {formatPEN(totalGenerales)} de costos generales sin repartir a esta área
+            </Link>
+          ) : null}
         </Card>
         <Card className="p-4">
           <p className="text-xs text-slate-500">Minutos productivos</p>
