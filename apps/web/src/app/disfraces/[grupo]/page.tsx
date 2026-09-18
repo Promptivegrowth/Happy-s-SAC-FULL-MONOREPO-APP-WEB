@@ -39,7 +39,15 @@ export default async function GrupoPage({
   // Para "accesorios" filtramos por categoría con código ACC.
   let pubs: ProductCardData[] = [];
   if (grupo === 'accesorios') {
-    const { data: cat } = await sb.from('categorias').select('id').eq('codigo', 'ACC').maybeSingle();
+    /*
+     * La categoría se busca por su slug, no por el código.
+     *
+     * Acá decía `codigo = 'ACC'` y el código real es 'AC': no encontraba nada y
+     * la página salía vacía, sin error y sin 404, con 47 accesorios publicados
+     * del otro lado. El slug es el mismo que va en la URL y es el que se usa en
+     * el resto del sitio, así que es el dato que de verdad tiene que coincidir.
+     */
+    const { data: cat } = await sb.from('categorias').select('id').eq('slug', 'accesorios').maybeSingle();
     pubs = cat ? await loadPublicaciones({ categoriaId: cat.id, limit: 120, q: sp.q }) : [];
   } else {
     // loadPublicaciones no filtra por género, lo hacemos directo aquí

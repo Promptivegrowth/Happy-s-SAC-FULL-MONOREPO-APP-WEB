@@ -3,17 +3,34 @@ import Link from 'next/link';
 import { ArrowRight } from 'lucide-react';
 
 type Cat = {
-  slug: string;
+  /** Dirección completa, no un slug: acá se decide a dónde va cada tarjeta. */
+  href: string;
   label: string;
   /** Imágenes transparentes — se renderizan superpuestas con leve rotación al hover */
   images: [string, string];
 };
 
+/**
+ * Las cuatro tarjetas de la portada.
+ *
+ * Antes cada una guardaba un `slug` y el enlace se armaba como
+ * `/categoria/${slug}`, con slugs escritos a mano —"disfraces-ninas",
+ * "disfraces-nino", "disfraces-adulto"— que NUNCA existieron como categoría en
+ * la base. Las categorías reales son "halloween", "danzas-tipicas" y compañía,
+ * y lo que la portada quiere ofrecer no es una categoría sino un público. Tres
+ * de las cuatro tarjetas llevaban a un 404 desde el día uno; se descubrió el
+ * 18/09/2026.
+ *
+ * Ahora van a `/disfraces/<grupo>`, que es la página que agrupa por público y
+ * que ya existía. Se guarda la dirección entera justamente para que no haya que
+ * adivinar de dónde sale: si mañana una tarjeta tiene que ir a otro lado, se
+ * cambia acá y se ve lo que quedó.
+ */
 const CATEGORIES: [Cat, Cat, Cat, Cat] = [
-  { slug: 'disfraces-ninas', label: 'Disfraces Niñas', images: ['/grid/nina-1.png', '/grid/nina-2.png'] },
-  { slug: 'disfraces-nino', label: 'Disfraces de niño', images: ['/grid/nino-1.png', '/grid/nino-2.png'] },
-  { slug: 'accesorios', label: 'Accesorios', images: ['/grid/accesorios-1.png', '/grid/accesorios-2.png'] },
-  { slug: 'disfraces-adulto', label: 'Disfraces de adulto', images: ['/grid/adulto-1.png', '/grid/adulto-2.png'] },
+  { href: '/disfraces/ninas', label: 'Disfraces Niñas', images: ['/grid/nina-1.png', '/grid/nina-2.png'] },
+  { href: '/disfraces/ninos', label: 'Disfraces de niño', images: ['/grid/nino-1.png', '/grid/nino-2.png'] },
+  { href: '/categoria/accesorios', label: 'Accesorios', images: ['/grid/accesorios-1.png', '/grid/accesorios-2.png'] },
+  { href: '/disfraces/adultos', label: 'Disfraces de adulto', images: ['/grid/adulto-1.png', '/grid/adulto-2.png'] },
 ];
 
 /**
@@ -67,7 +84,7 @@ function CategoryTile({
 }) {
   return (
     <Link
-      href={`/categoria/${cat.slug}`}
+      href={cat.href}
       className={`group relative isolate overflow-hidden rounded-3xl shadow-lg ring-1 ring-white/10 ${
         tall ? 'min-h-[420px] lg:min-h-[560px]' : 'min-h-[260px] sm:min-h-[300px]'
       } ${className}`}
