@@ -9,6 +9,15 @@ import { VerComprobanteButton } from './ver-comprobante-button';
 export const metadata = { title: 'Ventas' };
 export const dynamic = 'force-dynamic';
 
+/** Cómo se llama cada tipo fuera del sistema. */
+const ETIQUETA_TIPO: Record<string, string> = {
+  BOLETA: 'Boleta',
+  FACTURA: 'Factura',
+  NOTA_VENTA: 'Nota de venta',
+  NOTA_CREDITO: 'Nota de crédito',
+  NOTA_DEBITO: 'Nota de débito',
+};
+
 export default async function VentasPage() {
   const sb = await createClient();
   // `comprobante_pdf_path` es columna nueva (mig 85) aún no reflejada en los
@@ -20,6 +29,34 @@ export default async function VentasPage() {
       data: Array<{ id: string; numero: string; canal: string; fecha: string; total: number; estado: string; comprobante_pdf_path: string | null }> | null;
     };
 
+  /*
+   * El número del comprobante, que es el que tiene el cliente en la mano.
+   *
+   * Esta lista mostraba solo el VEN-000105, que es el número interno de la
+   * venta: sirve para el kardex y el arqueo, pero no está impreso en ningún
+   * papel. Quien venía con una boleta B005-00004048 a preguntar por su compra
+   * no la podía encontrar acá. Es el mismo problema que tenían las notas de
+   * venta y se arregla igual: mostrar el número del documento.
+   *
+   * Va en consulta aparte y no embebido para no depender del nombre que
+   * PostgREST le dé a la relación.
+   */
+  const ids = (data ?? []).map((v) => v.id);
+  const { data: comps } = ids.length
+    ? await sbAny.from('comprobantes')
+        .select('venta_id, numero_completo, tipo')
+        .in('venta_id', ids) as {
+          data: Array<{ venta_id: string; numero_completo: string; tipo: string }> | null;
+        }
+    : { data: [] };
+
+  const documento = new Map<string, { numero: string; tipo: string }>();
+  for (const c of comps ?? []) {
+    // Una nota de crédito no reemplaza al comprobante de la venta: lo corrige.
+    if (c.tipo === 'NOTA_CREDITO' || c.tipo === 'NOTA_DEBITO') continue;
+    if (c.venta_id) documento.set(c.venta_id, { numero: c.numero_completo, tipo: c.tipo });
+  }
+
   return (
     <PageShell
       title="Ventas (consolidadas)"
@@ -29,20 +66,37 @@ export default async function VentasPage() {
         <CardContent className="p-0">
           <Table>
             <TableHeader><TableRow>
-              <TableHead>N°</TableHead><TableHead>Fecha</TableHead><TableHead>Canal</TableHead>
+              <TableHead>Comprobante</TableHead><TableHead>Tipo</TableHead>
+              <TableHead>Fecha</TableHead><TableHead>Canal</TableHead>
               <TableHead>Tienda/Almacén</TableHead><TableHead>Cliente</TableHead>
               <TableHead className="text-right">Total</TableHead><TableHead>Estado</TableHead>
-              <TableHead className="text-right">Comprobante</TableHead>
+              <TableHead className="text-right">PDF</TableHead>
             </TableRow></TableHeader>
             <TableBody>
-              {(data ?? []).length === 0 && <TableRow><TableCell colSpan={8} className="py-10 text-center text-sm text-slate-500">Sin ventas registradas.</TableCell></TableRow>}
+              {(data ?? []).length === 0 && <TableRow><TableCell colSpan={9} className="py-10 text-center text-sm text-slate-500">Sin ventas registradas.</TableCell></TableRow>}
               {data?.map((v) => {
                 const a = (v as unknown as { almacenes?: { nombre: string } }).almacenes;
                 const c = (v as unknown as { clientes?: { razon_social?: string; nombres?: string; apellido_paterno?: string } }).clientes;
                 const cliente = c?.razon_social ?? (`${c?.nombres ?? ''} ${c?.apellido_paterno ?? ''}`.trim() || '—');
+                const doc = documento.get(v.id);
                 return (
                   <TableRow key={v.id}>
-                    <TableCell className="font-mono text-xs">{v.numero}</TableCell>
+                    <TableCell className="font-mono text-xs">
+                      {/*
+                        * Arriba el número del papel, abajo el interno.
+                        *
+                        * Los dos hacen falta: por el de arriba pregunta el
+                        * cliente, y el de abajo es el que aparece en el arqueo
+                        * de caja y en el kardex.
+                        */}
+                      <div className="font-semibold text-corp-900">{doc?.numero ?? '—'}</div>
+                      <div className="text-[10px] font-normal text-slate-400">{v.numero}</div>
+                    </TableCell>
+                    <TableCell>
+                      {doc
+                        ? <Badge variant="secondary">{ETIQUETA_TIPO[doc.tipo] ?? doc.tipo}</Badge>
+                        : <span className="text-xs text-slate-400">Sin comprobante</span>}
+                    </TableCell>
                     <TableCell className="text-sm">{formatDateTime(v.fecha)}</TableCell>
                     <TableCell><Badge variant="secondary">{v.canal}</Badge></TableCell>
                     <TableCell className="text-sm">{a?.nombre}</TableCell>
