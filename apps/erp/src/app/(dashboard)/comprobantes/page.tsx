@@ -17,7 +17,20 @@ const tono = (e: string) =>
 
 export default async function ComprobantesPage() {
   const sb = await createClient();
-  const { data } = await sb.from('comprobantes').select('id, tipo, serie, numero, numero_completo, fecha_emision, total, estado, razon_social_cliente, numero_documento_cliente').order('fecha_emision', { ascending: false }).limit(200);
+  /*
+   * Solo los documentos que van a SUNAT.
+   *
+   * La nota de venta ahora también se guarda en esta tabla —hacía falta para
+   * poder buscarla por el número que sale impreso en el ticket— pero no es un
+   * comprobante electrónico y no tiene nada que hacer en esta pantalla, que se
+   * llama "Comprobantes SUNAT". Las notas se ven en la lista de ventas.
+   */
+  const { data } = await sb
+    .from('comprobantes')
+    .select('id, tipo, serie, numero, numero_completo, fecha_emision, total, estado, razon_social_cliente, numero_documento_cliente')
+    .in('tipo', ['BOLETA', 'FACTURA', 'NOTA_CREDITO', 'NOTA_DEBITO'])
+    .order('fecha_emision', { ascending: false })
+    .limit(200);
   return (
     <PageShell title="Comprobantes Electrónicos SUNAT" description="Boletas, Facturas, Notas de Crédito/Débito, Guías." actions={<ResumenBoletasButton />}>
       <Card><CardContent className="p-0">

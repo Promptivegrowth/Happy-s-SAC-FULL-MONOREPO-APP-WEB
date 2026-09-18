@@ -1292,9 +1292,6 @@ export async function emitirComprobante(input: z.infer<typeof emitirSchema>): Pr
     const { data: numComp } = await sb.rpc('next_correlativo', { p_clave: `COMP_${serie}`, p_padding: DIGITOS_CORRELATIVO });
     numeroNum = Number(numComp);
     numeroCompleto = `${serie}-${fmtNumero(numeroNum)}`;
-
-    // No insertamos en tabla `comprobantes` para NOTA_VENTA, pero sí devolvemos número artificial.
-    comprobanteId = '';
   } else {
     // BOLETA / FACTURA — usa series_comprobantes activa para la caja
     const { data: serieRow } = await sb
@@ -1330,7 +1327,28 @@ export async function emitirComprobante(input: z.infer<typeof emitirSchema>): Pr
         throw new Error('Para emitir FACTURA, el cliente debe tener RUC válido.');
       }
     }
+  }
 
+  /*
+   * El documento se guarda SIEMPRE, también la nota de venta.
+   *
+   * Antes la nota tomaba su número del correlativo, lo imprimía en el ticket y
+   * lo tiraba: no se insertaba nada. El cliente se iba con un papel que decía
+   * "005-0011476" y ese texto no existía en ninguna parte del sistema. Cuando
+   * volvía a cambiar una talla, la cajera tenía el papel con un código y la
+   * pantalla con otro —VEN-000033— y no había forma de cruzarlos. Pasó el
+   * 17/09/2026.
+   *
+   * Guardarla no la convierte en un documento fiscal: la nota de venta sigue
+   * sin declararse y sin ir a SUNAT. El envío filtra por tipo —las facturas van
+   * solas, las boletas por resumen diario— y el armador de XML rechaza de plano
+   * cualquier tipo que no sea de SUNAT. Lo único que cambia es que ahora se
+   * puede buscar.
+   *
+   * El estado lo dice: EMITIDO, no BORRADOR. BORRADOR significa "todavía no se
+   * mandó a SUNAT" y dispararía la alerta de comprobantes vencidos.
+   */
+  {
     const nombreCliente = parsed.cliente_data.razon_social
       ?? [parsed.cliente_data.nombres, parsed.cliente_data.apellidos].filter(Boolean).join(' ').trim()
       ?? null;
@@ -1352,13 +1370,27 @@ export async function emitirComprobante(input: z.infer<typeof emitirSchema>): Pr
         igv: Number(venta.igv ?? 0),
         total: Number(venta.total ?? 0),
         moneda: 'PEN',
-        estado: 'BORRADOR',
+        estado: parsed.tipo === 'NOTA_VENTA' ? 'EMITIDO' : 'BORRADOR',
         forma_pago: 'CONTADO',
       })
-      .select('id')
+      .select('id, numero_completo')
       .single();
     if (errComp) throw new Error(`No se pudo crear comprobante: ${errComp.message}`);
     comprobanteId = comp.id;
+
+    /*
+     * El número que se imprime es el que quedó guardado. No uno parecido.
+     *
+     * Hasta hoy se armaba a mano con 7 dígitos —"005-0011476"— mientras la base
+     * lo genera con 8 —"005-00011476"—. Son el mismo comprobante, pero el papel
+     * y la pantalla no coincidían, y a SUNAT viaja el de la base: el del ticket
+     * no existía en ningún sistema. Un cliente volvió a cambiar una talla con
+     * ese papel en la mano y no hubo forma de encontrarlo (17/09/2026).
+     *
+     * Leerlo de vuelta en vez de recalcularlo vuelve imposible que se separen
+     * otra vez: hay un solo número y sale de un solo lugar.
+     */
+    if (comp.numero_completo) numeroCompleto = comp.numero_completo;
 
     // Líneas comprobante (best-effort; no detiene si falla)
     if (lineas && lineas.length) {

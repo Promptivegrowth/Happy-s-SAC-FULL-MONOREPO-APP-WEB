@@ -16,6 +16,7 @@
  *  - Si es DEVOLUCION, se registra metodo_devolucion + monto_devuelto
  */
 
+import { variantesDeNumero } from '@happy/lib/comprobantes/numero';
 import { z } from 'zod';
 import { createClient } from '@happy/db/server';
 import { createServiceClient } from '@happy/db/service';
@@ -63,13 +64,14 @@ export async function buscarVentaParaDevolucion(query: string): Promise<VentaDev
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const sb = (await createClient()) as any;
 
-  // 1) Buscar por número de comprobante (B001-00000123)
+  // 1) Buscar por número de comprobante (B005-00004032, 005-0011476, …)
   let ventaId: string | null = null;
-  const { data: comp } = await sb
+  const { data: comps } = await sb
     .from('comprobantes')
     .select('venta_id, tipo, numero_completo')
-    .eq('numero_completo', q)
-    .maybeSingle();
+    .in('numero_completo', variantesDeNumero(q))
+    .limit(1);
+  const comp = (comps ?? [])[0];
   if (comp?.venta_id) {
     ventaId = comp.venta_id as string;
   } else {

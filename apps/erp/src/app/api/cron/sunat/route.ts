@@ -253,6 +253,16 @@ export async function GET(request: Request) {
   const { count: vencidos } = await sb
     .from('comprobantes')
     .select('id', { count: 'exact', head: true })
+    /*
+     * Solo los que SÍ van a SUNAT.
+     *
+     * Desde que la nota de venta se guarda como documento —para poder buscarla
+     * por el número que sale impreso— hay filas que nunca se declaran. Sin este
+     * filtro, cada nota emitida haría sonar la alerta de "comprobante vencido
+     * sin enviar" al día siguiente, y gerencia terminaría ignorando el aviso
+     * justo el día que sea de verdad.
+     */
+    .in('tipo', ['BOLETA', 'FACTURA', 'NOTA_CREDITO', 'NOTA_DEBITO'])
     .in('estado', ['BORRADOR', 'EMITIDO', 'RECHAZADO'])
     .lt('fecha_emision', hace24h);
 
