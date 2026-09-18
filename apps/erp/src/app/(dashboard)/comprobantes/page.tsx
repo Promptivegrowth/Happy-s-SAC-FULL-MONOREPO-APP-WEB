@@ -5,6 +5,9 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { PageShell } from '@/components/page-shell';
 import { formatDateTime, formatPEN } from '@happy/lib';
 import { ResumenBoletasButton } from './resumen-boletas-button';
+import { PanelSunat } from './panel-sunat';
+import { estadoSunat } from '@/server/actions/sunat-monitor';
+import { HORA_RESUMEN } from '@/server/actions/sunat-monitor-tipos';
 
 export const metadata = { title: 'Comprobantes SUNAT' };
 export const dynamic = 'force-dynamic';
@@ -15,8 +18,23 @@ const tono = (e: string) =>
   e === 'OBSERVADO' ? 'warning' :
   e === 'ANULADO' ? 'secondary' : 'default';
 
+/**
+ * El estado, dicho como lo entiende quien no trabaja con SUNAT todos los días.
+ *
+ * "BORRADOR" en una boleta de hoy no significa que algo salió mal: significa
+ * que está esperando el resumen de las 23:00. Mostrar la palabra cruda hacía
+ * que una jornada normal pareciera un problema.
+ */
+function enCastellano(estado: string, tipo: string, fechaEmision: string): string {
+  if (estado !== 'BORRADOR' && estado !== 'EMITIDO') return estado;
+  const viejo = new Date(fechaEmision).getTime() < Date.now() - 24 * 3600 * 1000;
+  if (viejo) return 'DEMORADO';
+  return tipo === 'BOLETA' ? `EN COLA · ${HORA_RESUMEN}:00` : 'ENVIANDO';
+}
+
 export default async function ComprobantesPage() {
   const sb = await createClient();
+  const panel = await estadoSunat();
   /*
    * Solo los documentos que van a SUNAT.
    *
@@ -32,7 +50,13 @@ export default async function ComprobantesPage() {
     .order('fecha_emision', { ascending: false })
     .limit(200);
   return (
-    <PageShell title="Comprobantes Electrónicos SUNAT" description="Boletas, Facturas, Notas de Crédito/Débito, Guías." actions={<ResumenBoletasButton />}>
+    <PageShell
+      title="Comprobantes Electrónicos SUNAT"
+      description="Boletas, facturas y notas de crédito. Acá se ve si SUNAT las aceptó y cómo se envían."
+      actions={<ResumenBoletasButton />}
+    >
+      <div className="mb-4"><PanelSunat e={panel} /></div>
+
       <Card><CardContent className="p-0">
         <Table>
           <TableHeader><TableRow>
@@ -53,7 +77,11 @@ export default async function ComprobantesPage() {
                   <div className="font-mono text-xs text-slate-500">{c.numero_documento_cliente}</div>
                 </TableCell>
                 <TableCell className="text-right font-medium">{formatPEN(Number(c.total))}</TableCell>
-                <TableCell><Badge variant={tono(c.estado)}>{c.estado}</Badge></TableCell>
+                <TableCell>
+                  <Badge variant={tono(c.estado)}>
+                    {enCastellano(c.estado, c.tipo as string, c.fecha_emision as string)}
+                  </Badge>
+                </TableCell>
               </TableRow>
             ))}
           </TableBody>
