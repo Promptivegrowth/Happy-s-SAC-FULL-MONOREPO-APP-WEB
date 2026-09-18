@@ -5,13 +5,20 @@ import {
   Tags, Scissors, Wrench, Coins, Hammer, Store, QrCode, Plane, Barcode,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
-import type { Rol } from '@happy/db/enums';
 
 export type NavItem = {
   label: string;
   href: string;
   icon: LucideIcon;
-  roles?: Rol[];      // si está vacío, todos los roles staff
+  /*
+   * Quién ve cada entrada NO se declara acá.
+   *
+   * Antes sí, y era el problema: de cuarenta y cinco entradas sólo nueve lo
+   * declaraban, así que las otras treinta y seis se le mostraban a cualquiera.
+   * Y aunque una estuviera escondida, la dirección escrita a mano entraba
+   * igual. Ahora el menú y el control de acceso salen los dos de `permisos.ts`,
+   * que va por ruta: agregar una entrada acá no puede abrirle la puerta a nadie.
+   */
   badge?: string;
 };
 
@@ -50,11 +57,11 @@ export const NAV: NavGroup[] = [
   {
     label: 'Producción',
     items: [
-      { label: 'Plan Maestro', href: '/plan-maestro', icon: ClipboardList, roles: ['gerente','jefe_produccion'] },
-      { label: 'Órdenes de Trabajo', href: '/ot', icon: Factory, roles: ['gerente','jefe_produccion','operario'] },
-      { label: 'Corte', href: '/corte', icon: Scissors, roles: ['gerente','jefe_produccion','operario'] },
-      { label: 'Órdenes de Servicio', href: '/servicios', icon: Wrench, roles: ['gerente','jefe_produccion'] },
-      { label: 'Control de Calidad', href: '/calidad', icon: Scale, roles: ['gerente','jefe_produccion','almacenero'] },
+      { label: 'Plan Maestro', href: '/plan-maestro', icon: ClipboardList },
+      { label: 'Órdenes de Trabajo', href: '/ot', icon: Factory },
+      { label: 'Corte', href: '/corte', icon: Scissors },
+      { label: 'Órdenes de Servicio', href: '/servicios', icon: Wrench },
+      { label: 'Control de Calidad', href: '/calidad', icon: Scale },
       { label: 'Trazabilidad', href: '/trazabilidad', icon: QrCode },
     ],
   },
@@ -80,8 +87,8 @@ export const NAV: NavGroup[] = [
     label: 'Ventas',
     items: [
       { label: 'Ventas (todas)', href: '/ventas', icon: Receipt },
-      { label: 'POS (simulador)', href: '/pos', icon: Store, roles: ['gerente','cajero'] },
-      { label: 'Ventas de exportación', href: '/ventas/exportacion', icon: Plane, roles: ['gerente'] },
+      { label: 'POS (simulador)', href: '/pos', icon: Store },
+      { label: 'Ventas de exportación', href: '/ventas/exportacion', icon: Plane },
       { label: 'Pedidos Web', href: '/pedidos-web', icon: Globe },
       { label: 'Pedidos B2B', href: '/b2b', icon: Users },
       { label: 'Comprobantes SUNAT', href: '/comprobantes', icon: FileText },
@@ -92,8 +99,8 @@ export const NAV: NavGroup[] = [
     items: [
       { label: 'Reportes', href: '/reportes', icon: BarChart3 },
       { label: 'Reclamos INDECOPI', href: '/reclamos', icon: MessageSquareWarning },
-      { label: 'Usuarios & Roles', href: '/usuarios', icon: UserCog, roles: ['gerente'] },
-      { label: 'Configuración', href: '/configuracion', icon: Settings, roles: ['gerente'] },
+      { label: 'Usuarios & Roles', href: '/usuarios', icon: UserCog },
+      { label: 'Configuración', href: '/configuracion', icon: Settings },
     ],
   },
 ];

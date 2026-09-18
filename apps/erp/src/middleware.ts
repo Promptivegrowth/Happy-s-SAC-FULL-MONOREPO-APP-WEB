@@ -33,7 +33,18 @@ function redirigirConservandoSesion(url: URL, response: NextResponse): NextRespo
 }
 
 export async function middleware(request: NextRequest) {
-  const response = NextResponse.next({ request });
+  /*
+   * La ruta viaja en una cabecera para que el layout la pueda leer.
+   *
+   * El control de permisos vive en el layout del dashboard —que es el único
+   * lugar por el que pasan las 118 pantallas y que además ya tiene los roles
+   * cargados—, pero un layout de Next no recibe el pathname. Resolverlo acá
+   * cuesta nada; hacerlo en el middleware costaría una consulta de roles a la
+   * base en cada request, porque el JWT no los trae.
+   */
+  const headers = new Headers(request.headers);
+  headers.set('x-pathname', request.nextUrl.pathname);
+  const response = NextResponse.next({ request: { headers } });
 
   const supabase = createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,

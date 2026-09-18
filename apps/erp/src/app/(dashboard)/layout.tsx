@@ -1,6 +1,9 @@
+import { headers } from 'next/headers';
 import { Sidebar } from '@/components/sidebar';
 import { Topbar } from '@/components/topbar';
 import { getSession } from '@/server/session';
+import { puedeVer } from '@/server/permisos';
+import { SinPermiso } from '@/components/sin-permiso';
 import { listarMisNotificaciones, contarNotificacionesNoLeidas } from '@/server/actions/notificaciones';
 
 // El layout hace queries vía getSession(), por lo tanto debe ser dinámico.
@@ -10,16 +13,36 @@ export const dynamic = 'force-dynamic';
 
 export default async function DashboardLayout({ children }: { children: React.ReactNode }) {
   const sesion = await getSession();
-  const [notificaciones, noLeidas] = await Promise.all([
+  const [notificaciones, noLeidas, cabeceras] = await Promise.all([
     listarMisNotificaciones(15),
     contarNotificacionesNoLeidas(),
+    headers(),
   ]);
+
+  /*
+   * El control de permisos, en el único lugar por el que pasan todas las
+   * pantallas.
+   *
+   * Antes esto no se comprobaba en ninguna parte: el middleware sólo miraba que
+   * la persona hubiera iniciado sesión, y de 118 pantallas apenas 13 se defendían
+   * solas. Esconder la entrada del menú no alcanzaba, porque la dirección escrita
+   * a mano entraba igual.
+   *
+   * Se muestra un cartel en lugar de redirigir. Un rebote silencioso al
+   * dashboard deja a la persona sin entender qué pasó y llamando a soporte; acá
+   * se le dice que existe, que no es para su rol y a quién pedírselo.
+   */
+  const pathname = cabeceras.get('x-pathname') ?? '';
+  const permitido = pathname === '' || puedeVer(sesion.roles, pathname);
+
   return (
     <div className="flex min-h-screen">
       <Sidebar roles={sesion.roles} />
       <div className="flex w-full flex-col">
         <Topbar nombre={sesion.nombre} email={sesion.email} roles={sesion.roles} notificaciones={notificaciones} noLeidas={noLeidas} />
-        <main className="flex-1 overflow-x-hidden p-6">{children}</main>
+        <main className="flex-1 overflow-x-hidden p-6">
+          {permitido ? children : <SinPermiso roles={sesion.roles} />}
+        </main>
       </div>
     </div>
   );

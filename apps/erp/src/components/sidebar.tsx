@@ -5,11 +5,11 @@ import { usePathname } from 'next/navigation';
 import { cn } from '@happy/ui/cn';
 import { Logo } from '@happy/ui/logo';
 import { NAV } from './nav-config';
+import { puedeVer } from '@/server/permisos';
 import type { Rol } from '@happy/db/enums';
 
 export function Sidebar({ roles }: { roles: Rol[] }) {
   const pathname = usePathname();
-  const isAdmin = roles.includes('gerente');
 
   return (
     <aside className="hidden w-64 shrink-0 border-r bg-corp-900 text-white lg:block">
@@ -27,9 +27,17 @@ export function Sidebar({ roles }: { roles: Rol[] }) {
 
       <nav className="scrollbar-thin h-[calc(100vh-4rem)] overflow-y-auto px-2 py-4">
         {NAV.map((group) => {
-          const items = group.items.filter(
-            (item) => !item.roles || isAdmin || item.roles.some((r) => roles.includes(r)),
-          );
+          /*
+           * El menú muestra exactamente lo que el layout deja abrir.
+           *
+           * Antes decidía por su cuenta con el `roles` de cada entrada, y como
+           * treinta y seis de las cuarenta y cinco no lo declaraban, se le
+           * mostraban a cualquiera. Peor: aunque una entrada estuviera escondida,
+           * la dirección escrita a mano entraba igual, porque nadie comprobaba
+           * nada del otro lado. Ahora las dos cosas salen de `puedeVer`, así que
+           * no se pueden contradecir.
+           */
+          const items = group.items.filter((item) => puedeVer(roles, item.href));
           if (items.length === 0) return null;
           return (
             <div key={group.label} className="mb-5">
