@@ -1053,6 +1053,13 @@ export function PosTerminal({
         // 3.5) Guardar el PDF dentro del sistema (bucket privado) para poder
         //      consultarlo desde cualquier PC vía el ERP. Best-effort: la venta
         //      y el comprobante ya quedaron registrados aunque esto falle.
+        //
+        //      El resultado SI se mira (fix 18/09/2026). Antes se descartaba con
+        //      `void`, asi que cuando la subida fallaba no se enteraba nadie: la
+        //      venta quedaba sin PDF y en el ERP aparecia un guion, sin ninguna
+        //      pista de por que. Pasaron 2 de 111. Ahora se reintenta una vez
+        //      —casi siempre es un tropiezo de red— y si igual falla se avisa,
+        //      diciendo ademas que el documento no se perdio.
         try {
           const base64 = await new Promise<string>((resolve, reject) => {
             const fr = new FileReader();
@@ -1061,12 +1068,34 @@ export function PosTerminal({
             fr.readAsDataURL(blob);
           });
           if (base64) {
-            void guardarPdfComprobante({
+            const guardar = () => guardarPdfComprobante({
               venta_id: r.venta_id,
               comprobante_id: emitido.id || null,
               filename,
               base64,
             });
+
+            /*
+             * Sigue sin bloquear el cobro: se encadena en lugar de esperarse.
+             * Subir el PDF puede tardar un segundo largo y el cliente esta en el
+             * mostrador; lo que cambia es que ahora el fallo se ve.
+             */
+            void guardar()
+              .then((res) => (res.ok ? res : guardar()))
+              .then((res) => {
+                if (!res.ok) {
+                  toast.warning(
+                    `El comprobante ${numeroComprobante} se emitio bien, pero no se pudo guardar su PDF en el sistema. Se puede volver a generar desde Historial.`,
+                    { duration: 10000 },
+                  );
+                }
+              })
+              .catch(() => {
+                toast.warning(
+                  `El comprobante ${numeroComprobante} se emitio bien, pero no se pudo guardar su PDF en el sistema. Se puede volver a generar desde Historial.`,
+                  { duration: 10000 },
+                );
+              });
           }
         } catch {
           /* no bloquear la venta si falla el guardado del PDF */
