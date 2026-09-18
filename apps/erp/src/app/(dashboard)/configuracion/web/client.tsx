@@ -54,16 +54,31 @@ function medirImagen(file: File): Promise<{ ancho: number; alto: number }> {
 }
 
 function CampoImagen({
-  valor, medida, onCambio, disabled,
+  valor, medida, onCambio, disabled, urlWeb,
 }: {
   valor: string;
   medida: Medida;
   onCambio: (url: string) => void;
   disabled?: boolean;
+  /** Dónde vive la tienda: hace falta para ver las imágenes que están allá. */
+  urlWeb: string;
 }) {
   const ref = useRef<HTMLInputElement>(null);
   const [subiendo, setSubiendo] = useState(false);
   const [aviso, setAviso] = useState<string | null>(null);
+  const [noCarga, setNoCarga] = useState(false);
+
+  /*
+   * De dónde sale la miniatura.
+   *
+   * Las imágenes que se suben desde acá quedan con dirección completa y se ven
+   * sin más. Las originales —"/slider1.webp"— viven en la carpeta pública de la
+   * TIENDA, que es otro sitio en otro dominio: pedirlas así, tal cual, las
+   * buscaba dentro del ERP, donde no están, y la vista previa salía rota. Se
+   * les antepone la dirección de la tienda.
+   */
+  const esAbsoluta = /^https?:\/\//i.test(valor);
+  const src = !valor ? '' : esAbsoluta ? valor : `${urlWeb.replace(/\/$/, '')}${valor.startsWith('/') ? '' : '/'}${valor}`;
 
   async function elegir(file: File) {
     setAviso(null);
@@ -95,6 +110,7 @@ function CampoImagen({
       fd.append('file', file);
       const r = await subirImagenWeb(fd);
       if (!r.ok) { toast.error(r.error); return; }
+      setNoCarga(false);
       onCambio(r.url);
       toast.success('Imagen subida');
     } catch (e) {
@@ -108,12 +124,24 @@ function CampoImagen({
   return (
     <div className="space-y-1.5">
       <div className="flex flex-wrap items-center gap-2">
-        {valor ? (
+        {valor && !noCarga ? (
           // eslint-disable-next-line @next/next/no-img-element
-          <img src={valor} alt="" className="h-16 w-28 rounded border object-cover" />
+          <img
+            src={src}
+            alt=""
+            className="h-16 w-28 rounded border bg-slate-50 object-cover"
+            onError={() => setNoCarga(true)}
+            onLoad={() => setNoCarga(false)}
+          />
         ) : (
-          <div className="flex h-16 w-28 items-center justify-center rounded border border-dashed text-slate-300">
-            <IconoImagen className="h-5 w-5" />
+          /*
+            Sin miniatura, se dice por qué.
+            Un recuadro roto hace pensar que la imagen se perdió, cuando lo más
+            probable es que esté publicada y solo no se pueda mostrar desde acá.
+          */
+          <div className="flex h-16 w-28 flex-col items-center justify-center gap-0.5 rounded border border-dashed bg-slate-50 text-center text-slate-400">
+            <IconoImagen className="h-4 w-4" />
+            {valor && <span className="px-1 text-[8px] leading-tight">sin vista previa</span>}
           </div>
         )}
         <div className="flex flex-col gap-1">
@@ -143,6 +171,15 @@ function CampoImagen({
         disabled={disabled}
         className="h-8 font-mono text-[11px]"
       />
+
+      {valor && noCarga && (
+        <p className="flex items-start gap-1.5 rounded-md border bg-slate-50 p-2 text-[11px] text-slate-600">
+          <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+          No se puede mostrar la vista previa de esta imagen desde el ERP, pero eso no significa
+          que falte: <b className="mx-1">{valor}</b> es una imagen que vino con la tienda. Ábrela
+          en la web para verla, o sube una nueva y la vista previa aparece al instante.
+        </p>
+      )}
 
       {aviso && (
         <p className="flex items-start gap-1.5 rounded-md border border-amber-300 bg-amber-50 p-2 text-[11px] text-amber-900">
@@ -304,6 +341,7 @@ export function WebConfigClient({ inicial, urlWeb }: { inicial: ContenidoWeb; ur
                       medida={MEDIDAS.slide}
                       onCambio={(url) => slide(i, 'imagen_url', url)}
                       disabled={pendiente}
+                      urlWeb={urlWeb}
                     />
                   </Campo>
                   <Campo etiqueta="Descripción de la imagen" ayuda="La lee Google y quien navega sin ver. Ej: «Disfraces de Halloween para niños».">
@@ -391,6 +429,7 @@ export function WebConfigClient({ inicial, urlWeb }: { inicial: ContenidoWeb; ur
                 medida={MEDIDAS.cta}
                 onCambio={(url) => setC((p) => ({ ...p, cta_mayorista: { ...p.cta_mayorista, imagen_url: url } }))}
                 disabled={pendiente}
+                urlWeb={urlWeb}
               />
             </Campo>
             <div className="space-y-2">

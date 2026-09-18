@@ -11,12 +11,20 @@ export default async function WebConfigPage() {
   const contenido = await obtenerContenido();
 
   /*
-   * A dónde apunta el botón de "abrir la tienda".
+   * A dónde apunta el botón de "abrir la tienda", y de dónde salen las
+   * miniaturas de las imágenes que vinieron con el sitio.
    *
    * Sale de la variable de entorno para que en pruebas lleve al sitio de
    * pruebas y no al que están mirando los clientes.
+   *
+   * Con una excepción: si esa variable quedó apuntando a localhost —es lo que
+   * pasa cuando se copia el archivo de configuración de la máquina de
+   * desarrollo al servidor— no sirve para nadie que abra el ERP desde otra
+   * computadora. En ese caso se usa la tienda de verdad.
    */
-  const urlWeb = process.env.NEXT_PUBLIC_WEB_URL || 'https://www.disfraceshappys.com.pe';
+  const configurada = process.env.NEXT_PUBLIC_WEB_URL ?? '';
+  const esLocal = /localhost|127\.0\.0\.1/i.test(configurada);
+  const urlWeb = configurada && !esLocal ? configurada : 'https://www.disfraceshappys.com.pe';
 
   return (
     <PageShell
