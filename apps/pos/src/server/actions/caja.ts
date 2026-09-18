@@ -165,6 +165,49 @@ export async function abrirSesion(input: {
 // OBTENER SESIÓN ACTIVA (con balance en vivo)
 // ============================================================================
 
+/**
+ * Por qué este usuario no ve ninguna caja, dicho en palabras.
+ *
+ * `obtenerSesionActiva` y `obtenerHistorialSesion` se apoyan en la caja del
+ * perfil, y cuando no la hay se tragaban el error y devolvían null y lista
+ * vacía. Con eso el POS quedaba mudo: el botón Pagar deshabilitado sin decir
+ * nada, el historial en cero, y el único mensaje que salía era "Abre la caja
+ * primero" —falso, porque la caja estaba abierta; lo que faltaba era la caja
+ * ASIGNADA AL USUARIO. Pasó en tienda el 18/09/2026 y costó media hora de
+ * ventas.
+ *
+ * Devuelve null cuando no hay nada que explicar: no hay sesión abierta y punto,
+ * que es el caso normal a primera hora.
+ */
+export async function motivoSinCaja(): Promise<string | null> {
+  const sb = await createClient();
+  const { data: { user } } = await sb.auth.getUser();
+  if (!user) return 'Tu sesión venció. Volvé a iniciar sesión.';
+
+  const { data: perfil } = await sb
+    .from('perfiles')
+    .select('caja_default, nombre_completo')
+    .eq('id', user.id)
+    .maybeSingle();
+
+  if (!perfil) return 'No se encontró tu perfil. Avisá a gerencia.';
+  if (!perfil.caja_default) {
+    return `${perfil.nombre_completo ?? 'Tu usuario'} no tiene una caja asignada, así que el POS no sabe en cuál cobrar. `
+      + 'Se arregla en el ERP: Usuarios → editar tu usuario → Caja. Es un minuto y no se pierde nada de lo vendido.';
+  }
+
+  const { data: caja } = await sb
+    .from('cajas')
+    .select('nombre, activo')
+    .eq('id', perfil.caja_default)
+    .maybeSingle();
+
+  if (!caja) return 'La caja asignada a tu usuario ya no existe. Pedí en el ERP que te asignen otra.';
+  if (!caja.activo) return `La caja "${caja.nombre}" está desactivada. Pedí en el ERP que te asignen otra.`;
+
+  return null;
+}
+
 export async function obtenerSesionActiva(): Promise<
   | { sesion: SesionCajaDTO; balance: BalanceCajaDTO }
   | null

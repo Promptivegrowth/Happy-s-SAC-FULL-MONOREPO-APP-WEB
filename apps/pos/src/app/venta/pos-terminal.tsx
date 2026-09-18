@@ -8,7 +8,7 @@ import { Card } from '@happy/ui/card';
 import { Input } from '@happy/ui/input';
 import { Button } from '@happy/ui/button';
 import { Badge } from '@happy/ui/badge';
-import { Trash2, Plus, Minus, ScanBarcode, X, Banknote, Building2, MessageCircle, Loader2, LayoutGrid, ShoppingBag, LogOut, Receipt, History, RotateCcw, Coins, Wallet, Search, LogIn, UserX, Pencil, Send, FileText, Printer } from 'lucide-react';
+import { Trash2, Plus, Minus, ScanBarcode, X, Banknote, Building2, MessageCircle, Loader2, LayoutGrid, ShoppingBag, LogOut, Receipt, History, RotateCcw, Coins, Wallet, Search, LogIn, UserX, Pencil, Send, FileText, Printer, AlertTriangle } from 'lucide-react';
 import { toast } from 'sonner';
 import { formatPEN, ordenTalla, formatTalla, normalizarTexto , formatTallaChip } from '@happy/lib';
 
@@ -24,7 +24,7 @@ function coincideBusqueda(q: string, hay: string): boolean {
 // del carrito ahora abre CotizacionModal en vez de wa.me directo. Ver
 // mensaje formateado inline en el modal.
 import { registrarVenta } from '@/server/actions/venta';
-import { emitirComprobante, guardarPdfComprobante, obtenerSesionActiva } from '@/server/actions/caja';
+import { emitirComprobante, guardarPdfComprobante, obtenerSesionActiva, motivoSinCaja } from '@/server/actions/caja';
 import { aplicarAdelantoAVenta, obtenerSaldoCliente } from '@/server/actions/adelantos';
 import { cerrarSesionUsuario } from '@/server/actions/auth';
 import { buscarClientesPOS, crearClienteRapidoPOS, type ClienteRow } from '@/server/actions/clientes';
@@ -488,6 +488,24 @@ export function PosTerminal({
     const r = await obtenerSesionActiva();
     setSesionActiva(r?.sesion ?? null);
     setBalanceActual(r?.balance ?? null);
+
+    /*
+     * Si no hay sesión, averiguar POR QUE y decirlo.
+     *
+     * Sin esto el POS se quedaba mudo: el botón Pagar deshabilitado sin ningún
+     * cartel, y al insistir salía "Abre la caja primero" aunque la caja
+     * estuviera abierta. El problema real era otro —el usuario logueado no
+     * tenía caja asignada— y no había forma de enterarse desde la tienda.
+     */
+    if (!r) {
+      try {
+        setMotivoCaja(await motivoSinCaja());
+      } catch {
+        setMotivoCaja(null);
+      }
+    } else {
+      setMotivoCaja(null);
+    }
   }
 
   // Auto-focus en input para pistola de barras. Solo activo cuando:
@@ -829,6 +847,8 @@ export function PosTerminal({
   }
 
   const [cobrando, setCobrando] = useState(false);
+  /** Por que no hay caja, cuando no la hay. Null = no hay nada que explicar. */
+  const [motivoCaja, setMotivoCaja] = useState<string | null>(null);
 
   function abrirModalCobrar() {
     if (!sesionActiva) return toast.error('Abre la caja primero');
@@ -848,7 +868,7 @@ export function PosTerminal({
    * bloqueante en vez de abrir modal.
    */
   async function pagarEImprimir() {
-    if (!sesionActiva || !cajaActual) return toast.error('Abre la caja primero');
+    if (!sesionActiva || !cajaActual) return toast.error(motivoCaja ?? 'Abre la caja primero');
     if (carrito.length === 0) return toast.error('Carrito vacío');
     if (pagado < total) return toast.error(`Falta cobrar ${formatPEN(total - pagado)}`);
     // Validación por tipo de comprobante
@@ -1258,6 +1278,23 @@ export function PosTerminal({
       {/* IZQUIERDA — Búsqueda + carrito */}
       <section className="flex h-screen flex-col bg-white">
         <header className="border-b p-4">
+          {/*
+            * Por qué no se puede cobrar, arriba de todo y en rojo.
+            *
+            * Es el cartel que faltaba el 18/09/2026: sin caja asignada al
+            * usuario, el botón Pagar quedaba deshabilitado sin explicación y en
+            * la tienda estuvieron media hora sin poder vender sin saber por qué.
+            */}
+          {!sesionActiva && motivoCaja && (
+            <div className="mb-3 flex items-start gap-2 rounded-md border border-red-300 bg-red-50 p-3">
+              <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-red-600" />
+              <div>
+                <p className="text-sm font-semibold text-red-900">No se puede cobrar todavía</p>
+                <p className="mt-0.5 text-xs leading-relaxed text-red-800">{motivoCaja}</p>
+              </div>
+            </div>
+          )}
+
           {/* flex-wrap: en pantallas/zoom chicos los botones (Gastos, Adelantos,
               Cerrar caja, Salir) pasan a una segunda línea en vez de cortarse. */}
           <div className="mb-3 flex flex-wrap items-center gap-2">
