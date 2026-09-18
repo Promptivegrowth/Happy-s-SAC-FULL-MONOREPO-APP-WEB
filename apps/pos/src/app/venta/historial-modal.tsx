@@ -5,8 +5,15 @@
  *
  * Útil para que el cajero:
  *  - Verifique sus ventas al cuadrar caja
+ *  - Vuelva a imprimir un ticket que no salió
  *  - Reenvíe boleta por WhatsApp a un cliente que la pidió después
  *  - Vea de un vistazo qué método de pago se usó en cada venta
+ *
+ * La reimpresión se agregó después del 18/09/2026. Ese día la ticketera quedó
+ * mal conectada, los tickets no salían, y como no había forma de volver a
+ * imprimir un comprobante ya emitido, en la tienda dejaron de usar el sistema y
+ * vendieron en papel dos horas y media. La venta nunca fue el problema: quedaba
+ * registrada igual. Lo que faltaba era poder sacar el papel más tarde.
  */
 
 import { useEffect, useState } from 'react';
@@ -14,7 +21,7 @@ import { Card } from '@happy/ui/card';
 import { Button } from '@happy/ui/button';
 import { Badge } from '@happy/ui/badge';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@happy/ui/table';
-import { X, Loader2, History, Send, Clock, User, Users, Banknote, Receipt as ReceiptIcon, FileText, Search } from 'lucide-react';
+import { X, Loader2, History, Send, Clock, User, Users, Banknote, Receipt as ReceiptIcon, FileText, Search, Printer } from 'lucide-react';
 import { formatPEN, formatDateTime } from '@happy/lib';
 import { toast } from 'sonner';
 import {
@@ -27,7 +34,8 @@ import {
 } from '@/server/actions/caja';
 import type { TransaccionRow, SesionCajaDTO, BalanceCajaDTO } from '@/server/actions/caja-helpers';
 import { construirMensajeWhatsApp, abrirWhatsApp } from './whatsapp-helper';
-import { generarTicket } from './comprobante-pdf';
+import { generarTicket, abrirPDF } from './comprobante-pdf';
+import { reimprimirComprobante, type EmpresaTicket } from './imprimir-ticket';
 
 type CierreParcial = {
   id: string;
@@ -39,7 +47,17 @@ type CierreParcial = {
   observaciones: string | null;
 };
 
-export function HistorialModal({ onClose, empresaNombre }: { onClose: () => void; empresaNombre: string }) {
+export function HistorialModal({
+  onClose, empresaNombre, empresaTicket, almacenId, establecimiento, caja,
+}: {
+  onClose: () => void;
+  empresaNombre: string;
+  /** Datos de la empresa para armar el ticket ESC/POS; sin esto no se reimprime. */
+  empresaTicket?: EmpresaTicket;
+  almacenId?: string | null;
+  establecimiento?: { nombre: string | null; direccion: string | null } | null;
+  caja?: string | null;
+}) {
   const hoyISO = new Date().toISOString().slice(0, 10);
   const [rows, setRows] = useState<TransaccionRow[]>([]);
   const [loading, setLoading] = useState(true);
@@ -48,6 +66,7 @@ export function HistorialModal({ onClose, empresaNombre }: { onClose: () => void
   const [hasta, setHasta] = useState(hoyISO);
   const [buscarTick, setBuscarTick] = useState(0);
   const [pdfLoadingId, setPdfLoadingId] = useState<string | null>(null);
+  const [reimprimiendoId, setReimprimiendoId] = useState<string | null>(null);
   const [sesion, setSesion] = useState<SesionCajaDTO | null>(null);
   const [balance, setBalance] = useState<BalanceCajaDTO | null>(null);
   const [cierresParciales, setCierresParciales] = useState<CierreParcial[]>([]);
@@ -132,6 +151,62 @@ export function HistorialModal({ onClose, empresaNombre }: { onClose: () => void
       toast.error((e as Error).message);
     } finally {
       setPdfLoadingId(null);
+    }
+  }
+
+  /**
+   * Vuelve a sacar el ticket por la ticketera.
+   *
+   * No toca la venta ni el comprobante: son los mismos datos y el mismo número,
+   * solo sale otra vez el papel. Si la ticketera no está disponible cae al PDF,
+   * igual que al cobrar, así que el cajero siempre termina con algo en la mano.
+   */
+  async function reimprimir(r: TransaccionRow) {
+    if (!empresaTicket) {
+      toast.error('Falta la configuración de la empresa para armar el ticket');
+      return;
+    }
+    setReimprimiendoId(r.venta_id);
+    try {
+      const data = await obtenerPdfDataVenta(r.venta_id);
+      if (!data.ok) {
+        toast.error(data.error);
+        return;
+      }
+
+      const res = await reimprimirComprobante(
+        data.pdf_data,
+        { empresa: empresaTicket, establecimiento: establecimiento ?? null, caja: caja ?? null },
+        almacenId ?? null,
+      );
+
+      if (res.via === 'agente' && res.estado === 'impreso') {
+        toast.success(`Ticket reimpreso en ${res.equipo}`);
+        return;
+      }
+      if (res.via === 'agente' && res.estado === 'esperando') {
+        toast.warning(
+          `El ticket está en cola en ${res.equipo} y todavía no sale. Revisa que la ticketera tenga papel y esté encendida.`,
+          { duration: 9000 },
+        );
+        return;
+      }
+
+      // Cualquier otro caso: la ticketera no está disponible → papel por PDF.
+      if (res.via === 'pdf' && res.motivo === 'sin-conexion') {
+        toast.error(`La computadora "${res.detalle}" está apagada o sin internet. Se abre el PDF para imprimirlo a mano.`);
+      } else if (res.via === 'pdf' && res.motivo === 'sin-equipo') {
+        toast.warning('No hay ninguna ticketera configurada en esta tienda. Se abre el PDF.');
+      } else {
+        toast.error('La ticketera no pudo imprimir. Se abre el PDF para imprimirlo a mano.');
+      }
+
+      const blob = await generarTicket(data.pdf_data);
+      abrirPDF(blob, `${data.tipo.toLowerCase()}_${data.numero.replace(/[^A-Za-z0-9_-]/g, '_')}.pdf`);
+    } catch (e) {
+      toast.error((e as Error).message);
+    } finally {
+      setReimprimiendoId(null);
     }
   }
 
@@ -400,6 +475,21 @@ export function HistorialModal({ onClose, empresaNombre }: { onClose: () => void
                     </TableCell>
                     <TableCell>
                       <div className="flex items-center justify-end gap-1">
+                        {r.estado !== 'ANULADA' && (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => reimprimir(r)}
+                            disabled={reimprimiendoId === r.venta_id}
+                            title="Reimprimir el ticket por la ticketera (no vuelve a cobrar)"
+                          >
+                            {reimprimiendoId === r.venta_id ? (
+                              <Loader2 className="h-3.5 w-3.5 animate-spin text-corp-600" />
+                            ) : (
+                              <Printer className="h-3.5 w-3.5 text-corp-600" />
+                            )}
+                          </Button>
+                        )}
                         <Button
                           variant="ghost"
                           size="sm"

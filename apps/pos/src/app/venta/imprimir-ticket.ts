@@ -23,7 +23,7 @@ import { logoAPuntos } from '@happy/lib/escpos/logo';
 import type { ComprobantePDFData } from '@/server/actions/caja-helpers';
 import {
   encolarTicket, esperarImpresion, equiposDisponibles, equipoElegido,
-  listoParaImprimir, type EquipoImpresion,
+  listoParaImprimir, conectado, type EquipoImpresion,
 } from './cola-impresion';
 
 export type EmpresaTicket = {
@@ -104,7 +104,7 @@ export async function datosDelTicket(
 
 export type ResultadoImpresion =
   | { via: 'agente'; estado: 'impreso' | 'esperando' | 'error'; equipo: string }
-  | { via: 'pdf'; motivo: 'sin-equipo' | 'sin-agente' | 'fallo'; detalle?: string };
+  | { via: 'pdf'; motivo: 'sin-equipo' | 'sin-agente' | 'fallo' | 'sin-conexion'; detalle?: string };
 
 /**
  * Elige por qué computadora imprimir.
@@ -112,6 +112,14 @@ export type ResultadoImpresion =
  * Primero la que el cajero haya fijado en este navegador; si no, la de su
  * tienda que esté lista. Devuelve null cuando no hay ninguna instalada, que es
  * la señal para caer al PDF.
+ *
+ * El equipo fijado NO se respeta a ciegas (incidente del 18/09/2026). Queda
+ * guardado en el navegador para siempre, así que un equipo que se eligió una
+ * vez para una prueba seguía siendo el elegido meses después, aunque fuera una
+ * laptop de otra tienda y estuviera apagada. El ticket se encolaba ahí y no
+ * salía por ninguna impresora: la cajera se quedaba sin papel sin entender por
+ * qué. Ahora el fijado tiene que estar prendido y ser de esta tienda; si no, se
+ * lo ignora y se sigue con el mejor disponible.
  */
 export async function equipoParaImprimir(almacenId?: string | null): Promise<EquipoImpresion | null> {
   const lista = await equiposDisponibles(almacenId);
@@ -119,7 +127,8 @@ export async function equipoParaImprimir(almacenId?: string | null): Promise<Equ
 
   const fijado = equipoElegido();
   const elegido = fijado ? lista.find((e) => e.id === fijado) : undefined;
-  if (elegido) return elegido;
+  const deOtraTienda = Boolean(almacenId && elegido && elegido.almacen_id !== almacenId);
+  if (elegido && listoParaImprimir(elegido) && !deOtraTienda) return elegido;
 
   // `equiposDisponibles` ya ordena poniendo primero los de esta tienda que
   // están listos, así que el primero es la mejor opción disponible.
@@ -138,6 +147,18 @@ export async function imprimirPorAgente(
   equipo: EquipoImpresion,
   opciones: { comprobanteId?: string | null; abrirCajon?: boolean } = {},
 ): Promise<ResultadoImpresion> {
+  /*
+   * Si la computadora no está prendida, el ticket no se encola: se cae al PDF.
+   *
+   * Encolarlo sería peor que no imprimir. El ticket queda esperando a un agente
+   * que no está, así que no sale nada en el momento —justo cuando el cliente
+   * está en el mostrador— y cuando esa computadora vuelva a prenderse, horas
+   * después o al día siguiente, escupe el ticket de una venta vieja.
+   */
+  if (!conectado(equipo)) {
+    return { via: 'pdf', motivo: 'sin-conexion', detalle: equipo.nombre };
+  }
+
   const ticket = construirTicket(datos, {
     avanceCorteMm: equipo.avance_corte_mm ?? undefined,
     abrirCajon: opciones.abrirCajon,
@@ -151,6 +172,29 @@ export async function imprimirPorAgente(
 
   const estado = await esperarImpresion(encolado.id, 12);
   return { via: 'agente', estado, equipo: equipo.nombre };
+}
+
+/**
+ * Vuelve a sacar por la ticketera un comprobante ya emitido.
+ *
+ * Es la salida que faltaba el 18/09/2026. Cuando el ticket no salía, la única
+ * idea que le quedaba a la cajera era volver a hacer la venta —o dejar de
+ * usar el sistema, que es lo que pasó: dos horas y media vendiendo en papel
+ * porque no había forma de imprimir el comprobante después.
+ *
+ * La venta ya está registrada y el número ya está emitido: reimprimir no
+ * genera nada nuevo, solo repite el papel.
+ */
+export async function reimprimirComprobante(
+  pdf: ComprobantePDFData,
+  extra: { empresa: EmpresaTicket; establecimiento: Establecimiento; caja?: string | null },
+  almacenId?: string | null,
+): Promise<ResultadoImpresion> {
+  const equipo = await equipoParaImprimir(almacenId);
+  if (!equipo) return { via: 'pdf', motivo: 'sin-equipo' };
+
+  const datos = await datosDelTicket(pdf, extra);
+  return imprimirPorAgente(datos, equipo);
 }
 
 /**
@@ -176,6 +220,7 @@ export async function imprimirDocumentoDeCaja(
 ): Promise<ResultadoImpresion> {
   const equipo = await equipoParaImprimir(almacenId);
   if (!equipo) return { via: 'pdf', motivo: 'sin-equipo' };
+  if (!conectado(equipo)) return { via: 'pdf', motivo: 'sin-conexion', detalle: equipo.nombre };
 
   const ticket = armar(equipo.avance_corte_mm ?? undefined);
   const encolado = await encolarTicket(ticket.aBase64(), equipo.id, { descripcion });

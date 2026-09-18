@@ -1022,11 +1022,23 @@ export function PosTerminal({
                 // no terminar con el comprobante impreso dos veces.
                 impresoPorAgente = true;
                 toast.warning(
-                  `El ticket esta en cola en ${r.equipo} y todavia no sale. Revisa que la ticketera tenga papel y este encendida.`,
-                  { duration: 9000 },
+                  `El ticket esta en cola en ${r.equipo} y todavia no sale. Revisa que la ticketera tenga papel y este encendida. La venta YA quedo registrada: cuando la arregles, sacalo con "Reimprimir" en Historial, no vuelvas a cobrarla.`,
+                  { duration: 14000 },
                 );
               } else if (r.via === 'agente') {
                 toast.error(`La ticketera de ${r.equipo} no pudo imprimir. Se abre el PDF para imprimirlo a mano.`);
+              } else if (r.via === 'pdf' && r.motivo === 'sin-conexion') {
+                /*
+                 * La computadora de la ticketera esta apagada o sin internet.
+                 * Se dice con nombre propio porque es lo que paso el 18/09/2026
+                 * y nadie supo interpretarlo: el ticket no salia y no habia
+                 * ningun mensaje que explicara que el problema era la impresora
+                 * y no el sistema.
+                 */
+                toast.error(
+                  `La computadora "${r.detalle}" esta apagada o sin internet, asi que el ticket no puede salir por la ticketera. Se abre el PDF para imprimirlo a mano. La venta YA quedo registrada.`,
+                  { duration: 14000 },
+                );
               }
             }
           } catch (e) {
@@ -2350,6 +2362,13 @@ export function PosTerminal({
         <HistorialModal
           onClose={() => setHistorialOpen(false)}
           empresaNombre={empresaNombre}
+          empresaTicket={empresaTicket}
+          almacenId={sesionActiva?.almacen_id ?? cajaActual?.almacen_id ?? null}
+          establecimiento={(() => {
+            const t = almacenes.find((a) => a.id === (sesionActiva?.almacen_id ?? cajaActual?.almacen_id));
+            return t ? { nombre: t.nombre, direccion: t.direccion } : null;
+          })()}
+          caja={sesionActiva?.caja_nombre ?? cajaActual?.nombre ?? null}
         />
       )}
 
