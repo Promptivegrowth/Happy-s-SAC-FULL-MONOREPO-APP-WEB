@@ -8,7 +8,7 @@ import { Card } from '@happy/ui/card';
 import { Input } from '@happy/ui/input';
 import { Button } from '@happy/ui/button';
 import { Badge } from '@happy/ui/badge';
-import { Trash2, Plus, Minus, ScanBarcode, X, Banknote, Building2, MessageCircle, Loader2, LayoutGrid, ShoppingBag, LogOut, Receipt, History, RotateCcw, Coins, Wallet, Search, LogIn, UserX, Pencil, Send, FileText, Printer, AlertTriangle } from 'lucide-react';
+import { Trash2, Plus, Minus, ScanBarcode, X, Banknote, Building2, MessageCircle, Loader2, LayoutGrid, ShoppingBag, LogOut, Receipt, History, RotateCcw, Coins, Wallet, Search, LogIn, UserX, Pencil, Send, FileText, Printer, AlertTriangle, WifiOff } from 'lucide-react';
 import { toast } from 'sonner';
 import { formatPEN, ordenTalla, formatTalla, normalizarTexto , formatTallaChip } from '@happy/lib';
 
@@ -34,6 +34,7 @@ import { CerrarCajaModal } from './cerrar-caja-modal';
 import { CobrarModal, type CobrarPayload } from './cobrar-modal';
 import { generarTicket, generarA4, abrirPDF } from './comprobante-pdf';
 import { datosDelTicket, equipoParaImprimir, imprimirPorAgente, type EmpresaTicket } from './imprimir-ticket';
+import { useEstadoConexion } from './estado-conexion';
 import type { EncabezadoCaja } from '@happy/lib/escpos/caja';
 import { generarPdfCotizacion, siguienteNumeroCotizacion, type FormatoCotizacion } from './cotizacion-pdf';
 import { HistorialModal } from './historial-modal';
@@ -847,6 +848,8 @@ export function PosTerminal({
   }
 
   const [cobrando, setCobrando] = useState(false);
+  /* Estado de la red, para avisar ANTES de que se caiga un cobro. */
+  const conexion = useEstadoConexion();
   /** Por que no hay caja, cuando no la hay. Null = no hay nada que explicar. */
   const [motivoCaja, setMotivoCaja] = useState<string | null>(null);
 
@@ -1173,6 +1176,41 @@ export function PosTerminal({
       // El stock acaba de bajar: que la pantalla lo muestre sin esperar al
       // refresco de cada minuto.
       refrescarCatalogo();
+    } catch (e) {
+      /*
+       * Si el cobro se cae, DECIRLO. Este catch no existía.
+       *
+       * Había un `try { ... } finally { setCobrando(false) }` sin catch: cuando
+       * `registrarVenta` fallaba —y se corta internet, falla— la excepción se
+       * iba al vacío. El spinner se apagaba y no salía ningún cartel. Para la
+       * cajera eso es exactamente "apreté Pagar y no pasó nada"; es lo que
+       * reportaron el 18/09/2026 como "se congeló el botón".
+       *
+       * Lo que más importa del mensaje no es el error: es si la venta quedó
+       * registrada o no, porque de eso depende si puede volver a cobrar o si
+       * cobrarí­a dos veces al mismo cliente. Cuando el navegador estaba sin
+       * internet se puede afirmar que no salió de la máquina. Cuando había
+       * conexión, la petición pudo llegar y perderse la respuesta, y ahí lo
+       * honesto es mandarla a mirar el historial antes de repetir.
+       */
+      const sinInternet = typeof navigator !== 'undefined' && navigator.onLine === false;
+      const detalle = (e as Error)?.message ?? 'error desconocido';
+
+      if (sinInternet) {
+        toast.error(
+          'Se cortó el internet: la venta NO se registró. Revisá la conexión y volvé a cobrarla; '
+          + 'no se emitió ningún comprobante ni se descontó stock.',
+          { duration: 15000 },
+        );
+      } else {
+        toast.error(
+          `No se pudo completar el cobro (${detalle}). ANTES de volver a cobrar, fijate en Historial `
+          + 'si la venta quedó registrada: puede haber llegado y haberse perdido la respuesta.',
+          { duration: 20000 },
+        );
+      }
+      // Que quede rastro para poder diagnosticarlo después.
+      console.error('[POS] fallo el cobro:', e);
     } finally {
       setCobrando(false);
     }
@@ -1285,6 +1323,34 @@ export function PosTerminal({
             * usuario, el botón Pagar quedaba deshabilitado sin explicación y en
             * la tienda estuvieron media hora sin poder vender sin saber por qué.
             */}
+          {conexion !== 'ok' && (
+            <div className={`mb-3 flex items-start gap-2 rounded-md border p-3 ${
+              conexion === 'sin-internet'
+                ? 'border-red-300 bg-red-50'
+                : 'border-amber-300 bg-amber-50'
+            }`}>
+              <WifiOff className={`mt-0.5 h-5 w-5 shrink-0 ${
+                conexion === 'sin-internet' ? 'text-red-600' : 'text-amber-600'
+              }`} />
+              <div>
+                <p className={`text-sm font-semibold ${
+                  conexion === 'sin-internet' ? 'text-red-900' : 'text-amber-900'
+                }`}>
+                  {conexion === 'sin-internet' ? 'Sin conexion con el sistema' : 'Conexion lenta'}
+                </p>
+                <p className={`mt-0.5 text-xs leading-relaxed ${
+                  conexion === 'sin-internet' ? 'text-red-800' : 'text-amber-800'
+                }`}>
+                  {conexion === 'sin-internet'
+                    ? 'Mientras diga esto, cobrar va a fallar: la venta no llega al sistema. '
+                      + 'Revisa el internet de la tienda antes de seguir. Lo que ya vendiste esta guardado.'
+                    : 'El sistema esta respondiendo lento. Cobrar puede demorar unos segundos; '
+                      + 'espera el ticket antes de volver a apretar Pagar para no cobrar dos veces.'}
+                </p>
+              </div>
+            </div>
+          )}
+
           {!sesionActiva && motivoCaja && (
             <div className="mb-3 flex items-start gap-2 rounded-md border border-red-300 bg-red-50 p-3">
               <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-red-600" />

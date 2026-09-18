@@ -9,7 +9,14 @@ import { NextResponse, type NextRequest } from 'next/server';
  * equipo, que la propia ruta valida. Si pasara por acá, el guardia lo mandaría
  * al login y ningún ticket saldría nunca.
  */
-const PUBLIC = ['/login', '/auth/callback', '/api/impresion'];
+/*
+ * `/api/ping` mide la red, no la sesion.
+ *
+ * Si pidiera login, con la sesion vencida devolveria el HTML del /login con
+ * un 200 y el POS concluiria que hay internet igual. Justo al reves de lo que
+ * tiene que detectar.
+ */
+const PUBLIC = ['/login', '/auth/callback', '/api/impresion', '/api/ping'];
 
 
 /**

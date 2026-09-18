@@ -428,6 +428,17 @@ export function CobrarModal({
         adelanto_aplicado: adelantoMonto > 0 ? { monto: adelantoMonto } : null,
         vendedor_usuario_id: vendedorId || null,
       });
+    } catch (e) {
+      /*
+       * Segunda red por si algo se escapa del cobro.
+       *
+       * Acá también había un try/finally sin catch, así que una excepción que
+       * `onConfirmar` no atrapara terminaba en una promesa rechazada que nadie
+       * mira: el botón volvía a habilitarse y no pasaba nada más. Un cobro que
+       * falla en silencio es lo peor que puede hacer un POS.
+       */
+      toast.error(`No se pudo cobrar: ${(e as Error)?.message ?? 'error desconocido'}`, { duration: 12000 });
+      console.error('[POS] fallo al confirmar el cobro:', e);
     } finally {
       setConfirming(false);
     }
