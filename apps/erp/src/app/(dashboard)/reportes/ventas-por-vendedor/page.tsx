@@ -6,18 +6,19 @@ import { Badge } from '@happy/ui/badge';
 import { Trophy, Users } from 'lucide-react';
 import { PageShell } from '@/components/page-shell';
 import { ExportButtons } from '@/components/reportes/export-buttons';
-import { formatDate, formatPEN } from '@happy/lib';
+import { formatDate, formatDateTime, formatPEN } from '@happy/lib';
 import {
   reporteVentasPorVendedor,
   listarAlmacenesLookup,
   type FiltrosVentasVendedor,
 } from '@/server/actions/reportes';
+import { ventasPorVendedorDetalle, listarVendedoresLookup } from '@/server/actions/ventas-vendedor-detalle';
 import { CANALES_VENTA, hoy, inicioDeMes } from '@/server/actions/reportes-helpers';
 
 export const metadata = { title: 'Ventas por vendedor' };
 export const dynamic = 'force-dynamic';
 
-type SP = { desde?: string; hasta?: string; canal?: string; almacen_id?: string };
+type SP = { desde?: string; hasta?: string; canal?: string; almacen_id?: string; vendedor_id?: string };
 
 export default async function Page({ searchParams }: { searchParams: Promise<SP> }) {
   const sp = await searchParams;
@@ -25,10 +26,13 @@ export default async function Page({ searchParams }: { searchParams: Promise<SP>
   const hasta = sp.hasta || hoy();
   const canal = (sp.canal as FiltrosVentasVendedor['canal']) || '';
   const almacen_id = sp.almacen_id || '';
+  const vendedor_id = sp.vendedor_id || '';
 
-  const [resultado, almacenes] = await Promise.all([
+  const [resultado, almacenes, detalle, vendedores] = await Promise.all([
     reporteVentasPorVendedor({ desde, hasta, canal, almacen_id }),
     listarAlmacenesLookup(),
+    ventasPorVendedorDetalle({ desde, hasta, canal, almacen_id, vendedor_id }),
+    listarVendedoresLookup(),
   ]);
 
   const { metricas, rows } = resultado;
@@ -36,7 +40,49 @@ export default async function Page({ searchParams }: { searchParams: Promise<SP>
     `Desde ${formatDate(desde)} hasta ${formatDate(hasta)}`,
     canal ? `Canal: ${canal}` : null,
     almacen_id ? `Almacén: ${almacenes.find((a) => a.id === almacen_id)?.nombre ?? almacen_id}` : null,
+    vendedor_id ? `Vendedor: ${vendedores.find((v) => v.id === vendedor_id)?.nombre ?? vendedor_id}` : null,
   ].filter(Boolean) as string[];
+
+  /*
+   * Dos cortes más del mismo período, cada uno con su descarga.
+   *
+   * El ranking contesta la comisión; el corte por día muestra la curva y delata
+   * el día flojo; el detalle es el que hace falta cuando alguien discute un
+   * número y hay que ir venta por venta.
+   */
+  const exportPorDia = {
+    titulo: 'Ventas por vendedor y día',
+    subtitulo: `Del ${formatDate(desde)} al ${formatDate(hasta)}`,
+    filtros,
+    cols: [
+      { header: 'Fecha', key: 'fecha', formato: 'fecha' as const, width: 14 },
+      { header: 'Vendedor', key: 'vendedor_nombre', width: 28 },
+      { header: 'Ventas', key: 'cantidad_ventas', formato: 'numero' as const, width: 10 },
+      { header: 'Total vendido', key: 'total_vendido', formato: 'moneda' as const, width: 16 },
+      { header: 'Ticket promedio', key: 'ticket_promedio', formato: 'moneda' as const, width: 16 },
+    ],
+    rows: detalle.por_dia as unknown as Record<string, unknown>[],
+    totales: { total_vendido: detalle.total_general },
+  };
+
+  const exportDetalle = {
+    titulo: 'Detalle de ventas por vendedor',
+    subtitulo: `Del ${formatDate(desde)} al ${formatDate(hasta)}`,
+    filtros,
+    cols: [
+      { header: 'Fecha', key: 'fecha', formato: 'fecha' as const, width: 18 },
+      { header: 'Comprobante', key: 'documento', width: 18 },
+      { header: 'Tipo', key: 'tipo_documento', width: 14 },
+      { header: 'N° interno', key: 'numero', width: 14 },
+      { header: 'Canal', key: 'canal', width: 12 },
+      { header: 'Cliente', key: 'cliente', width: 30 },
+      { header: 'Vendedor', key: 'vendedor_nombre', width: 26 },
+      { header: 'Medios de pago', key: 'pagos', width: 44 },
+      { header: 'Total', key: 'total', formato: 'moneda' as const, width: 14 },
+    ],
+    rows: detalle.detalle as unknown as Record<string, unknown>[],
+    totales: { total: detalle.total_general },
+  };
 
   const exportPayload = {
     titulo: 'Ventas por Vendedor',
@@ -110,6 +156,13 @@ export default async function Page({ searchParams }: { searchParams: Promise<SP>
             {almacenes.map((a) => <option key={a.id} value={a.id}>{a.codigo} · {a.nombre}</option>)}
           </select>
         </div>
+        <div>
+          <label className="mb-1 block text-[10px] font-medium uppercase tracking-wider text-slate-500">Vendedor</label>
+          <select name="vendedor_id" defaultValue={vendedor_id} className="h-9 rounded-md border bg-white px-2 text-sm">
+            <option value="">Todos</option>
+            {vendedores.map((v) => <option key={v.id} value={v.id}>{v.nombre}</option>)}
+          </select>
+        </div>
         <button type="submit" className="h-9 rounded-md bg-happy-500 px-4 text-sm font-medium text-white hover:bg-happy-600">
           Aplicar
         </button>
@@ -167,6 +220,99 @@ export default async function Page({ searchParams }: { searchParams: Promise<SP>
                 ))}
               </TableBody>
             </Table>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* ─────────── Día por día ─────────── */}
+      {detalle.por_dia.length > 0 && (
+        <Card>
+          <CardContent className="p-4">
+            <div className="mb-1 flex items-center justify-between">
+              <h3 className="font-display text-sm font-semibold text-corp-900">Día por día</h3>
+              <ExportButtons payload={exportPorDia} />
+            </div>
+            <p className="mb-3 text-xs text-slate-500">
+              Cuánto vendió cada vendedor en cada fecha. Es el corte que hace falta cuando alguien
+              discute su comisión, o para ver en qué días rinde cada uno.
+            </p>
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Fecha</TableHead>
+                  <TableHead>Vendedor</TableHead>
+                  <TableHead className="text-right">Ventas</TableHead>
+                  <TableHead className="text-right">Total vendido</TableHead>
+                  <TableHead className="text-right">Ticket promedio</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {detalle.por_dia.slice(0, 200).map((d, i) => (
+                  <TableRow key={`${d.fecha}-${d.vendedor_id}-${i}`}>
+                    <TableCell className="font-mono text-xs">{formatDate(d.fecha)}</TableCell>
+                    <TableCell className="text-sm">{d.vendedor_nombre}</TableCell>
+                    <TableCell className="text-right text-sm">{d.cantidad_ventas}</TableCell>
+                    <TableCell className="text-right text-sm font-semibold text-emerald-700">{formatPEN(d.total_vendido)}</TableCell>
+                    <TableCell className="text-right text-sm text-slate-600">{formatPEN(d.ticket_promedio)}</TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+            {detalle.por_dia.length > 200 && (
+              <p className="border-t bg-slate-50 p-2 text-center text-[10px] text-slate-500">
+                Mostrando 200 de {detalle.por_dia.length} — la descarga incluye todas.
+              </p>
+            )}
+          </CardContent>
+        </Card>
+      )}
+
+      {/* ─────────── Venta por venta ─────────── */}
+      {detalle.detalle.length > 0 && (
+        <Card>
+          <CardContent className="p-4">
+            <div className="mb-1 flex items-center justify-between">
+              <h3 className="font-display text-sm font-semibold text-corp-900">
+                Detalle de ventas ({detalle.cantidad_ventas})
+              </h3>
+              <ExportButtons payload={exportDetalle} />
+            </div>
+            <p className="mb-3 text-xs text-slate-500">
+              Cada venta con su comprobante, su cliente y cómo se pagó. Es lo que permite auditar
+              un número sin salir del sistema.
+            </p>
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Fecha</TableHead>
+                  <TableHead>Comprobante</TableHead>
+                  <TableHead>Cliente</TableHead>
+                  <TableHead>Vendedor</TableHead>
+                  <TableHead>Medios de pago</TableHead>
+                  <TableHead className="text-right">Total</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {detalle.detalle.slice(0, 200).map((v) => (
+                  <TableRow key={v.venta_id}>
+                    <TableCell className="text-xs">{formatDateTime(v.fecha)}</TableCell>
+                    <TableCell className="font-mono text-xs">
+                      <div className="font-semibold text-corp-900">{v.documento}</div>
+                      <div className="text-[10px] font-normal text-slate-400">{v.numero}</div>
+                    </TableCell>
+                    <TableCell className="text-xs">{v.cliente}</TableCell>
+                    <TableCell className="text-xs">{v.vendedor_nombre}</TableCell>
+                    <TableCell className="text-xs text-slate-600">{v.pagos}</TableCell>
+                    <TableCell className="text-right text-sm font-semibold">{formatPEN(v.total)}</TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+            {detalle.detalle.length > 200 && (
+              <p className="border-t bg-slate-50 p-2 text-center text-[10px] text-slate-500">
+                Mostrando 200 de {detalle.detalle.length} — la descarga incluye todas.
+              </p>
+            )}
           </CardContent>
         </Card>
       )}

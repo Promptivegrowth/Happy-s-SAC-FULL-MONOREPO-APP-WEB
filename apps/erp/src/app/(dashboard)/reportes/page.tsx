@@ -120,6 +120,14 @@ const REPORTES: ReporteCard[] = [
     badge: 'Nuevo',
   },
   {
+    href: '/reportes/cuadres-caja',
+    titulo: 'Cuadres de caja',
+    descripcion: 'Historial de todos los turnos: quién abrió y cerró, cuánto se esperaba en el cajón y cuánto se contó. Cada turno abre su arqueo completo, desglosado por cuenta, para imprimir o descargar.',
+    icono: Wallet,
+    categoria: 'Finanzas',
+    badge: 'Nuevo',
+  },
+  {
     href: '/reportes/caja',
     titulo: 'Flujo de caja',
     descripcion: 'Ingresos POS/WEB/B2B vs egresos talleres + proveedores. Saldo por día.',
