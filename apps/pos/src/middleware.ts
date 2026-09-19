@@ -63,5 +63,24 @@ export async function middleware(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ['/((?!_next/static|_next/image|favicon.ico|manifest.json|.*\\.(?:svg|png|jpg|jpeg|gif|webp|avif|ico|woff|woff2)$).*)'],
+  /*
+   * `api/ping` queda FUERA del middleware, no sólo exenta de login.
+   *
+   * Acá arriba se llama a `auth.getUser()` en TODA request, antes de mirar si la
+   * ruta es pública. El ping sale del navegador cada tanto y lleva las cookies
+   * de sesión, así que cada uno pedía una comprobación de auth y, con el token
+   * por vencer, disparaba una renovación. Varias renovaciones simultáneas del
+   * mismo token hacen que Supabase lo revoque por reuso: la sesión muere y el
+   * POS vuelve solo al login. Pasó el 18/09/2026 — cuatro reingresos en once
+   * minutos desde la misma computadora.
+   *
+   * Medir la red no necesita saber quién sos.
+   *
+   * `api/impresion` sale por la misma razón y pesa todavía más: el agente de
+   * cada caja la consulta UNA VEZ POR SEGUNDO, y cada consulta gastaba una
+   * comprobación de sesión que no servía para nada. Esas rutas se identifican
+   * con el token del equipo y lo validan ellas mismas; nunca necesitaron pasar
+   * por el guardia.
+   */
+  matcher: ['/((?!api/ping|api/impresion|_next/static|_next/image|favicon.ico|manifest.json|.*\\.(?:svg|png|jpg|jpeg|gif|webp|avif|ico|woff|woff2)$).*)'],
 };

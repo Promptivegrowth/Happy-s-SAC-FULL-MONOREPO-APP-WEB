@@ -19,8 +19,14 @@ import { useEffect, useState } from 'react';
 
 export type EstadoConexion = 'ok' | 'sin-internet' | 'lenta';
 
-/** Cada cuánto se comprueba, en milisegundos. */
-const CADA = 20_000;
+/**
+ * Cada cuánto se comprueba, en milisegundos.
+ *
+ * Un minuto y no veinte segundos: lo que se busca es enterarse de que se cayó
+ * el internet antes de cobrar, y para eso alcanza. Cuanto menos hable el POS
+ * con el servidor por su cuenta, menos se mete en el camino de lo que importa.
+ */
+const CADA = 60_000;
 
 /** A partir de acá la conexión está para avisar: el cobro se va a sentir. */
 const LENTA_MS = 4_000;
@@ -45,6 +51,15 @@ async function medir(): Promise<EstadoConexion> {
     const r = await fetch(`/api/ping?t=${inicio}`, {
       cache: 'no-store',
       signal: abortar.signal,
+      /*
+       * SIN cookies, a proposito.
+       *
+       * Mandar la sesion en cada comprobacion hacia que el servidor la
+       * revisara, y con el token por vencer intentara renovarlo. Varias
+       * renovaciones a la vez lo revocan y cierran la sesion sola. Medir la red
+       * no necesita identificarse.
+       */
+      credentials: 'omit',
     });
     if (!r.ok) return 'sin-internet';
     return Date.now() - inicio > LENTA_MS ? 'lenta' : 'ok';
