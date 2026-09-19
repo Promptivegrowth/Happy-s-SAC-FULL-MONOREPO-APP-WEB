@@ -58,14 +58,43 @@ export async function middleware(request: NextRequest) {
     },
   );
 
-  // getSession() solo decodifica el JWT del cookie (sin round-trip al server de auth).
-  // Se usa para gating de rutas en el edge — la validación real ocurre en server components
-  // vía getSession() de @/server/session que sí llama auth.getUser().
-  const { data: { session } } = await supabase.auth.getSession();
-  const user = session?.user ?? null;
+  /*
+   * Se le PREGUNTA al servidor si la sesión sirve. Antes se decodificaba el JWT.
+   *
+   * `getSession()` sólo lee el token del cookie y comprueba que no haya vencido;
+   * no sabe si lo revocaron. Y cambiar la contraseña revoca las sesiones al
+   * instante, mientras el JWT sigue pareciendo bueno hasta una hora más.
+   *
+   * Con eso las dos capas se contradecían y el navegador quedaba rebotando:
+   * acá se veía "sesión válida" y se mandaba de /login a /dashboard; el layout
+   * del dashboard sí preguntaba de verdad, fallaba, y devolvía a /login. Otra
+   * vuelta, y otra, hasta ERR_TOO_MANY_REDIRECTS. Le pasó a Luigi el 19/09/2026
+   * justo después de cambiar su contraseña, que es exactamente cuando este
+   * desacuerdo aparece.
+   *
+   * `getUser()` cuesta una consulta al servidor de auth, pero es la única
+   * respuesta que coincide con la que va a dar el layout.
+   */
+  const { data: { user } } = await supabase.auth.getUser();
 
   const { pathname } = request.nextUrl;
   const isPublic = PUBLIC_PATHS.some((p) => pathname.startsWith(p));
+
+  /*
+   * Válvula de escape: en el login, una sesión que ya no sirve se tira.
+   *
+   * Si igual quedara alguna cookie vieja dando vueltas, sin esto el navegador
+   * no tiene forma de salir solo: hay que entrar a borrar cookies a mano, que
+   * es lo que Edge terminó sugiriendo. Limpiarlas acá hace que el bucle no
+   * pueda ni empezar.
+   */
+  if (!user && pathname === '/login') {
+    for (const cookie of request.cookies.getAll()) {
+      if (cookie.name.startsWith('sb-') && cookie.name.includes('auth-token')) {
+        response.cookies.delete(cookie.name);
+      }
+    }
+  }
 
   if (!user && !isPublic) {
     const url = request.nextUrl.clone();

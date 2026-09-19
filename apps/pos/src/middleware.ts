@@ -51,6 +51,23 @@ export async function middleware(request: NextRequest) {
   const { data: { user } } = await supabase.auth.getUser();
   const { pathname } = request.nextUrl;
   const isPublic = PUBLIC.some((p) => pathname.startsWith(p));
+
+  /*
+   * En el login, una sesion que ya no sirve se tira.
+   *
+   * Aca se pregunta al servidor —no se decodifica el token— asi que el bucle de
+   * redirecciones que sufrio el ERP no aplica. Pero si por lo que sea quedara
+   * una cookie vieja trabando la entrada, el navegador no tiene forma de salir
+   * solo y hay que borrar cookies a mano. En una caja con clientes esperando,
+   * eso no puede pasar.
+   */
+  if (!user && pathname === '/login') {
+    for (const cookie of request.cookies.getAll()) {
+      if (cookie.name.startsWith('sb-') && cookie.name.includes('auth-token')) {
+        response.cookies.delete(cookie.name);
+      }
+    }
+  }
   if (!user && !isPublic) {
     const url = request.nextUrl.clone(); url.pathname = '/login';
     return redirigirConservandoSesion(url, response);
