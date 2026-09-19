@@ -456,6 +456,8 @@ type AvioRow = {
   material: string;
   codigo: string;
   categoria: string;
+  /** Unidad de consumo del material: m, und, kg... */
+  unidad: string;
   enviado: number;
   devuelto: number;
   observacion: string;
@@ -493,6 +495,7 @@ export function AviosDevueltosEditor({ osId, avios, disabled }: { osId: string; 
           <TableRow>
             <TableHead>Material</TableHead>
             <TableHead>Categoría</TableHead>
+            <TableHead>Unidad</TableHead>
             <TableHead className="text-right">Enviado</TableHead>
             <TableHead className="text-right">Devuelto</TableHead>
             <TableHead className="text-right">Consumo real</TableHead>
@@ -509,6 +512,8 @@ export function AviosDevueltosEditor({ osId, avios, disabled }: { osId: string; 
                   {a.codigo && <span className="ml-2 font-mono text-[10px] text-slate-400">{a.codigo}</span>}
                 </TableCell>
                 <TableCell>{a.categoria && <Badge variant="secondary" className="text-[10px]">{a.categoria}</Badge>}</TableCell>
+                {/* La unidad manda: 3227 en metros y 3227 en unidades no son lo mismo. */}
+                <TableCell className="font-mono text-xs text-slate-600">{a.unidad}</TableCell>
                 <TableCell className="text-right font-mono text-sm">{a.enviado.toFixed(4)}</TableCell>
                 <TableCell className="text-right">
                   <Input

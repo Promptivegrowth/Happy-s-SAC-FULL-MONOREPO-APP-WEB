@@ -34,7 +34,7 @@ type AvioOS = {
   cantidad_enviada: number;
   cantidad_devuelta: number | null;
   observacion: string | null;
-  materiales: { nombre: string; codigo: string; categoria: string } | null;
+  materiales: { nombre: string; codigo: string; categoria: string; unidad_consumo_id: string | null } | null;
 };
 
 export default async function Page({ params }: { params: Promise<{ id: string }> }) {
@@ -53,7 +53,7 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
       .order('talla'),
     sb
       .from('ordenes_servicio_avios')
-      .select('id, cantidad_enviada, cantidad_devuelta, observacion, materiales(nombre, codigo, categoria)')
+      .select('id, cantidad_enviada, cantidad_devuelta, observacion, materiales(nombre, codigo, categoria, unidad_consumo_id)')
       .eq('os_id', id),
     sb.from('talleres').select('id, nombre').eq('activo', true).order('nombre'),
   ]);
@@ -76,6 +76,26 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
   const corte = (os as unknown as { ot_corte?: { numero: string; id: string } | null }).ot_corte;
   const lineas = (lineasData ?? []) as unknown as LineaOS[];
   const avios = (aviosData ?? []) as unknown as AvioOS[];
+
+  /*
+   * La unidad de medida de cada avío.
+   *
+   * Sin ella, la guía al taller decía "ELASTICO POLIESTER DE 5CM BLANCO · 3227.8"
+   * y nadie podía saber si eran metros, rollos o centímetros: ni el taller al
+   * recibir, ni quien devuelve el sobrante, ni quien revisa después. Lo pidió
+   * Javier el 18/09/2026.
+   *
+   * Se trae en consulta aparte para no depender del nombre que PostgREST le dé
+   * a la relación entre material y unidad.
+   */
+  const unidadDe = new Map<string, string>();
+  const idsUnidad = [...new Set(avios.map((a) => a.materiales?.unidad_consumo_id).filter(Boolean))] as string[];
+  if (idsUnidad.length > 0) {
+    const { data: uds } = await sb.from('unidades_medida').select('id, codigo').in('id', idsUnidad);
+    for (const u of (uds ?? []) as Array<{ id: string; codigo: string }>) unidadDe.set(u.id, u.codigo);
+  }
+  const unidadAvio = (a: AvioOS) =>
+    (a.materiales?.unidad_consumo_id ? unidadDe.get(a.materiales.unidad_consumo_id) : null) ?? '—';
   const totalUnidades = lineas.reduce((s, l) => s + Number(l.cantidad), 0);
   const totalRecep = lineas.reduce((s, l) => s + Number(l.cantidad_recepcionada ?? 0), 0);
   const totalFallas = lineas.reduce((s, l) => s + Number(l.cantidad_fallada ?? 0), 0);
@@ -109,6 +129,7 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
       material: a.materiales?.nombre ?? '—',
       categoria: a.materiales?.categoria ?? null,
       cantidad: Number(a.cantidad_enviada ?? 0),
+      unidad: unidadAvio(a),
     })),
   };
 
@@ -272,6 +293,7 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
                 material: a.materiales?.nombre ?? '—',
                 codigo: a.materiales?.codigo ?? '',
                 categoria: a.materiales?.categoria ?? '',
+                unidad: unidadAvio(a),
                 enviado: Number(a.cantidad_enviada ?? 0),
                 devuelto: Number(a.cantidad_devuelta ?? 0),
                 observacion: a.observacion ?? '',

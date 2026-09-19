@@ -33,7 +33,8 @@ export type OSPdfData = {
   cuidados?: string | null;
   consideraciones?: string | null;
   lineas: { producto: string; codigo?: string | null; talla: string; cantidad: number }[];
-  avios: { material: string; categoria?: string | null; cantidad: number }[];
+  /* `unidad` es el codigo de la unidad de consumo: m, und, kg... */
+  avios: { material: string; categoria?: string | null; cantidad: number; unidad?: string | null }[];
 };
 
 const AZUL: [number, number, number] = [30, 58, 95];
@@ -254,12 +255,14 @@ function renderCopia(
     autoTable(doc, {
       startY: y,
       margin: { left: M, right: M },
-      head: [['Item', 'Material', 'Categoría', 'Cantidad enviada']],
+      head: [['Item', 'Material', 'Categoría', 'Cantidad enviada', 'Unidad']],
       body: os.avios.map((a, i) => [
         String(i + 1),
         a.material,
         a.categoria ?? '—',
         Number(a.cantidad).toFixed(4),
+        // Sin la unidad, el taller no sabe si recibe metros, rollos o unidades.
+        a.unidad ?? '—',
       ]),
       headStyles: { fillColor: GRIS, textColor: 255, fontSize: 7.5, halign: 'center' },
       bodyStyles: { fontSize: 7.5, cellPadding: 1.2 },
