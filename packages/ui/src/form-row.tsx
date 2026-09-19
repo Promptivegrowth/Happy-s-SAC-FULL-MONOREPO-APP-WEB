@@ -46,17 +46,28 @@ export function FormSection({
   description,
   children,
   className,
+  actions,
 }: {
   title: string;
   description?: string;
   children: React.ReactNode;
   className?: string;
+  /**
+   * Controles al costado del título: un botón de refrescar, un enlace.
+   *
+   * Opcional y al final, así las secciones que ya existían siguen exactamente
+   * igual — sólo cambia la alineación cuando alguien pasa algo.
+   */
+  actions?: React.ReactNode;
 }) {
   return (
     <section className={cn('rounded-xl border bg-white p-6 shadow-soft', className)}>
-      <header className="mb-5">
-        <h2 className="font-display text-base font-semibold text-corp-900">{title}</h2>
-        {description && <p className="mt-1 text-sm text-slate-500">{description}</p>}
+      <header className="mb-5 flex items-start justify-between gap-4">
+        <div>
+          <h2 className="font-display text-base font-semibold text-corp-900">{title}</h2>
+          {description && <p className="mt-1 text-sm text-slate-500">{description}</p>}
+        </div>
+        {actions && <div className="shrink-0">{actions}</div>}
       </header>
       <div className="space-y-4">{children}</div>
     </section>

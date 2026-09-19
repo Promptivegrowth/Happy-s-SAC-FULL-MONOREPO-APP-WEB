@@ -10,6 +10,7 @@ import { Textarea } from '@happy/ui/textarea';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@happy/ui/table';
 import { Loader2, Save, Plus, Trash2, AlertTriangle, Search, ScanLine, Zap, Upload, X, Truck, RefreshCw, Pencil, Check } from 'lucide-react';
 import { ajustarStock } from '@/server/actions/inventario';
+import { listarVariantesParaTraslado } from '@/server/actions/traslados';
 import { toast } from 'sonner';
 import { formatTallaChip } from '@happy/lib';
 import {
@@ -43,7 +44,7 @@ function nextUid() {
 
 export function NuevoTrasladoForm({
   almacenes,
-  variantes,
+  variantes: variantesIniciales,
   materiales,
   sinMateriales = false,
   puedeAjustar = false,
@@ -66,6 +67,81 @@ export function NuevoTrasladoForm({
 }) {
   const router = useRouter();
   const [pending, start] = useTransition();
+
+  /*
+   * El catálogo de productos se puede volver a pedir sin recargar la página.
+   *
+   * Venía fijo desde el servidor, cargado una sola vez al abrir la pantalla. Si
+   * alguien creaba un producto mientras tanto —que es justo lo que hizo almacén
+   * el 19/09/2026— no aparecía en el buscador NI al pasarle la pistola, y la
+   * única salida era recargar y perder todas las líneas cargadas.
+   *
+   * Es un problema distinto del stock: aquel era "el número está viejo", este es
+   * "el producto no existe para esta pantalla".
+   */
+  const [variantes, setVariantes] = useState<VarianteItem[]>(variantesIniciales);
+  const [buscandoNuevos, setBuscandoNuevos] = useState(false);
+
+  /*
+   * Corregir el stock desde la propia fila del traslado.
+   *
+   * El lápiz existía sólo dentro de la ventana de "Agregar varios", y almacén
+   * trabaja en esta tabla: veía el botón de refrescar pero no tenía cómo
+   * corregir, que era justamente lo que necesitaba. Reportado el 19/09/2026.
+   */
+  const [ajustandoUid, setAjustandoUid] = useState<string | null>(null);
+  const [valorAjusteFila, setValorAjusteFila] = useState('');
+  const [guardandoAjusteFila, setGuardandoAjusteFila] = useState(false);
+
+  async function guardarAjusteFila(varianteId: string, etiqueta: string) {
+    const n = Number(valorAjusteFila);
+    if (!Number.isFinite(n) || n < 0) {
+      toast.error('Escribí una cantidad válida (0 o más)');
+      return;
+    }
+    setGuardandoAjusteFila(true);
+    try {
+      const r = await ajustarStock({
+        almacen_id: origenId,
+        variante_id: varianteId,
+        cantidad_nueva: n,
+        motivo: 'CONTEO',
+        observacion: `Corregido desde el armado de un traslado (${etiqueta})`,
+      });
+      if (!r.ok) {
+        toast.error(r.error ?? 'No se pudo corregir el stock');
+        return;
+      }
+      toast.success(`${etiqueta}: stock corregido a ${n}`);
+      setAjustandoUid(null);
+      setValorAjusteFila('');
+      setRefrescoStock((x) => x + 1);
+    } finally {
+      setGuardandoAjusteFila(false);
+    }
+  }
+
+  async function recargarCatalogo() {
+    setBuscandoNuevos(true);
+    try {
+      const antes = variantes.length;
+      const r = await listarVariantesParaTraslado();
+      if (!r.ok || !r.data) {
+        toast.error(r.ok ? 'No se pudo actualizar la lista' : (r.error ?? 'No se pudo actualizar la lista'));
+        return;
+      }
+      setVariantes(r.data);
+      const nuevos = r.data.length - antes;
+      toast.success(
+        nuevos > 0
+          ? `Lista actualizada: ${nuevos} producto(s) nuevo(s) disponible(s)`
+          : 'Lista actualizada. No hay productos nuevos.',
+      );
+    } finally {
+      setBuscandoNuevos(false);
+    }
+  }
+
   const [origenId, setOrigenId] = useState<string>('');
   const [destinoId, setDestinoId] = useState<string>('');
   const [motivo, setMotivo] = useState('');
@@ -667,6 +743,25 @@ export function NuevoTrasladoForm({
             : 'Seleccione el almacén origen para ver stock disponible al agregar productos.'
         }
         className="p-5"
+        actions={
+          /*
+           * Traer los productos creados después de abrir esta pantalla.
+           *
+           * Va acá arriba, al lado del título, porque es lo primero que se
+           * busca cuando un producto "no aparece": ni el buscador ni la pistola
+           * lo encuentran hasta que la lista se vuelve a pedir.
+           */
+          <button
+            type="button"
+            onClick={() => void recargarCatalogo()}
+            disabled={buscandoNuevos}
+            title="Traer los productos que se crearon después de abrir esta pantalla"
+            className="inline-flex items-center gap-1.5 rounded-md border border-slate-300 px-2.5 py-1.5 text-xs font-medium text-slate-600 transition hover:border-happy-300 hover:text-happy-700 disabled:opacity-50"
+          >
+            <RefreshCw className={`h-3.5 w-3.5 ${buscandoNuevos ? 'animate-spin' : ''}`} />
+            Buscar productos nuevos
+          </button>
+        }
       >
         <div className="space-y-3">
           {/* Lectora de código de barras SIEMPRE visible (pedido del cliente
@@ -794,15 +889,64 @@ export function NuevoTrasladoForm({
                             <span className="text-slate-400">—</span>
                           ) : stockLoading ? (
                             <Loader2 className="ml-auto h-3 w-3 animate-spin text-slate-400" />
+                          ) : ajustandoUid === l.uid ? (
+                            <span className="inline-flex items-center gap-1">
+                              <input
+                                type="number"
+                                min={0}
+                                autoFocus
+                                value={valorAjusteFila}
+                                onChange={(e) => setValorAjusteFila(e.target.value.replace(/[^\d]/g, ''))}
+                                onKeyDown={(e) => {
+                                  if (e.key === 'Enter' && l.variante_id) {
+                                    e.preventDefault();
+                                    void guardarAjusteFila(l.variante_id, l.display || 'producto');
+                                  }
+                                  if (e.key === 'Escape') { setAjustandoUid(null); setValorAjusteFila(''); }
+                                }}
+                                placeholder="real"
+                                className="h-7 w-16 rounded border border-happy-400 px-1.5 text-right font-mono text-xs focus:outline-none focus:ring-2 focus:ring-happy-100"
+                              />
+                              <button
+                                type="button"
+                                onClick={() => l.variante_id && void guardarAjusteFila(l.variante_id, l.display || 'producto')}
+                                disabled={guardandoAjusteFila}
+                                title="Guardar la cantidad real"
+                                className="rounded p-1 text-emerald-600 hover:bg-emerald-50 disabled:opacity-50"
+                              >
+                                {guardandoAjusteFila
+                                  ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                  : <Check className="h-3.5 w-3.5" />}
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => { setAjustandoUid(null); setValorAjusteFila(''); }}
+                                disabled={guardandoAjusteFila}
+                                title="Cancelar"
+                                className="rounded p-1 text-slate-400 hover:bg-slate-100 disabled:opacity-50"
+                              >
+                                <X className="h-3.5 w-3.5" />
+                              </button>
+                            </span>
                           ) : (
-                            <span
-                              className={
-                                insuficiente
-                                  ? 'font-semibold text-rose-600'
-                                  : 'text-slate-700'
-                              }
-                            >
-                              {stockDisp.toLocaleString('es-PE', { maximumFractionDigits: 4 })}
+                            <span className="inline-flex items-center gap-1">
+                              <span className={insuficiente ? 'font-semibold text-rose-600' : 'text-slate-700'}>
+                                {stockDisp.toLocaleString('es-PE', { maximumFractionDigits: 4 })}
+                              </span>
+                              {/* El lápiz, en la fila donde almacén está trabajando. */}
+                              {puedeAjustar && l.tipo === 'VARIANTE' && l.variante_id && origenId && (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setAjustandoUid(l.uid);
+                                    setValorAjusteFila(String(stockDisp));
+                                  }}
+                                  title="Corregir el stock real de este producto en el almacén origen"
+                                  className="rounded p-0.5 text-slate-300 transition hover:bg-slate-100 hover:text-happy-600"
+                                >
+                                  <Pencil className="h-3 w-3" />
+                                </button>
+                              )}
                             </span>
                           )}
                         </TableCell>
