@@ -8,6 +8,14 @@ export const ROLES = [
   'jefe_produccion',
   'operario',
   'almacenero',
+  /**
+   * Almacén La Quinta: sólo ve el módulo de Inventario.
+   *
+   * Es un almacenero con el menú recortado, no otro juego de permisos: para las
+   * políticas de la base cuenta como `almacenero` (ver migración 103). El
+   * recorte vive en el mapa de rutas del ERP.
+   */
+  'almacen_la_quinta',
   'cajero',
   'vendedor_b2b',
   'contador',

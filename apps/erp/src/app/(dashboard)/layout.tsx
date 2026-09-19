@@ -2,7 +2,8 @@ import { headers } from 'next/headers';
 import { Sidebar } from '@/components/sidebar';
 import { Topbar } from '@/components/topbar';
 import { getSession } from '@/server/session';
-import { puedeVer } from '@/server/permisos';
+import { redirect } from 'next/navigation';
+import { puedeVer, primeraRutaPara } from '@/server/permisos';
 import { SinPermiso } from '@/components/sin-permiso';
 import { listarMisNotificaciones, contarNotificacionesNoLeidas } from '@/server/actions/notificaciones';
 
@@ -34,6 +35,18 @@ export default async function DashboardLayout({ children }: { children: React.Re
    */
   const pathname = cabeceras.get('x-pathname') ?? '';
   const permitido = pathname === '' || puedeVer(sesion.roles, pathname);
+
+  /*
+   * Si cae en el tablero y no le corresponde, se lo lleva a lo suyo.
+   *
+   * /dashboard es donde aterriza todo el mundo al iniciar sesión, y desde el
+   * 19/09/2026 es sólo de gerencia y contabilidad. Mostrar el cartel de "no es
+   * para tu rol" justo al entrar seria dejar a media empresa creyendo que el
+   * sistema no la deja pasar. Al resto de las pantallas sí se les muestra el
+   * cartel: ahí la persona fue a buscarlas y merece una explicación, no un
+   * rebote silencioso.
+   */
+  if (!permitido && pathname === '/dashboard') redirect(primeraRutaPara(sesion.roles));
 
   return (
     <div className="flex min-h-screen">

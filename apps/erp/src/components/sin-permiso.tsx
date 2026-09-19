@@ -10,6 +10,7 @@ const NOMBRE_ROL: Record<string, string> = {
   jefe_produccion: 'Jefatura de producción',
   operario: 'Operario',
   almacenero: 'Almacén',
+  almacen_la_quinta: 'Almacén La Quinta',
   cajero: 'Caja / tienda',
   vendedor_b2b: 'Ventas mayoristas',
   contador: 'Contabilidad',

@@ -1,6 +1,6 @@
 import { PageShell } from '@/components/page-shell';
 import { requireRol } from '@/server/session';
-import { listarUsuariosAdmin } from '@/server/actions/usuarios';
+import { listarUsuariosAdmin, lookupsDeAsignacion } from '@/server/actions/usuarios';
 import { UsuariosClient } from './usuarios-client';
 
 export const metadata = { title: 'Usuarios & Roles' };
@@ -8,7 +8,7 @@ export const dynamic = 'force-dynamic';
 
 export default async function UsuariosPage() {
   await requireRol('gerente');
-  const res = await listarUsuariosAdmin();
+  const [res, lookups] = await Promise.all([listarUsuariosAdmin(), lookupsDeAsignacion()]);
   const usuarios = res.ok ? (res.data ?? []) : [];
 
   return (
@@ -21,7 +21,7 @@ export default async function UsuariosPage() {
           Error: {res.error}
         </div>
       )}
-      <UsuariosClient initialUsuarios={usuarios} />
+      <UsuariosClient initialUsuarios={usuarios} almacenes={lookups.almacenes} cajas={lookups.cajas} />
     </PageShell>
   );
 }

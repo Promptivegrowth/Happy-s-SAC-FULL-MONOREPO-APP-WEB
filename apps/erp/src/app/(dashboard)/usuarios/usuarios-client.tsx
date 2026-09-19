@@ -20,7 +20,11 @@ import {
 } from '@/server/actions/usuarios';
 import { ROLES_SISTEMA, DESCRIPCION_ROL, type RolSistema } from '@/server/actions/usuarios-helpers';
 
-export function UsuariosClient({ initialUsuarios }: { initialUsuarios: UsuarioRow[] }) {
+type Lookup = { id: string; nombre: string };
+
+export function UsuariosClient({
+  initialUsuarios, almacenes = [], cajas = [],
+}: { initialUsuarios: UsuarioRow[]; almacenes?: Lookup[]; cajas?: Lookup[] }) {
   const router = useRouter();
   const [usuarios] = useState<UsuarioRow[]>(initialUsuarios);
   const [filtro, setFiltro] = useState('');
@@ -98,6 +102,8 @@ export function UsuariosClient({ initialUsuarios }: { initialUsuarios: UsuarioRo
       {editando && (
         <EditarUsuarioModal
           usuario={editando}
+          almacenes={almacenes}
+          cajas={cajas}
           initialTab={editTab}
           onClose={() => setEditando(null)}
           onSaved={() => { setEditando(null); refresh(); }}
@@ -276,12 +282,14 @@ function NuevoUsuarioModal({ onClose, onCreated }: { onClose: () => void; onCrea
 // MODAL EDITAR USUARIO (3 tabs)
 // ─────────────────────────────────────────────────────────────────────────
 function EditarUsuarioModal({
-  usuario, initialTab, onClose, onSaved,
+  usuario, initialTab, onClose, onSaved, almacenes, cajas,
 }: {
   usuario: UsuarioRow;
   initialTab: 'perfil' | 'roles' | 'password';
   onClose: () => void;
   onSaved: () => void;
+  almacenes: Lookup[];
+  cajas: Lookup[];
 }) {
   const [tab, setTab] = useState(initialTab);
 
@@ -292,22 +300,29 @@ function EditarUsuarioModal({
         <TabBtn active={tab === 'roles'} onClick={() => setTab('roles')}>Roles</TabBtn>
         <TabBtn active={tab === 'password'} onClick={() => setTab('password')}>Contraseña</TabBtn>
       </div>
-      {tab === 'perfil' && <PerfilTab usuario={usuario} onSaved={onSaved} />}
+      {tab === 'perfil' && <PerfilTab usuario={usuario} onSaved={onSaved} almacenes={almacenes} cajas={cajas} />}
       {tab === 'roles' && <RolesTab usuario={usuario} onSaved={onSaved} />}
       {tab === 'password' && <PasswordTab usuario={usuario} onSaved={onSaved} />}
     </Modal>
   );
 }
 
-function PerfilTab({ usuario, onSaved }: { usuario: UsuarioRow; onSaved: () => void }) {
+function PerfilTab({
+  usuario, onSaved, almacenes, cajas,
+}: { usuario: UsuarioRow; onSaved: () => void; almacenes: Lookup[]; cajas: Lookup[] }) {
   const [pending, start] = useTransition();
   const [nombre, setNombre] = useState(usuario.nombre_completo ?? '');
   const [dni, setDni] = useState(usuario.dni ?? '');
   const [cargo, setCargo] = useState(usuario.cargo ?? '');
   const [telefono, setTelefono] = useState(usuario.telefono ?? '');
+  const [almacen, setAlmacen] = useState(usuario.almacen_default ?? '');
+  const [caja, setCaja] = useState(usuario.caja_default ?? '');
   function submit() {
     start(async () => {
-      const r = await actualizarPerfilUsuario(usuario.id, { nombre_completo: nombre, dni, cargo, telefono });
+      const r = await actualizarPerfilUsuario(usuario.id, {
+        nombre_completo: nombre, dni, cargo, telefono,
+        almacen_default: almacen, caja_default: caja,
+      });
       if (r.ok) { toast.success('Perfil actualizado'); onSaved(); }
       else toast.error(r.error ?? 'Error');
     });
@@ -326,6 +341,36 @@ function PerfilTab({ usuario, onSaved }: { usuario: UsuarioRow; onSaved: () => v
       <Field label="Teléfono">
         <Input value={telefono} onChange={(e) => setTelefono(e.target.value)} />
       </Field>
+
+      {/*
+        * Dónde trabaja la persona. Esto no se podía editar y hacía falta.
+        *
+        * La CAJA es la que decide si el POS puede cobrar: sin ella el botón
+        * PAGAR queda muerto y el historial sale vacío. El ALMACÉN es el que se
+        * propone al mover stock. Los dos se pueden dejar en blanco, que es lo
+        * que Javier necesitaba para sacar a juana del almacén equivocado.
+        */}
+      <Field label="Caja donde cobra" hint="Sin caja asignada, esta persona NO va a poder cobrar en el POS">
+        <select
+          value={caja}
+          onChange={(e) => setCaja(e.target.value)}
+          className="h-10 w-full rounded-md border bg-white px-2 text-sm"
+        >
+          <option value="">— sin caja asignada —</option>
+          {cajas.map((c) => <option key={c.id} value={c.id}>{c.nombre}</option>)}
+        </select>
+      </Field>
+      <Field label="Almacén / tienda" hint="El que se propone al registrar movimientos de stock">
+        <select
+          value={almacen}
+          onChange={(e) => setAlmacen(e.target.value)}
+          className="h-10 w-full rounded-md border bg-white px-2 text-sm"
+        >
+          <option value="">— sin almacén asignado —</option>
+          {almacenes.map((a) => <option key={a.id} value={a.id}>{a.nombre}</option>)}
+        </select>
+      </Field>
+
       <div className="flex justify-end pt-2">
         <Button variant="premium" onClick={submit} disabled={pending}>
           {pending && <Loader2 className="h-4 w-4 animate-spin" />}

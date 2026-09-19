@@ -10,7 +10,7 @@ import { runAction, requireUser, bumpPaths, type ActionResult } from './_helpers
  */
 
 const ROLES_VALIDOS = [
-  'gerente','jefe_produccion','operario','almacenero','cajero','vendedor_b2b','contador','cliente',
+  'gerente','jefe_produccion','operario','almacenero','almacen_la_quinta','cajero','vendedor_b2b','contador','cliente',
 ] as const;
 type Rol = (typeof ROLES_VALIDOS)[number];
 
@@ -124,8 +124,17 @@ export async function crearUsuario(
       await admin.auth.admin.deleteUser(userId);
       throw new Error(`Roles: ${errDel.message}`);
     }
+    /*
+     * El cast es por los tipos generados, no por el dato.
+     *
+     * `almacen_la_quinta` ya existe en el enum de Postgres (migracion 103) pero
+     * los tipos de Supabase se generaron antes y todavia no lo conocen. El
+     * insert es valido; lo que esta viejo es el archivo de tipos. Se quita en
+     * cuanto se regeneren.
+     */
     const rolesInsert = data.roles.map((r) => ({ usuario_id: userId, rol: r }));
-    const { error: errRoles } = await admin.from('usuarios_roles').insert(rolesInsert);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { error: errRoles } = await admin.from('usuarios_roles').insert(rolesInsert as any);
     if (errRoles) {
       await admin.from('perfiles').delete().eq('id', userId);
       await admin.auth.admin.deleteUser(userId);
@@ -142,11 +151,24 @@ export async function crearUsuario(
 // ============================================================================
 // ACTUALIZAR PERFIL
 // ============================================================================
+/*
+ * El perfil incluye ALMACEN y CAJA. Antes no, y era un agujero serio.
+ *
+ * Sin caja asignada, el POS no sabe donde registrar la venta y el boton PAGAR
+ * queda muerto. Cuatro personas con rol de cajero estaban asi y no habia forma
+ * de arreglarlo desde el sistema: el formulario solo editaba nombre, DNI, cargo
+ * y telefono. Habia que entrar a la base de datos.
+ *
+ * Los dos campos aceptan vacio para DESASIGNAR, que es lo que Javier no podia
+ * hacer el 19/09/2026 cuando quiso sacar a juana del almacen equivocado.
+ */
 const actualizarPerfilSchema = z.object({
   nombre_completo: z.string().min(2),
   dni: z.string().optional().or(z.literal('')),
   cargo: z.string().optional().or(z.literal('')),
   telefono: z.string().optional().or(z.literal('')),
+  almacen_default: z.string().uuid().nullable().optional().or(z.literal('')),
+  caja_default: z.string().uuid().nullable().optional().or(z.literal('')),
 });
 
 export async function actualizarPerfilUsuario(
@@ -164,6 +186,9 @@ export async function actualizarPerfilUsuario(
         dni: data.dni || null,
         cargo: data.cargo || null,
         telefono: data.telefono || null,
+        // Cadena vacia = desasignar. `undefined` no llega nunca desde el form.
+        almacen_default: data.almacen_default || null,
+        caja_default: data.caja_default || null,
       })
       .eq('id', usuarioId);
     if (error) throw new Error(error.message);
@@ -198,7 +223,9 @@ export async function actualizarRolesUsuario(
     const { error: errDel } = await admin.from('usuarios_roles').delete().eq('usuario_id', usuarioId);
     if (errDel) throw new Error(`Limpiar roles: ${errDel.message}`);
     const rolesInsert = roles.map((r) => ({ usuario_id: usuarioId, rol: r }));
-    const { error: errIns } = await admin.from('usuarios_roles').insert(rolesInsert);
+    // Mismo motivo que arriba: tipos generados desactualizados, no el dato.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { error: errIns } = await admin.from('usuarios_roles').insert(rolesInsert as any);
     if (errIns) throw new Error(`Asignar roles: ${errIns.message}`);
     return null;
   }).then((r) => {
@@ -324,6 +351,8 @@ export type UsuarioRow = {
   nombre_completo: string | null;
   dni: string | null;
   cargo: string | null;
+  almacen_default: string | null;
+  caja_default: string | null;
   telefono: string | null;
   activo: boolean;
   ultimo_login: string | null;
@@ -337,7 +366,7 @@ export async function listarUsuariosAdmin(): Promise<ActionResult<UsuarioRow[]>>
     const [{ data: perfiles }, { data: rolesRows }, { data: authData }] = await Promise.all([
       admin
         .from('perfiles')
-        .select('id, nombre_completo, dni, cargo, telefono, activo, ultimo_login')
+        .select('id, nombre_completo, dni, cargo, telefono, activo, ultimo_login, almacen_default, caja_default')
         .order('nombre_completo'),
       admin.from('usuarios_roles').select('usuario_id, rol'),
       admin.auth.admin.listUsers({ perPage: 200 }),
@@ -358,6 +387,8 @@ export async function listarUsuariosAdmin(): Promise<ActionResult<UsuarioRow[]>>
       nombre_completo: p.nombre_completo,
       dni: p.dni,
       cargo: p.cargo,
+      almacen_default: p.almacen_default ?? null,
+      caja_default: p.caja_default ?? null,
       telefono: (p as { telefono: string | null }).telefono ?? null,
       activo: p.activo,
       ultimo_login: p.ultimo_login,
@@ -365,4 +396,25 @@ export async function listarUsuariosAdmin(): Promise<ActionResult<UsuarioRow[]>>
     }));
     return rows;
   });
+}
+
+/**
+ * Almacenes y cajas para los selectores del perfil.
+ *
+ * Van juntos en una sola acción porque se piden juntos: el formulario de perfil
+ * necesita los dos para poder asignar dónde trabaja cada persona.
+ */
+export async function lookupsDeAsignacion(): Promise<{
+  almacenes: Array<{ id: string; nombre: string }>;
+  cajas: Array<{ id: string; nombre: string }>;
+}> {
+  const admin = createServiceClient();
+  const [{ data: almacenes }, { data: cajas }] = await Promise.all([
+    admin.from('almacenes').select('id, nombre').eq('activo', true).order('nombre'),
+    admin.from('cajas').select('id, nombre').eq('activo', true).order('nombre'),
+  ]);
+  return {
+    almacenes: (almacenes ?? []) as Array<{ id: string; nombre: string }>,
+    cajas: (cajas ?? []) as Array<{ id: string; nombre: string }>,
+  };
 }

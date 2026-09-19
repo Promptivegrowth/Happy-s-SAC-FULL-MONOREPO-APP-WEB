@@ -36,6 +36,15 @@ const PERSONAL: Rol[] = ['almacenero', 'jefe_produccion', 'operario', 'cajero', 
 /** Quien mueve mercadería: almacén y producción. */
 const LOGISTICA: Rol[] = ['almacenero', 'jefe_produccion'];
 
+/**
+ * Quien administra: gerencia y contabilidad.
+ *
+ * Son los únicos que ven los tableros. Pedido de Javier el 19/09/2026: los
+ * números del negocio son para quien los tiene que leer, no para todo el
+ * personal.
+ */
+const ADMINISTRATIVO: Rol[] = ['contador'];
+
 /** Quien atiende y factura. */
 const COMERCIAL: Rol[] = ['cajero', 'vendedor_b2b'];
 
@@ -78,14 +87,18 @@ export const PERMISOS: Array<{ prefijo: string; roles: Rol[] }> = [
   // ── Almacén y compras ────────────────────────────────────────────────────
   // `cajero` entra a stock, kardex y traslados a propósito: la tienda recibe
   // mercadería y consulta existencias todos los días.
-  { prefijo: '/inventario', roles: [...LOGISTICA, 'cajero'] },
+  { prefijo: '/inventario', roles: [...LOGISTICA, 'cajero', 'almacen_la_quinta'] },
   { prefijo: '/kardex', roles: [...LOGISTICA, 'cajero', 'contador'] },
   { prefijo: '/traslados', roles: [...LOGISTICA, 'cajero'] },
   { prefijo: '/materiales', roles: LOGISTICA },
   { prefijo: '/oc', roles: [...LOGISTICA, 'contador'] },
   { prefijo: '/recepciones', roles: LOGISTICA },
   { prefijo: '/compras', roles: [...LOGISTICA, 'contador'] },
-  { prefijo: '/proveedores', roles: [...LOGISTICA, 'contador'] },
+  /*
+   * Almacén NO entra a Proveedores. Pedido de Javier el 19/09/2026: el módulo
+   * de Personas no es asunto de quien mueve mercadería.
+   */
+  { prefijo: '/proveedores', roles: ['jefe_produccion', 'contador'] },
 
   // ── Producción ───────────────────────────────────────────────────────────
   { prefijo: '/plan-maestro', roles: ['jefe_produccion'] },
@@ -102,7 +115,15 @@ export const PERMISOS: Array<{ prefijo: string; roles: Rol[] }> = [
   // ── Consulta común ───────────────────────────────────────────────────────
   { prefijo: '/productos', roles: PERSONAL },
   { prefijo: '/trazabilidad', roles: PERSONAL },
-  { prefijo: '/dashboard', roles: PERSONAL },
+  /*
+   * El tablero es sólo para gerencia y contabilidad.
+   *
+   * Quien no lo tenga NO se queda contra una pared: `primeraRutaPara` lo manda
+   * a la primera pantalla que sí le corresponde. Sin eso, restringir el tablero
+   * dejaría a media empresa sin poder entrar, porque es la pantalla a la que
+   * cae todo el mundo al iniciar sesión.
+   */
+  { prefijo: '/dashboard', roles: ADMINISTRATIVO },
   { prefijo: '/notificaciones', roles: PERSONAL },
 ];
 
@@ -131,4 +152,36 @@ export function puedeVer(roles: Rol[], pathname: string): boolean {
   const regla = reglaDe(pathname);
   if (!regla) return false;
   return regla.roles.some((r) => roles.includes(r));
+}
+
+/**
+ * Adónde mandar a alguien cuando entra.
+ *
+ * Todo el mundo cae en /dashboard al iniciar sesión, pero desde el 19/09/2026
+ * el tablero es sólo de gerencia y contabilidad. Sin esta función, restringirlo
+ * dejaría a media empresa mirando "esta sección no es para tu rol" nada más
+ * entrar, sin haber hecho nada mal y sin saber a dónde ir.
+ *
+ * Devuelve la primera pantalla que esa persona SÍ puede abrir, en orden de lo
+ * que hace cada uno: el almacenero aterriza en stock, la cajera en ventas, el
+ * jefe de producción en sus órdenes.
+ */
+const ATERRIZAJE: string[] = [
+  '/dashboard',     // gerencia y contabilidad
+  '/ventas',        // caja y mayoristas
+  '/ot',            // producción y operarios
+  '/inventario',    // almacén, y el único destino de Almacén La Quinta
+  '/productos',     // último recurso: lo ve todo el personal
+];
+
+export function primeraRutaPara(roles: Rol[]): string {
+  for (const ruta of ATERRIZAJE) {
+    if (puedeVer(roles, ruta)) return ruta;
+  }
+  /*
+   * Nadie debería llegar acá: significa que la persona no puede ver ni
+   * Productos, o sea que no tiene ningún rol de staff. Se la manda igual al
+   * tablero, donde el cartel le explica que hable con gerencia.
+   */
+  return '/dashboard';
 }
