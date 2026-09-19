@@ -8,7 +8,7 @@ import { FormRow, FormGrid, FormSection } from '@happy/ui/form-row';
 import { Input } from '@happy/ui/input';
 import { Textarea } from '@happy/ui/textarea';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@happy/ui/table';
-import { Loader2, Save, Plus, Trash2, AlertTriangle, Search, ScanLine, Zap, Upload, X, Truck } from 'lucide-react';
+import { Loader2, Save, Plus, Trash2, AlertTriangle, Search, ScanLine, Zap, Upload, X, Truck, RefreshCw } from 'lucide-react';
 import { toast } from 'sonner';
 import { formatTallaChip } from '@happy/lib';
 import {
@@ -104,6 +104,16 @@ export function NuevoTrasladoForm({
   const [stockVar, setStockVar] = useState<Record<string, number>>({});
   const [stockMat, setStockMat] = useState<Record<string, number>>({});
   const [stockLoading, setStockLoading] = useState(false);
+  /*
+   * Contador para volver a pedir el stock a mano.
+   *
+   * El stock se carga cuando cambian el origen o las lineas. Si alguien lo
+   * corrige desde OTRA pestana —que es como trabaja almacen: revisa el traslado
+   * y va ajustando existencias en paralelo— acá sigue figurando el numero
+   * viejo, casi siempre cero. La unica salida era recargar la pagina y perder
+   * todas las lineas cargadas. Reportado el 19/09/2026.
+   */
+  const [refrescoStock, setRefrescoStock] = useState(0);
 
   // Carga de stock cuando cambia el origen o las líneas (entidades únicas).
   // Los ids se derivan de una KEY string estable (ordenada) — sin esto, cada
@@ -136,7 +146,7 @@ export function NuevoTrasladoForm({
     return () => {
       cancelled = true;
     };
-  }, [origenId, varianteIds, materialIds]);
+  }, [origenId, varianteIds, materialIds, refrescoStock]);
 
   const destinosDisponibles = useMemo(
     () => almacenes.filter((a) => a.id !== origenId),
@@ -674,7 +684,21 @@ export function NuevoTrasladoForm({
                   <TableRow>
                     <TableHead className="w-24">Tipo</TableHead>
                     <TableHead className="min-w-[380px]">Ítem</TableHead>
-                    <TableHead className="w-28 text-right">Stock origen</TableHead>
+                    <TableHead className="w-28 text-right">
+                      <div className="flex items-center justify-end gap-1">
+                        Stock origen
+                        {/* Vuelve a preguntar el stock sin perder las lineas cargadas. */}
+                        <button
+                          type="button"
+                          onClick={() => setRefrescoStock((n) => n + 1)}
+                          disabled={stockLoading}
+                          title="Volver a consultar el stock. Úsalo si lo acabas de corregir en otra pestaña."
+                          className="rounded p-0.5 text-slate-400 transition hover:bg-slate-100 hover:text-happy-600 disabled:opacity-50"
+                        >
+                          <RefreshCw className={`h-3 w-3 ${stockLoading ? 'animate-spin' : ''}`} />
+                        </button>
+                      </div>
+                    </TableHead>
                     <TableHead className="w-24 text-right">Cantidad</TableHead>
                     <TableHead className="w-40">Observación</TableHead>
                     <TableHead className="w-12"></TableHead>
@@ -968,6 +992,8 @@ function MultiTallaModal({
   const [cantidades, setCantidades] = useState<Record<string, string>>({});
   const [stock, setStock] = useState<Record<string, number>>({});
   const [stockCargando, setStockCargando] = useState(false);
+  /** Mismo motivo que en la tabla: poder repreguntar sin cerrar y reabrir. */
+  const [refrescoStock, setRefrescoStock] = useState(0);
 
   // Agrupar variantes por producto_nombre — la data ya está en memoria.
   const productos = useMemo(() => {
@@ -1019,7 +1045,7 @@ function MultiTallaModal({
       })
       .finally(() => { if (!cancelled) setStockCargando(false); });
     return () => { cancelled = true; };
-  }, [productoNombre, tallasProducto, origenId]);
+  }, [productoNombre, tallasProducto, origenId, refrescoStock]);
 
   function elegirProducto(nombre: string) {
     setProductoNombre(nombre);
@@ -1129,7 +1155,18 @@ function MultiTallaModal({
                     <th className="py-1.5">Talla</th>
                     <th className="py-1.5">SKU</th>
                     <th className="py-1.5 text-right">
-                      Stock origen{stockCargando && <Loader2 className="ml-1 inline h-3 w-3 animate-spin" />}
+                      <span className="inline-flex items-center gap-1">
+                        Stock origen
+                        <button
+                          type="button"
+                          onClick={() => setRefrescoStock((n) => n + 1)}
+                          disabled={stockCargando}
+                          title="Volver a consultar el stock. Úsalo si lo acabas de corregir en otra pestaña."
+                          className="rounded p-0.5 text-slate-400 transition hover:bg-slate-100 hover:text-happy-600 disabled:opacity-50"
+                        >
+                          <RefreshCw className={`h-3 w-3 ${stockCargando ? 'animate-spin' : ''}`} />
+                        </button>
+                      </span>
                     </th>
                     <th className="py-1.5 text-right">Cantidad</th>
                   </tr>
