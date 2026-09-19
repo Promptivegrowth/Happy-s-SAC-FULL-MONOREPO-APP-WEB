@@ -48,6 +48,7 @@ export default async function Page({ searchParams }: { searchParams: Promise<SP>
       { header: 'Ventas', key: 'cantidad_ventas', formato: 'numero' as const, width: 10 },
       { header: 'Total vendido', key: 'total_vendido', formato: 'moneda' as const, width: 16 },
       { header: 'Efectivo cobrado', key: 'total_efectivo', formato: 'moneda' as const, width: 16 },
+      { header: 'Otros medios (banco)', key: 'otros_medios', formato: 'moneda' as const, width: 18 },
       { header: 'Apertura S/', key: 'monto_apertura', formato: 'moneda' as const, width: 14 },
       { header: 'Caja chica', key: 'total_gastos', formato: 'moneda' as const, width: 14 },
       { header: 'Efectivo esperado', key: 'efectivo_esperado', formato: 'moneda' as const, width: 18 },
@@ -57,6 +58,7 @@ export default async function Page({ searchParams }: { searchParams: Promise<SP>
     rows: rows.map((r) => ({
       ...r,
       cerrada_txt: r.cerrada_en ? formatDateTime(r.cerrada_en) : 'ABIERTA',
+      otros_medios: Math.max(0, r.total_vendido - r.total_efectivo),
       cerro_txt: r.cerrada_por ?? '—',
       contado_txt: r.efectivo_contado === null ? '—' : formatPEN(r.efectivo_contado),
       diferencia_txt: r.diferencia === null ? '—' : formatPEN(r.diferencia),
@@ -96,6 +98,13 @@ export default async function Page({ searchParams }: { searchParams: Promise<SP>
         </Card>
       </div>
 
+      <p className="rounded-lg border border-sky-200 bg-sky-50/60 p-3 text-xs leading-relaxed text-sky-900">
+        <b>Vendido</b> es todo lo cobrado, por cualquier medio. <b>Esperado en el cajón</b> es sólo la
+        plata física: el fondo de apertura más lo cobrado en efectivo, menos los gastos de caja chica.
+        Lo que entró por Yape, Plin, transferencia o tarjeta va al banco y nunca pasa por el cajón, así
+        que las dos cifras no tienen por qué coincidir — y casi nunca coinciden.
+      </p>
+
       <form className="flex flex-wrap items-end gap-2 rounded-lg border border-dashed border-slate-200 p-3" method="get">
         <div>
           <label className="mb-1 block text-[10px] font-medium uppercase tracking-wider text-slate-500">Desde</label>
@@ -132,8 +141,14 @@ export default async function Page({ searchParams }: { searchParams: Promise<SP>
                   <TableHead>Caja / Tienda</TableHead>
                   <TableHead>Cajero</TableHead>
                   <TableHead className="text-right">Ventas</TableHead>
-                  <TableHead className="text-right">Vendido</TableHead>
-                  <TableHead className="text-right">Efectivo esperado</TableHead>
+                  <TableHead className="text-right">
+                    Vendido
+                    <span className="block text-[9px] font-normal normal-case text-slate-400">todos los medios</span>
+                  </TableHead>
+                  <TableHead className="text-right">
+                    Esperado en el cajón
+                    <span className="block text-[9px] font-normal normal-case text-slate-400">apertura + efectivo − caja chica</span>
+                  </TableHead>
                   <TableHead className="text-right">Contado</TableHead>
                   <TableHead className="text-right">Diferencia</TableHead>
                   <TableHead className="text-right">Cuadre</TableHead>
@@ -162,7 +177,20 @@ export default async function Page({ searchParams }: { searchParams: Promise<SP>
                         )}
                       </TableCell>
                       <TableCell className="text-right text-sm">{r.cantidad_ventas}</TableCell>
-                      <TableCell className="text-right text-sm font-semibold text-emerald-700">{formatPEN(r.total_vendido)}</TableCell>
+                      {/*
+                        * Debajo del total, en que se reparte.
+                        *
+                        * Javier pregunto por que "Vendido S/1,541" no cuadra con
+                        * "Efectivo S/451": porque el resto se cobro por Yape,
+                        * Plin o transferencia y nunca pasa por el cajon. La
+                        * columna sola no lo decia y obligaba a entrar al detalle.
+                        */}
+                      <TableCell className="text-right">
+                        <div className="text-sm font-semibold text-emerald-700">{formatPEN(r.total_vendido)}</div>
+                        <div className="text-[10px] text-slate-400">
+                          efectivo {formatPEN(r.total_efectivo)} · otros {formatPEN(Math.max(0, r.total_vendido - r.total_efectivo))}
+                        </div>
+                      </TableCell>
                       <TableCell className="text-right text-sm">{formatPEN(r.efectivo_esperado)}</TableCell>
                       <TableCell className="text-right text-sm">
                         {r.efectivo_contado === null ? <span className="text-slate-400">—</span> : formatPEN(r.efectivo_contado)}
