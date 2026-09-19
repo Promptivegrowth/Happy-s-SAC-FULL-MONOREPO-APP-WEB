@@ -8,7 +8,8 @@ import { FormRow, FormGrid, FormSection } from '@happy/ui/form-row';
 import { Input } from '@happy/ui/input';
 import { Textarea } from '@happy/ui/textarea';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@happy/ui/table';
-import { Loader2, Save, Plus, Trash2, AlertTriangle, Search, ScanLine, Zap, Upload, X, Truck, RefreshCw } from 'lucide-react';
+import { Loader2, Save, Plus, Trash2, AlertTriangle, Search, ScanLine, Zap, Upload, X, Truck, RefreshCw, Pencil, Check } from 'lucide-react';
+import { ajustarStock } from '@/server/actions/inventario';
 import { toast } from 'sonner';
 import { formatTallaChip } from '@happy/lib';
 import {
@@ -45,12 +46,23 @@ export function NuevoTrasladoForm({
   variantes,
   materiales,
   sinMateriales = false,
+  puedeAjustar = false,
 }: {
   almacenes: Almacen[];
   variantes: VarianteItem[];
   materiales: MaterialItem[];
   /** Si true, los traslados NO manejan materiales (pedido cliente 2026-08-27). */
   sinMateriales?: boolean;
+  /**
+   * Si esta persona puede corregir el stock sin salir del traslado.
+   *
+   * Almacen trabajaba con dos pestanas: armaba el traslado acá y corregia las
+   * existencias en otra, porque lo que la pantalla le mostraba no lo podia
+   * arreglar la pantalla. Reportado el 19/09/2026. Ajustar inventario hoy es
+   * solo de gerencia, asi que el boton aparece unicamente a quien el servidor
+   * le va a aceptar el cambio.
+   */
+  puedeAjustar?: boolean;
 }) {
   const router = useRouter();
   const [pending, start] = useTransition();
@@ -958,6 +970,8 @@ export function NuevoTrasladoForm({
         <MultiTallaModal
           variantes={variantes}
           origenId={origenId}
+          origenNombre={almacenes.find((a) => a.id === origenId)?.nombre ?? 'el almacén origen'}
+          puedeAjustar={puedeAjustar}
           onAgregar={agregarLoteVariantes}
           onClose={() => setMultiTallaOpen(false)}
         />
@@ -979,11 +993,15 @@ export function NuevoTrasladoForm({
 function MultiTallaModal({
   variantes,
   origenId,
+  origenNombre,
+  puedeAjustar,
   onAgregar,
   onClose,
 }: {
   variantes: VarianteItem[];
   origenId: string;
+  origenNombre: string;
+  puedeAjustar: boolean;
   onAgregar: (seleccion: { variante: VarianteItem; cantidad: number }[]) => void;
   onClose: () => void;
 }) {
@@ -994,6 +1012,49 @@ function MultiTallaModal({
   const [stockCargando, setStockCargando] = useState(false);
   /** Mismo motivo que en la tabla: poder repreguntar sin cerrar y reabrir. */
   const [refrescoStock, setRefrescoStock] = useState(0);
+
+  /*
+   * Corregir el stock sin salir de acá.
+   *
+   * Es el nudo del problema que reportó almacén el 19/09/2026: la pantalla le
+   * mostraba "sin stock", no lo dejaba agregar la talla, y para arreglarlo tenía
+   * que irse a otra ventana, volver, y cerrar y reabrir esta para que el número
+   * se actualizara. Corrigiendo acá mismo el viaje desaparece.
+   *
+   * `ajustandoId` es la variante que se está editando; null = ninguna.
+   */
+  const [ajustandoId, setAjustandoId] = useState<string | null>(null);
+  const [valorAjuste, setValorAjuste] = useState('');
+  const [guardandoAjuste, setGuardandoAjuste] = useState(false);
+
+  async function guardarAjuste(v: VarianteItem) {
+    const n = Number(valorAjuste);
+    if (!Number.isFinite(n) || n < 0) {
+      toast.error('Escribí una cantidad válida (0 o más)');
+      return;
+    }
+    setGuardandoAjuste(true);
+    try {
+      const r = await ajustarStock({
+        almacen_id: origenId,
+        variante_id: v.id,
+        cantidad_nueva: n,
+        motivo: 'CONTEO',
+        observacion: `Corregido desde el armado de un traslado (${v.sku})`,
+      });
+      if (!r.ok) {
+        toast.error(r.error ?? 'No se pudo corregir el stock');
+        return;
+      }
+      toast.success(`${v.sku}: stock corregido a ${n} en ${origenNombre}`);
+      setAjustandoId(null);
+      setValorAjuste('');
+      // Repreguntar para que la fila quede con el numero nuevo.
+      setRefrescoStock((x) => x + 1);
+    } finally {
+      setGuardandoAjuste(false);
+    }
+  }
 
   // Agrupar variantes por producto_nombre — la data ya está en memoria.
   const productos = useMemo(() => {
@@ -1186,7 +1247,65 @@ function MultiTallaModal({
                         <td className="py-1.5 font-display font-semibold">{formatTallaChip(v.talla)}</td>
                         <td className="py-1.5 font-mono text-xs text-slate-500">{v.sku}</td>
                         <td className={`py-1.5 text-right font-mono text-xs ${st <= 0 ? 'text-rose-500' : 'text-slate-600'}`}>
-                          {stockCargando ? '…' : st}
+                          {/*
+                            * El stock, y al lado el lapiz para corregirlo.
+                            *
+                            * Quien puede ajustar edita la cantidad real acá
+                            * mismo: se guarda como ajuste de inventario —igual
+                            * que desde Stock actual, con su motivo y a nombre
+                            * de quien lo hace— y la fila se actualiza sola.
+                            */}
+                          {ajustandoId === v.id ? (
+                            <span className="inline-flex items-center gap-1">
+                              <input
+                                type="number"
+                                min={0}
+                                autoFocus
+                                value={valorAjuste}
+                                onChange={(e) => setValorAjuste(e.target.value.replace(/[^\d]/g, ''))}
+                                onKeyDown={(e) => {
+                                  if (e.key === 'Enter') { e.preventDefault(); void guardarAjuste(v); }
+                                  if (e.key === 'Escape') { setAjustandoId(null); setValorAjuste(''); }
+                                }}
+                                placeholder="real"
+                                className="h-7 w-16 rounded border border-happy-400 px-1.5 text-right font-mono text-xs focus:outline-none focus:ring-2 focus:ring-happy-100"
+                              />
+                              <button
+                                type="button"
+                                onClick={() => void guardarAjuste(v)}
+                                disabled={guardandoAjuste}
+                                title="Guardar la cantidad real"
+                                className="rounded p-1 text-emerald-600 hover:bg-emerald-50 disabled:opacity-50"
+                              >
+                                {guardandoAjuste
+                                  ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                  : <Check className="h-3.5 w-3.5" />}
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => { setAjustandoId(null); setValorAjuste(''); }}
+                                disabled={guardandoAjuste}
+                                title="Cancelar"
+                                className="rounded p-1 text-slate-400 hover:bg-slate-100 disabled:opacity-50"
+                              >
+                                <X className="h-3.5 w-3.5" />
+                              </button>
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center gap-1">
+                              {stockCargando ? '…' : st}
+                              {puedeAjustar && !stockCargando && (
+                                <button
+                                  type="button"
+                                  onClick={() => { setAjustandoId(v.id); setValorAjuste(String(st)); }}
+                                  title={`Corregir el stock de ${v.sku} en ${origenNombre}`}
+                                  className="rounded p-0.5 text-slate-300 transition hover:bg-slate-100 hover:text-happy-600"
+                                >
+                                  <Pencil className="h-3 w-3" />
+                                </button>
+                              )}
+                            </span>
+                          )}
                         </td>
                         <td className="py-1.5 text-right">
                           {sinStock ? (

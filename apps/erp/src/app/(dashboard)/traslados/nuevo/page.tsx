@@ -3,6 +3,7 @@ import { Button } from '@happy/ui/button';
 import { Card } from '@happy/ui/card';
 import { ArrowLeft } from 'lucide-react';
 import { PageShell } from '@/components/page-shell';
+import { getSession } from '@/server/session';
 import { listarAlmacenes } from '@/server/actions/kardex';
 import { listarVariantesParaTraslado } from '@/server/actions/traslados';
 import { NuevoTrasladoForm } from './form-client';
@@ -11,10 +12,17 @@ export const metadata = { title: 'Nuevo traslado' };
 export const dynamic = 'force-dynamic';
 
 export default async function NuevoTrasladoPage() {
-  const [resAlms, resVars] = await Promise.all([
+  const [resAlms, resVars, sesion] = await Promise.all([
     listarAlmacenes(),
     listarVariantesParaTraslado(),
+    getSession(),
   ]);
+  /*
+   * Corregir stock desde el traslado es un AJUSTE de inventario, y eso hoy solo
+   * lo puede hacer gerencia (`requireGerenteAjuste`). Se pregunta acá para no
+   * ofrecer un boton que el servidor va a rechazar.
+   */
+  const puedeAjustar = sesion.roles.includes('gerente');
   // Excluir MATERIA_PRIMA: los traslados entre almacenes son de productos
   // terminados, no se hacen contra MP. Cliente lo pidió explícito.
   const almacenes = resAlms.ok
@@ -48,6 +56,7 @@ export default async function NuevoTrasladoPage() {
           variantes={variantes}
           materiales={materiales}
           sinMateriales
+          puedeAjustar={puedeAjustar}
         />
       )}
     </PageShell>
