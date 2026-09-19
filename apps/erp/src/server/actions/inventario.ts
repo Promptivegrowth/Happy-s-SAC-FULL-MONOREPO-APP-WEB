@@ -24,7 +24,7 @@ export async function ajustarStock(
   const r = await runAction(async () => {
     const data = ajustarSchema.parse(input);
     const { sb, userId } = await requireUser();
-    await requierePermisoConteo(sb, userId);
+    await requierePermisoAlmacen(sb, userId);
 
     // Stock actual (puede no existir todavía → trato como 0)
     const { data: actualRow } = await sb
@@ -113,7 +113,7 @@ export async function registrarMovimientoStock(
      *
      * Las compras, devoluciones y mermas siguen fuera: no llegan por acá.
      */
-    await requierePermisoConteo(sb, userId);
+    await requierePermisoAlmacen(sb, userId);
 
     // Restricción adicional: solo permitir tipos de AJUSTE manual.
     // Los otros tipos (ENTRADA_COMPRA, DEVOLUCION_*, SALIDA_MERMA) deben
@@ -222,7 +222,7 @@ export async function ajustarStockBatch(
   const r = await runAction(async () => {
     const data = ajustarBatchSchema.parse(input);
     const { sb, userId } = await requireUser();
-    await requierePermisoConteo(sb, userId); // contar es trabajo de almacén
+    await requierePermisoAlmacen(sb, userId); // contar es trabajo de almacén
 
     // Guardarraíl: bloquear productos terminados en almacén de materia prima.
     const { data: almRow } = await sb
@@ -323,16 +323,9 @@ async function requireAlmacenMaterial(sb: Awaited<ReturnType<typeof requireUser>
 // gerencia puede hacerlo (pedido cliente 2026-08-24). Los movimientos reales de
 // logística/producción (traslado, ingreso por producción, compra recibida,
 // devolución, salida a servicio) siguen su propio flujo/rol.
-async function requireGerenteAjuste(sb: Awaited<ReturnType<typeof requireUser>>['sb'], userId: string) {
-  const { data: roles } = await sb.from('usuarios_roles').select('rol').eq('usuario_id', userId);
-  const esGte = (roles ?? []).some((r) => (r as { rol: string }).rol === 'gerente');
-  if (!esGte) {
-    throw new Error('El ajuste de inventario solo lo puede hacer gerencia (o con permiso de gerencia).');
-  }
-}
 
 /**
- * Quién puede CORREGIR lo que hay en el almacén.
+ * Quién puede mover y corregir el inventario: almacén y gerencia.
  *
  * Contar y corregir es el trabajo de almacén, no un privilegio de gerencia.
  * Estaba reservado a `gerente`, y funcionaba sólo porque todos entraban con la
@@ -341,17 +334,18 @@ async function requireGerenteAjuste(sb: Awaited<ReturnType<typeof requireUser>>[
  * diferencia y tenía que llamar al gerente por cada talla. Se vio el 19/09/2026
  * al probar con la cuenta de Harold.
  *
- * Se separa a propósito de `requireGerenteAjuste`, que sigue cubriendo los
- * MOVIMIENTOS manuales (declarar ingresos, mermas, salidas). No es lo mismo:
- * contar es constatar lo que hay, y declarar un movimiento es afirmar que algo
- * entró o salió. Lo primero lo hace quien está frente al estante; lo segundo
- * mueve plata y sigue siendo de gerencia.
+ * Empezó cubriendo sólo el conteo, dejando los movimientos manuales en
+ * gerencia. Javier lo revisó el 19/09/2026 y confirmó que TODO el módulo de
+ * inventario —incluido "Registrar movimiento de material", con sus compras,
+ * consumos y mermas— es trabajo del almacén de Santa Bárbara. Se le planteó el
+ * riesgo de saltear los flujos automáticos y lo ratificó: es su decisión y su
+ * operación.
  *
  * Todo ajuste queda en el kardex con su motivo, su fecha y el usuario que lo
  * hizo, así que el control no se pierde: se vuelve auditable en lugar de
  * bloqueante.
  */
-async function requierePermisoConteo(sb: Awaited<ReturnType<typeof requireUser>>['sb'], userId: string) {
+async function requierePermisoAlmacen(sb: Awaited<ReturnType<typeof requireUser>>['sb'], userId: string) {
   const { data: roles } = await sb.from('usuarios_roles').select('rol').eq('usuario_id', userId);
   const suyos = (roles ?? []).map((r) => (r as { rol: string }).rol);
   const permitidos = ['gerente', 'almacenero', 'almacen_la_quinta'];
@@ -377,7 +371,7 @@ export async function registrarMovimientoMaterial(
     // gerencia. Los movimientos reales (compra, devolución, salida a producción/
     // servicio, merma) los puede hacer el almacén.
     const esAjuste = data.tipo === 'ENTRADA_AJUSTE' || data.tipo === 'SALIDA_AJUSTE';
-    if (esAjuste) await requireGerenteAjuste(sb, userId);
+    if (esAjuste) await requierePermisoAlmacen(sb, userId);
     else await requireAlmacenMaterial(sb, userId);
 
     // Para salidas, no permitir dejar el stock negativo.
@@ -428,7 +422,7 @@ export async function ajustarStockMaterial(
   const r = await runAction(async () => {
     const data = ajustarMaterialSchema.parse(input);
     const { sb, userId } = await requireUser();
-    await requierePermisoConteo(sb, userId); // corregir cantidad = contar
+    await requierePermisoAlmacen(sb, userId); // corregir cantidad = contar
 
     const { data: actualRow } = await sb
       .from('stock_actual')
@@ -472,7 +466,7 @@ export async function registrarMovimientoStockBatch(
 
     // Mismo criterio que la version de a uno: el esquema solo admite
     // ENTRADA_AJUSTE y SALIDA_AJUSTE, o sea corregir existencias.
-    await requierePermisoConteo(sb, userId);
+    await requierePermisoAlmacen(sb, userId);
 
     // Guardarraíl: bloquear si el almacén destino es MATERIA_PRIMA (ahí van
     // telas/insumos, no prendas). Ver registrarMovimientoStock para el motivo.
@@ -555,7 +549,7 @@ export async function ajustarStockMaterialBatch(
   const r = await runAction(async () => {
     const data = ajustarMaterialBatchSchema.parse(input);
     const { sb, userId } = await requireUser();
-    await requierePermisoConteo(sb, userId); // conteo masivo de materiales = contar
+    await requierePermisoAlmacen(sb, userId); // conteo masivo de materiales = contar
 
     const ids = data.lineas.map((l) => l.material_id);
     const { data: stockRows } = await sb
@@ -618,7 +612,7 @@ export async function registrarMovimientoMaterialBatch(
   const r = await runAction(async () => {
     const data = movimientoMaterialBatchSchema.parse(input);
     const { sb, userId } = await requireUser();
-    await requireGerenteAjuste(sb, userId); // ajuste masivo → solo gerencia
+    await requierePermisoAlmacen(sb, userId);
 
     const rows = data.lineas.map((l) => ({
       tipo: data.tipo,
