@@ -1,14 +1,16 @@
 'use client';
 
-import { LogOut, User } from 'lucide-react';
+import { LogOut, User, KeyRound } from 'lucide-react';
 import { Button } from '@happy/ui/button';
 import { Badge } from '@happy/ui/badge';
 import { Logo } from '@happy/ui/logo';
 import { createClient } from '@happy/db/browser';
 import { useRouter } from 'next/navigation';
+import { useState } from 'react';
 import Link from 'next/link';
 import { toast } from 'sonner';
 import { NotificationsBell } from './notifications-bell';
+import { CambiarPasswordModal } from './cambiar-password-modal';
 import type { NotificacionUI } from '@/server/actions/notificaciones';
 
 export function Topbar({
@@ -18,6 +20,7 @@ export function Topbar({
   notificaciones?: NotificacionUI[]; noLeidas?: number;
 }) {
   const router = useRouter();
+  const [cambiarPass, setCambiarPass] = useState(false);
   async function logout() {
     const sb = createClient();
     await sb.auth.signOut();
@@ -51,11 +54,24 @@ export function Topbar({
             <p className="text-[11px] text-slate-500">{email}</p>
           </div>
         </div>
+        {/*
+          * Cambiarse la contraseña, al lado del nombre.
+          *
+          * Antes no había ningún lugar donde hacerlo: el único enlace del tema
+          * era "¿Olvidaste tu contraseña?" en el login, y apuntaba a una página
+          * que no existía. Va acá porque es donde uno busca lo suyo.
+          */}
+        <Button variant="ghost" size="sm" onClick={() => setCambiarPass(true)} title="Cambiar mi contraseña">
+          <KeyRound className="h-4 w-4" />
+          <span className="hidden lg:inline">Contraseña</span>
+        </Button>
         <Button variant="ghost" size="sm" onClick={logout}>
           <LogOut className="h-4 w-4" />
           <span className="hidden sm:inline">Salir</span>
         </Button>
       </div>
+
+      {cambiarPass && <CambiarPasswordModal email={email} onClose={() => setCambiarPass(false)} />}
     </header>
   );
 }

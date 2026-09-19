@@ -381,14 +381,38 @@ function PasswordTab({ usuario, onSaved }: { usuario: UsuarioRow; onSaved: () =>
     if (!confirm(`¿Cambiar la contraseña de ${usuario.nombre_completo ?? usuario.email}?`)) return;
     start(async () => {
       const r = await cambiarPasswordUsuario(usuario.id, { password: pass });
-      if (r.ok) { toast.success('Contraseña cambiada'); setPass(''); setPass2(''); onSaved(); }
+      if (r.ok) {
+        /*
+         * El aviso dura y dice que paso de verdad.
+         *
+         * Antes decia "Contraseña cambiada" y se iba en unos segundos; para
+         * quien miraba la pantalla, el modal simplemente se habia cerrado solo.
+         */
+        toast.success(
+          `Contraseña de ${usuario.email} cambiada. Todas las sesiones de esa cuenta se cerraron: `
+          + 'hay que volver a entrar con la nueva.',
+          { duration: 15000 },
+        );
+        setPass(''); setPass2(''); onSaved();
+      }
       else toast.error(r.error ?? 'Error');
     });
   }
   return (
     <div className="space-y-3">
+      {/*
+        * Se avisa que el cambio CIERRA TODAS LAS SESIONES de esa cuenta.
+        *
+        * Faltaba decirlo y confundió a Javier el 19/09/2026: cambió la clave de
+        * gerencia, todo el mundo quedó afuera —la caja de la tienda incluida,
+        * porque comparten esa cuenta— y el aviso de exito ya se habia
+        * desvanecido. Conclusion razonable: "no me deja cambiarla". Cambiaba
+        * perfecto; lo que no hacia era contar la consecuencia.
+        */}
       <p className="rounded-md border border-amber-200 bg-amber-50 p-2 text-xs text-amber-800">
-        ⚠ La persona tendrá que usar esta contraseña la próxima vez que entre. Comunícasela de forma segura.
+        ⚠ Al cambiarla se <b>cierran todas las sesiones abiertas</b> de esta cuenta: quien la esté
+        usando en ese momento —incluida la caja de la tienda si comparte el usuario— va a tener que
+        volver a entrar con la nueva. Comunícasela de forma segura antes de cambiarla.
       </p>
       <Field label="Nueva contraseña *" hint="Mínimo 8 caracteres">
         <Input type="password" value={pass} onChange={(e) => setPass(e.target.value)} placeholder="••••••••" />
