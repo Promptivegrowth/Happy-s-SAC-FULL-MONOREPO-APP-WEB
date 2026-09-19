@@ -371,14 +371,36 @@ function RolesTab({ usuario, onSaved }: { usuario: UsuarioRow; onSaved: () => vo
   );
 }
 
+/**
+ * Cambiarle la contrasena a alguien, sin que el cambio pueda fallar en silencio.
+ *
+ * Javier reporto el 19/09/2026 que "el sistema no lo deja cambiarla". No habia
+ * ningun error: habia DOS caminos por los que este formulario no hacia nada sin
+ * explicar por que.
+ *
+ *  1. Si las dos contrasenas no coincidian, salia un aviso rojo que a los pocos
+ *     segundos se iba. Quien no lo cazaba al vuelo veia un boton que no hacia
+ *     nada. Ahora la diferencia se ve DEBAJO del campo, se queda, y el boton
+ *     esta apagado hasta que coincidan.
+ *
+ *  2. Pedia confirmacion con el `confirm()` del navegador. Cuando el navegador
+ *     tiene bloqueados los dialogos —Edge y Chrome lo ofrecen despues de
+ *     mostrar varios— `confirm()` devuelve false sin preguntar nada, y la
+ *     funcion se cortaba ahi. Cero mensajes, cero pistas. Ahora la confirmacion
+ *     es un paso dentro de la propia pantalla.
+ */
 function PasswordTab({ usuario, onSaved }: { usuario: UsuarioRow; onSaved: () => void }) {
   const [pending, start] = useTransition();
   const [pass, setPass] = useState('');
   const [pass2, setPass2] = useState('');
+  const [confirmando, setConfirmando] = useState(false);
+
+  const cortita = pass.length > 0 && pass.length < 8;
+  const noCoinciden = pass2.length > 0 && pass !== pass2;
+  const listo = pass.length >= 8 && pass === pass2;
+
   function submit() {
-    if (pass.length < 8) { toast.error('Mínimo 8 caracteres'); return; }
-    if (pass !== pass2) { toast.error('Las contraseñas no coinciden'); return; }
-    if (!confirm(`¿Cambiar la contraseña de ${usuario.nombre_completo ?? usuario.email}?`)) return;
+    if (!listo) return;
     start(async () => {
       const r = await cambiarPasswordUsuario(usuario.id, { password: pass });
       if (r.ok) {
@@ -414,18 +436,65 @@ function PasswordTab({ usuario, onSaved }: { usuario: UsuarioRow; onSaved: () =>
         usando en ese momento —incluida la caja de la tienda si comparte el usuario— va a tener que
         volver a entrar con la nueva. Comunícasela de forma segura antes de cambiarla.
       </p>
-      <Field label="Nueva contraseña *" hint="Mínimo 8 caracteres">
-        <Input type="password" value={pass} onChange={(e) => setPass(e.target.value)} placeholder="••••••••" />
+      {/*
+        * Acá la contraseña se VE mientras se escribe, al reves que en todos lados.
+        *
+        * Es una clave provisional que el gerente le va a dictar a otra persona:
+        * no tiene sentido ocultarsela a quien la esta inventando, y ocultarla es
+        * justo lo que permitio escribir dos distintas sin notarlo.
+        */}
+      <Field label="Nueva contraseña *" hint="Mínimo 8 caracteres · se muestra para que puedas dictarla">
+        <Input
+          type="text" value={pass} onChange={(e) => { setPass(e.target.value); setConfirmando(false); }}
+          placeholder="Escribila completa"
+          className={cortita ? 'border-danger bg-red-50' : ''}
+        />
       </Field>
+      {cortita && <p className="-mt-2 text-xs font-medium text-danger">Le faltan {8 - pass.length} caracteres.</p>}
+
       <Field label="Repetir contraseña *">
-        <Input type="password" value={pass2} onChange={(e) => setPass2(e.target.value)} placeholder="••••••••" />
+        <Input
+          type="text" value={pass2} onChange={(e) => { setPass2(e.target.value); setConfirmando(false); }}
+          placeholder="La misma, otra vez"
+          className={noCoinciden ? 'border-danger bg-red-50' : ''}
+        />
       </Field>
-      <div className="flex justify-end pt-2">
-        <Button variant="premium" onClick={submit} disabled={pending}>
-          {pending && <Loader2 className="h-4 w-4 animate-spin" />}
-          Cambiar contraseña
-        </Button>
-      </div>
+      {/*
+        * El error se queda debajo del campo en vez de irse con el aviso.
+        * Es exactamente lo que no se vio: las dos contrasenas eran distintas.
+        */}
+      {noCoinciden && (
+        <p className="-mt-2 text-xs font-medium text-danger">
+          Las dos contraseñas no son iguales. Revisá: una tiene {pass.length} caracteres y la otra {pass2.length}.
+        </p>
+      )}
+      {listo && !confirmando && (
+        <p className="-mt-2 text-xs font-medium text-emerald-700">Las dos coinciden.</p>
+      )}
+
+      {/* Confirmacion DENTRO de la pantalla: el confirm() del navegador se puede bloquear. */}
+      {confirmando ? (
+        <div className="rounded-md border border-corp-200 bg-corp-50 p-3">
+          <p className="text-xs text-corp-900">
+            ¿Confirmás cambiar la contraseña de <b>{usuario.nombre_completo ?? usuario.email}</b>?
+          </p>
+          <div className="mt-2 flex justify-end gap-2">
+            <Button variant="outline" size="sm" onClick={() => setConfirmando(false)} disabled={pending}>
+              No, volver
+            </Button>
+            <Button variant="premium" size="sm" onClick={submit} disabled={pending}>
+              {pending && <Loader2 className="h-4 w-4 animate-spin" />}
+              Sí, cambiarla
+            </Button>
+          </div>
+        </div>
+      ) : (
+        <div className="flex justify-end pt-2">
+          <Button variant="premium" onClick={() => setConfirmando(true)} disabled={pending || !listo}>
+            Cambiar contraseña
+          </Button>
+        </div>
+      )}
     </div>
   );
 }
