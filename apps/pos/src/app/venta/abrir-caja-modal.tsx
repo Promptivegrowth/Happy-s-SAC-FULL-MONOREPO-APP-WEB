@@ -37,6 +37,8 @@ export function AbrirCajaModal({
 }) {
   const [monto, setMonto] = useState<string>(montoDefault.toFixed(2));
   const [obs, setObs] = useState('');
+  /** Por que no se pudo abrir. Se queda en pantalla, no se desvanece. */
+  const [error, setError] = useState<string | null>(null);
   // La caja asignada viene preseleccionada, pero SE PUEDE CAMBIAR. Antes era un
   // campo de solo lectura y no habia forma de cambiarla en todo el sistema: el
   // ERP tampoco escribe caja_default en ninguna pantalla. Una cajera que cubre
@@ -65,15 +67,30 @@ export function AbrirCajaModal({
       try {
         // Siempre se manda la caja elegida: el servidor la guarda como la nueva
         // predeterminada, asi que el proximo turno ya arranca con esta.
-        await abrirSesion({
+        const r = await abrirSesion({
           monto_apertura: n,
           caja_id: cajaSel,
           observacion: obs || null,
         });
+        if (!r.ok) {
+          /*
+           * El motivo viene como dato y se muestra entero.
+           *
+           * Antes el servidor lanzaba el error y Next le borraba el mensaje en
+           * produccion: la cajera veia un parrafo en ingles sobre "Server
+           * Components render" en lugar de "esta caja ya tiene un turno
+           * abierto". Dura lo suficiente para leerlo y actuar.
+           */
+          setError(r.error);
+          toast.error(r.error, { duration: 15000 });
+          return;
+        }
         toast.success('Caja abierta');
         onAbierta();
       } catch (e) {
-        toast.error((e as Error).message);
+        const msg = (e as Error)?.message ?? 'No se pudo abrir la caja';
+        setError(msg);
+        toast.error(msg, { duration: 12000 });
       }
     });
   }
@@ -204,6 +221,13 @@ export function AbrirCajaModal({
             ¿Es otra persona? Cambiar de usuario
           </button>
         </p>
+
+        {error && (
+          <div className="mb-3 rounded-md border border-red-300 bg-red-50 p-3">
+            <p className="text-sm font-semibold text-red-900">No se pudo abrir la caja</p>
+            <p className="mt-0.5 text-xs leading-relaxed text-red-800">{error}</p>
+          </div>
+        )}
 
         <Button
           onClick={submit}

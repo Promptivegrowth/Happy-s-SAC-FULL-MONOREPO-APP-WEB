@@ -93,11 +93,29 @@ const abrirSchema = z.object({
   observacion: z.string().max(500).optional().nullable(),
 });
 
+/**
+ * Abre el turno. Los problemas previsibles se DEVUELVEN, no se lanzan.
+ *
+ * Lanzarlos parecia funcionar porque el modal los atrapaba y los mostraba. Pero
+ * en produccion Next borra el mensaje de cualquier error que salga de una
+ * accion de servidor —para no filtrar detalles— y lo cambia por un parrafo en
+ * ingles sobre "Server Components render". La cajera se topaba con eso en vez
+ * de leer "esta caja ya tiene un turno abierto por otro usuario", que era la
+ * frase exacta que necesitaba y que el sistema ya sabia decir.
+ *
+ * Paso el 19/09/2026, la primera vez que alguien que no es gerente uso el POS.
+ *
+ * Devolverlos como dato es lo unico que los hace llegar enteros. Se reservan
+ * las excepciones para lo que de verdad es inesperado.
+ */
 export async function abrirSesion(input: {
   monto_apertura: number;
   caja_id?: string | null;
   observacion?: string | null;
-}) {
+}): Promise<
+  | { ok: true; id: string; caja_nombre: string }
+  | { ok: false; error: string }
+> {
   const parsed = abrirSchema.parse(input);
   const sb = await createClient();
   const user = await requireUser(sb);
@@ -112,9 +130,7 @@ export async function abrirSesion(input: {
     cajaId = perfil?.caja_default ?? null;
   }
   if (!cajaId) {
-    throw new Error(
-      'Tu usuario no tiene caja asignada. Elegí una caja en el modal o pedí al admin que la configure.',
-    );
+    return { ok: false, error: 'Tu usuario no tiene caja asignada. Elegí una caja de la lista, o pedile a gerencia que te la configure.' };
   }
 
   const { data: caja, error: errCaja } = await sb
@@ -123,7 +139,9 @@ export async function abrirSesion(input: {
     .eq('id', cajaId)
     .eq('activo', true)
     .single();
-  if (errCaja || !caja) throw new Error('La caja indicada no existe o está inactiva.');
+  if (errCaja || !caja) {
+    return { ok: false, error: 'La caja indicada no existe o está desactivada. Elegí otra de la lista.' };
+  }
 
   // Validar que NO haya otra sesión abierta para esta caja
   const { data: abierta } = await sb
@@ -134,9 +152,24 @@ export async function abrirSesion(input: {
     .maybeSingle();
   if (abierta) {
     if (abierta.abierta_por === user.id) {
-      throw new Error('Ya tienes una sesión abierta en esta caja.');
+      return { ok: false, error: 'Ya tenés un turno abierto en esta caja. Cerralo antes de abrir otro.' };
     }
-    throw new Error('Esta caja ya tiene una sesión abierta por otro usuario. Pídele que la cierre primero.');
+    /*
+     * Se dice QUIEN la tiene abierta y QUE hacer.
+     *
+     * "Pidele que la cierre" a secas obliga a averiguar a quien. Con el nombre,
+     * la cajera sabe a quien buscar; y si el turno es de otra persona que sigue
+     * trabajando, lo que corresponde es un cambio de turno, no abrir otra vez.
+     */
+    const { data: duenio } = await sb
+      .from('perfiles').select('nombre_completo').eq('id', abierta.abierta_por).maybeSingle();
+    const quien = duenio?.nombre_completo ?? 'otro usuario';
+    return {
+      ok: false,
+      error: `Esta caja ya tiene un turno abierto por ${quien} desde antes. `
+        + 'Si ya se fue, pedile que lo cierre. Si están haciendo cambio de turno, usá "Cerrar caja" '
+        + 'y elegí cambio de turno en lugar de abrir una nueva.',
+    };
   }
 
   const { data: nueva, error } = await sb
@@ -149,7 +182,7 @@ export async function abrirSesion(input: {
     })
     .select('id')
     .single();
-  if (error) throw new Error(`No se pudo abrir caja: ${error.message}`);
+  if (error) return { ok: false, error: `No se pudo abrir la caja: ${error.message}` };
 
   // Si el cajero eligió manualmente una caja distinta a su default, persistirla
   // como nuevo default para no tener que elegirla la próxima vez.
@@ -158,7 +191,7 @@ export async function abrirSesion(input: {
   }
 
   revalidatePath('/venta');
-  return { id: nueva.id, caja_nombre: caja.nombre };
+  return { ok: true, id: nueva.id, caja_nombre: caja.nombre };
 }
 
 // ============================================================================
