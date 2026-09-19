@@ -18,11 +18,13 @@ export default async function NuevoTrasladoPage() {
     getSession(),
   ]);
   /*
-   * Corregir stock desde el traslado es un AJUSTE de inventario, y eso hoy solo
-   * lo puede hacer gerencia (`requireGerenteAjuste`). Se pregunta acá para no
-   * ofrecer un boton que el servidor va a rechazar.
+   * Corregir stock desde el traslado es un conteo, y contar es trabajo de
+   * almacén. Los roles tienen que ser LOS MISMOS que acepta
+   * `requierePermisoConteo` en el servidor: si acá se ofreciera de más, el
+   * botón aparecería y el guardado fallaría.
    */
-  const puedeAjustar = sesion.roles.includes('gerente');
+  const ROLES_QUE_CUENTAN = ['gerente', 'almacenero', 'almacen_la_quinta'];
+  const puedeAjustar = sesion.roles.some((r) => ROLES_QUE_CUENTAN.includes(r));
   // Excluir MATERIA_PRIMA: los traslados entre almacenes son de productos
   // terminados, no se hacen contra MP. Cliente lo pidió explícito.
   const almacenes = resAlms.ok

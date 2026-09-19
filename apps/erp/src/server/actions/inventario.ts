@@ -24,7 +24,7 @@ export async function ajustarStock(
   const r = await runAction(async () => {
     const data = ajustarSchema.parse(input);
     const { sb, userId } = await requireUser();
-    await requireGerenteAjuste(sb, userId);
+    await requierePermisoConteo(sb, userId);
 
     // Stock actual (puede no existir todavía → trato como 0)
     const { data: actualRow } = await sb
@@ -219,7 +219,7 @@ export async function ajustarStockBatch(
   const r = await runAction(async () => {
     const data = ajustarBatchSchema.parse(input);
     const { sb, userId } = await requireUser();
-    await requireGerenteAjuste(sb, userId); // conteo = ajuste → solo gerencia
+    await requierePermisoConteo(sb, userId); // contar es trabajo de almacén
 
     // Guardarraíl: bloquear productos terminados en almacén de materia prima.
     const { data: almRow } = await sb
@@ -329,6 +329,35 @@ async function requireGerenteAjuste(sb: Awaited<ReturnType<typeof requireUser>>[
 }
 
 /**
+ * Quién puede CORREGIR lo que hay en el almacén.
+ *
+ * Contar y corregir es el trabajo de almacén, no un privilegio de gerencia.
+ * Estaba reservado a `gerente`, y funcionaba sólo porque todos entraban con la
+ * cuenta de Javier: el día que cada uno tuviera la suya, el almacenero —que es
+ * justamente quien cuenta la mercadería— se quedaba sin poder arreglar una
+ * diferencia y tenía que llamar al gerente por cada talla. Se vio el 19/09/2026
+ * al probar con la cuenta de Harold.
+ *
+ * Se separa a propósito de `requireGerenteAjuste`, que sigue cubriendo los
+ * MOVIMIENTOS manuales (declarar ingresos, mermas, salidas). No es lo mismo:
+ * contar es constatar lo que hay, y declarar un movimiento es afirmar que algo
+ * entró o salió. Lo primero lo hace quien está frente al estante; lo segundo
+ * mueve plata y sigue siendo de gerencia.
+ *
+ * Todo ajuste queda en el kardex con su motivo, su fecha y el usuario que lo
+ * hizo, así que el control no se pierde: se vuelve auditable en lugar de
+ * bloqueante.
+ */
+async function requierePermisoConteo(sb: Awaited<ReturnType<typeof requireUser>>['sb'], userId: string) {
+  const { data: roles } = await sb.from('usuarios_roles').select('rol').eq('usuario_id', userId);
+  const suyos = (roles ?? []).map((r) => (r as { rol: string }).rol);
+  const permitidos = ['gerente', 'almacenero', 'almacen_la_quinta'];
+  if (!suyos.some((r) => permitidos.includes(r))) {
+    throw new Error('Corregir el stock lo puede hacer almacén o gerencia. Pedile a alguien con ese rol que lo haga.');
+  }
+}
+
+/**
  * Registra un movimiento manual de stock de MATERIAL (entrada o salida). El
  * signo lo define el prefijo del tipo (ENTRADA_/SALIDA_). Restringido a gerente.
  * Cubre los flujos que el cliente pidió operar a mano: ingresos, devoluciones de
@@ -396,7 +425,7 @@ export async function ajustarStockMaterial(
   const r = await runAction(async () => {
     const data = ajustarMaterialSchema.parse(input);
     const { sb, userId } = await requireUser();
-    await requireGerenteAjuste(sb, userId); // corregir cantidad = ajuste → solo gerencia
+    await requierePermisoConteo(sb, userId); // corregir cantidad = contar
 
     const { data: actualRow } = await sb
       .from('stock_actual')
@@ -529,7 +558,7 @@ export async function ajustarStockMaterialBatch(
   const r = await runAction(async () => {
     const data = ajustarMaterialBatchSchema.parse(input);
     const { sb, userId } = await requireUser();
-    await requireGerenteAjuste(sb, userId); // conteo = ajuste → solo gerencia
+    await requierePermisoConteo(sb, userId); // conteo masivo de materiales = contar
 
     const ids = data.lineas.map((l) => l.material_id);
     const { data: stockRows } = await sb
