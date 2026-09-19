@@ -102,15 +102,18 @@ export async function registrarMovimientoStock(
     const data = movimientoSchema.parse(input);
     const { sb, userId } = await requireUser();
 
-    // Validar rol gerente
-    const { data: roles } = await sb
-      .from('usuarios_roles')
-      .select('rol')
-      .eq('usuario_id', userId);
-    const esGerente = (roles ?? []).some((r) => (r as { rol: string }).rol === 'gerente');
-    if (!esGerente) {
-      throw new Error('Solo el gerente puede registrar ajustes manuales de stock. Pedile a alguien con ese rol que lo haga.');
-    }
+    /*
+     * Almacen tambien entra acá, y por el mismo motivo que al lapiz de conteo.
+     *
+     * Este modal SOLO acepta ENTRADA_AJUSTE y SALIDA_AJUSTE —lo comprueba unas
+     * lineas mas abajo—, asi que es corregir existencias igual que contar: la
+     * unica diferencia es que se escribe "suma 10" en vez de "el real es 25".
+     * Dejarlo en gerencia mientras el conteo estaba abierto hubiera sido una
+     * distincion sin sentido para quien esta frente al estante.
+     *
+     * Las compras, devoluciones y mermas siguen fuera: no llegan por acá.
+     */
+    await requierePermisoConteo(sb, userId);
 
     // Restricción adicional: solo permitir tipos de AJUSTE manual.
     // Los otros tipos (ENTRADA_COMPRA, DEVOLUCION_*, SALIDA_MERMA) deben
@@ -467,15 +470,9 @@ export async function registrarMovimientoStockBatch(
     const data = movimientoBatchSchema.parse(input);
     const { sb, userId } = await requireUser();
 
-    // Restringido a gerente (igual que registrarMovimientoStock)
-    const { data: roles } = await sb
-      .from('usuarios_roles')
-      .select('rol')
-      .eq('usuario_id', userId);
-    const esGerente = (roles ?? []).some((r) => (r as { rol: string }).rol === 'gerente');
-    if (!esGerente) {
-      throw new Error('Solo el gerente puede registrar ajustes masivos de stock.');
-    }
+    // Mismo criterio que la version de a uno: el esquema solo admite
+    // ENTRADA_AJUSTE y SALIDA_AJUSTE, o sea corregir existencias.
+    await requierePermisoConteo(sb, userId);
 
     // Guardarraíl: bloquear si el almacén destino es MATERIA_PRIMA (ahí van
     // telas/insumos, no prendas). Ver registrarMovimientoStock para el motivo.
