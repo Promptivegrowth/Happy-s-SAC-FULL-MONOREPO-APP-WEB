@@ -1,4 +1,7 @@
 import { Suspense } from 'react';
+import { redirect } from 'next/navigation';
+import { getSession } from '@/server/session';
+import { puedeVer, primeraRutaPara } from '@/server/permisos';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@happy/ui/card';
 import { Skeleton } from '@happy/ui/skeleton';
 import { formatPEN, formatNumber } from '@happy/lib';
@@ -19,6 +22,23 @@ export const dynamic = 'force-dynamic';
 type SP = { [k: string]: string | string[] | undefined };
 
 export default async function DashboardPage(props: { searchParams: Promise<SP> }) {
+  /*
+   * Quien no ve el tablero se va derecho a lo suyo.
+   *
+   * Todo el mundo cae acá al iniciar sesión, pero el tablero es sólo de
+   * gerencia y contabilidad. Antes este desvío vivía en el layout, y redirigir
+   * desde un layout dejaba la PANTALLA EN BLANCO: el título cambiaba pero el
+   * cuerpo no se dibujaba, y había que recargar a mano. Le pasó a Luigi con la
+   * cuenta de almacén el 19 y el 20/09/2026.
+   *
+   * Desde la página funciona bien: Next resuelve el desvío antes de empezar a
+   * dibujar nada, así que se ve la pantalla correcta a la primera.
+   */
+  const sesion = await getSession();
+  if (!puedeVer(sesion.roles, '/dashboard')) {
+    redirect(primeraRutaPara(sesion.roles));
+  }
+
   const searchParams = await props.searchParams;
   const periodo = resolvePeriodo(searchParams);
 
