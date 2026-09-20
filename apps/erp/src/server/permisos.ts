@@ -127,9 +127,20 @@ export const PERMISOS: Array<{ prefijo: string; roles: Rol[] }> = [
   { prefijo: '/notificaciones', roles: PERSONAL },
 ];
 
-/** Lo único que abre la cuenta de Almacén La Quinta. La campanita va incluida
- *  porque, si no, el aviso que le llega no lo puede ni abrir. */
-const SOLO_LA_QUINTA: string[] = ['/inventario', '/notificaciones'];
+/**
+ * Lo único que abre la cuenta de Almacén La Quinta.
+ *
+ * Es la sección Inventario del menú entera —Kardex, Stock actual, Traslados y
+ * las alertas—, no sólo el stock: quien cuenta un almacén también recibe y
+ * manda mercadería, y sin Traslados el trabajo queda a medias. La campanita va
+ * incluida porque, si no, el aviso que le llega no lo puede ni abrir.
+ */
+const SOLO_LA_QUINTA: string[] = [
+  '/inventario',    // stock actual y alertas de stock bajo
+  '/kardex',        // el historial de cada movimiento
+  '/traslados',     // recibir y enviar mercadería
+  '/notificaciones',
+];
 
 /** La regla que aplica a una ruta: la de prefijo más largo que coincida. */
 export function reglaDe(pathname: string): { prefijo: string; roles: Rol[] } | null {
