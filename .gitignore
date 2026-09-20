@@ -83,4 +83,6 @@ logs/
 Guia-Pruebas-HAPPY-SAC.docx
 
 # Credenciales del cliente: NO van al repositorio.
-USUARIOS-Y-CONTRASENAS.xlsx
+# Credenciales del personal: NUNCA al repositorio. El comodin es a proposito,
+# para que una copia con fecha o un "(1)" de Windows tampoco se escape.
+USUARIOS-Y-CONTRASENAS*.xlsx
