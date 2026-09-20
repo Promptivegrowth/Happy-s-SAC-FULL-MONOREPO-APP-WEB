@@ -14,9 +14,19 @@ export const dynamic = 'force-dynamic';
 
 export default async function DashboardLayout({ children }: { children: React.ReactNode }) {
   const sesion = await getSession();
+
+  /*
+   * La campanita no puede tumbar el ERP.
+   *
+   * Si cualquiera de estas dos consultas falla, el layout entero revienta — y
+   * un layout que revienta no tiene error boundary que lo atrape: se ve una
+   * PANTALLA EN BLANCO y hay que recargar a mano. Eso es lo que reportó Luigi
+   * el 19/09/2026. Por unas notificaciones no vale la pena perder el sistema:
+   * si no llegan, la campanita sale vacía y todo lo demás sigue funcionando.
+   */
   const [notificaciones, noLeidas, cabeceras] = await Promise.all([
-    listarMisNotificaciones(15),
-    contarNotificacionesNoLeidas(),
+    listarMisNotificaciones(15).catch(() => []),
+    contarNotificacionesNoLeidas().catch(() => 0),
     headers(),
   ]);
 
