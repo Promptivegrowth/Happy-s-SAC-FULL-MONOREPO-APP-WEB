@@ -850,8 +850,13 @@ export function PosTerminal({
   const [cobrando, setCobrando] = useState(false);
   /* Estado de la red, para avisar ANTES de que se caiga un cobro. */
   const conexion = useEstadoConexion();
-  /** Por que no hay caja, cuando no la hay. Null = no hay nada que explicar. */
-  const [motivoCaja, setMotivoCaja] = useState<string | null>(null);
+  /**
+   * Por que no hay caja, cuando no la hay. Null = no hay nada que explicar.
+   *
+   * `puedeElegir` separa el bloqueo de verdad —sesion vencida, perfil perdido—
+   * de lo que se resuelve solo eligiendo la caja al abrir el turno.
+   */
+  const [motivoCaja, setMotivoCaja] = useState<{ texto: string; puedeElegir: boolean } | null>(null);
 
   function abrirModalCobrar() {
     if (!sesionActiva) return toast.error('Abre la caja primero');
@@ -871,7 +876,7 @@ export function PosTerminal({
    * bloqueante en vez de abrir modal.
    */
   async function pagarEImprimir() {
-    if (!sesionActiva || !cajaActual) return toast.error(motivoCaja ?? 'Abre la caja primero');
+    if (!sesionActiva || !cajaActual) return toast.error(motivoCaja?.texto ?? 'Abre la caja primero');
     if (carrito.length === 0) return toast.error('Carrito vacío');
     if (pagado < total) return toast.error(`Falta cobrar ${formatPEN(total - pagado)}`);
     // Validación por tipo de comprobante
@@ -1356,7 +1361,7 @@ export function PosTerminal({
               <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-red-600" />
               <div>
                 <p className="text-sm font-semibold text-red-900">No se puede cobrar todavía</p>
-                <p className="mt-0.5 text-xs leading-relaxed text-red-800">{motivoCaja}</p>
+                <p className="mt-0.5 text-xs leading-relaxed text-red-800">{motivoCaja.texto}</p>
               </div>
             </div>
           )}
@@ -2409,16 +2414,24 @@ export function PosTerminal({
               * tambien en esta pantalla, que es la que de verdad se ve.
               */}
             <h3 className="font-display text-xl font-semibold text-corp-900">
-              {motivoCaja ? 'No se puede vender todavía' : 'No hay caja abierta'}
+              {motivoCaja && !motivoCaja.puedeElegir ? 'No se puede vender todavía' : 'No hay caja abierta'}
             </h3>
             <p className="mt-1 text-sm leading-relaxed text-slate-500">
-              {motivoCaja ?? `Para vender, ${cajeroNombre} tiene que abrir su turno con un monto inicial.`}
+              {motivoCaja?.texto ?? `Para vender, ${cajeroNombre} tiene que abrir su turno con un monto inicial.`}
             </p>
             {/*
               * Abrir caja solo cuando abrir caja es la respuesta. Ofrecerlo a
               * quien no tiene caja asignada lo manda derecho a un error.
               */}
-            {!motivoCaja && (
+            {/*
+              * Se ofrece abrir caja salvo que sea un bloqueo real.
+              *
+              * Esconderlo siempre que faltara la caja fue un exceso mio: a quien
+              * solo le falta ELEGIRLA, ese boton es justo lo que tiene que
+              * apretar. Se esconde unicamente cuando apretarlo no llevaria a
+              * ningun lado —sesion vencida, perfil perdido—.
+              */}
+            {(!motivoCaja || motivoCaja.puedeElegir) && (
               <Button
                 onClick={() => setAbrirCajaOpen(true)}
                 variant="premium"

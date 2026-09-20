@@ -66,6 +66,38 @@ async function getCajaDefault(sb: ServerClient, userId: string) {
     .eq('id', userId)
     .single();
   if (!perfil?.caja_default) {
+    /*
+     * Sin caja fija, se usa aquella donde esta persona tenga un turno abierto.
+     *
+     * Gerencia no trabaja en una caja: abre la de Huallaga un dia y la de La
+     * Quinta otro, y obligarla a fijarse una es al reves de como funciona. Pero
+     * si ya abrio un turno, el POS no tiene por que preguntarle en cual: lo
+     * busca y lo encuentra. Javier se quedo sin poder ver su propio turno el
+     * 19/09/2026 justamente por esto.
+     *
+     * Si no tiene ninguno abierto, se sigue de largo al error: ahi la respuesta
+     * es elegir la caja en el modal de apertura, que la guarda para la proxima.
+     */
+    const { data: sesionSuya } = await sb
+      .from('cajas_sesiones')
+      .select('caja_id')
+      .eq('abierta_por', userId)
+      .is('cerrada_en', null)
+      .order('abierta_en', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (sesionSuya?.caja_id) {
+      const { data: cajaAbierta } = await sb
+        .from('cajas')
+        .select('id, codigo, nombre, almacen_id, monto_apertura_default, serie_boleta, serie_factura, serie_nota_venta')
+        .eq('id', sesionSuya.caja_id)
+        .single();
+      if (cajaAbierta) {
+        return { caja: cajaAbierta, cajeroNombre: perfil?.nombre_completo ?? 'Cajero' };
+      }
+    }
+
     throw new Error(
       'Tu usuario no tiene una caja asignada. Pídele a un administrador que configure tu "caja default" en el perfil.',
     );
@@ -212,10 +244,10 @@ export async function abrirSesion(input: {
  * Devuelve null cuando no hay nada que explicar: no hay sesión abierta y punto,
  * que es el caso normal a primera hora.
  */
-export async function motivoSinCaja(): Promise<string | null> {
+export async function motivoSinCaja(): Promise<{ texto: string; puedeElegir: boolean } | null> {
   const sb = await createClient();
   const { data: { user } } = await sb.auth.getUser();
-  if (!user) return 'Tu sesión venció. Volvé a iniciar sesión.';
+  if (!user) return { texto: 'Tu sesión venció. Volvé a iniciar sesión.', puedeElegir: false };
 
   const { data: perfil } = await sb
     .from('perfiles')
@@ -223,10 +255,21 @@ export async function motivoSinCaja(): Promise<string | null> {
     .eq('id', user.id)
     .maybeSingle();
 
-  if (!perfil) return 'No se encontró tu perfil. Avisá a gerencia.';
+  if (!perfil) return { texto: 'No se encontró tu perfil. Avisá a gerencia.', puedeElegir: false };
   if (!perfil.caja_default) {
-    return `${perfil.nombre_completo ?? 'Tu usuario'} no tiene una caja asignada, así que el POS no sabe en cuál cobrar. `
-      + 'Se arregla en el ERP: Usuarios → editar tu usuario → Caja. Es un minuto y no se pierde nada de lo vendido.';
+    /*
+     * No tener caja fija NO es un bloqueo: es que todavia no se eligio.
+     *
+     * Antes esto mandaba a pedirle el cambio a gerencia y escondia el boton de
+     * abrir caja, que es justo lo que habia que apretar. Para quien trabaja
+     * siempre en la misma caja conviene que se la asignen; para gerencia, que
+     * abre una u otra segun el dia, elegirla en el momento es lo correcto.
+     */
+    return {
+      texto: 'Todavía no elegiste en qué caja vas a trabajar. Tocá "Abrir caja" y elegila de la lista: '
+        + 'queda guardada para la próxima vez.',
+      puedeElegir: true,
+    };
   }
 
   const { data: caja } = await sb
@@ -235,8 +278,8 @@ export async function motivoSinCaja(): Promise<string | null> {
     .eq('id', perfil.caja_default)
     .maybeSingle();
 
-  if (!caja) return 'La caja asignada a tu usuario ya no existe. Pedí en el ERP que te asignen otra.';
-  if (!caja.activo) return `La caja "${caja.nombre}" está desactivada. Pedí en el ERP que te asignen otra.`;
+  if (!caja) return { texto: 'La caja asignada a tu usuario ya no existe. Pedí en el ERP que te asignen otra.', puedeElegir: true };
+  if (!caja.activo) return { texto: `La caja "${caja.nombre}" está desactivada. Elegí otra al abrir, o pedí en el ERP que te asignen una.`, puedeElegir: true };
 
   return null;
 }
