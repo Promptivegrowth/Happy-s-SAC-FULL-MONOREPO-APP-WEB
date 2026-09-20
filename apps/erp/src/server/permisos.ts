@@ -156,15 +156,15 @@ export function puedeVer(roles: Rol[], pathname: string): boolean {
   /*
    * Almacén La Quinta: sólo Inventario, pase lo que pase.
    *
-   * En la base, ese rol no figura en ninguna de las 105 políticas de seguridad
-   * —ni siquiera en la que deja leer los propios roles—, así que la cuenta
-   * entraba sin ningún rol a la vista y se quedaba mirando una pantalla vacía.
-   * Para que pueda trabajar lleva además el rol de `almacenero`, que es el que
-   * la base sí reconoce.
+   * En la base este rol vale por `almacenero` —la equivalencia está dentro de
+   * `tiene_algun_rol`—, así que puede leer y mover stock como corresponde. Pero
+   * Javier pidió el 19/09/2026 que la cuenta viera Inventario y nada más, y esa
+   * parte se decide acá.
    *
-   * Ese rol extra le abriría medio menú, y Javier pidió el 19/09/2026 que esta
-   * cuenta viera Inventario y nada más. Entonces acá manda la lista corta: no
-   * importa qué otros roles tenga, si es La Quinta sólo pasa esto.
+   * Es una lista corta y no una regla más del mapa a propósito: si mañana
+   * alguien le suma `almacenero` o `cajero` a esta cuenta para destrabar algo,
+   * el mapa le abriría medio menú sin que nadie se entere. Así no: mientras sea
+   * La Quinta, sólo pasa esto.
    */
   if (roles.includes('almacen_la_quinta')) {
     return SOLO_LA_QUINTA.some((p) => pathname === p || pathname.startsWith(`${p}/`));
