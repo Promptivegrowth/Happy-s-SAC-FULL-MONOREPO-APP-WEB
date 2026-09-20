@@ -2396,18 +2396,38 @@ export function PosTerminal({
             <div className="mx-auto mb-3 flex h-14 w-14 items-center justify-center rounded-full bg-happy-100">
               <LogIn className="h-7 w-7 text-happy-600" />
             </div>
-            <h3 className="font-display text-xl font-semibold text-corp-900">No hay caja abierta</h3>
-            <p className="mt-1 text-sm text-slate-500">
-              Para vender, {cajeroNombre} tiene que abrir su turno con un monto inicial.
+            {/*
+              * Si el problema NO es que falte abrir el turno, se dice cual es.
+              *
+              * "No hay caja abierta" era mentira cuando el usuario no tenia
+              * caja asignada: la caja estaba abierta, con 56 ventas, y el POS
+              * no la encontraba porque la busca por la caja del PERFIL. La
+              * cajera leia ese cartel, apretaba "Abrir caja" y chocaba contra
+              * "ya tiene un turno abierto". Paso en Huallaga el 19/09/2026.
+              *
+              * `motivoCaja` ya trae la explicacion buena; solo faltaba usarla
+              * tambien en esta pantalla, que es la que de verdad se ve.
+              */}
+            <h3 className="font-display text-xl font-semibold text-corp-900">
+              {motivoCaja ? 'No se puede vender todavía' : 'No hay caja abierta'}
+            </h3>
+            <p className="mt-1 text-sm leading-relaxed text-slate-500">
+              {motivoCaja ?? `Para vender, ${cajeroNombre} tiene que abrir su turno con un monto inicial.`}
             </p>
-            <Button
-              onClick={() => setAbrirCajaOpen(true)}
-              variant="premium"
-              size="lg"
-              className="mt-5 w-full"
-            >
-              <LogIn className="h-4 w-4" /> Abrir caja
-            </Button>
+            {/*
+              * Abrir caja solo cuando abrir caja es la respuesta. Ofrecerlo a
+              * quien no tiene caja asignada lo manda derecho a un error.
+              */}
+            {!motivoCaja && (
+              <Button
+                onClick={() => setAbrirCajaOpen(true)}
+                variant="premium"
+                size="lg"
+                className="mt-5 w-full"
+              >
+                <LogIn className="h-4 w-4" /> Abrir caja
+              </Button>
+            )}
 
             {/* Salir tiene que estar ACA DENTRO.
                 El boton de la barra de arriba funciona igual con este aviso
