@@ -59,23 +59,33 @@ export async function middleware(request: NextRequest) {
   );
 
   /*
-   * Se le PREGUNTA al servidor si la sesión sirve. Antes se decodificaba el JWT.
+   * Se le PREGUNTA al servidor si la sesión sirve, pero sin echar a nadie
+   * cuando no se le pudo preguntar.
    *
-   * `getSession()` sólo lee el token del cookie y comprueba que no haya vencido;
-   * no sabe si lo revocaron. Y cambiar la contraseña revoca las sesiones al
-   * instante, mientras el JWT sigue pareciendo bueno hasta una hora más.
+   * Antes se decodificaba el JWT con `getSession()`, que sólo comprueba que no
+   * haya vencido y no sabe si lo revocaron. Cambiar la contraseña revoca al
+   * instante mientras el token sigue pareciendo bueno una hora más, y eso hacía
+   * que el middleware y el layout se contradijeran: uno mandaba de /login a
+   * /dashboard, el otro devolvía a /login, hasta ERR_TOO_MANY_REDIRECTS.
    *
-   * Con eso las dos capas se contradecían y el navegador quedaba rebotando:
-   * acá se veía "sesión válida" y se mandaba de /login a /dashboard; el layout
-   * del dashboard sí preguntaba de verdad, fallaba, y devolvía a /login. Otra
-   * vuelta, y otra, hasta ERR_TOO_MANY_REDIRECTS. Le pasó a Luigi el 19/09/2026
-   * justo después de cambiar su contraseña, que es exactamente cuando este
-   * desacuerdo aparece.
+   * Pero `getUser()` contesta null en DOS casos distintos —no hay sesión, y no
+   * se pudo preguntar— y tratarlos igual fue peor: un tropiezo de red, o el
+   * límite de peticiones de Supabase que se alcanza regularizando stock en
+   * ráfaga, terminaba en cierre de sesión. Con la válvula de abajo, que además
+   * borra las cookies, quedaba afuera de verdad. Dejó sin sistema a gerencia y
+   * a la tienda el 19/09/2026.
    *
-   * `getUser()` cuesta una consulta al servidor de auth, pero es la única
-   * respuesta que coincide con la que va a dar el layout.
+   * Entonces: cuando el servidor contesta, su respuesta manda. Cuando no se le
+   * pudo preguntar, se cae al token de la cookie. Puede estar revocado, pero el
+   * costo de equivocarse ahí es que alguien siga adentro unos minutos de más,
+   * contra el de echar a toda la tienda por un problema de un segundo.
    */
-  const { data: { user } } = await supabase.auth.getUser();
+  const { data: { user: userVerificado }, error: errorAuth } = await supabase.auth.getUser();
+  let user = userVerificado;
+  if (errorAuth) {
+    const { data: { session } } = await supabase.auth.getSession();
+    user = session?.user ?? null;
+  }
 
   const { pathname } = request.nextUrl;
   const isPublic = PUBLIC_PATHS.some((p) => pathname.startsWith(p));
@@ -88,7 +98,7 @@ export async function middleware(request: NextRequest) {
    * es lo que Edge terminó sugiriendo. Limpiarlas acá hace que el bucle no
    * pueda ni empezar.
    */
-  if (!user && pathname === '/login') {
+  if (!user && !errorAuth && pathname === '/login') {
     for (const cookie of request.cookies.getAll()) {
       if (cookie.name.startsWith('sb-') && cookie.name.includes('auth-token')) {
         response.cookies.delete(cookie.name);

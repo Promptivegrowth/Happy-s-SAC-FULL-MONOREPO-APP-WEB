@@ -48,7 +48,27 @@ export async function middleware(request: NextRequest) {
       },
     },
   );
-  const { data: { user } } = await supabase.auth.getUser();
+  /*
+   * Se distingue "no hay sesión" de "no pude preguntar".
+   *
+   * `getUser()` contesta null en los dos casos, y tratarlos igual convierte un
+   * tropiezo de red —o un límite de peticiones de Supabase, que se alcanza
+   * facilísimo cuando alguien regulariza stock en ráfaga— en un cierre de
+   * sesión definitivo. Peor todavía con la válvula de abajo, que además borra
+   * las cookies: la persona queda afuera de verdad por un problema de un
+   * segundo. Pasó el 19/09/2026 y dejó sin sistema a gerencia y a la tienda.
+   *
+   * Cuando el servidor contesta, su respuesta manda. Cuando NO se le pudo
+   * preguntar, se cae al token que ya está en la cookie: puede estar revocado,
+   * pero el costo de equivocarse ahí es que alguien siga adentro unos minutos
+   * de más, contra el de echar a toda la tienda.
+   */
+  const { data: { user: userVerificado }, error: errorAuth } = await supabase.auth.getUser();
+  let user = userVerificado;
+  if (errorAuth) {
+    const { data: { session } } = await supabase.auth.getSession();
+    user = session?.user ?? null;
+  }
   const { pathname } = request.nextUrl;
   const isPublic = PUBLIC.some((p) => pathname.startsWith(p));
 
@@ -61,7 +81,7 @@ export async function middleware(request: NextRequest) {
    * solo y hay que borrar cookies a mano. En una caja con clientes esperando,
    * eso no puede pasar.
    */
-  if (!user && pathname === '/login') {
+  if (!user && !errorAuth && pathname === '/login') {
     for (const cookie of request.cookies.getAll()) {
       if (cookie.name.startsWith('sb-') && cookie.name.includes('auth-token')) {
         response.cookies.delete(cookie.name);
