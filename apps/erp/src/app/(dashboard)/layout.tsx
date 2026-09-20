@@ -43,7 +43,21 @@ export default async function DashboardLayout({ children }: { children: React.Re
    * se le dice que existe, que no es para su rol y a quién pedírselo.
    */
   const pathname = cabeceras.get('x-pathname') ?? '';
-  const permitido = pathname === '' || puedeVer(sesion.roles, pathname);
+
+  /*
+   * El tablero se deja pasar SIEMPRE, y lo resuelve su propia página.
+   *
+   * Todo el mundo cae en /dashboard al iniciar sesión, pero el tablero es sólo
+   * de gerencia y contabilidad. Si acá se le pone el cartel a quien no lo
+   * tiene, la página nunca llega a correr — y es la página la que sabe desviar
+   * a cada uno a lo suyo. El 20/09/2026 eso dejó a Harold plantado en "esta
+   * sección no es para tu rol" nada más entrar, sin poder hacer nada.
+   *
+   * Que pase por acá no lo abre a nadie: la página comprueba el permiso igual,
+   * y si no hay a dónde desviar, muestra el mismo cartel.
+   */
+  const permitido =
+    pathname === '' || pathname === '/dashboard' || puedeVer(sesion.roles, pathname);
 
   return (
     <div className="flex min-h-screen">

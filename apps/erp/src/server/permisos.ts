@@ -127,6 +127,10 @@ export const PERMISOS: Array<{ prefijo: string; roles: Rol[] }> = [
   { prefijo: '/notificaciones', roles: PERSONAL },
 ];
 
+/** Lo único que abre la cuenta de Almacén La Quinta. La campanita va incluida
+ *  porque, si no, el aviso que le llega no lo puede ni abrir. */
+const SOLO_LA_QUINTA: string[] = ['/inventario', '/notificaciones'];
+
 /** La regla que aplica a una ruta: la de prefijo más largo que coincida. */
 export function reglaDe(pathname: string): { prefijo: string; roles: Rol[] } | null {
   let mejor: { prefijo: string; roles: Rol[] } | null = null;
@@ -148,6 +152,23 @@ export function reglaDe(pathname: string): { prefijo: string; roles: Rol[] } | n
  */
 export function puedeVer(roles: Rol[], pathname: string): boolean {
   if (roles.includes('gerente')) return true;
+
+  /*
+   * Almacén La Quinta: sólo Inventario, pase lo que pase.
+   *
+   * En la base, ese rol no figura en ninguna de las 105 políticas de seguridad
+   * —ni siquiera en la que deja leer los propios roles—, así que la cuenta
+   * entraba sin ningún rol a la vista y se quedaba mirando una pantalla vacía.
+   * Para que pueda trabajar lleva además el rol de `almacenero`, que es el que
+   * la base sí reconoce.
+   *
+   * Ese rol extra le abriría medio menú, y Javier pidió el 19/09/2026 que esta
+   * cuenta viera Inventario y nada más. Entonces acá manda la lista corta: no
+   * importa qué otros roles tenga, si es La Quinta sólo pasa esto.
+   */
+  if (roles.includes('almacen_la_quinta')) {
+    return SOLO_LA_QUINTA.some((p) => pathname === p || pathname.startsWith(`${p}/`));
+  }
 
   const regla = reglaDe(pathname);
   if (!regla) return false;

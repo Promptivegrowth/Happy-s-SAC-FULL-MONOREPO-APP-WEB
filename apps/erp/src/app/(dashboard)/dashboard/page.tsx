@@ -2,6 +2,7 @@ import { Suspense } from 'react';
 import { redirect } from 'next/navigation';
 import { getSession } from '@/server/session';
 import { puedeVer, primeraRutaPara } from '@/server/permisos';
+import { SinPermiso } from '@/components/sin-permiso';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@happy/ui/card';
 import { Skeleton } from '@happy/ui/skeleton';
 import { formatPEN, formatNumber } from '@happy/lib';
@@ -36,7 +37,13 @@ export default async function DashboardPage(props: { searchParams: Promise<SP> }
    */
   const sesion = await getSession();
   if (!puedeVer(sesion.roles, '/dashboard')) {
-    redirect(primeraRutaPara(sesion.roles));
+    const destino = primeraRutaPara(sesion.roles);
+    /*
+     * Si no hay a dónde mandarlo, el cartel — nunca un desvío a esta misma
+     * pantalla, que sería un ida y vuelta infinito contra sí misma.
+     */
+    if (destino !== '/dashboard') redirect(destino);
+    return <SinPermiso roles={sesion.roles} />;
   }
 
   const searchParams = await props.searchParams;
