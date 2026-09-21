@@ -21,19 +21,35 @@ import { ENVIO_GRATIS_DESDE, COSTO_ENVIO_DEFECTO, costoEnvio, type DestinoEnvio 
 
 type Metodo = 'yape' | 'plin' | 'izipay_card' | 'transferencia' | 'whatsapp';
 
-// Cliente pidió (post-2026-07-08): solo WhatsApp estaba habilitado. Desde el
-// 15/09/2026 se suma la tarjeta por izipay, que se habilita sola cuando el
-// servidor tiene cargadas las credenciales (prop `izipayHabilitado`): así la
-// opción no aparece si todavía no se puede cobrar.
-// Yape, Plin y transferencia siguen como "Próximamente" hasta que se defina el
-// flujo de sube-captura del voucher.
+/*
+ * Cliente pidió (post-2026-07-08): solo WhatsApp estaba habilitado. Desde el
+ * 15/09/2026 se suma la tarjeta por izipay, que se habilita sola cuando el
+ * servidor tiene cargadas las credenciales (prop `izipayHabilitado`): así la
+ * opción no aparece si todavía no se puede cobrar.
+ *
+ * Yape, Plin y transferencia decían "Próximamente" desde julio, esperando que
+ * izipay los ofreciera. No los ofrece: consultada su API el 20/09/2026, la
+ * tienda tiene habilitadas solo tarjetas, y el Yape web de izipay va por otro
+ * SDK distinto al que está integrado. Mientras tanto la franja de arriba los
+ * anunciaba igual, así que el comprador llegaba hasta el final para encontrarse
+ * con que no estaban.
+ *
+ * Desde el 21/09/2026 sí se pueden elegir, y van por WhatsApp: el comprador
+ * paga desde su app y manda la captura. No es un cobro automático, pero es lo
+ * que la tienda ya hace todos los días por teléfono — con la diferencia de que
+ * ahora el pedido, el monto y el número adonde pagar viajan escritos y no hay
+ * que dictarlos.
+ */
 const metodosDisponibles = (tarjeta: boolean): { id: Metodo; label: string; descripcion: string; icon: React.ReactNode; habilitado: boolean }[] => [
-  { id: 'izipay_card',   label: 'Tarjeta',        descripcion: tarjeta ? 'Crédito o débito · pago seguro' : 'Próximamente', icon: <CreditCard className="h-5 w-5 text-emerald-600" />,    habilitado: tarjeta },
-  { id: 'whatsapp',      label: 'WhatsApp',       descripcion: 'Coordinar pago con asesor',    icon: <MessageCircle className="h-5 w-5 text-emerald-500" />, habilitado: true },
-  { id: 'yape',          label: 'Yape',           descripcion: 'Próximamente',                 icon: <Smartphone className="h-5 w-5 text-purple-600" />,     habilitado: false },
-  { id: 'plin',          label: 'Plin',           descripcion: 'Próximamente',                 icon: <Smartphone className="h-5 w-5 text-blue-600" />,       habilitado: false },
-  { id: 'transferencia', label: 'Transferencia',  descripcion: 'Próximamente',                 icon: <Building2 className="h-5 w-5 text-slate-600" />,       habilitado: false },
+  { id: 'izipay_card',   label: 'Tarjeta',        descripcion: tarjeta ? 'Crédito o débito · pago al instante' : 'Próximamente', icon: <CreditCard className="h-5 w-5 text-emerald-600" />, habilitado: tarjeta },
+  { id: 'yape',          label: 'Yape',           descripcion: 'Pagas y envías la captura por WhatsApp', icon: <Smartphone className="h-5 w-5 text-purple-600" />,     habilitado: true },
+  { id: 'plin',          label: 'Plin',           descripcion: 'Pagas y envías la captura por WhatsApp', icon: <Smartphone className="h-5 w-5 text-blue-600" />,       habilitado: true },
+  { id: 'transferencia', label: 'Transferencia',  descripcion: 'Transfieres y envías la constancia por WhatsApp', icon: <Building2 className="h-5 w-5 text-slate-600" />, habilitado: true },
+  { id: 'whatsapp',      label: 'WhatsApp',       descripcion: 'Coordinar el pago con un asesor', icon: <MessageCircle className="h-5 w-5 text-emerald-500" />, habilitado: true },
 ];
+
+/** Los métodos cuyo pago se coordina por WhatsApp con captura. */
+const CON_CAPTURA: Metodo[] = ['yape', 'plin', 'transferencia'];
 
 type CuentaWeb = {
   id: string;
@@ -87,6 +103,27 @@ export function CheckoutClient({
    * lo cotiza la agencia—, y no se suma al total. Antes daba S/ 15 desde el
    * primer segundo, con la dirección todavía vacía.
    */
+  /*
+   * Adónde paga, según lo que haya elegido.
+   *
+   * Sale de las cuentas cargadas en el ERP y no de un número escrito acá: si
+   * mañana cambian el Yape o suman otro banco, se toca en Cuentas Bancarias y
+   * la web y el mensaje acompañan solos. Yape y Plin usan las cuentas que
+   * tienen teléfono; la transferencia, las que tienen número de cuenta.
+   */
+  const destinoDePago = useMemo(() => {
+    if (!CON_CAPTURA.includes(metodo)) return [];
+    const esBilletera = metodo === 'yape' || metodo === 'plin';
+    return cuentasWeb
+      .filter((c) => (esBilletera ? c.numero_telefono : c.numero_cuenta))
+      .map((c) => {
+        const titular = c.titular ? ` (${c.titular})` : '';
+        if (esBilletera) return `${metodo === 'yape' ? 'Yape' : 'Plin'} al *${c.numero_telefono}*${titular}`;
+        const cci = c.numero_cci ? ` · CCI ${c.numero_cci}` : '';
+        return `${c.banco ?? c.nombre_corto}: *${c.numero_cuenta}*${titular}${cci}`;
+      });
+  }, [metodo, cuentasWeb]);
+
   const envio = useMemo(
     () => costoEnvio(entrega, total, destino),
     [entrega, total, destino],
@@ -164,7 +201,7 @@ export function CheckoutClient({
     if (entrega === 'DELIVERY' && !direccion) return toast.error('Ingresa la dirección de envío');
     if (faltaDestino) return toast.error('Elegí si el envío va a Lima Metropolitana o a provincia');
 
-    if (metodo === 'whatsapp') {
+    if (metodo === 'whatsapp' || CON_CAPTURA.includes(metodo)) {
       const msg = buildPedidoWaMessage({
         cliente: { nombre, documento: `${tipoDoc} ${doc}`, telefono },
         direccion,
@@ -176,9 +213,16 @@ export function CheckoutClient({
         })),
         envio: envio ?? 0,
         canal: 'WEB',
+        pago: CON_CAPTURA.includes(metodo)
+          ? { metodo: metodo as 'yape' | 'plin' | 'transferencia', destino: destinoDePago }
+          : undefined,
       });
       window.open(buildWhatsappUrl(msg), '_blank');
-      toast.info('Abriendo WhatsApp con tu pedido...');
+      toast.info(
+        CON_CAPTURA.includes(metodo)
+          ? 'Abriendo WhatsApp con tu pedido y los datos para pagar'
+          : 'Abriendo WhatsApp con tu pedido...',
+      );
       return;
     }
 
@@ -388,8 +432,8 @@ export function CheckoutClient({
           <h2 className="mb-1 font-display text-lg font-semibold">3. Método de pago</h2>
           <p className="mb-4 text-xs text-slate-500">
             {izipayHabilitado
-              ? 'Paga con tarjeta al instante o coordina con un asesor por WhatsApp. Yape, Plin y transferencia estarán disponibles próximamente.'
-              : 'Hoy solo aceptamos coordinación por WhatsApp. Yape, Plin, tarjeta y transferencia estarán disponibles próximamente.'}
+              ? 'Con tarjeta el pago es al instante. Con Yape, Plin o transferencia pagas desde tu app y nos envías la captura por WhatsApp para confirmarlo.'
+              : 'Pagas con Yape, Plin o transferencia desde tu app y nos envías la captura por WhatsApp para confirmarlo.'}
           </p>
           <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
             {METODOS.map((m) => {
@@ -433,6 +477,37 @@ export function CheckoutClient({
               <p className="mt-1">
                 Al finalizar la compra abriremos WhatsApp con un asesor real. Te enviaremos el resumen del pedido pre-cargado
                 y coordinaremos el método de pago que prefieras (Yape / Plin / tarjeta / transferencia / efectivo contra entrega).
+              </p>
+            </div>
+          )}
+
+          {/*
+            * El número adonde pagar, antes de salir de la página.
+            *
+            * También viaja dentro del mensaje de WhatsApp, pero conviene verlo
+            * acá: hay quien paga primero desde el banco y recién después manda
+            * la captura, y si el dato solo estuviera del otro lado tendría que
+            * ir y volver para copiarlo.
+            */}
+          {CON_CAPTURA.includes(metodo) && (
+            <div className="mt-3 rounded-md border border-happy-200 bg-happy-50/70 p-3 text-xs text-slate-700">
+              <p className="font-semibold text-corp-900">
+                Cómo sigue: pagas {metodo === 'transferencia' ? 'la transferencia' : `por ${metodo === 'yape' ? 'Yape' : 'Plin'}`} y nos mandas la captura
+              </p>
+              {destinoDePago.length > 0 ? (
+                <ul className="mt-2 space-y-1">
+                  {destinoDePago.map((d) => (
+                    <li key={d} className="font-medium text-corp-900">
+                      {d.replace(/\*/g, '')}
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="mt-1">Te pasamos los datos para pagar apenas abramos el chat.</p>
+              )}
+              <p className="mt-2">
+                Al terminar abrimos WhatsApp con tu pedido y el monto ya escritos. Nos envías la captura por ahí,
+                la verificamos y te confirmamos el pedido.
               </p>
             </div>
           )}
@@ -538,6 +613,10 @@ export function CheckoutClient({
             <><Loader2 className="h-4 w-4 animate-spin" /> Procesando...</>
           ) : metodo === 'whatsapp' ? (
             <><MessageCircle className="h-4 w-4" /> Abrir chat con asesor por WhatsApp</>
+          ) : CON_CAPTURA.includes(metodo) ? (
+            // Dice el monto: es lo que la persona va a tener que pagar en su
+            // app, y verlo en el botón evita volver a mirar el resumen.
+            <><MessageCircle className="h-4 w-4" /> Pagar S/ {totalFinal.toFixed(2)} por WhatsApp</>
           ) : metodo === 'izipay_card' ? (
             <><Lock className="h-4 w-4" /> Pagar S/ {totalFinal.toFixed(2)} con tarjeta</>
           ) : (

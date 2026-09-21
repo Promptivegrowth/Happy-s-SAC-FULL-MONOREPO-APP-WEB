@@ -24,6 +24,20 @@ export type PedidoWaData = {
   descuento?: number;
   notas?: string | null;
   canal?: 'WEB' | 'POS';
+  /**
+   * Cómo y adónde va a pagar, cuando el pago se coordina por acá.
+   *
+   * Yape, Plin y transferencia no se cobran en la web: el comprador paga desde
+   * su app y manda la captura. Para que eso funcione, el número o la cuenta
+   * tienen que viajar DENTRO del mensaje —es donde el comprador los va a
+   * buscar cuando abra su banco— y el pedido de la captura tiene que estar
+   * dicho, o llega el pago sin saber de quién es.
+   */
+  pago?: {
+    metodo: 'yape' | 'plin' | 'transferencia';
+    /** Adónde paga: el número de Yape/Plin, o el banco y la cuenta. */
+    destino: string[];
+  };
 };
 
 const WA_NUMBER = '51916856842';
@@ -77,6 +91,17 @@ export function buildPedidoWaMessage(data: PedidoWaData): string {
   if (data.descuento && data.descuento > 0) lines.push(`Descuento: -${money(data.descuento)}`);
   lines.push(`*TOTAL: ${money(total)}*`);
   lines.push('');
+
+  if (data.pago) {
+    const nombre = data.pago.metodo === 'transferencia'
+      ? 'Transferencia'
+      : data.pago.metodo === 'yape' ? 'Yape' : 'Plin';
+    const verbo = data.pago.metodo === 'transferencia' ? 'transferir' : 'pagar';
+    lines.push(`💳 *Pago por ${nombre}*`);
+    for (const d of data.pago.destino) lines.push(`• ${d}`);
+    lines.push(`• Voy a ${verbo} *${money(total)}* y les envío la captura por acá para que lo verifiquen.`);
+    lines.push('');
+  }
 
   if (data.notas) {
     lines.push('📝 *Notas*');
