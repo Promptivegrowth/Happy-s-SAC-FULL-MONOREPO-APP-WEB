@@ -69,6 +69,8 @@ export const PERMISOS: Array<{ prefijo: string; roles: Rol[] }> = [
   { prefijo: '/configuracion', roles: [] },
   { prefijo: '/usuarios', roles: [] },
   { prefijo: '/web-catalogo', roles: [] },
+  // Las campañas de temporada son la cara de la tienda: gerencia.
+  { prefijo: '/campanias', roles: [] },
   { prefijo: '/reclamos', roles: [] },
   { prefijo: '/ventas/exportacion', roles: [] },
 

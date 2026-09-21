@@ -2,7 +2,7 @@ import {
   LayoutDashboard, Package, Layers3, FileText, Shirt, Users, Truck, Factory,
   Warehouse, ShoppingCart, Boxes, Receipt, ClipboardList, Scale,
   AlertTriangle, MessageSquareWarning, BarChart3, Settings, UserCog, Globe,
-  Tags, Scissors, Wrench, Coins, Hammer, Store, QrCode, Plane, Barcode,
+  Tags, Scissors, Wrench, Coins, Hammer, Store, QrCode, Plane, Barcode, Sparkles,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 
@@ -43,6 +43,7 @@ export const NAV: NavGroup[] = [
       { label: 'Materiales', href: '/materiales', icon: Boxes },
       { label: 'Recetas (BOM)', href: '/recetas', icon: FileText },
       { label: 'Publicación Web', href: '/web-catalogo', icon: Globe },
+      { label: 'Campañas', href: '/campanias', icon: Sparkles },
     ],
   },
   {
