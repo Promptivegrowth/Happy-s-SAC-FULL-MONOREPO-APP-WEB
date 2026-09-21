@@ -307,17 +307,34 @@ export default async function ProductoDetallePage({ params }: { params: Promise<
         <span className="text-slate-900">{prod.nombre}</span>
       </nav>
 
-      <div className="grid gap-10 lg:grid-cols-2">
-        {/* Galería con zoom (cliente pidió lightbox al hacer click) */}
-        <GaleriaProducto
-          imagenes={galeria}
-          nombre={pub.titulo_web ?? prod.nombre}
-          descuentoBadge={
-            precioOferta && precioBase > 0
-              ? `-${Math.round((1 - precioOferta / precioBase) * 100)}%`
-              : null
-          }
-        />
+      <div className="grid items-start gap-10 lg:grid-cols-2">
+        {/*
+          * La galería acompaña la lectura en vez de quedarse atrás.
+          *
+          * La columna derecha —tallas, pago, envío, descripción— es mucho más
+          * larga que las fotos, así que al bajar quedaba medio metro de blanco
+          * al lado del texto. Reportado el 21/09/2026.
+          *
+          * Mover la descripción a todo el ancho arreglaría ESE blanco creando el
+          * de antes: así estaba hasta el 13/08/2026, y se cambió justamente
+          * porque dejaba el hueco del otro lado. Dejarla fija resuelve los dos,
+          * y encima el comprador ve la prenda mientras lee "chaleco rojo".
+          *
+          * `top-44` son los 164px del encabezado fijo (36 de la franja + 80 del
+          * logo + 48 del menú) más un respiro. Sólo desde `lg`: más abajo la
+          * página es de una sola columna y no hay nada al lado.
+          */}
+        <div className="lg:sticky lg:top-44 lg:self-start">
+          <GaleriaProducto
+            imagenes={galeria}
+            nombre={pub.titulo_web ?? prod.nombre}
+            descuentoBadge={
+              precioOferta && precioBase > 0
+                ? `-${Math.round((1 - precioOferta / precioBase) * 100)}%`
+                : null
+            }
+          />
+        </div>
 
         {/* Info + cliente */}
         <div className="space-y-5">
@@ -458,7 +475,12 @@ export default async function ProductoDetallePage({ params }: { params: Promise<
           {/* Descripción larga — reubicada (pedido cliente 2026-08-13): antes iba
               a todo el ancho debajo del grid, dejando un gran espacio en blanco
               al lado de la galería. Ahora vive en la columna derecha, junto a
-              las imágenes, para aprovechar ese espacio. */}
+              las imágenes, para aprovechar ese espacio.
+
+              NO devolverla a todo el ancho: es de acá de donde sale el largo de
+              esta columna, y sacarla reabre el hueco de agosto. El blanco que se
+              veía al bajar (21/09/2026) se resolvió dejando la galería fija;
+              está explicado arriba, donde empieza el grid. */}
           {pub.descripcion_larga && (
             <div className="border-t pt-6">
               <h2 className="mb-4 font-display text-2xl font-semibold text-corp-900">Descripción</h2>
