@@ -119,6 +119,38 @@ export default async function Page({ searchParams }: { searchParams: Promise<SP>
     },
   ];
 
+  /*
+   * El resumen del consumo, con lo de más y lo de menos por separado.
+   *
+   * La tabla listaba línea por línea y había que sumar de cabeza. Pero un neto
+   * solo tampoco alcanza: un material que se fue S/ 1.000 arriba y otro S/ 1.000
+   * abajo dan cero, y eso leído como "todo bien" esconde dos problemas. Por eso
+   * van los tres números, y además el material que más pesa — que es lo primero
+   * que se pregunta cualquiera al ver una diferencia grande. Pedido de Javier
+   * el 21/09/2026, mirando el elástico de la mariposa.
+   *
+   * Se suma sobre TODAS las líneas del período, no sobre las 200 que se
+   * muestran: un total que solo cubre lo visible es un total equivocado.
+   */
+  const resumenConsumos = (() => {
+    let deMas = 0;
+    let deMenos = 0;
+    let mayor: (typeof consumos)[number] | null = null;
+    for (const c of consumos) {
+      if (c.valor_diferencia > 0) deMas += c.valor_diferencia;
+      else deMenos += c.valor_diferencia;
+      if (!mayor || Math.abs(c.valor_diferencia) > Math.abs(mayor.valor_diferencia)) mayor = c;
+    }
+    const neto = deMas + deMenos;
+    return {
+      deMas,
+      deMenos,
+      neto,
+      mayor,
+      pesoDelMayor: neto !== 0 && mayor ? Math.abs(mayor.valor_diferencia / neto) : 0,
+    };
+  })();
+
   const consUp = metricas.valor_diferencia >= 0;
   const tiempoUp = metricas.diferencia_min >= 0;
 
@@ -239,6 +271,44 @@ export default async function Page({ searchParams }: { searchParams: Promise<SP>
               <h3 className="flex items-center gap-2 text-sm font-semibold text-corp-900"><Boxes className="h-4 w-4 text-slate-400" />Consumos por OT y material</h3>
               <span className="text-[11px] text-slate-500">{consumos.length} líneas{consumos.length > 200 ? ' · se muestran las primeras 200' : ''}</span>
             </div>
+
+            {/* El resumen del bloque, antes de entrar a leer línea por línea. */}
+            {consumos.length > 0 && (
+              <div className="border-b bg-white px-3 py-3">
+                <div className="flex flex-wrap items-baseline gap-x-6 gap-y-2">
+                  <span className="text-[11px] font-medium uppercase tracking-wider text-slate-500">
+                    Diferencia de material
+                  </span>
+                  <span className="text-sm">
+                    <span className="text-slate-500">Se consumió de más </span>
+                    <span className="font-mono font-semibold text-red-700">{formatPEN(resumenConsumos.deMas)}</span>
+                  </span>
+                  <span className="text-sm">
+                    <span className="text-slate-500">De menos </span>
+                    <span className="font-mono font-semibold text-emerald-700">{formatPEN(Math.abs(resumenConsumos.deMenos))}</span>
+                  </span>
+                  <span className="text-sm">
+                    <span className="text-slate-500">Neto </span>
+                    <span className={`font-mono text-base font-semibold ${resumenConsumos.neto >= 0 ? 'text-red-700' : 'text-emerald-700'}`}>
+                      {formatPEN(resumenConsumos.neto)}
+                    </span>
+                  </span>
+                </div>
+                {resumenConsumos.mayor && Math.abs(resumenConsumos.mayor.valor_diferencia) > 0 && (
+                  <p className="mt-1.5 text-[11px] text-slate-600">
+                    El que más pesa:{' '}
+                    <strong>{resumenConsumos.mayor.material_nombre}</strong> en {resumenConsumos.mayor.ot_numero}, con{' '}
+                    <span className={resumenConsumos.mayor.valor_diferencia >= 0 ? 'text-red-700' : 'text-emerald-700'}>
+                      {formatPEN(resumenConsumos.mayor.valor_diferencia)}
+                    </span>
+                    {resumenConsumos.pesoDelMayor >= 0.4 && (
+                      <> — {(resumenConsumos.pesoDelMayor * 100).toFixed(0)}% de toda la diferencia. Conviene revisar esa receta antes que el resto.</>
+                    )}
+                  </p>
+                )}
+              </div>
+            )}
+
             <div className="overflow-x-auto p-0">
               <Table>
                 <TableHeader>
@@ -282,6 +352,23 @@ export default async function Page({ searchParams }: { searchParams: Promise<SP>
                       </TableRow>
                     );
                   })}
+                  {consumos.length > 0 && (
+                    <TableRow className="border-t-2 bg-slate-50 font-semibold hover:bg-slate-50">
+                      <TableCell colSpan={6} className="text-sm">
+                        Total del período
+                        {consumos.length > 200 && (
+                          <span className="ml-1 font-normal text-[11px] text-slate-500">
+                            (las {consumos.length} líneas, no sólo las 200 de arriba)
+                          </span>
+                        )}
+                      </TableCell>
+                      <TableCell className="text-right" />
+                      <TableCell className="text-right" />
+                      <TableCell className={`text-right font-mono text-sm ${resumenConsumos.neto >= 0 ? 'text-red-700' : 'text-emerald-700'}`}>
+                        {formatPEN(resumenConsumos.neto)}
+                      </TableCell>
+                    </TableRow>
+                  )}
                 </TableBody>
               </Table>
             </div>
