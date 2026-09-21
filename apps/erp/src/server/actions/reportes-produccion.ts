@@ -23,6 +23,7 @@ import type {
   ReporteCosteoComparativoResult,
 } from './reportes-produccion-helpers';
 import { labelMes } from './reportes-produccion-helpers';
+import { precioPorUnidadDeConsumo } from '@/server/costo-material';
 
 async function sbReadonly() {
   const sb = await createClient();
@@ -264,9 +265,11 @@ export async function reporteCosteoComparativo(
   const precioMat = new Map<string, number>();
   const matIds = Array.from(new Set(kdx.map((k) => k.material_id)));
   if (matIds.length > 0) {
-    const { data: matRaw } = await sb.from('materiales').select('id, precio_unitario').in('id', matIds);
-    for (const m of (matRaw ?? []) as { id: string; precio_unitario: number | string | null }[]) {
-      precioMat.set(m.id, Number(m.precio_unitario ?? 0));
+    // El precio va a la unidad de consumo: `precio_unitario` es el de la
+    // unidad de COMPRA y el kardex mueve unidades de consumo.
+    const { data: matRaw } = await sb.from('materiales').select('id, precio_unitario, factor_conversion').in('id', matIds);
+    for (const m of (matRaw ?? []) as { id: string; precio_unitario: number | string | null; factor_conversion: number | string | null }[]) {
+      precioMat.set(m.id, precioPorUnidadDeConsumo(m.precio_unitario, m.factor_conversion));
     }
   }
   for (const k of kdx) {

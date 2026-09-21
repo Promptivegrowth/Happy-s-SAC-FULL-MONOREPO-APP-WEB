@@ -17,6 +17,7 @@ import { createClient } from '@happy/db/server';
 import { redirect } from 'next/navigation';
 import { formatTallaChip } from '@happy/lib';
 import { LOTE_IDS } from '../lotes';
+import { precioPorUnidadDeConsumo } from '@/server/costo-material';
 import {
   type CanalVenta,
   type EstadoOT,
@@ -427,20 +428,21 @@ export async function reporteRentabilidad(f: FiltrosRentabilidad): Promise<Repor
     producto_id: string;
     activa: boolean;
     creado_en: string;
-    recetas_lineas: { cantidad: string | number; material: { precio_unitario: string | number } | null }[] | null;
+    recetas_lineas: { cantidad: string | number; material: { precio_unitario: string | number; factor_conversion: string | number | null } | null }[] | null;
   };
   const costoMatPorProducto = new Map<string, number>();
   for (const chunk of chunks) {
     const { data, error } = await sb
       .from('recetas')
-      .select('producto_id, activa, creado_en, recetas_lineas(cantidad, material:material_id(precio_unitario))')
+      .select('producto_id, activa, creado_en, recetas_lineas(cantidad, material:material_id(precio_unitario, factor_conversion))')
       .in('producto_id', chunk)
       .eq('activa', true);
     if (error) throw new Error(error.message);
     for (const r of (data ?? []) as RecRaw[]) {
       const total =
         (r.recetas_lineas ?? []).reduce(
-          (s, l) => s + Number(l.cantidad) * Number(l.material?.precio_unitario ?? 0),
+          // El precio de la receta va por unidad de consumo, no de compra.
+          (s, l) => s + Number(l.cantidad) * precioPorUnidadDeConsumo(l.material?.precio_unitario, l.material?.factor_conversion),
           0,
         ) || 0;
       // Si hay varias recetas activas (no debería), tomamos el promedio

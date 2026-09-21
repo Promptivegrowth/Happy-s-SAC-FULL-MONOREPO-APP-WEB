@@ -33,6 +33,7 @@
 
 import { createClient } from '@happy/db/server';
 import { redirect } from 'next/navigation';
+import { precioPorUnidadDeConsumo } from '@/server/costo-material';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 async function sbReadonly(): Promise<{ from: (t: string) => any }> {
@@ -276,11 +277,11 @@ export async function reporteConsumosYTiempos(
 
   // Datos del material (código, nombre, unidad de consumo, precio).
   const materialIds = Array.from(new Set([...cons.values()].map((c) => c.material_id)));
-  type Mat = { id: string; codigo: string | null; nombre: string | null; precio_unitario: number | string | null; unidades_medida: { simbolo: string | null } | null };
+  type Mat = { id: string; codigo: string | null; nombre: string | null; precio_unitario: number | string | null; factor_conversion: number | string | null; unidades_medida: { simbolo: string | null } | null };
   const matById = new Map<string, Mat>();
   if (materialIds.length > 0) {
     const { data: matRaw } = await sb.from('materiales')
-      .select('id, codigo, nombre, precio_unitario, unidades_medida:unidad_consumo_id(simbolo)')
+      .select('id, codigo, nombre, precio_unitario, factor_conversion, unidades_medida:unidad_consumo_id(simbolo)')
       .in('id', materialIds);
     for (const m of (matRaw ?? []) as unknown as Mat[]) matById.set(m.id, m);
   }
@@ -290,7 +291,15 @@ export async function reporteConsumosYTiempos(
     .map((c) => {
       const ot = otById.get(c.ot_id)!;
       const m = matById.get(c.material_id);
-      const precio = Number(m?.precio_unitario ?? 0);
+      /*
+       * El precio se trae a la unidad en que la receta consume.
+       *
+       * Las cantidades de este reporte están en unidad de CONSUMO (metros,
+       * unidades) y `precio_unitario` es el de la unidad de COMPRA (el mazo
+       * de 1.728 botones, el paquete de 120 cierres). Multiplicar una por
+       * otro inflaba el costo por el factor entero.
+       */
+      const precio = precioPorUnidadDeConsumo(m?.precio_unitario, m?.factor_conversion);
       const teorico = c.teorico_cortado;
       const dif = c.real_cant - teorico;
       const nota = c.real_cant < 0
