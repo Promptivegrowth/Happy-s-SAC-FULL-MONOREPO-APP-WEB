@@ -95,7 +95,7 @@ export function ProductosDeCampana({
               Todavía no hay disfraces. Elegilos de la derecha.
             </p>
           ) : (
-            <ul className="max-h-[26rem] space-y-1 overflow-y-auto">
+            <ul className="max-h-72 space-y-1 overflow-y-auto sm:max-h-[26rem]">
               {dentro.map((p) => (
                 <li key={p.id} className="flex items-center justify-between gap-2 rounded-md px-2 py-1.5 hover:bg-slate-50">
                   <span className="min-w-0 text-sm">
@@ -137,7 +137,7 @@ export function ProductosDeCampana({
             />
           </div>
 
-          <ul className="max-h-[22rem] space-y-1 overflow-y-auto">
+          <ul className="max-h-72 space-y-1 overflow-y-auto sm:max-h-[22rem]">
             {filtrados.map((p) => (
               <li key={p.id}>
                 <label className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 hover:bg-slate-50">
@@ -171,7 +171,7 @@ export function ProductosDeCampana({
             </p>
           )}
 
-          <div className="mt-3 flex items-center gap-2 border-t pt-3">
+          <div className="mt-3 flex flex-wrap items-center gap-2 border-t pt-3">
             <Button
               size="sm"
               disabled={pendiente || elegidos.size === 0}

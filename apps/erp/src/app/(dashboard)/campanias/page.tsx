@@ -35,7 +35,7 @@ function estadoDe(c: CampanaRow, hoy: string) {
   if (!c.fecha_inicio || !c.fecha_fin) return { texto: 'Sin fechas', variant: 'destructive' as const };
   if (hoy < c.fecha_inicio) return { texto: 'Programada', variant: 'outline' as const };
   if (hoy > c.fecha_fin) return { texto: 'Terminada', variant: 'secondary' as const };
-  return { texto: 'En vivo', variant: 'default' as const };
+  return { texto: 'En vivo', variant: 'success' as const };
 }
 
 function fmt(d: string | null) {
@@ -145,8 +145,14 @@ export default async function CampaniasPage() {
               <TableRow>
                 <TableHead>Campaña</TableHead>
                 <TableHead>Estado</TableHead>
-                <TableHead>Se muestra</TableHead>
-                <TableHead className="text-right">Asignados</TableHead>
+                {/*
+                  * En el celular sobran columnas: seis no entran y la tabla
+                  * termina arrastrándose de costado. Las fechas se repiten
+                  * debajo del nombre y los asignados se leen en el detalle, así
+                  * que acá se esconden y queda lo que se mira de un vistazo.
+                  */}
+                <TableHead className="hidden md:table-cell">Se muestra</TableHead>
+                <TableHead className="hidden text-right sm:table-cell">Asignados</TableHead>
                 <TableHead className="text-right">En la web</TableHead>
                 <TableHead className="text-right">Acciones</TableHead>
               </TableRow>
@@ -158,17 +164,20 @@ export default async function CampaniasPage() {
                 const vacia = est.texto === 'En vivo' && n.publicados === 0;
                 return (
                   <TableRow key={c.id}>
-                    <TableCell>
+                    <TableCell className="min-w-[11rem]">
                       <Link href={`/campanias/${c.id}`} className="font-medium hover:underline">
                         {c.nombre}
                       </Link>
                       <span className="block text-xs text-slate-500">{c.codigo}</span>
+                      <span className="block text-xs text-slate-500 md:hidden">
+                        {fmt(c.fecha_inicio)} → {fmt(c.fecha_fin)}
+                      </span>
                     </TableCell>
                     <TableCell><Badge variant={est.variant}>{est.texto}</Badge></TableCell>
-                    <TableCell className="text-sm text-slate-600">
+                    <TableCell className="hidden text-sm text-slate-600 md:table-cell">
                       {fmt(c.fecha_inicio)} → {fmt(c.fecha_fin)}
                     </TableCell>
-                    <TableCell className="text-right">{n.total}</TableCell>
+                    <TableCell className="hidden text-right sm:table-cell">{n.total}</TableCell>
                     <TableCell className="text-right">
                       <span className={vacia ? 'font-semibold text-danger' : ''}>{n.publicados}</span>
                       {vacia && (

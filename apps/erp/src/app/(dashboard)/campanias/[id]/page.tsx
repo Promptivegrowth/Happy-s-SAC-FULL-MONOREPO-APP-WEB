@@ -78,7 +78,7 @@ export default async function CampanaPage({ params }: { params: Promise<{ id: st
       title={camp.nombre}
       description={`${camp.codigo} · así es como se ve la sección de temporada en la tienda web.`}
       actions={
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
           <Button asChild variant="ghost">
             <Link href="/campanias"><ArrowLeft className="h-4 w-4" /> Volver</Link>
           </Button>
