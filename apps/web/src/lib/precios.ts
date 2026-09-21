@@ -59,11 +59,37 @@ export function precioEfectivoLinea(item: PreciosDeLinea, escalon: EscalonAplica
 }
 
 /** Costo de envío según la modalidad de entrega y el subtotal. */
+/**
+ * A dónde va el pedido. `null` = todavía no lo dijo.
+ *
+ * Los tres estados son distintos y hay que poder distinguirlos: no es lo mismo
+ * "va a Lima y cuesta 15" que "va a provincia y se cotiza aparte" que "todavía
+ * no sé a dónde va".
+ */
+export type DestinoEnvio = 'LIMA_METRO' | 'PROVINCIA';
+
+/**
+ * Cuánto cuesta el envío, o `null` cuando todavía no se puede decir.
+ *
+ * Antes devolvía S/ 15 siempre, sin mirar a dónde iba el pedido ni si el
+ * comprador ya había dicho algo: nada más entrar al checkout, con la dirección
+ * en blanco, el resumen ya cobraba el envío. Reportado el 20/09/2026.
+ *
+ * `null` NO es cero. Cero es "no se cobra envío" —recojo en tienda, o compra
+ * que pasa el mínimo—, y null es "esto todavía no se sabe": o falta el destino,
+ * o va a provincia y el flete lo cotiza la agencia. Quien muestra el resumen
+ * escribe "Se calcula al indicar el destino" en vez de un número inventado, y
+ * quien cobra no suma nada.
+ */
 export function costoEnvio(
   metodoEntrega: 'DELIVERY' | 'RECOJO_TIENDA',
   subTotal: number,
-): number {
+  destino: DestinoEnvio | null,
+): number | null {
   if (metodoEntrega === 'RECOJO_TIENDA') return 0;
+  if (destino === null) return null;
+  // A provincia va por agencia y el flete se paga allá: no se cobra acá.
+  if (destino === 'PROVINCIA') return null;
   return subTotal >= ENVIO_GRATIS_DESDE ? 0 : COSTO_ENVIO_DEFECTO;
 }
 

@@ -16,6 +16,7 @@
 import { createServiceClient } from '@happy/db/service';
 import {
   costoEnvio,
+  type DestinoEnvio,
   escalonPorTotalItems,
   precioEfectivoLinea,
   type EscalonAplicado,
@@ -73,6 +74,7 @@ function preciosDe(v: FilaVariante) {
 export async function cotizarPedido(
   items: ItemPedido[],
   metodoEntrega: 'DELIVERY' | 'RECOJO_TIENDA',
+  destino: DestinoEnvio | null = null,
 ): Promise<Cotizacion> {
   // Un mismo SKU puede venir repetido si el carrito quedó raro; se suma.
   const porVariante = new Map<string, number>();
@@ -132,7 +134,13 @@ export async function cotizarPedido(
   }
 
   const subTotal = Number(lineas.reduce((a, l) => a + l.subTotal, 0).toFixed(2));
-  const envio = costoEnvio(metodoEntrega, subTotal);
+  /*
+   * Sin destino no se cobra envío: se cobra la mercadería y el flete se
+   * coordina aparte. Es lo mismo que ve el comprador en pantalla, y tiene que
+   * serlo — si acá se sumara algo que allá no se mostró, se le cobraría de más
+   * sin avisarle.
+   */
+  const envio = costoEnvio(metodoEntrega, subTotal, destino) ?? 0;
   return {
     lineas,
     escalon,

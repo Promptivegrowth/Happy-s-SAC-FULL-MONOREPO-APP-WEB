@@ -17,7 +17,7 @@ import { toast } from 'sonner';
 import { useRouter } from 'next/navigation';
 import { buildPedidoWaMessage, buildWhatsappUrl } from '@happy/lib/whatsapp';
 import { formatTallaChip } from '@happy/lib';
-import { ENVIO_GRATIS_DESDE, COSTO_ENVIO_DEFECTO } from '@/lib/precios';
+import { ENVIO_GRATIS_DESDE, COSTO_ENVIO_DEFECTO, costoEnvio, type DestinoEnvio } from '@/lib/precios';
 
 type Metodo = 'yape' | 'plin' | 'izipay_card' | 'transferencia' | 'whatsapp';
 
@@ -70,16 +70,29 @@ export function CheckoutClient({
   const [referencia, setReferencia] = useState('');
   const [ubigeo, setUbigeo] = useState('');
   const [entrega, setEntrega] = useState<'DELIVERY' | 'RECOJO_TIENDA'>('DELIVERY');
+  const [destino, setDestino] = useState<DestinoEnvio | null>(null);
   const [metodo, setMetodo] = useState<Metodo>(izipayHabilitado ? 'izipay_card' : 'whatsapp');
   const [necesitaFactura, setNecesitaFactura] = useState(false);
   const [enviando, setEnviando] = useState(false);
 
 
+  /*
+   * El envío sale de la MISMA función que usa el servidor para cobrar.
+   *
+   * Acá estaba escrita la regla de nuevo, a mano, y eso es exactamente lo que
+   * el archivo de precios pide no hacer: dos copias que se separan y el
+   * comprador ve un precio mientras se le cobra otro.
+   *
+   * `null` significa "todavía no se sabe" —falta el destino, o va a provincia y
+   * lo cotiza la agencia—, y no se suma al total. Antes daba S/ 15 desde el
+   * primer segundo, con la dirección todavía vacía.
+   */
   const envio = useMemo(
-    () => entrega === 'RECOJO_TIENDA' ? 0 : (total >= ENVIO_GRATIS_DESDE ? 0 : COSTO_ENVIO_DEFECTO),
-    [entrega, total],
+    () => costoEnvio(entrega, total, destino),
+    [entrega, total, destino],
   );
-  const totalFinal = total + envio;
+  const totalFinal = total + (envio ?? 0);
+  const faltaDestino = entrega === 'DELIVERY' && destino === null;
 
   const [buscandoDoc, setBuscandoDoc] = useState(false);
   // Trackea el último valor que ESCRIBIÓ el autolookup. Regla anti datos
@@ -149,6 +162,7 @@ export function CheckoutClient({
     if (items.length === 0) return toast.error('Carrito vacío');
     if (!nombre || !telefono) return toast.error('Completa nombre y teléfono');
     if (entrega === 'DELIVERY' && !direccion) return toast.error('Ingresa la dirección de envío');
+    if (faltaDestino) return toast.error('Elegí si el envío va a Lima Metropolitana o a provincia');
 
     if (metodo === 'whatsapp') {
       const msg = buildPedidoWaMessage({
@@ -160,7 +174,7 @@ export function CheckoutClient({
           // Precio efectivo aplicando escalón mayor/fábrica según total.
           cantidad: i.cantidad, precioUnit: precioEfectivoLinea(i, escalon),
         })),
-        envio,
+        envio: envio ?? 0,
         canal: 'WEB',
       });
       window.open(buildWhatsappUrl(msg), '_blank');
@@ -175,13 +189,13 @@ export function CheckoutClient({
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
           cliente: { tipoDoc, doc, nombre, email, telefono },
-          entrega: { metodo: entrega, direccion, referencia, ubigeo },
+          entrega: { metodo: entrega, direccion, referencia, ubigeo, destino },
           metodoPago: metodo,
           necesitaFactura,
           // El precio que se mostró en pantalla. El servidor NO cobra esto:
           // lo recalcula con los precios de la base y solo avisa si cambió.
           items: items.map((i) => ({ ...i, precio: precioEfectivoLinea(i, escalon) })),
-          envio,
+          envio: envio ?? 0,
           total: totalFinal,
         }),
       });
@@ -318,6 +332,40 @@ export function CheckoutClient({
 
           {entrega === 'DELIVERY' && (
             <div className="mt-4 grid gap-3 sm:grid-cols-2">
+              {/*
+                * Primero a dónde va, porque de eso depende el envío.
+                *
+                * Hasta que no se elija, el resumen no pone ningún monto: antes
+                * cobraba S/ 15 apenas entrabas, sin saber si el pedido iba a
+                * San Miguel o a Iquitos.
+                */}
+              <div className="sm:col-span-2">
+                <Label>¿A dónde enviamos?</Label>
+                <div className="mt-1 grid gap-2 sm:grid-cols-2">
+                  <button
+                    type="button"
+                    onClick={() => setDestino('LIMA_METRO')}
+                    className={`rounded-lg border p-3 text-left text-sm ${destino === 'LIMA_METRO' ? 'border-happy-500 bg-happy-50' : 'hover:border-slate-400'}`}
+                  >
+                    <span className="font-medium">Lima Metropolitana</span>
+                    <span className="mt-0.5 block text-xs text-slate-500">
+                      {total >= ENVIO_GRATIS_DESDE
+                        ? 'Envío GRATIS: tu compra pasa el mínimo'
+                        : `Envío S/ ${COSTO_ENVIO_DEFECTO.toFixed(2)} · gratis desde S/ ${ENVIO_GRATIS_DESDE}`}
+                    </span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setDestino('PROVINCIA')}
+                    className={`rounded-lg border p-3 text-left text-sm ${destino === 'PROVINCIA' ? 'border-happy-500 bg-happy-50' : 'hover:border-slate-400'}`}
+                  >
+                    <span className="font-medium">Provincia</span>
+                    <span className="mt-0.5 block text-xs text-slate-500">
+                      Va por agencia y el flete se paga allá: acá no se te cobra envío.
+                    </span>
+                  </button>
+                </div>
+              </div>
               <div className="sm:col-span-2">
                 <Label>Dirección</Label>
                 <Input value={direccion} onChange={(e) => setDireccion(e.target.value)} required />
@@ -460,14 +508,32 @@ export function CheckoutClient({
           })}
           <hr className="my-2" />
           <div className="flex justify-between"><span>Subtotal</span><span>S/ {total.toFixed(2)}</span></div>
-          <div className="flex justify-between"><span>Envío</span><span>{envio === 0 ? 'GRATIS' : `S/ ${envio.toFixed(2)}`}</span></div>
+          <div className="flex justify-between gap-4">
+            <span>Envío</span>
+            {envio === null ? (
+              <span className="text-right text-xs text-slate-500">
+                {entrega === 'DELIVERY' && destino === 'PROVINCIA'
+                  ? 'Se cotiza por agencia'
+                  : 'Se calcula al indicar el destino'}
+              </span>
+            ) : (
+              <span>{envio === 0 ? 'GRATIS' : `S/ ${envio.toFixed(2)}`}</span>
+            )}
+          </div>
           <hr className="my-2" />
           <div className="flex justify-between text-base">
             <span className="font-semibold">Total</span>
             <span className="font-display text-xl font-semibold text-happy-600">S/ {totalFinal.toFixed(2)}</span>
           </div>
         </div>
-        <Button onClick={enviarPedido} variant="premium" size="lg" className="mt-5 w-full" disabled={enviando}>
+        {/*
+          * Mientras falte el destino el botón no se aprieta, y se dice por qué.
+          *
+          * Un botón apagado sin explicación manda a la gente a buscar el error
+          * en cualquier otro lado; con el renglón de abajo sabe exactamente qué
+          * le falta.
+          */}
+        <Button onClick={enviarPedido} variant="premium" size="lg" className="mt-5 w-full" disabled={enviando || faltaDestino}>
           {enviando ? (
             <><Loader2 className="h-4 w-4 animate-spin" /> Procesando...</>
           ) : metodo === 'whatsapp' ? (
@@ -478,6 +544,11 @@ export function CheckoutClient({
             'Finalizar compra'
           )}
         </Button>
+        {faltaDestino && (
+          <p className="mt-2 text-center text-xs text-slate-500">
+            Elegí arriba si el envío va a Lima Metropolitana o a provincia para ver el total.
+          </p>
+        )}
         <p className="mt-3 text-center text-[10px] text-slate-400">
           Tus datos están protegidos. <a href="/politica-de-privacidad" className="underline">Política de privacidad</a>
         </p>

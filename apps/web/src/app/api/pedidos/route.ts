@@ -19,6 +19,8 @@ const schema = z.object({
     direccion: z.string().optional(),
     referencia: z.string().optional(),
     ubigeo: z.string().optional(),
+    // A dónde va. Si no viene, no se cobra envío: ver costoEnvio.
+    destino: z.enum(['LIMA_METRO', 'PROVINCIA']).nullish(),
   }),
   metodoPago: z.enum(['yape','plin','culqi_card','izipay_card','transferencia','whatsapp']),
   necesitaFactura: z.boolean().default(false),
@@ -113,6 +115,7 @@ export async function POST(req: Request) {
     cotizacion = await cotizarPedido(
       body.items.map((i) => ({ varianteId: i.varianteId, cantidad: i.cantidad })),
       body.entrega.metodo,
+      body.entrega.destino ?? null,
     );
   } catch (e) {
     const esDeNegocio = e instanceof ErrorCotizacion;
