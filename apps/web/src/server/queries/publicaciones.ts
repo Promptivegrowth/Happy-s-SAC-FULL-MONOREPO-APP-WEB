@@ -29,6 +29,73 @@ type LoadOpts = {
   limit?: number;
 };
 
+/**
+ * El stock de muchas variantes, pedido de a tandas.
+ *
+ * La consulta viaja como `?variante_id=in.(uuid,uuid,...)` dentro de la
+ * DIRECCIÓN, y una dirección tiene largo máximo. Con 120 o 200 productos por
+ * página se juntaban entre 750 y 1140 identificadores —unos 40.000 caracteres—
+ * y el servidor devolvía "400 Bad Request" en vez de datos. Como más arriba un
+ * stock ausente se leía como cero, el catálogo entero salía AGOTADO mientras la
+ * ficha de cada producto mostraba existencias: son dos consultas distintas y la
+ * de la ficha, al pedir una sola prenda, nunca pasaba del límite. Reportado el
+ * 20/09/2026 en /disfraces.
+ *
+ * De a 200 la dirección queda en ~7.500 caracteres, con margen de sobra, y las
+ * tandas van en paralelo.
+ *
+ * Devuelve además si se pudo leer TODO. Si una tanda falla no se puede afirmar
+ * que no haya stock: lo que hay es un dato faltante, y quien decide arriba
+ * prefiere no poner el cartel antes que apagar la tienda por un error de red.
+ */
+const POR_TANDA = 200;
+
+async function cargarStock(
+  sb: Awaited<ReturnType<typeof createClient>>,
+  varianteIds: string[],
+): Promise<{ porVariante: Map<string, number>; completo: boolean }> {
+  const porVariante = new Map<string, number>();
+  if (varianteIds.length === 0) return { porVariante, completo: true };
+
+  const tandas: string[][] = [];
+  for (let i = 0; i < varianteIds.length; i += POR_TANDA) {
+    tandas.push(varianteIds.slice(i, i + POR_TANDA));
+  }
+
+  const consultar = (ids: string[]) =>
+    (sb as unknown as {
+      from: (t: string) => {
+        select: (s: string) => {
+          in: (c: string, v: string[]) => PromiseLike<{
+            data: { variante_id: string; stock_total: number }[] | null;
+            error: { message: string } | null;
+          }>;
+        };
+      };
+    })
+      .from('v_stock_variante_web')
+      .select('variante_id, stock_total')
+      .in('variante_id', ids);
+
+  const resultados = await Promise.all(
+    tandas.map((ids) =>
+      Promise.resolve(consultar(ids)).catch((e: Error) => ({ data: null, error: { message: e.message } })),
+    ),
+  );
+
+  let completo = true;
+  for (const r of resultados) {
+    if (r.error || !r.data) {
+      completo = false;
+      console.warn('[loadPublicaciones] tanda de stock sin respuesta:', r.error?.message ?? 'sin datos');
+      continue;
+    }
+    for (const s of r.data) porVariante.set(s.variante_id, Number(s.stock_total ?? 0));
+  }
+
+  return { porVariante, completo };
+}
+
 export async function loadPublicaciones(opts: LoadOpts = {}): Promise<ProductCardData[]> {
   try {
     const sb = await createClient();
@@ -116,7 +183,7 @@ export async function loadPublicaciones(opts: LoadOpts = {}): Promise<ProductCar
     const productoIds = pubs.map((p) => p.producto_id);
     const varianteIds = pubs.flatMap((p) => (p.productos?.productos_variantes ?? []).map((v) => v.id));
 
-    const [{ data: ratings }, { data: stocks }, extrasRes] = await Promise.all([
+    const [{ data: ratings }, stockRes, extrasRes] = await Promise.all([
       sb
         .from('v_productos_rating')
         .select('producto_id, total_resenas, promedio_rating')
@@ -124,18 +191,8 @@ export async function loadPublicaciones(opts: LoadOpts = {}): Promise<ProductCar
       // v_stock_variante_web = stock SOLO de La Quinta (mig 63) — misma
       // fuente que la ficha del producto, para que el catálogo y el detalle
       // nunca se contradigan (antes el catálogo sumaba todos los almacenes).
-      varianteIds.length > 0
-        ? (sb as unknown as {
-            from: (t: string) => {
-              select: (s: string) => {
-                in: (c: string, v: string[]) => PromiseLike<{ data: { variante_id: string; stock_total: number }[] | null }>;
-              };
-            };
-          })
-            .from('v_stock_variante_web')
-            .select('variante_id, stock_total')
-            .in('variante_id', varianteIds)
-        : Promise.resolve({ data: [] as { variante_id: string; stock_total: number }[] }),
+      // Va de a tandas: ver cargarStock.
+      cargarStock(sb, varianteIds),
       // Extras: si alguna está activa, el producto queda visible aunque
       // la categoría principal esté apagada. Cast hasta regenerar tipos.
       (sb as unknown as { from: (t: string) => any }) // eslint-disable-line @typescript-eslint/no-explicit-any
@@ -161,10 +218,8 @@ export async function loadPublicaciones(opts: LoadOpts = {}): Promise<ProductCar
       });
     }
 
-    const stockPorVariante = new Map<string, number>();
-    for (const s of stocks ?? []) {
-      stockPorVariante.set(s.variante_id as string, Number(s.stock_total ?? 0));
-    }
+    const stockPorVariante = stockRes.porVariante;
+    const stockConfiable = stockRes.completo;
 
     return pubs
       .filter((p) => p.productos)
@@ -214,8 +269,15 @@ export async function loadPublicaciones(opts: LoadOpts = {}): Promise<ProductCar
           etiquetas: p.etiquetas,
           rating: rt?.promedio ?? null,
           totalResenas: rt?.total ?? null,
-          stockTotal,
-          agotado: stockTotal <= 0,
+          /*
+           * Sin dato de stock no se dice "agotado".
+           *
+           * Es la diferencia entre "sé que no hay" y "no pude preguntar". Poner
+           * el cartel en el segundo caso apaga la tienda entera por un error de
+           * un segundo, y el cliente se va creyendo que no queda nada.
+           */
+          stockTotal: stockConfiable ? stockTotal : null,
+          agotado: stockConfiable && stockTotal <= 0,
         };
       });
   } catch (e) {
