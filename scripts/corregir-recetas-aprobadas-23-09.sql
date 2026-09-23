@@ -1,5 +1,5 @@
 -- =============================================================================
--- Correcciones de recetas aprobadas por Javier (22/09) y Cesar (23/09/2026)
+-- Correcciones de recetas aprobadas por Javier (22/09 y 23/09/2026)
 -- =============================================================================
 --
 -- Que hace:
@@ -7,16 +7,16 @@
 --      incluidas las que borra. Deshacer es volver a copiar de ahi.
 --   2. Corrige 106 cantidades:
 --        19 de la planilla del 22/09 (la coma corrida) mas la serie de la
---           lentejuela pegada que dejo Cesar el 23/09, identica en los dos colores;
+--           lentejuela pegada que dejo Javier el 23/09, identica en los dos colores;
 --        87 huecos del 23/09: tallas de nino que estaban en cero y si llevan.
---   3. Borra 47 lineas de tallas TAD y TS de prendas de nino. Cesar: "no existe
+--   3. Borra 47 lineas de tallas TAD y TS de prendas de nino. Javier: "no existe
 --      talla S o AD para nino(a), se debe eliminar".
 --
 -- Que NO hace:
 --   - El elastico de la mariposa (PRDM0017 T14): ya estaba en 0,52.
 --   - Los 2 del Sonic (PRM0157 T16, polar y polinam): los valores parecen
 --     cruzados entre los dos materiales. Quedan hasta que confirmen.
---   - Las 491 lineas en cero en todas las tallas: Cesar pidio dejarlas, todavia
+--   - Las 491 lineas en cero en todas las tallas: Javier pidio dejarlas, todavia
 --     no tienen los consumos medidos.
 --   - Las VARIANTES TAD/TS de productos de nino. Solo se borran lineas de
 --     receta; los SKU quedan, porque 46 de ellos tienen stock.
