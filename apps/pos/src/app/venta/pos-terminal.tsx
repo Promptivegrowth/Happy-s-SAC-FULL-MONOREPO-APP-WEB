@@ -33,7 +33,7 @@ import { AbrirCajaModal } from './abrir-caja-modal';
 import { CerrarCajaModal } from './cerrar-caja-modal';
 import { CobrarModal, type CobrarPayload } from './cobrar-modal';
 import { generarTicket, generarA4, abrirPDF } from './comprobante-pdf';
-import { datosDelTicket, equipoParaImprimir, imprimirPorAgente, type EmpresaTicket } from './imprimir-ticket';
+import { datosDelTicket, equipoParaImprimir, imprimirPorAgente, type EmpresaTicket, type ResultadoImpresion } from './imprimir-ticket';
 import { useEstadoConexion } from './estado-conexion';
 import type { EncabezadoCaja } from '@happy/lib/escpos/caja';
 import { generarPdfCotizacion, siguienteNumeroCotizacion, type FormatoCotizacion } from './cotizacion-pdf';
@@ -123,6 +123,18 @@ type MetodoCarrito = 'EFECTIVO' | 'YAPE' | 'PLIN' | 'TARJETA_DEBITO' | 'TARJETA_
 type PagoLinea = { metodo: MetodoCarrito; monto: number; cuentaNombre?: string };
 type CuentaBancariaDTO = { id: string; nombre_corto: string; banco: string | null; metodo_default: string };
 type VendedorDTO = { id: string; nombre: string };
+/**
+ * Una espera con tope: si la promesa no contesta a tiempo, se sigue con el plan B.
+ *
+ * La espera a la ticketera ya tiene su limite, pero se revisa ENTRE consultas:
+ * si una consulta se queda colgada por un corte de red, el limite no llega a
+ * mirarse y el cobro queda esperando. Con esto hay un techo que no depende de
+ * que la red conteste.
+ */
+function conTope<T>(promesa: Promise<T>, ms: number, planB: T): Promise<T> {
+  return Promise.race([promesa, new Promise<T>((resolver) => setTimeout(() => resolver(planB), ms))]);
+}
+
 type TipoDoc = 'BOLETA' | 'FACTURA' | 'NOTA_VENTA';
 type FormatoDoc = 'TICKET_80MM' | 'A4';
 
@@ -1053,7 +1065,14 @@ export function PosTerminal({
                 establecimiento: tienda ? { nombre: tienda.nombre, direccion: tienda.direccion } : null,
                 caja: sesionActiva?.caja_nombre ?? cajaActual?.nombre ?? null,
               });
-              const r = await imprimirPorAgente(datos, equipo, { comprobanteId: emitido.id || null });
+              // 20 s: los 12 que se espera a la ticketera, mas margen. Pasado ese
+              // tiempo se trata como "en cola": la venta ya esta registrada y el
+              // aviso le dice a la cajera que reimprima desde Historial.
+              const r = await conTope<ResultadoImpresion>(
+                imprimirPorAgente(datos, equipo, { comprobanteId: emitido.id || null }),
+                20_000,
+                { via: 'agente', estado: 'esperando', equipo: equipo.nombre },
+              );
 
               if (r.via === 'agente' && r.estado === 'impreso') {
                 impresoPorAgente = true;
@@ -1089,10 +1108,29 @@ export function PosTerminal({
           }
         }
 
-        const blob = payload.formato === 'TICKET_80MM'
-          ? await generarTicket(emitido.pdf_data)
-          : await generarA4(emitido.pdf_data);
-        if (!impresoPorAgente) abrirPDF(blob, filename);
+        /*
+         * Si el PDF no se puede armar, el comprobante igual existe.
+         *
+         * Antes este fallo caia en el mensaje "error al emitir comprobante", que
+         * es falso: la venta y el comprobante ya estan guardados. Con el ticket
+         * yendo primero ese mensaje podia salir DESPUES del papel, y lo natural
+         * era creer que habia que cobrar de nuevo.
+         */
+        let blob: Blob | null = null;
+        try {
+          blob = payload.formato === 'TICKET_80MM'
+            ? await generarTicket(emitido.pdf_data)
+            : await generarA4(emitido.pdf_data);
+        } catch (e) {
+          console.warn('No se pudo armar el PDF del comprobante:', e);
+          if (!impresoPorAgente) {
+            toast.error(
+              `El comprobante ${numeroComprobante} se emitio y la venta quedo registrada, pero no se pudo armar el PDF para imprimirlo. Reimprimelo desde Historial; no vuelvas a cobrar.`,
+              { duration: 14000 },
+            );
+          }
+        }
+        if (blob && !impresoPorAgente) abrirPDF(blob, filename);
 
         // 3.5) Guardar el PDF dentro del sistema (bucket privado) para poder
         //      consultarlo desde cualquier PC vía el ERP. Best-effort: la venta
@@ -1104,12 +1142,13 @@ export function PosTerminal({
         //      pista de por que. Pasaron 2 de 111. Ahora se reintenta una vez
         //      —casi siempre es un tropiezo de red— y si igual falla se avisa,
         //      diciendo ademas que el documento no se perdio.
-        try {
+        if (blob) try {
+          const pdf = blob;
           const base64 = await new Promise<string>((resolve, reject) => {
             const fr = new FileReader();
             fr.onload = () => resolve((fr.result as string).split(',')[1] ?? '');
             fr.onerror = () => reject(new Error('No se pudo leer el PDF'));
-            fr.readAsDataURL(blob);
+            fr.readAsDataURL(pdf);
           });
           if (base64) {
             const guardar = () => guardarPdfComprobante({
