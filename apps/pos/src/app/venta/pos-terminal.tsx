@@ -390,13 +390,23 @@ export function PosTerminal({
       if (tv === 'BOLETA' || tv === 'FACTURA') setTipoDoc(tv);
       const vv = localStorage.getItem('pos-vendedor-id');
       if (vv) setVendedorId(vv);
+      // El A4 tampoco se recupera, por lo mismo que la nota de venta: es la
+      // excepcion. Si se recordaba, una caja donde alguien toco A4 una vez
+      // quedaba imprimiendo en hoja para siempre, sin pasar por la ticketera y
+      // abriendo el dialogo de Windows en cada venta. Le paso a La Quinta: 30
+      // de 30 boletas salieron en A4 hasta el 24/09/2026.
       const fv = localStorage.getItem('pos-formato') as FormatoDoc | null;
-      if (fv === 'TICKET_80MM' || fv === 'A4') setFormato(fv);
+      if (fv === 'TICKET_80MM') setFormato(fv);
     } catch { /* ignore */ }
   }, []);
   useEffect(() => { try { localStorage.setItem('pos-tipo-doc', tipoDoc); } catch { /* ignore */ } }, [tipoDoc]);
   useEffect(() => { try { localStorage.setItem('pos-vendedor-id', vendedorId); } catch { /* ignore */ } }, [vendedorId]);
-  useEffect(() => { try { localStorage.setItem('pos-formato', formato); } catch { /* ignore */ } }, [formato]);
+  useEffect(() => {
+    try {
+      if (formato === 'TICKET_80MM') localStorage.setItem('pos-formato', formato);
+      else localStorage.removeItem('pos-formato');
+    } catch { /* ignore */ }
+  }, [formato]);
 
   // Autolookup SUNAT/RENIEC al terminar de tipear DNI (8 díg) o RUC (11 díg).
   // Debounce 500ms. Endpoint /api/sunat/{dni|ruc}/{n} devuelve razón social /
@@ -1023,9 +1033,12 @@ export function PosTerminal({
         //    consultarlo despues, pero solo se ABRE cuando no hubo forma de
         //    imprimir por la ticketera. Abrirlo siempre traeria de vuelta el
         //    dialogo de impresion que justamente se queria sacar del medio.
-        const blob = payload.formato === 'TICKET_80MM'
-          ? await generarTicket(emitido.pdf_data)
-          : await generarA4(emitido.pdf_data);
+        //
+        //    El ticket va PRIMERO y el PDF despues (24/09/2026). Antes el PDF se
+        //    armaba antes de mandar nada a la ticketera, y el papel esperaba a
+        //    un archivo que no necesita: el ticket se arma aparte, en ESC/POS.
+        //    El PDF solo hace falta como respaldo o si la ticketera falla, y en
+        //    los dos casos llega a tiempo generandolo despues.
         const filename = `${payload.tipo.toLowerCase()}_${numeroComprobante.replace(/[^A-Za-z0-9_-]/g, '_')}.pdf`;
 
         let impresoPorAgente = false;
@@ -1076,6 +1089,9 @@ export function PosTerminal({
           }
         }
 
+        const blob = payload.formato === 'TICKET_80MM'
+          ? await generarTicket(emitido.pdf_data)
+          : await generarA4(emitido.pdf_data);
         if (!impresoPorAgente) abrirPDF(blob, filename);
 
         // 3.5) Guardar el PDF dentro del sistema (bucket privado) para poder
