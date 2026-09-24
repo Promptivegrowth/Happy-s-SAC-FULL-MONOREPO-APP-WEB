@@ -7,6 +7,7 @@ import { PageShell } from '@/components/page-shell';
 import { CampanaForm } from '@/components/forms/campana-form';
 import { ProductosDeCampana, type ProductoFila } from './productos-client';
 import { Globe, ArrowLeft, AlertTriangle } from 'lucide-react';
+import type { EstiloCampana } from '@happy/lib/web/campana-estilo';
 
 export const metadata = { title: 'Campaña' };
 export const dynamic = 'force-dynamic';
@@ -23,15 +24,18 @@ type Campana = {
   activa: boolean | null;
   destacada_web: boolean | null;
   orden_web: number | null;
+  estilo: EstiloCampana | null;
 };
 
 export default async function CampanaPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const sb = await createClient();
 
-  const { data: campRaw } = await sb
+  // Cast hasta regenerar tipos: `estilo` es de la mig 105.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data: campRaw } = await (sb as unknown as { from: (t: string) => any })
     .from('campanas')
-    .select('id, codigo, nombre, descripcion, slug, fecha_inicio, fecha_fin, banner_url, activa, destacada_web, orden_web')
+    .select('id, codigo, nombre, descripcion, slug, fecha_inicio, fecha_fin, banner_url, activa, destacada_web, orden_web, estilo')
     .eq('id', id)
     .maybeSingle();
   const camp = campRaw as Campana | null;

@@ -9,7 +9,8 @@ import { Textarea } from '@happy/ui/textarea';
 import { Switch } from '@happy/ui/switch';
 import { Button } from '@happy/ui/button';
 import { FormGrid, FormRow, FormSection } from '@happy/ui/form-row';
-import { ImageUploader } from './image-uploader';
+import { CampanaDiseno } from './campana-diseno';
+import type { EstiloCampana } from '@happy/lib/web/campana-estilo';
 import { crearCampana, actualizarCampana } from '@/server/actions/campanas';
 
 type Campana = {
@@ -24,6 +25,7 @@ type Campana = {
   activa?: boolean | null;
   destacada_web?: boolean | null;
   orden_web?: number | null;
+  estilo?: EstiloCampana | null;
 };
 
 function slugificar(s: string): string {
@@ -66,6 +68,7 @@ export function CampanaForm({ initial }: { initial?: Campana }) {
   );
 
   const [nombre, setNombre] = useState(initial?.nombre ?? '');
+  const [descripcion, setDescripcion] = useState(initial?.descripcion ?? '');
   const [slugTocado, setSlugTocado] = useState(isEdit);
   const [slug, setSlug] = useState(initial?.slug ?? '');
   const [inicio, setInicio] = useState(initial?.fecha_inicio ?? '');
@@ -126,7 +129,8 @@ export function CampanaForm({ initial }: { initial?: Campana }) {
             <FormRow label="Texto" error={state.fields?.descripcion} hint="El renglón que va debajo del título.">
               <Textarea
                 name="descripcion"
-                defaultValue={initial?.descripcion ?? ''}
+                value={descripcion}
+                onChange={(e) => setDescripcion(e.target.value)}
                 rows={2}
                 placeholder="Los disfraces más terroríficos para pequeños y grandes."
               />
@@ -181,16 +185,15 @@ export function CampanaForm({ initial }: { initial?: Campana }) {
         </div>
       </FormSection>
 
-      <FormSection title="Banner" description="La imagen de fondo del encabezado. Si no ponés ninguna, va el degradado naranja.">
-        <ImageUploader
-          value={banner}
-          onChange={setBanner}
-          name="banner_url"
-          prefix="campanas"
-          label="Subir banner"
-          aspect="video"
-        />
-      </FormSection>
+      <CampanaDiseno
+        nombre={nombre}
+        descripcion={descripcion}
+        inicio={inicio}
+        fin={fin}
+        banner={banner}
+        onBanner={setBanner}
+        inicial={initial?.estilo ?? null}
+      />
 
       <div className="flex items-center gap-2">
         <SubmitButton>{isEdit ? 'Guardar cambios' : 'Crear campaña'}</SubmitButton>

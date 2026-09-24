@@ -18,6 +18,43 @@
 import { z } from 'zod';
 import { runAction, requireUser, bumpPaths, type ActionResult } from './_helpers';
 
+/*
+ * El diseño de la campaña (mig 105): colores, textos y la pestaña del menú.
+ *
+ * Llega del formulario como un solo JSON y se valida campo por campo: es lo que
+ * después pinta la tienda web, así que un color mal escrito no puede pasar. Todo
+ * es opcional; lo que no venga, la web lo completa con el diseño de siempre.
+ */
+const HEX = /^#[0-9a-fA-F]{6}$/;
+const color = z.string().regex(HEX, 'Color inválido').optional();
+const texto = (max: number) => z.string().max(max, `Máximo ${max} caracteres`).optional();
+const estiloSchema = z.object({
+  color_inicio: color,
+  color_medio: color,
+  color_fin: color,
+  color_texto: z.enum(['auto', 'claro', 'oscuro']).optional(),
+  etiqueta: texto(40),
+  mostrar_fechas: z.boolean().optional(),
+  imagen_modo: z.enum(['fondo', 'suave']).optional(),
+  menu_texto: texto(30),
+  menu_color: color,
+  menu_etiqueta: texto(12),
+  menu_etiqueta_color: color,
+}).strict();
+
+function parseEstilo(raw: FormDataEntryValue | null) {
+  if (!raw || typeof raw !== 'string') return {};
+  let obj: unknown;
+  try {
+    obj = JSON.parse(raw);
+  } catch {
+    throw new Error('El diseño de la campaña llegó mal armado. Recarga la página e intenta de nuevo.');
+  }
+  const r = estiloSchema.safeParse(obj);
+  if (!r.success) throw new Error(`Diseño de la campaña: ${r.error.issues[0]?.message ?? 'dato inválido'}`);
+  return r.data;
+}
+
 const schema = z.object({
   codigo: z.string().min(2, 'Mínimo 2 caracteres').max(40),
   nombre: z.string().min(2, 'Mínimo 2 caracteres').max(100),
@@ -68,6 +105,7 @@ function parseForm(fd: FormData) {
     slug: data.slug || slugificar(data.nombre),
     descripcion: data.descripcion || null,
     banner_url: data.banner_url || null,
+    estilo: parseEstilo(fd.get('estilo')),
   };
 }
 
@@ -75,7 +113,9 @@ export async function crearCampana(_prev: unknown, fd: FormData): Promise<Action
   const r = await runAction(async () => {
     const data = parseForm(fd);
     const { sb } = await requireUser();
-    const { data: row, error } = await sb
+    // Cast hasta regenerar tipos: `estilo` es de la mig 105.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data: row, error } = await (sb as unknown as { from: (t: string) => any })
       .from('campanas')
       .insert({ ...data, codigo: data.codigo.trim().toUpperCase() })
       .select('id')
@@ -91,7 +131,9 @@ export async function actualizarCampana(id: string, _prev: unknown, fd: FormData
   const r = await runAction(async () => {
     const data = parseForm(fd);
     const { sb } = await requireUser();
-    const { error } = await sb
+    // Cast hasta regenerar tipos: `estilo` es de la mig 105.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { error } = await (sb as unknown as { from: (t: string) => any })
       .from('campanas')
       .update({ ...data, codigo: data.codigo.trim().toUpperCase() })
       .eq('id', id);

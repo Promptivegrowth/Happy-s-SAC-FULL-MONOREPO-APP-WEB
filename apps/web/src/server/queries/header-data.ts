@@ -8,10 +8,13 @@
  */
 
 import { createClient } from '@happy/db/server';
+import type { EstiloCampana } from '@happy/lib/web/campana-estilo';
 
 export type CampanaVigente = {
   slug: string;
   nombre: string;
+  /** El diseño cargado en el ERP (mig 105): la pestaña del menú sale de acá. */
+  estilo?: EstiloCampana | null;
 };
 
 export type ProductoBusqueda = {
@@ -28,9 +31,11 @@ export async function cargarDatosHeader(): Promise<{
     const hoy = new Date().toISOString().slice(0, 10); // YYYY-MM-DD
 
     // 1) Campaña vigente por fecha
-    const { data: camp } = await sb
+    // Cast hasta regenerar tipos: `estilo` es de la mig 105.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data: camp } = await (sb as unknown as { from: (t: string) => any })
       .from('campanas')
-      .select('slug, nombre, fecha_inicio, fecha_fin, activa')
+      .select('slug, nombre, fecha_inicio, fecha_fin, activa, estilo')
       .eq('activa', true)
       .lte('fecha_inicio', hoy)
       .gte('fecha_fin', hoy)
@@ -39,7 +44,11 @@ export async function cargarDatosHeader(): Promise<{
       .maybeSingle();
 
     const campanaVigente = camp?.slug
-      ? { slug: camp.slug as string, nombre: camp.nombre as string }
+      ? {
+          slug: camp.slug as string,
+          nombre: camp.nombre as string,
+          estilo: ((camp as { estilo?: EstiloCampana | null }).estilo ?? null),
+        }
       : null;
 
     // 2) Productos publicados para autocomplete — solo nombre + slug para

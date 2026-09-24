@@ -6,6 +6,29 @@ import { ChevronDown } from 'lucide-react';
 import { Badge } from '@happy/ui/badge';
 import { MEGA_MENU, type MegaItem } from '@/lib/megamenu';
 import type { CampanaVigente } from '@/server/queries/header-data';
+import { resolverEstilo } from '@happy/lib/web/campana-estilo';
+
+/** El item de campaña lleva además cómo se pinta su pestaña (mig 105). */
+type EstiloPestana = { color: string; etiqueta: string; etiquetaColor: string };
+type Item = MegaItem & { estiloPestana?: EstiloPestana };
+
+/**
+ * La pastilla al lado del nombre ("HOT"). Para la campaña, el texto y el color
+ * los decide quien la carga en el ERP, y "" significa sin pastilla.
+ */
+function Pastilla({ item, className }: { item: Item; className: string }) {
+  if (!item.hot) return null;
+  const e = item.estiloPestana;
+  if (e && !e.etiqueta) return null;
+  return (
+    <Badge
+      className={`${className} h-4 px-1 text-[8px] text-white ${e ? '' : 'bg-danger hover:bg-danger'}`}
+      style={e ? { backgroundColor: e.etiquetaColor } : undefined}
+    >
+      {e ? e.etiqueta : 'HOT'}
+    </Badge>
+  );
+}
 
 /**
  * Reemplaza el link fijo de campaña del megamenu por la campaña VIGENTE
@@ -14,16 +37,22 @@ import type { CampanaVigente } from '@/server/queries/header-data';
  * marca para ser el placeholder — se detecta por href que empieza con
  * "/campanias/".
  */
-function aplicarCampana(items: MegaItem[], campana: CampanaVigente | null): MegaItem[] {
+function aplicarCampana(items: MegaItem[], campana: CampanaVigente | null): Item[] {
   return items
-    .map((item): MegaItem | null => {
+    .map((item): Item | null => {
       if (item.kind === 'link' && item.href.startsWith('/campanias/')) {
         if (!campana) return null; // sin vigente → ocultar
-        return { ...item, label: campana.nombre, href: `/campanias/${campana.slug}` };
+        const e = resolverEstilo(campana.estilo, campana.nombre);
+        return {
+          ...item,
+          label: e.menuTexto,
+          href: `/campanias/${campana.slug}`,
+          estiloPestana: { color: e.menuColor, etiqueta: e.menuEtiqueta, etiquetaColor: e.menuEtiquetaColor },
+        };
       }
       return item;
     })
-    .filter((x): x is MegaItem => x !== null);
+    .filter((x): x is Item => x !== null);
 }
 
 export function MegaMenu({ campanaVigente = null }: { campanaVigente?: CampanaVigente | null }) {
@@ -70,11 +99,14 @@ export function MegaMenu({ campanaVigente = null }: { campanaVigente?: CampanaVi
                   isOpen ? 'bg-corp-800 text-happy-300' : 'text-white hover:text-happy-300'
                 } ${item.label === 'Home' ? 'pr-3' : ''}`}
               >
-                <span className={item.hot ? 'text-happy-300' : ''}>{item.label}</span>
+                <span
+                  className={item.hot && !item.estiloPestana ? 'text-happy-300' : ''}
+                  style={item.estiloPestana ? { color: item.estiloPestana.color } : undefined}
+                >
+                  {item.label}
+                </span>
                 {hasFlyout && <ChevronDown className="h-3 w-3 opacity-70" />}
-                {item.hot && (
-                  <Badge className="ml-1 h-4 bg-danger px-1 text-[8px] hover:bg-danger">HOT</Badge>
-                )}
+                <Pastilla item={item} className="ml-1" />
               </Link>
 
               {/* Dropdown chico (Accesorios) */}
@@ -176,9 +208,7 @@ export function MegaMenuMobile({
                   className="block rounded-md px-3 py-2.5 text-sm font-semibold text-corp-900 hover:bg-happy-50"
                 >
                   {item.label}
-                  {item.hot && (
-                    <Badge className="ml-2 h-4 bg-danger px-1 text-[8px] hover:bg-danger">HOT</Badge>
-                  )}
+                  <Pastilla item={item} className="ml-2" />
                 </Link>
               </li>
             );
@@ -192,9 +222,7 @@ export function MegaMenuMobile({
               >
                 <span>
                   {item.label}
-                  {item.hot && (
-                    <Badge className="ml-2 h-4 bg-danger px-1 text-[8px] hover:bg-danger">HOT</Badge>
-                  )}
+                  <Pastilla item={item} className="ml-2" />
                 </span>
                 <ChevronDown className={`h-4 w-4 transition ${isOpen ? 'rotate-180' : ''}`} />
               </button>

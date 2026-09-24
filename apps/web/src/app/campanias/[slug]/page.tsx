@@ -7,6 +7,7 @@ import { Calendar, Sparkles } from 'lucide-react';
 import { ProductCard } from '@/components/product-card';
 import { loadPublicaciones } from '@/server/queries/publicaciones';
 import { BLUR_DATA_URL } from '@/lib/image';
+import { resolverEstilo, fondoCss, type EstiloCampana } from '@happy/lib/web/campana-estilo';
 
 export const dynamic = 'force-dynamic';
 
@@ -36,13 +37,16 @@ export default async function CampaniaPage({ params }: { params: Promise<{ slug:
     banner_url: string | null;
     imagen_url: string | null;
     activa: boolean;
+    estilo: EstiloCampana | null;
   } | null = null;
 
   try {
     const sb = await createClient();
-    const { data } = await sb
+    // Cast hasta regenerar tipos: `estilo` es de la mig 105.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data } = await (sb as unknown as { from: (t: string) => any })
       .from('campanas')
-      .select('id, codigo, nombre, descripcion, fecha_inicio, fecha_fin, banner_url, imagen_url, activa')
+      .select('id, codigo, nombre, descripcion, fecha_inicio, fecha_fin, banner_url, imagen_url, activa, estilo')
       .eq('slug', slug)
       .maybeSingle();
     camp = data;
@@ -54,6 +58,15 @@ export default async function CampaniaPage({ params }: { params: Promise<{ slug:
   const pubs = await loadPublicaciones({ campanaId: camp.id, limit: 60 });
   const banner = camp.banner_url ?? camp.imagen_url;
 
+  /*
+   * El diseño lo decide quien carga la campaña en el ERP (mig 105): colores,
+   * etiqueta, fechas, cómo va la foto. Lo que no se cargó sale como siempre.
+   * La letra se oscurece sola sobre fondos claros, que con blanco no se leen.
+   */
+  const e = resolverEstilo(camp.estilo, camp.nombre);
+  const colorLetra = e.textoOscuro ? '#1E1B4B' : '#FFFFFF';
+  const pastilla = e.textoOscuro ? 'bg-black/10' : 'bg-white/20';
+
   function fmt(d: string | null) {
     if (!d) return '';
     return new Date(d).toLocaleDateString('es-PE', { day: 'numeric', month: 'long' });
@@ -62,29 +75,47 @@ export default async function CampaniaPage({ params }: { params: Promise<{ slug:
   return (
     <>
       {/* Hero de la campaña */}
-      <section className="relative overflow-hidden bg-gradient-to-br from-happy-500 via-danger to-corp-700 text-white">
+      <section
+        className="relative overflow-hidden"
+        style={{ background: fondoCss(e), color: colorLetra }}
+      >
         {banner && (
-          <Image
-            src={banner}
-            alt={camp.nombre}
-            fill
-            className="object-cover opacity-30"
-            sizes="100vw"
-            placeholder="blur"
-            blurDataURL={BLUR_DATA_URL}
-            priority
-          />
+          <>
+            <Image
+              src={banner}
+              alt={camp.nombre}
+              fill
+              className={`object-cover ${e.imagenModo === 'suave' ? 'opacity-30' : ''}`}
+              sizes="100vw"
+              placeholder="blur"
+              blurDataURL={BLUR_DATA_URL}
+              priority
+            />
+            {/*
+              * Con la foto a pleno, un velo del color del fondo detrás del texto.
+              * Sin él, el título queda encima de lo que haya en la foto y según
+              * la imagen no se lee.
+              */}
+            {e.imagenModo === 'fondo' && (
+              <div
+                className="absolute inset-0"
+                style={{ background: `linear-gradient(90deg, ${e.colorInicio}E6 0%, ${e.colorInicio}99 40%, transparent 75%)` }}
+              />
+            )}
+          </>
         )}
         <div className="container relative px-4 py-16 lg:py-24">
-          <Badge className="mb-4 bg-white/20 text-white backdrop-blur-sm hover:bg-white/30">
-            <Sparkles className="mr-1 h-3 w-3" /> Campaña activa
-          </Badge>
+          {e.etiqueta && (
+            <Badge className={`mb-4 ${pastilla} backdrop-blur-sm`} style={{ color: colorLetra }}>
+              <Sparkles className="mr-1 h-3 w-3" /> {e.etiqueta}
+            </Badge>
+          )}
           <h1 className="font-display text-5xl font-semibold leading-tight md:text-6xl">{camp.nombre}</h1>
           {camp.descripcion && (
-            <p className="mt-3 max-w-2xl text-lg text-white/90">{camp.descripcion}</p>
+            <p className="mt-3 max-w-2xl text-lg opacity-90">{camp.descripcion}</p>
           )}
-          {(camp.fecha_inicio || camp.fecha_fin) && (
-            <p className="mt-4 inline-flex items-center gap-2 rounded-full bg-white/15 px-4 py-1.5 text-sm backdrop-blur-sm">
+          {e.mostrarFechas && (camp.fecha_inicio || camp.fecha_fin) && (
+            <p className={`mt-4 inline-flex items-center gap-2 rounded-full ${pastilla} px-4 py-1.5 text-sm backdrop-blur-sm`}>
               <Calendar className="h-4 w-4" />
               {camp.fecha_inicio && camp.fecha_fin
                 ? `Del ${fmt(camp.fecha_inicio)} al ${fmt(camp.fecha_fin)}`
