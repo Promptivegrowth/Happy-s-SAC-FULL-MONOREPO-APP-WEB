@@ -3,6 +3,7 @@
 import { z } from 'zod';
 import { redirect } from 'next/navigation';
 import { runAction, requireUser, bumpPaths, type ActionResult } from './_helpers';
+import { formatTallaChip } from '@happy/lib';
 
 const TALLAS = ['T0','T2','T4','T6','T8','T10','T12','T14','T16','TS','TAD', 'TU'] as const;
 
@@ -300,6 +301,53 @@ const varianteSchema = z.object({
   activo: z.boolean().default(true),
 });
 
+/**
+ * Qué talla y de qué producto ya usa un código de barras o un SKU.
+ *
+ * Los dos son únicos en todo el catálogo, y cuando uno choca la base solo dice
+ * "ya existe". Sin decir dónde, la persona no tiene cómo resolverlo: le pasó a
+ * Javier el 25/09/2026 con DT80, que estaba en otro disfraz casi igual y no
+ * había forma de encontrarlo desde la pantalla.
+ */
+async function quienLoTiene(
+  sb: Awaited<ReturnType<typeof requireUser>>['sb'],
+  campo: 'codigo_barras' | 'sku',
+  valor: string,
+  excluirVarianteId?: string,
+): Promise<string> {
+  let q = sb
+    .from('productos_variantes')
+    .select('sku, talla, activo, productos(codigo, nombre)')
+    .eq(campo, valor);
+  if (excluirVarianteId) q = q.neq('id', excluirVarianteId);
+  const { data } = await q.limit(1).maybeSingle();
+  const v = data as unknown as {
+    sku: string; talla: string; activo: boolean | null;
+    productos: { codigo: string; nombre: string } | null;
+  } | null;
+  if (!v) return 'otra talla';
+  const inactiva = v.activo === false ? ', que está desactivada' : '';
+  return `${v.productos?.codigo ?? '?'} "${v.productos?.nombre ?? 'producto'}", talla ${formatTallaChip(v.talla)} (SKU ${v.sku}${inactiva})`;
+}
+
+/** El mensaje para un código o SKU repetido, diciendo dónde está. */
+async function mensajeDuplicado(
+  sb: Awaited<ReturnType<typeof requireUser>>['sb'],
+  mensajeBase: string,
+  codigoBarras: string | null,
+  sku: string,
+  excluirVarianteId?: string,
+): Promise<string> {
+  // La restricción que chocó viene nombrada en el mensaje de la base.
+  if (codigoBarras && mensajeBase.includes('codigo_barras')) {
+    const donde = await quienLoTiene(sb, 'codigo_barras', codigoBarras, excluirVarianteId);
+    return `El código de barras "${codigoBarras}" ya lo tiene ${donde}. `
+      + 'Si ese código es el correcto para esta prenda, primero quítaselo a la otra (lápiz → borra el código → guardar).';
+  }
+  const donde = await quienLoTiene(sb, 'sku', sku, excluirVarianteId);
+  return `El SKU "${sku}" ya lo tiene ${donde}. Usa otro, o déjalo vacío para que se genere solo.`;
+}
+
 export async function crearVariante(_prev: unknown, fd: FormData): Promise<ActionResult> {
   const r = await runAction(async () => {
     const data = varianteSchema.parse({
@@ -335,7 +383,7 @@ export async function crearVariante(_prev: unknown, fd: FormData): Promise<Actio
     };
     const { error } = await sb.from('productos_variantes').insert(payload);
     if (error) {
-      if (error.code === '23505') throw new Error(`SKU "${sku}" ya existe — usa otro o déjalo vacío para autogenerar`);
+      if (error.code === '23505') throw new Error(await mensajeDuplicado(sb, error.message, payload.codigo_barras, sku));
       throw new Error(error.message);
     }
     return null;
@@ -384,14 +432,9 @@ export async function actualizarVariante(
     if (error) {
       if (error.code === '23505') {
         // El codigo de barras tambien es unico: sin distinguir, el usuario veia
-        // "el SKU ya existe" aunque el repetido fuera el codigo de barras.
-        if (error.message.includes('codigo_barras')) {
-          throw new Error(
-            `El código de barras "${payload.codigo_barras}" ya está asignado a otra talla o producto. ` +
-            'Cada código identifica una sola prenda: revisa la etiqueta.',
-          );
-        }
-        throw new Error(`SKU "${payload.sku}" ya existe en otra variante`);
+        // "el SKU ya existe" aunque el repetido fuera el codigo de barras. Y en
+        // los dos casos ahora se dice QUIEN lo tiene.
+        throw new Error(await mensajeDuplicado(sb, error.message, payload.codigo_barras, payload.sku, varianteId));
       }
       throw new Error(error.message);
     }
