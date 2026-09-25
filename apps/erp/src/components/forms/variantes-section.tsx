@@ -92,11 +92,21 @@ export function VariantesSection({
   const pv = (n: number | null | undefined) => (n != null ? String(n) : '');
 
   function onDelete(id: string) {
-    if (!confirm('¿Eliminar esta variante?')) return;
+    if (!confirm('¿Eliminar esta talla?' + '\n\n' + 'Si ya se vendió o tuvo movimientos, en vez de borrarse se desactiva: deja de aparecer en el punto de venta y en la web, y su historial se conserva.')) return;
     start(async () => {
       const r = await eliminarVariante(id, productoId);
-      if (r.ok) toast.success('Eliminada');
-      else toast.error(r.error ?? 'Error');
+      if (!r.ok) {
+        toast.error(r.error ?? 'No se pudo eliminar', { duration: 10000 });
+        return;
+      }
+      if (r.data?.desactivada) {
+        toast.success(
+          `No se borró porque ${r.data.motivo}: se desactivó. Ya no aparece en el punto de venta ni en la web, y su historial queda guardado.`,
+          { duration: 10000 },
+        );
+      } else {
+        toast.success('Talla eliminada');
+      }
     });
   }
 

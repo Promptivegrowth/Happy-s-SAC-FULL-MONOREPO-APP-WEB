@@ -401,14 +401,96 @@ export async function actualizarVariante(
   return r;
 }
 
-export async function eliminarVariante(varianteId: string, productoId: string): Promise<ActionResult> {
+/**
+ * Dónde puede tener historia una talla. Si aparece en cualquiera de estas
+ * tablas, borrarla dejaría ventas, movimientos o pedidos apuntando a la nada.
+ */
+const HISTORIA_VARIANTE: Array<{ tabla: string; uno: string; varios: string }> = [
+  { tabla: 'ventas_lineas', uno: 'venta', varios: 'ventas' },
+  { tabla: 'comprobantes_lineas', uno: 'comprobante', varios: 'comprobantes' },
+  { tabla: 'kardex_movimientos', uno: 'movimiento de stock', varios: 'movimientos de stock' },
+  { tabla: 'traslados_lineas', uno: 'traslado', varios: 'traslados' },
+  { tabla: 'devoluciones_lineas', uno: 'devolución', varios: 'devoluciones' },
+  { tabla: 'pedidos_web_lineas', uno: 'pedido web', varios: 'pedidos web' },
+  { tabla: 'pedidos_b2b_lineas', uno: 'pedido mayorista', varios: 'pedidos mayoristas' },
+  { tabla: 'cotizaciones_lineas', uno: 'cotización', varios: 'cotizaciones' },
+  { tabla: 'ot_lineas', uno: 'orden de trabajo', varios: 'órdenes de trabajo' },
+  { tabla: 'ingresos_pt_lineas', uno: 'ingreso de producción', varios: 'ingresos de producción' },
+  { tabla: 'guias_remision_items', uno: 'guía de remisión', varios: 'guías de remisión' },
+];
+
+/**
+ * Elimina una talla, o la desactiva si ya tiene historia.
+ *
+ * Antes se intentaba borrar a secas, y cuando la talla ya se había usado la
+ * base lo impedía con un mensaje técnico en inglés ("violates foreign key
+ * constraint…") que no decía qué pasaba ni qué hacer. Le pasó a Javier el
+ * 25/09/2026 con la talla S de la pistola: tenía 2 ventas y 9 movimientos.
+ *
+ * La base tenía razón en no dejar: borrarla habría dejado esas ventas apuntando
+ * a un producto que no existe. Lo que se quiere en ese caso es que deje de
+ * aparecer, y eso es desactivarla: sale del POS y de la tienda web, y la historia
+ * se conserva. Así que ahora:
+ *
+ *  - con stock distinto de cero, no se toca y se dice dónde está ese stock;
+ *  - con historia, se desactiva y se explica por qué;
+ *  - sin historia, se borra de verdad (junto con sus filas de stock en cero).
+ */
+export async function eliminarVariante(
+  varianteId: string,
+  productoId: string,
+): Promise<ActionResult<{ desactivada: boolean; motivo?: string }>> {
   const r = await runAction(async () => {
     const { sb } = await requireUser();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const sbAny = sb as unknown as { from: (t: string) => any };
+
+    // 1) Con mercadería no se toca: primero hay que moverla o ajustarla.
+    const { data: stock } = await sbAny
+      .from('stock_actual')
+      .select('cantidad, almacenes(nombre)')
+      .eq('variante_id', varianteId);
+    const conStock = ((stock ?? []) as Array<{ cantidad: number | string; almacenes: { nombre: string } | null }>)
+      .filter((s) => Number(s.cantidad) !== 0);
+    if (conStock.length > 0) {
+      const donde = conStock.map((s) => `${s.almacenes?.nombre ?? 'un almacén'}: ${Number(s.cantidad)}`).join(', ');
+      throw new Error(`Esta talla todavía tiene stock (${donde}). Trasládalo o ajústalo a cero antes de eliminarla.`);
+    }
+
+    // 2) Con historia, se desactiva.
+    const conteos = await Promise.all(
+      HISTORIA_VARIANTE.map(async (h) => {
+        const { count } = await sbAny.from(h.tabla).select('variante_id', { count: 'exact', head: true }).eq('variante_id', varianteId);
+        return { ...h, n: count ?? 0 };
+      }),
+    );
+    const usada = conteos.filter((c) => c.n > 0);
+
+    const desactivar = async (motivo: string) => {
+      const { error } = await sb.from('productos_variantes').update({ activo: false }).eq('id', varianteId);
+      if (error) throw new Error(error.message);
+      return { desactivada: true, motivo };
+    };
+
+    if (usada.length > 0) {
+      const motivo = usada
+        .map((c) => `${c.n} ${c.n === 1 ? c.uno : c.varios}`)
+        .join(', ');
+      return desactivar(`tiene ${motivo}`);
+    }
+
+    // 3) Sin historia: se borra, con sus filas de stock en cero.
+    await sbAny.from('stock_actual').delete().eq('variante_id', varianteId);
     const { error } = await sb.from('productos_variantes').delete().eq('id', varianteId);
-    if (error) throw new Error(error.message);
-    return null;
+    if (error) {
+      // Una referencia que no esta en la lista (un carrito web, un set): la
+      // talla se usó en algún lado. Mismo criterio, se desactiva.
+      if ((error as { code?: string }).code === '23503') return desactivar('figura en otros registros del sistema');
+      throw new Error(error.message);
+    }
+    return { desactivada: false };
   });
-  if (r.ok) await bumpPaths(`/productos/${productoId}`);
+  if (r.ok) await bumpPaths(`/productos/${productoId}`, '/inventario');
   return r;
 }
 

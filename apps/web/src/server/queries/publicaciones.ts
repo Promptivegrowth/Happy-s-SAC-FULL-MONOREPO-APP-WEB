@@ -14,7 +14,7 @@ type PubRow = {
     nombre: string;
     imagen_principal_url: string | null;
     categoria_id: string | null;
-    productos_variantes: { id: string; talla: string; precio_publico: number | null }[];
+    productos_variantes: { id: string; talla: string; precio_publico: number | null; activo?: boolean | null }[];
     categorias?: { activo: boolean } | null;
   } | null;
 };
@@ -103,7 +103,7 @@ export async function loadPublicaciones(opts: LoadOpts = {}): Promise<ProductCar
     let query = sb
       .from('productos_publicacion')
       .select(
-        'producto_id, slug, titulo_web, precio_oferta, descuento_porcentaje, descuento_excluir_tallas, etiquetas, productos!inner(id, nombre, imagen_principal_url, categoria_id, campana_id, productos_variantes(id, talla, precio_publico), categorias!productos_categoria_id_fkey(activo))',
+        'producto_id, slug, titulo_web, precio_oferta, descuento_porcentaje, descuento_excluir_tallas, etiquetas, productos!inner(id, nombre, imagen_principal_url, categoria_id, campana_id, productos_variantes(id, talla, precio_publico, activo), categorias!productos_categoria_id_fkey(activo))',
       )
       .eq('publicado', true)
       .order('orden_web')
@@ -233,7 +233,8 @@ export async function loadPublicaciones(opts: LoadOpts = {}): Promise<ProductCar
       })
       .map((p) => {
         const prod = p.productos!;
-        const variantes = prod.productos_variantes ?? [];
+        // Las tallas desactivadas no cuentan para el precio ni para el stock.
+        const variantes = (prod.productos_variantes ?? []).filter((v) => v.activo !== false);
         const precios = variantes.map((v) => Number(v.precio_publico ?? 0)).filter((x) => x > 0);
         const stockTotal = variantes.reduce((sum, v) => sum + (stockPorVariante.get(v.id) ?? 0), 0);
         const rt = ratingMap.get(p.producto_id);

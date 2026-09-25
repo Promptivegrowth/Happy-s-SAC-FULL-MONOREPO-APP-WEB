@@ -75,6 +75,7 @@ type ProductoDetalle = {
     id: string;
     sku: string;
     talla: string;
+    activo?: boolean | null;
     precio_publico: number | null;
     precio_mayorista_a: number | null;
     precio_mayorista_b: number | null;
@@ -99,7 +100,7 @@ export default async function ProductoDetallePage({ params }: { params: Promise<
       productos!inner(
         id, codigo, nombre, descripcion, imagen_principal_url, piezas_descripcion, genero, categoria_id, familia_id, color_variante,
         categoria:categorias!productos_categoria_id_fkey(nombre, slug),
-        productos_variantes(id, sku, talla, precio_publico, precio_mayorista_a, precio_mayorista_b, precio_industrial, imagen_url),
+        productos_variantes(id, sku, talla, precio_publico, precio_mayorista_a, precio_mayorista_b, precio_industrial, imagen_url, activo),
         productos_imagenes(id, url, orden, alt_texto)
       )
     `,
@@ -110,6 +111,15 @@ export default async function ProductoDetallePage({ params }: { params: Promise<
 
   if (!pub) notFound();
   const prod = (pub as unknown as { productos: ProductoDetalle }).productos;
+  /*
+   * Las tallas desactivadas no se ofrecen.
+   *
+   * Desactivar una talla en el ERP es la forma de sacarla de venta sin perder su
+   * historia (es lo que hace "eliminar" cuando la talla ya se vendió). El punto
+   * de venta ya las filtraba; la web no, y las seguía mostrando tachadas como si
+   * se hubieran agotado.
+   */
+  prod.productos_variantes = (prod.productos_variantes ?? []).filter((v) => v.activo !== false);
 
   // Disparar las queries dependientes EN PARALELO (rating, reseñas, relacionados, stock, colores de familia).
   const varianteIds = prod.productos_variantes.map((v) => v.id);
