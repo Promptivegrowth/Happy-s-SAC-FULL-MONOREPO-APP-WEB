@@ -333,6 +333,9 @@ export function PosTerminal({
   const [telefonoCliente, setTelefonoCliente] = useState('');
   const [clienteIdSeleccionado, setClienteIdSeleccionado] = useState<string | null>(null);
   const [buscandoSunat, setBuscandoSunat] = useState(false);
+  // Por qué no se pudo completar el DNI/RUC. Antes el fallo era mudo: el campo
+  // quedaba vacío y la cajera no sabía si esperar o escribirlo a mano.
+  const [errorConsulta, setErrorConsulta] = useState<string | null>(null);
   // Buscador de clientes frecuentes (2026-07-12) — dropdown que aparece al
   // tipear en el input "Nombre" con 2+ caracteres, busca en la BD por
   // razón social / nombres / apellidos vía buscarClientesPOS.
@@ -434,6 +437,7 @@ export function PosTerminal({
   const ultimoAutocompletadoRef = useRef<{ nombre: string; direccion: string }>({ nombre: '', direccion: '' });
   useEffect(() => {
     const n = docCliente.trim();
+    setErrorConsulta(null);
     if (n.length !== 8 && n.length !== 11) return;
     if (clienteIdSeleccionado) return; // ya está cargado
     const timer = setTimeout(async () => {
@@ -441,7 +445,15 @@ export function PosTerminal({
       setBuscandoSunat(true);
       try {
         const r = await fetch(`/api/sunat/${tipo}/${n}`);
-        if (!r.ok) return;
+        if (!r.ok) {
+          const cuerpo = await r.json().catch(() => ({})) as { error?: string };
+          setErrorConsulta(
+            r.status === 404
+              ? `No se encontró ese ${tipo.toUpperCase()}. Revisa el número o escribe el nombre a mano.`
+              : cuerpo.error ?? 'No se pudo consultar. Escribe el nombre a mano.',
+          );
+          return;
+        }
         const data = await r.json();
         const nombreNuevo: string | undefined = tipo === 'dni' ? data.nombreCompleto : data.razonSocial;
         if (nombreNuevo) {
@@ -460,12 +472,33 @@ export function PosTerminal({
             return data.direccion;
           });
         }
-      } catch { /* silent */ } finally {
+      } catch {
+        setErrorConsulta('Sin conexión con el servicio de consultas. Escribe el nombre a mano.');
+      } finally {
         setBuscandoSunat(false);
       }
     }, 500);
     return () => clearTimeout(timer);
   }, [docCliente, clienteIdSeleccionado]);
+
+  /*
+   * Un DNI o RUC escrito en el casillero del nombre pasa solo al suyo.
+   *
+   * El 28/09/2026 una cajera escribió el RUC en el casillero de la razón social
+   * y la consulta nunca se hizo: solo se dispara desde el de DNI/RUC. Si el
+   * nombre es puro número de 8 u 11 cifras, no es un nombre. Se espera un
+   * momento sin tipear para no cortar un RUC de 11 cifras al llegar a la 8va.
+   */
+  useEffect(() => {
+    const v = nombreCliente.trim();
+    if (!/^\d{8}$|^\d{11}$/.test(v) || docCliente.trim()) return;
+    const t = setTimeout(() => {
+      setDocCliente(v);
+      setNombreCliente('');
+      toast.info('Pasé el número al casillero de DNI/RUC para consultarlo.');
+    }, 900);
+    return () => clearTimeout(t);
+  }, [nombreCliente, docCliente]);
 
   // Debounce 350ms del buscador de clientes frecuentes. Se dispara al tipear
   // en el input de nombre — no bloquea si el usuario está tipeando un cliente
@@ -1843,11 +1876,29 @@ export function PosTerminal({
               <span className="text-emerald-600">✓ Guardado en BD</span>
             )}
           </div>
+          {/*
+            * Títulos fijos arriba de cada casillero.
+            *
+            * Solo tenían texto de ayuda adentro, que desaparece apenas se escribe.
+            * El 28/09/2026 una cajera puso el RUC en el casillero de la razón
+            * social y después no podía escribir el nombre en el otro, que solo
+            * acepta números: sintió que el sistema no la dejaba escribir a mano.
+            */}
+          <div className="grid grid-cols-[110px_1fr] gap-1.5 text-[9px] font-semibold uppercase tracking-wide text-slate-400">
+            <span>DNI / RUC</span>
+            <span>{tipoDoc === 'FACTURA' ? 'Razón social *' : 'Nombre del cliente'}</span>
+          </div>
           <div className="grid grid-cols-[110px_1fr] gap-1.5">
             <Input
               value={docCliente}
               onChange={(e) => {
-                const v = e.target.value.replace(/\D/g, '').slice(0, 11);
+                const crudo = e.target.value;
+                // Letras en el casillero del número: es el nombre en el lugar
+                // equivocado. Se avisa en vez de tragarlas en silencio.
+                if (/[a-zA-ZáéíóúñÁÉÍÓÚÑ]/.test(crudo)) {
+                  toast.info('Este casillero es solo para el número. El nombre va en el casillero de al lado.');
+                }
+                const v = crudo.replace(/\D/g, '').slice(0, 11);
                 setDocCliente(v);
                 // Reset cliente seleccionado al editar DNI/RUC
                 if (clienteIdSeleccionado) setClienteIdSeleccionado(null);
@@ -1917,6 +1968,9 @@ export function PosTerminal({
               )}
             </div>
           </div>
+          {errorConsulta && !buscandoSunat && (
+            <p className="mt-1 text-[10px] font-medium text-amber-700">⚠ {errorConsulta}</p>
+          )}
           {(tipoDoc === 'FACTURA' || direccionCliente) && (
             <Input
               value={direccionCliente}

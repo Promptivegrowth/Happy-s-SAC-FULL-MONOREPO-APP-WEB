@@ -10,6 +10,7 @@
     "./ubigeo": "./src/ubigeo/index.ts",
     "./ubigeo/data": "./src/ubigeo/ubigeo-peru.json",
     "./sunat": "./src/sunat/index.ts",
+    "./sunat/consulta-guardada": "./src/sunat/consulta-guardada.ts",
     "./sunat-ubl": "./src/sunat-ubl/index.ts",
     "./pagos": "./src/pagos/index.ts",
     "./pagos/izipay": "./src/pagos/izipay.ts",

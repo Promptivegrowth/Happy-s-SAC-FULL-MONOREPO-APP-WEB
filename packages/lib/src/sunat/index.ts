@@ -2,7 +2,7 @@
  * Integración con Decolecta para consulta DNI / RUC.
  *
  * Decolecta (https://decolecta.com) ofrece un plan gratuito de
- * 100 consultas/mes para RUC y DNI. Reemplaza al anterior apis.net.pe
+ * 1.000 consultas/mes para RUC y DNI. Reemplaza al anterior apis.net.pe
  * que descontinuó el servicio público de DNI por la nueva normativa
  * peruana de protección de datos personales (2026).
  *
@@ -62,6 +62,15 @@ async function decolectaFetch<T>(path: string, opts: FetchOptions): Promise<T> {
   });
   if (!res.ok) {
     const text = await res.text().catch(() => '');
+    /*
+     * Decolecta responde 401 tanto para un token malo como para el cupo agotado,
+     * y los distingue solo por el texto ("Apikey Required / Limit Exceeded").
+     * Tratarlos igual mandaba a revisar el token cuando lo que pasaba era que se
+     * habían terminado las consultas del mes (28/09/2026).
+     */
+    if (res.status === 429 || (res.status === 401 && /limit/i.test(text))) {
+      throw new Error('Se agotaron las consultas del mes en el servicio de RENIEC/SUNAT. Escribe el nombre a mano.');
+    }
     if (res.status === 401) {
       throw new Error('Token inválido o vencido. Regenerá DECOLECTA_TOKEN en https://decolecta.com');
     }
@@ -80,9 +89,6 @@ async function decolectaFetch<T>(path: string, opts: FetchOptions): Promise<T> {
         /* texto plano */
       }
       throw new Error(detalle ? `Documento inválido: ${detalle}` : 'Documento inválido (formato no reconocido).');
-    }
-    if (res.status === 429) {
-      throw new Error('Cuota mensual del plan gratuito agotada. Esperá al próximo mes o subí de plan en Decolecta.');
     }
     throw new Error(`Decolecta ${res.status}: ${text || res.statusText}`);
   }
