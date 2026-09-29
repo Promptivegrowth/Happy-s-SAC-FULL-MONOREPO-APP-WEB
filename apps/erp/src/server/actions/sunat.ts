@@ -70,6 +70,8 @@ const configSchema = z.object({
   endpoint_factura: z.string().url(),
   certificado_password: z.string().optional().or(z.literal('')),
   firmante_nombre: z.string().optional().or(z.literal('')),
+  gre_client_id: z.string().trim().optional().or(z.literal('')),
+  gre_client_secret: z.string().trim().optional().or(z.literal('')),
 });
 
 export async function actualizarSunatConfig(_prev: unknown, fd: FormData): Promise<ActionResult> {
@@ -81,6 +83,8 @@ export async function actualizarSunatConfig(_prev: unknown, fd: FormData): Promi
       endpoint_factura: fd.get('endpoint_factura'),
       certificado_password: fd.get('certificado_password') ?? '',
       firmante_nombre: fd.get('firmante_nombre') ?? '',
+      gre_client_id: fd.get('gre_client_id') ?? '',
+      gre_client_secret: fd.get('gre_client_secret') ?? '',
     });
     const { sb } = await requireUser();
     const { data: empresa } = await sb.from('empresa').select('id').single();
@@ -102,9 +106,16 @@ export async function actualizarSunatConfig(_prev: unknown, fd: FormData): Promi
       firmante_nombre: data.firmante_nombre || null,
       ...(certPfxBase64 ? { certificado_pfx_base64: certPfxBase64 } : {}),
       ...(data.certificado_password ? { certificado_password: data.certificado_password } : {}),
+      // Credenciales de la API de guías. El secreto no se muestra: vacío = dejar el actual.
+      // Al cambiarlas se descarta el token guardado, que era de las anteriores.
+      ...(data.gre_client_id ? { gre_client_id: data.gre_client_id } : {}),
+      ...(data.gre_client_secret ? { gre_client_secret: data.gre_client_secret } : {}),
+      ...(data.gre_client_id || data.gre_client_secret ? { gre_token: null, gre_token_expira: null } : {}),
     };
 
-    const { error } = await sb.from('sunat_config').upsert(updates, { onConflict: 'empresa_id' });
+    // Cast hasta regenerar tipos: las columnas gre_* son de la mig 107.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { error } = await (sb as unknown as { from: (t: string) => any }).from('sunat_config').upsert(updates, { onConflict: 'empresa_id' });
     if (error) throw new Error(error.message);
     await bumpPaths('/configuracion/sunat');
     return null;

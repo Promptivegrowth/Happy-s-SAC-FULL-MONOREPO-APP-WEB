@@ -14,6 +14,8 @@ type Props = {
   defaultLabel?: string;
   name?: string;
   required?: boolean;
+  /** Aviso al padre cuando se elige o se borra un distrito (formularios controlados). */
+  onChange?: (codigo: string | null) => void;
 };
 
 // Helper que valida que la respuesta sea JSON. Si /api/ubigeo cayera por algún
@@ -35,7 +37,7 @@ async function fetchJson<T>(url: string): Promise<T | null> {
   }
 }
 
-export function UbigeoSelect({ value, defaultLabel, name, required }: Props) {
+export function UbigeoSelect({ value, defaultLabel, name, required, onChange }: Props) {
   const [codigo, setCodigo] = useState<string | null>(value ?? null);
   const [label, setLabel] = useState<string>(defaultLabel ?? '');
   const [open, setOpen] = useState(false);
@@ -107,11 +109,13 @@ export function UbigeoSelect({ value, defaultLabel, name, required }: Props) {
 
   function pick(c: string, ruta: string) {
     setCodigo(c); setLabel(ruta); setOpen(false); setBusca('');
+    onChange?.(c);
   }
 
   function clear() {
     setCodigo(null); setLabel(''); setOpen(false);
     setDepSel(''); setProvSel(''); setProvs([]); setDists([]);
+    onChange?.(null);
   }
 
   return (

@@ -12,6 +12,7 @@
     "./sunat": "./src/sunat/index.ts",
     "./sunat/consulta-guardada": "./src/sunat/consulta-guardada.ts",
     "./sunat-ubl": "./src/sunat-ubl/index.ts",
+    "./sunat-ubl/despatch": "./src/sunat-ubl/despatch.ts",
     "./pagos": "./src/pagos/index.ts",
     "./pagos/izipay": "./src/pagos/izipay.ts",
     "./pagos/vuelto": "./src/pagos/vuelto.ts",

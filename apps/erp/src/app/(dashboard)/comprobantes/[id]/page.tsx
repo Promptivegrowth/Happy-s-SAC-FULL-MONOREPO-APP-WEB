@@ -10,7 +10,7 @@ import { EmitirSunatButton } from './client';
 import { AnularBoletaButton } from './anular-client';
 import { VerComprobanteButton } from '../../ventas/ver-comprobante-button';
 import { formatDateTime, formatPEN } from '@happy/lib';
-import { Download } from 'lucide-react';
+import { Download, Truck } from 'lucide-react';
 
 export const dynamic = 'force-dynamic';
 
@@ -60,6 +60,12 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
             <a href={comp.pdf_url} target="_blank" rel="noopener noreferrer">
               <Button variant="outline"><Download className="h-4 w-4" /> PDF SUNAT</Button>
             </a>
+          )}
+          {/* Para despachar esta venta a provincia por agencia. */}
+          {(comp.tipo === 'BOLETA' || comp.tipo === 'FACTURA') && comp.estado !== 'ANULADO' && (
+            <Link href={`/guias/nueva?comprobante=${id}`}>
+              <Button variant="outline"><Truck className="h-4 w-4" /> Guía de remisión</Button>
+            </Link>
           )}
           {comp.estado !== 'ACEPTADO' && comp.estado !== 'ANULADO' && (
             <EmitirSunatButton comprobanteId={id} estado={comp.estado} />

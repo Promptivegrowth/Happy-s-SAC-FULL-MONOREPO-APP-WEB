@@ -88,6 +88,22 @@ export default async function Page() {
             </FormGrid>
           </FormSection>
 
+          <FormSection title="Guías de remisión (API de SUNAT)">
+            <p className="text-xs text-slate-500">
+              Las guías electrónicas van por otra vía que las facturas y piden credenciales propias. Se generan una sola vez en
+              SOL → Credenciales de API SUNAT → Gestión Credenciales de API SUNAT, registrando esta aplicación y marcando
+              &quot;GRE Emisión de Comprobantes&quot;. Usan el mismo usuario SOL secundario de arriba.
+            </p>
+            <FormGrid cols={2}>
+              <FormRow label="ID (client_id)">
+                <Input name="gre_client_id" defaultValue={(cfg as { gre_client_id?: string | null } | null)?.gre_client_id ?? ''} placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" autoComplete="off" />
+              </FormRow>
+              <FormRow label="Clave (client_secret)" hint={(cfg as { gre_client_secret?: string | null } | null)?.gre_client_secret ? 'Ya cargada. Déjala vacía para no cambiarla.' : 'Se ve una sola vez en SOL al generarla.'}>
+                <Input name="gre_client_secret" type="password" placeholder={(cfg as { gre_client_secret?: string | null } | null)?.gre_client_secret ? '(guardada)' : '••••••••'} autoComplete="new-password" />
+              </FormRow>
+            </FormGrid>
+          </FormSection>
+
           <FormSection title="Firmante">
             <FormRow label="Nombre completo del representante legal">
               <Input name="firmante_nombre" defaultValue={cfg?.firmante_nombre ?? ''} placeholder="Para mostrar en el PDF" />

@@ -6,3 +6,5 @@ export * from './voided';
 export * from './summary';
 export * from './sign';
 export * from './soap';
+export * from './despatch';
+export * from './gre-api';

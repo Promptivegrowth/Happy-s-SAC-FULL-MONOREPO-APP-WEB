@@ -93,6 +93,7 @@ export const NAV: NavGroup[] = [
       { label: 'Pedidos Web', href: '/pedidos-web', icon: Globe },
       { label: 'Pedidos B2B', href: '/b2b', icon: Users },
       { label: 'Comprobantes SUNAT', href: '/comprobantes', icon: FileText },
+      { label: 'Guías de remisión', href: '/guias', icon: Truck },
     ],
   },
   {

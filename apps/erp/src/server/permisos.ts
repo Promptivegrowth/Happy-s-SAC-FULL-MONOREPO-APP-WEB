@@ -81,6 +81,11 @@ export const PERMISOS: Array<{ prefijo: string; roles: Rol[] }> = [
   // ── Comercial ────────────────────────────────────────────────────────────
   { prefijo: '/ventas', roles: [...COMERCIAL, 'contador'] },
   { prefijo: '/comprobantes', roles: [...COMERCIAL, 'contador'] },
+  /*
+   * La guía de remisión la emite quien despacha: la tienda que manda un pedido
+   * a provincia por agencia y el almacén que mueve mercadería.
+   */
+  { prefijo: '/guias', roles: [...COMERCIAL, ...LOGISTICA, 'contador'] },
   { prefijo: '/pedidos-web', roles: COMERCIAL },
   { prefijo: '/b2b', roles: ['vendedor_b2b'] },
   { prefijo: '/clientes', roles: COMERCIAL },

@@ -245,6 +245,52 @@ export async function GET(request: Request) {
   }
   const resumenDiario = resumenesEnviados.length > 0 ? resumenesEnviados.join(', ') : 'sin novedad';
 
+  // ------------------------------------ 3b. guías de remisión (GRE) -------
+  // Aparte y con su propio try: una guía que falla no puede frenar ni ensuciar
+  // el envío de boletas y facturas, que es lo que corre arriba.
+  //   - Las que quedaron sin llegar a SUNAT (sin conexión, SUNAT caído) se
+  //     reintentan con espera creciente.
+  //   - Las enviadas esperan respuesta: se consulta su ticket.
+  let guiasCerradas = 0;
+  try {
+    const hace2min = new Date(Date.now() - 2 * 60_000).toISOString();
+    const [{ data: porEnviar }, { data: porConsultar }] = await Promise.all([
+      sb.from('guias_remision')
+        .select('id, numero_completo')
+        .eq('estado', 'BORRADOR')
+        .is('sunat_ticket', null)
+        // Con reintento vencido, o recién creadas que nunca llegaron a intentarse.
+        .or(`sunat_proximo_intento.lte.${ahora},and(sunat_intentos.eq.0,created_at.lt.${hace2min})`)
+        .order('created_at', { ascending: true })
+        .limit(5),
+      sb.from('guias_remision')
+        .select('id, numero_completo')
+        .eq('estado', 'EMITIDO')
+        .not('sunat_ticket', 'is', null)
+        .order('sunat_enviado_en', { ascending: true })
+        .limit(10),
+    ]);
+    const pendientesGre = [
+      ...((porEnviar ?? []) as Array<{ id: string; numero_completo: string }>).map((g) => ({ ...g, enviar: true })),
+      ...((porConsultar ?? []) as Array<{ id: string; numero_completo: string }>).map((g) => ({ ...g, enviar: false })),
+    ];
+    if (pendientesGre.length > 0) {
+      const { enviarGuiaConCliente, consultarGuiaConCliente } = await import('@/server/gre-core');
+      for (const g of pendientesGre) {
+        try {
+          const r = g.enviar ? await enviarGuiaConCliente(sb, g.id, 0) : await consultarGuiaConCliente(sb, g.id);
+          if (r.estado === 'ACEPTADO' || r.estado === 'RECHAZADO') guiasCerradas++;
+          detalle.push(`guía ${g.numero_completo}: ${r.estado}${r.estado === 'ACEPTADO' ? '' : ` ${r.mensaje.slice(0, 100)}`}`);
+        } catch (e) {
+          detalle.push(`guía ${g.numero_completo}: error ${(e as Error).message.slice(0, 120)}`);
+        }
+        await new Promise((x) => setTimeout(x, 1000));
+      }
+    }
+  } catch (e) {
+    detalle.push(`guías: error ${(e as Error).message.slice(0, 140)}`);
+  }
+
   // ------------------------------- 4. alerta de plazo (norma peruana) ------
   // El plazo legal de envío corre desde la emisión. Si un comprobante lleva más
   // de 24 horas sin ser aceptado, alguien tiene que enterarse antes de que se
@@ -299,6 +345,7 @@ export async function GET(request: Request) {
     pendientes_mas_24h: vencidos ?? 0,
     resumen_diario: resumenDiario,
     resumenes_cerrados: resumenesCerrados,
+    guias_cerradas: guiasCerradas,
     duracion_ms: Date.now() - inicio,
     detalle,
   });
