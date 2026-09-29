@@ -204,6 +204,23 @@ export async function enviarGuiaConCliente(sb: ClienteSb, guiaId: string, espera
   if (g.estado === 'RECHAZADO' || g.estado === 'ANULADO') throw new Error('Una guía rechazada o anulada no se reenvía: hay que emitir otra.');
   if (g.sunat_ticket) return consultarGuiaConCliente(sb, guiaId);
 
+  /*
+   * Solo sale a SUNAT una guía de una serie de guías habilitada (T001). Una
+   * fila de prueba o con una serie mal escrita no puede terminar enviándose
+   * sola desde el cron: el 28/09/2026 una fila de prueba (serie TEST) quedó en
+   * la base y el envío automático la intentó mandar; no llegó solo porque
+   * todavía no había credenciales.
+   */
+  const { data: serieOk } = await sb.from('series_comprobantes')
+    .select('serie').eq('tipo', 'GUIA_REMISION').eq('activa', true).eq('serie', g.serie).maybeSingle();
+  if (!serieOk) {
+    await sb.from('guias_remision').update({
+      sunat_mensaje: `La serie ${g.serie} no es una serie de guías habilitada: no se envía a SUNAT.`,
+      sunat_proximo_intento: null,
+    }).eq('id', guiaId);
+    return { estado: 'BORRADOR', mensaje: `La serie ${g.serie} no es una serie de guías habilitada.` };
+  }
+
   const registrarFallo = async (mensaje: string) => {
     const intentos = (g.sunat_intentos ?? 0) + 1;
     const espera = ESPERA_REINTENTO_MIN[intentos - 1];
