@@ -94,10 +94,17 @@ async function todas<T>(armar: () => any): Promise<T[]> {
   }
 }
 
-/** `.in()` en tandas: con cientos de ids la URL se vuelve demasiado larga. */
+/**
+ * `.in()` en tandas: con cientos de ids la URL se vuelve demasiado larga. Las
+ * tandas van en paralelo (de a 6): una detrás de otra, un mes tardaba 4 s.
+ */
 async function enTandas<T>(ids: string[], leer: (tanda: string[]) => Promise<T[]>): Promise<T[]> {
+  const tandas: string[][] = [];
+  for (let i = 0; i < ids.length; i += 150) tandas.push(ids.slice(i, i + 150));
   const out: T[] = [];
-  for (let i = 0; i < ids.length; i += 150) out.push(...(await leer(ids.slice(i, i + 150))));
+  for (let i = 0; i < tandas.length; i += 6) {
+    for (const r of await Promise.all(tandas.slice(i, i + 6).map(leer))) out.push(...r);
+  }
   return out;
 }
 
@@ -122,15 +129,23 @@ export async function armarReporteComprobantes(sb: Sb, mes: string): Promise<Rep
 
   // Tienda y medios de pago, desde la venta de cada comprobante.
   const ventaIds = [...new Set(comps.map((c) => c.venta_id).filter(Boolean))] as string[];
-  const ventas = await enTandas(ventaIds, async (t) => {
-    const { data } = await sb.from('ventas').select('id, almacen:almacen_id(nombre)').in('id', t);
-    return (data ?? []) as Array<{ id: string; almacen: { nombre: string } | null }>;
-  });
+  const refIds = [...new Set(comps.map((c) => c.documento_referencia_id).filter(Boolean))] as string[];
+  const [ventas, pagos, refs] = await Promise.all([
+    enTandas(ventaIds, async (t) => {
+      const { data } = await sb.from('ventas').select('id, almacen:almacen_id(nombre)').in('id', t);
+      return (data ?? []) as Array<{ id: string; almacen: { nombre: string } | null }>;
+    }),
+    enTandas(ventaIds, async (t) => {
+      const { data } = await sb.from('ventas_pagos').select('venta_id, metodo, referencia').in('venta_id', t);
+      return (data ?? []) as Array<{ venta_id: string; metodo: string; referencia: string | null }>;
+    }),
+    // Número del comprobante que corrige cada nota de crédito/débito.
+    enTandas(refIds, async (t) => {
+      const { data } = await sb.from('comprobantes').select('id, numero_completo, venta_id').in('id', t);
+      return (data ?? []) as Array<{ id: string; numero_completo: string; venta_id: string | null }>;
+    }),
+  ]);
   const tiendaDe = new Map(ventas.map((x) => [x.id, x.almacen?.nombre ?? '']));
-  const pagos = await enTandas(ventaIds, async (t) => {
-    const { data } = await sb.from('ventas_pagos').select('venta_id, metodo, referencia').in('venta_id', t);
-    return (data ?? []) as Array<{ venta_id: string; metodo: string; referencia: string | null }>;
-  });
   const pagosDe = new Map<string, Set<string>>();
   for (const p of pagos) {
     const s = pagosDe.get(p.venta_id) ?? new Set<string>();
@@ -138,12 +153,6 @@ export async function armarReporteComprobantes(sb: Sb, mes: string): Promise<Rep
     pagosDe.set(p.venta_id, s);
   }
 
-  // Número del comprobante que corrige cada nota de crédito/débito.
-  const refIds = [...new Set(comps.map((c) => c.documento_referencia_id).filter(Boolean))] as string[];
-  const refs = await enTandas(refIds, async (t) => {
-    const { data } = await sb.from('comprobantes').select('id, numero_completo, venta_id').in('id', t);
-    return (data ?? []) as Array<{ id: string; numero_completo: string; venta_id: string | null }>;
-  });
   const refDe = new Map(refs.map((r) => [r.id, r]));
 
   const porTipo = Object.fromEntries(TIPOS.map((t) => [t, { cantidad: 0, base: 0, igv: 0, total: 0 }])) as Record<TipoDoc, ResumenTipo>;
