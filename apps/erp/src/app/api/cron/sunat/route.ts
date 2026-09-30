@@ -95,7 +95,36 @@ export async function GET(request: Request) {
     .limit(LOTE);
 
   type Pendiente = { id: string; tipo: string; numero_completo: string | null; sunat_intentos: number | null };
-  const cola = (pendientes ?? []) as Pendiente[];
+  let cola = (pendientes ?? []) as Pendiente[];
+
+  /*
+   * Una nota de crédito o débito sale recién cuando SUNAT ya aceptó el
+   * comprobante que corrige.
+   *
+   * Las boletas llegan a SUNAT en el resumen de las 23:00: la nota de crédito
+   * de un cambio hecho en la mañana sobre una boleta del mismo día llegaría
+   * antes que la boleta, y SUNAT la rechazaría por no encontrarla. Se la deja
+   * esperando, sin contar intento, hasta la corrida siguiente al resumen.
+   */
+  const notas = cola.filter((c) => c.tipo === 'NOTA_CREDITO' || c.tipo === 'NOTA_DEBITO');
+  if (notas.length > 0) {
+    const { data: refs } = await sb.from('comprobantes')
+      .select('id, documento_referencia_id').in('id', notas.map((n) => n.id));
+    const refIds = ((refs ?? []) as { id: string; documento_referencia_id: string | null }[])
+      .map((r) => r.documento_referencia_id).filter(Boolean) as string[];
+    const { data: estados } = refIds.length
+      ? await sb.from('comprobantes').select('id, numero_completo, estado').in('id', refIds)
+      : { data: [] };
+    const estadoDe = new Map(((estados ?? []) as { id: string; numero_completo: string; estado: string }[]).map((e) => [e.id, e]));
+    const refDe = new Map(((refs ?? []) as { id: string; documento_referencia_id: string | null }[]).map((r) => [r.id, r.documento_referencia_id]));
+    cola = cola.filter((c) => {
+      if (c.tipo !== 'NOTA_CREDITO' && c.tipo !== 'NOTA_DEBITO') return true;
+      const ref = estadoDe.get(refDe.get(c.id) ?? '');
+      const listo = ref && (ref.estado === 'ACEPTADO' || ref.estado === 'OBSERVADO');
+      if (!listo) detalle.push(`${c.numero_completo}: espera que SUNAT acepte ${ref?.numero_completo ?? 'su comprobante'}`);
+      return Boolean(listo);
+    });
+  }
 
   if (cola.length > 0) {
     // Mismo núcleo que usa la emisión manual, pero con el cliente de servicio:

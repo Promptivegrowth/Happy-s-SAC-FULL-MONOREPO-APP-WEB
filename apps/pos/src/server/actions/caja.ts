@@ -633,13 +633,27 @@ export async function obtenerPdfDataVenta(
     if (errV || !venta) return { ok: false, error: 'Venta no encontrada' };
 
     // Comprobante fiscal (boleta/factura). Si no hay → NOTA_VENTA.
-    const { data: comp } = await sb
+    const { data: compRaw } = await (sb as unknown as { from: (t: string) => any }) // eslint-disable-line @typescript-eslint/no-explicit-any
       .from('comprobantes')
-      .select('tipo, numero_completo, fecha_emision, razon_social_cliente, numero_documento_cliente, tipo_documento_cliente, direccion_cliente')
+      .select('id, tipo, numero_completo, fecha_emision, razon_social_cliente, numero_documento_cliente, tipo_documento_cliente, direccion_cliente, devolucion_id, sub_total, igv, total')
       .eq('venta_id', venta_id)
       .order('created_at', { ascending: false })
       .limit(1)
       .maybeSingle();
+    const comp = compRaw as {
+      id: string; tipo: string; numero_completo: string; fecha_emision: string; razon_social_cliente: string | null;
+      numero_documento_cliente: string | null; tipo_documento_cliente: TipoDocumentoCliente | null; direccion_cliente: string | null;
+      devolucion_id: string | null; sub_total: number | null; igv: number | null; total: number | null;
+    } | null;
+    /*
+     * Comprobante de la diferencia de un cambio (mig 111): cubre solo lo que el
+     * cliente pagó de más, no las prendas del cambio. El ticket sale con su
+     * línea y su total; con las de la venta, un papel de S/ 5 decía S/ 90.
+     */
+    const esDiferencia = Boolean(comp?.devolucion_id);
+    const { data: lineasComp } = esDiferencia
+      ? await sb.from('comprobantes_lineas').select('descripcion, cantidad, precio_unitario, total').eq('comprobante_id', comp!.id)
+      : { data: null };
 
     let vendedorNombre = 'Vendedor';
     if (venta.vendedor_usuario_id) {
@@ -693,7 +707,11 @@ export async function obtenerPdfDataVenta(
       cantidad: number; precio_unitario: number; descuento_monto: number | null;
       variantes: MaybeOne<{ sku: string; talla: string; productos: MaybeOne<{ nombre: string; codigo: string }> }>;
     };
-    const items = ((lineas ?? []) as unknown as LineaRaw[]).map((l) => {
+    const items = esDiferencia
+      ? ((lineasComp ?? []) as Array<{ descripcion: string; cantidad: number; precio_unitario: number; total: number }>).map((l) => ({
+        descripcion: l.descripcion, cantidad: Number(l.cantidad), precio_unitario: Number(l.precio_unitario), sub_total: Number(l.total),
+      }))
+      : ((lineas ?? []) as unknown as LineaRaw[]).map((l) => {
       const variante = pickOne(l.variantes);
       const producto = variante ? pickOne(variante.productos) : null;
       const desc = Number(l.descuento_monto ?? 0);
@@ -735,12 +753,13 @@ export async function obtenerPdfDataVenta(
         direccion: clienteDir,
       },
       items,
-      totales: {
-        sub_total: Number(venta.sub_total ?? 0),
-        igv: Number(venta.igv ?? 0),
-        total: Number(venta.total ?? 0),
-      },
-      pagos: (pagosVenta ?? []).map((p) => ({ metodo: String(p.metodo), monto: Number(p.monto ?? 0), referencia: p.referencia ?? null })),
+      totales: esDiferencia
+        ? { sub_total: Number(comp!.sub_total ?? 0), igv: Number(comp!.igv ?? 0), total: Number(comp!.total ?? 0) }
+        : { sub_total: Number(venta.sub_total ?? 0), igv: Number(venta.igv ?? 0), total: Number(venta.total ?? 0) },
+      // En la diferencia, el crédito de la prenda devuelta no es un pago de este papel.
+      pagos: (pagosVenta ?? [])
+        .filter((p) => !(esDiferencia && p.metodo === 'CREDITO'))
+        .map((p) => ({ metodo: String(p.metodo), monto: Number(p.monto ?? 0), referencia: p.referencia ?? null })),
       vendedor: vendedorNombre,
     };
 

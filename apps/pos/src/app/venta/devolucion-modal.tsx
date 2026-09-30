@@ -29,6 +29,7 @@ import {
   cargarDatosDevolucionPDF,
   type VentaDevolucionData,
 } from '@/server/actions/devoluciones';
+import { obtenerPdfDataVenta } from '@/server/actions/caja';
 
 type Step = 'buscar' | 'seleccionar' | 'entrega' | 'confirmar';
 type TipoDevolucion = 'DEVOLUCION' | 'CAMBIO';
@@ -325,6 +326,22 @@ export function DevolucionModal({
         if (!r.ok) { toast.error(r.error ?? 'Error'); return; }
         devolucionId = r.data!.devolucion_id;
         if (r.data!.aviso) toast.warning(r.data!.aviso, { duration: 12000 });
+        const comp = r.data!.comprobante;
+        if (comp?.tipo === 'NOTA_CREDITO') {
+          toast.info(`Se emitió la nota de crédito ${comp.numero} por ${formatPEN(comp.monto)} devueltos. SUNAT la recibe sola.`, { duration: 12000 });
+        } else if (comp) {
+          // El comprobante de la diferencia se imprime como el de cualquier venta.
+          toast.info(`${comp.tipo === 'FACTURA' ? 'Factura' : comp.tipo === 'BOLETA' ? 'Boleta' : 'Nota de venta'} ${comp.numero} por la diferencia de ${formatPEN(comp.monto)}.`, { duration: 10000 });
+          try {
+            const pdf = await obtenerPdfDataVenta(r.data!.venta_id);
+            if (pdf.ok) {
+              const { generarTicket, abrirPDF } = await import('./comprobante-pdf');
+              abrirPDF(await generarTicket(pdf.pdf_data), `${pdf.tipo.toLowerCase()}_${pdf.numero.replace(/[^A-Za-z0-9_-]/g, '_')}.pdf`);
+            }
+          } catch {
+            toast.warning(`No se pudo abrir el comprobante ${comp.numero}. Reimprímelo desde el Historial.`);
+          }
+        }
         const dif = r.data!.diferencia;
         mensajeExito = `✅ Cambio ${r.data!.devolucion_numero} · ` + (
           dif > 0.01 ? `Cobrado adicional ${formatPEN(dif)}` :

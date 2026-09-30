@@ -478,7 +478,12 @@ const cambioSchema = z.object({
 
 export async function registrarCambio(
   input: z.input<typeof cambioSchema>,
-): Promise<ActionResult<{ devolucion_id: string; devolucion_numero: string; venta_id: string; venta_numero: string; diferencia: number; aviso: string | null }>> {
+): Promise<ActionResult<{
+  devolucion_id: string; devolucion_numero: string; venta_id: string; venta_numero: string; diferencia: number;
+  aviso: string | null;
+  /** El comprobante de la diferencia (o la nota de crédito del vuelto), si correspondía. */
+  comprobante: { tipo: string; numero: string; monto: number } | null;
+}>> {
   try {
     const userId = await requireUserId();
     const data = cambioSchema.parse(input);
@@ -718,6 +723,28 @@ export async function registrarCambio(
       }
     }
 
+    /*
+     * El comprobante de la diferencia (decisión de Javier, 30/09/2026).
+     *
+     * Si el cliente paga una diferencia, lleva un comprobante del mismo tipo
+     * que su compra original por ese monto; si se le devuelve plata sobre una
+     * boleta o factura, una nota de crédito. Lo resuelve la base en una sola
+     * transacción (mig 111). Si fallara, el cambio ya está hecho —mercadería y
+     * plata— y no se deshace: se avisa para emitirlo a mano.
+     */
+    let comprobante: { tipo: string; numero: string; monto: number } | null = null;
+    let avisoComprobante: string | null = null;
+    if (Math.abs(diferencia) > 0.01) {
+      const { data: rc, error: errC } = await sb.rpc('emitir_diferencia_cambio', {
+        p_venta_nueva: ventaNuevaId, p_devolucion: devId, p_diferencia: diferencia, p_usuario: userId,
+      });
+      if (errC) {
+        avisoComprobante = `El cambio quedó hecho, pero no se pudo emitir el comprobante de la diferencia (${errC.message}).`;
+      } else if (rc?.emitido) {
+        comprobante = { tipo: rc.tipo as string, numero: rc.numero as string, monto: Number(rc.monto) };
+      }
+    }
+
     // El vuelto, si la prenda nueva costaba menos, también sale de la caja.
     const aviso = diferencia < -0.01
       ? await salidaDeCaja(sb, {
@@ -734,7 +761,8 @@ export async function registrarCambio(
         venta_id: ventaNuevaId,
         venta_numero: ventaNumero,
         diferencia,
-        aviso,
+        aviso: [avisoComprobante, aviso].filter(Boolean).join(' ') || null,
+        comprobante,
       },
     };
   } catch (e) {
