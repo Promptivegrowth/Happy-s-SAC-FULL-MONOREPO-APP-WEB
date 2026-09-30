@@ -36,9 +36,21 @@ export type AnulacionVenta = {
   total: number;
   /** Número de la nota de crédito, cuando se anuló una factura. */
   notaCredito: string | null;
-  /** Cómo se devolvió la plata: "Efectivo S/ 30.00", "Yape S/ 20.00"… */
+  /** Lo que hay que devolver en plata: "Efectivo S/ 30.00", "Yape S/ 20.00"… */
   devolver: string[];
+  /** Lo pagado con el adelanto del cliente, que volvió a su saldo a favor. */
+  saldoDevuelto: number;
 };
+
+/*
+ * Qué pagos NO se devuelven en plata al anular.
+ *
+ *  - CREDITO es el adelanto (saldo a favor) del cliente: vuelve a su saldo, lo
+ *    hace la función de la base.
+ *  - WHATSAPP_PENDIENTE es un pago que todavía no llegó: no hay nada que
+ *    devolver.
+ */
+const NO_SE_DEVUELVE = new Set(['CREDITO', 'WHATSAPP_PENDIENTE']);
 
 export async function anularVentaPos(
   input: z.input<typeof schema>,
@@ -83,7 +95,7 @@ export async function anularVentaPos(
 
     const { data: r, error } = await svc.rpc('anular_venta', { p_venta_id: venta_id, p_motivo: motivo, p_usuario: user.id });
     if (error) throw new Error(error.message);
-    const res = r as { documento: string; tipo: AnulacionVenta['tipo']; unidades: number; total: number; nota_credito: string | null };
+    const res = r as { documento: string; tipo: AnulacionVenta['tipo']; unidades: number; total: number; nota_credito: string | null; saldo_devuelto: number | null };
 
     revalidatePath('/venta');
     return {
@@ -95,7 +107,9 @@ export async function anularVentaPos(
         total: Number(res.total ?? 0),
         notaCredito: res.nota_credito,
         devolver: ((pagos ?? []) as Array<{ metodo: string; monto: number | string; referencia: string | null }>)
+          .filter((p) => !NO_SE_DEVUELVE.has(p.metodo))
           .map((p) => `${etiquetaPago(p.metodo, p.referencia)} S/ ${Number(p.monto ?? 0).toFixed(2)}`),
+        saldoDevuelto: Number(res.saldo_devuelto ?? 0),
       },
     };
   } catch (e) {

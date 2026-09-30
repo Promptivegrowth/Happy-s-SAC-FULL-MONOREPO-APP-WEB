@@ -141,7 +141,10 @@ export function HistorialModal({
         { duration: 8000 },
       );
       if (d.devolver.length > 0) {
-        toast.info(`Devuelve al cliente: ${d.devolver.join(' · ')}`, { duration: 15000 });
+        toast.info(`Si el cliente ya te pagó, devuélvele: ${d.devolver.join(' · ')}. Si no llegó a pagar, no devuelvas nada.`, { duration: 15000 });
+      }
+      if (d.saldoDevuelto > 0) {
+        toast.info(`S/ ${d.saldoDevuelto.toFixed(2)} pagados con su adelanto volvieron a su saldo a favor.`, { duration: 12000 });
       }
       obtenerSesionActiva().then((r) => setBalance(r?.balance ?? null));
       setAnulando(null);
@@ -604,7 +607,7 @@ export function HistorialModal({
             <ul className="space-y-1 rounded-lg bg-slate-50 p-3 text-xs text-slate-600">
               <li>• Se anula la venta completa y las prendas vuelven al stock.</li>
               <li>• {queVaAPasar(anulando.comprobante?.tipo)}</li>
-              <li>• Sale del cuadre de caja: devuelve la plata al cliente{anulando.metodos.length ? ` (${anulando.metodos.join(', ')})` : ''}.</li>
+              <li>• Sale del cuadre de caja. Si el cliente ya pagó, devuélvele la plata{anulando.metodos.length ? ` (${anulando.metodos.join(', ')})` : ''}; si no llegó a pagar, no hay nada que devolver y el cuadre igual queda bien.</li>
               <li>• Queda registrado quién la anuló, cuándo y por qué. No se puede deshacer.</li>
             </ul>
 
