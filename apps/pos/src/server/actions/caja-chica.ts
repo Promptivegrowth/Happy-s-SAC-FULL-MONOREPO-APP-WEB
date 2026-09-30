@@ -193,13 +193,18 @@ export async function eliminarMovimientoCajaChica(id: string): Promise<{ ok: boo
     const user = await requireUser(sb);
 
     // Solo el mismo usuario que lo creó puede borrarlo
-    const { data: mov } = await sb
+    const { data: mov } = await (sb as unknown as { from: (t: string) => any }) // eslint-disable-line @typescript-eslint/no-explicit-any
       .from('caja_chica_movimientos')
-      .select('registrado_por')
+      .select('registrado_por, devolucion_id')
       .eq('id', id)
       .maybeSingle();
     if (!mov) return { ok: false, error: 'Movimiento no encontrado' };
-    const r = mov as { registrado_por: string };
+    const r = mov as { registrado_por: string; devolucion_id: string | null };
+    // La salida de una devolución la registra el sistema: borrarla haría que la
+    // plata devuelta vuelva a figurar como faltante en el cuadre.
+    if (r.devolucion_id) {
+      return { ok: false, error: 'Es la plata devuelta en una devolución: no se borra desde aquí.' };
+    }
     if (r.registrado_por !== user.id) {
       return { ok: false, error: 'Solo el cajero que registró el movimiento puede eliminarlo' };
     }

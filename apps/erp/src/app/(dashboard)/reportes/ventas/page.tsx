@@ -50,21 +50,31 @@ export default async function Page({ searchParams }: { searchParams: Promise<SP>
     vendedor_id && vendedorNombre ? `Vendedor: ${vendedorNombre}` : null,
   ].filter(Boolean) as string[];
 
-  // Desglose por tipo de comprobante para ver la mezcla del período
+  // Desglose por tipo de comprobante para ver la mezcla del período. Los
+  // cambios suman solo la diferencia cobrada: el resto es la prenda devuelta,
+  // que ya está en su venta original.
   const desgloseTipo = rows.reduce(
     (acc, r) => {
       const t = r.tipo_comprobante ?? 'SIN_COMPROBANTE';
       const cur = acc.get(t) ?? { cant: 0, total: 0 };
-      acc.set(t, { cant: cur.cant + 1, total: cur.total + r.total });
+      acc.set(t, { cant: cur.cant + 1, total: cur.total + r.neto });
       return acc;
     },
     new Map<string, { cant: number; total: number }>(),
   );
+  const ETIQUETA: Record<string, string> = {
+    BOLETA: 'Boletas', FACTURA: 'Facturas', NOTA_VENTA: 'Notas de venta', CAMBIO: 'Cambios (diferencia cobrada)', SIN_COMPROBANTE: 'Sin comprobante',
+  };
+  const bruto = rows.reduce((s, r) => s + r.total, 0);
+  const { cambios, devoluciones } = metricas;
 
   const exportPayload = {
     titulo: 'Reporte de Ventas',
     subtitulo: `Del ${formatDate(desde)} al ${formatDate(hasta)}`,
-    filtros,
+    filtros: [
+      ...filtros,
+      `Ventas S/ ${bruto.toFixed(2)} − crédito de cambios S/ ${cambios.credito.toFixed(2)} − plata devuelta S/ ${devoluciones.monto.toFixed(2)} = neto S/ ${metricas.total_ventas.toFixed(2)}`,
+    ],
     cols: [
       { header: 'Fecha', key: 'fecha', formato: 'fecha' as const, width: 14 },
       { header: 'Venta N°', key: 'numero', width: 16 },
@@ -77,6 +87,8 @@ export default async function Page({ searchParams }: { searchParams: Promise<SP>
       { header: 'Documento', key: 'cliente_documento', width: 12 },
       { header: 'Método(s) pago', key: 'metodos_pago', width: 20 },
       { header: 'Total', key: 'total', formato: 'moneda' as const, width: 14 },
+      { header: 'Crédito de cambio', key: 'credito_cambio', formato: 'moneda' as const, width: 14 },
+      { header: 'Neto', key: 'neto', formato: 'moneda' as const, width: 14 },
     ],
     rows: rows.map((r) => ({
       ...r,
@@ -84,7 +96,11 @@ export default async function Page({ searchParams }: { searchParams: Promise<SP>
       tipo_comprobante: r.tipo_comprobante ?? '—',
       numero_comprobante: r.numero_comprobante ?? '—',
     })),
-    totales: { total: metricas.total_ventas },
+    totales: {
+      total: +bruto.toFixed(2),
+      credito_cambio: cambios.credito,
+      neto: +rows.reduce((s, r) => s + r.neto, 0).toFixed(2),
+    },
   };
 
   const trendUp = metricas.pct_vs_anterior >= 0;
@@ -97,8 +113,15 @@ export default async function Page({ searchParams }: { searchParams: Promise<SP>
     >
       <div className="grid gap-3 sm:grid-cols-4">
         <Card className="p-4">
-          <p className="text-xs text-slate-500">Total ventas</p>
+          <p className="text-xs text-slate-500">Total ventas (neto)</p>
           <p className="mt-1 font-display text-2xl font-semibold text-emerald-600">{formatPEN(metricas.total_ventas)}</p>
+          {(cambios.credito > 0 || devoluciones.monto > 0) && (
+            <p className="mt-0.5 text-[10px] leading-tight text-slate-400">
+              {formatPEN(bruto)} en ventas
+              {cambios.credito > 0 && <> − {formatPEN(cambios.credito)} de cambios</>}
+              {devoluciones.monto > 0 && <> − {formatPEN(devoluciones.monto)} devueltos</>}
+            </p>
+          )}
         </Card>
         <Card className="p-4">
           <p className="text-xs text-slate-500"># Comprobantes</p>
@@ -119,15 +142,26 @@ export default async function Page({ searchParams }: { searchParams: Promise<SP>
       </div>
 
       {/* Desglose por tipo de comprobante */}
-      {desgloseTipo.size > 1 && (
-        <div className="grid gap-2 sm:grid-cols-4">
+      {(desgloseTipo.size > 1 || devoluciones.cantidad > 0) && (
+        <div className="grid gap-2 sm:grid-cols-3 lg:grid-cols-6">
           {Array.from(desgloseTipo.entries()).map(([tipo, d]) => (
             <Card key={tipo} className="p-3">
-              <p className="text-[10px] uppercase tracking-wider text-slate-500">{tipo}</p>
+              <p className="text-[10px] uppercase tracking-wider text-slate-500">{ETIQUETA[tipo] ?? tipo}</p>
               <p className="font-display text-lg font-semibold text-corp-900">{formatPEN(d.total)}</p>
-              <p className="text-[10px] text-slate-400">{d.cant} comprobantes</p>
+              <p className="text-[10px] text-slate-400">
+                {tipo === 'CAMBIO'
+                  ? `${d.cant} cambio${d.cant === 1 ? '' : 's'} · ${formatPEN(cambios.credito)} fue la prenda devuelta`
+                  : `${d.cant} comprobante${d.cant === 1 ? '' : 's'}`}
+              </p>
             </Card>
           ))}
+          {devoluciones.cantidad > 0 && (
+            <Card className="border-rose-200 p-3">
+              <p className="text-[10px] uppercase tracking-wider text-rose-600">Plata devuelta</p>
+              <p className="font-display text-lg font-semibold text-rose-600">− {formatPEN(devoluciones.monto)}</p>
+              <p className="text-[10px] text-slate-400">{devoluciones.cantidad} devolución{devoluciones.cantidad === 1 ? '' : 'es'} con reembolso</p>
+            </Card>
+          )}
         </div>
       )}
 
@@ -207,6 +241,7 @@ export default async function Page({ searchParams }: { searchParams: Promise<SP>
                             className={`text-[10px] ${
                               r.tipo_comprobante === 'FACTURA' ? 'bg-indigo-100 text-indigo-700' :
                               r.tipo_comprobante === 'BOLETA' ? 'bg-sky-100 text-sky-700' :
+                              r.tipo_comprobante === 'CAMBIO' ? 'bg-amber-100 text-amber-800' :
                               'bg-slate-100 text-slate-700'
                             }`}
                           >
@@ -226,7 +261,12 @@ export default async function Page({ searchParams }: { searchParams: Promise<SP>
                       {r.cliente_documento && <div className="font-mono text-[10px] text-slate-500">{r.cliente_documento}</div>}
                     </TableCell>
                     <TableCell className="text-xs text-slate-600">{r.metodos_pago || '—'}</TableCell>
-                    <TableCell className="text-right font-semibold text-emerald-700">{formatPEN(r.total)}</TableCell>
+                    <TableCell className="text-right font-semibold text-emerald-700">
+                      {formatPEN(r.neto)}
+                      {r.credito_cambio > 0 && (
+                        <div className="text-[10px] font-normal text-slate-400">de {formatPEN(r.total)}: {formatPEN(r.credito_cambio)} fue cambio</div>
+                      )}
+                    </TableCell>
                   </TableRow>
                 ))}
               </TableBody>

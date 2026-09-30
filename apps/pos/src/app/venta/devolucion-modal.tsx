@@ -291,9 +291,11 @@ export function DevolucionModal({
           metodo_devolucion: metodo,
           monto_devuelto: totalSeleccionado,
           lineas: lineasDevolver,
+          caja_sesion_id: sesionId,
         });
         if (!r.ok) { toast.error(r.error ?? 'Error'); return; }
         devolucionId = r.data!.id;
+        if (r.data!.aviso) toast.warning(r.data!.aviso, { duration: 12000 });
         mensajeExito = `✅ ${r.data!.numero} · ${formatPEN(totalSeleccionado)}`;
       } else {
         // CAMBIO atómico: devolución + venta nueva + diferencia
@@ -322,6 +324,7 @@ export function DevolucionModal({
         });
         if (!r.ok) { toast.error(r.error ?? 'Error'); return; }
         devolucionId = r.data!.devolucion_id;
+        if (r.data!.aviso) toast.warning(r.data!.aviso, { duration: 12000 });
         const dif = r.data!.diferencia;
         mensajeExito = `✅ Cambio ${r.data!.devolucion_numero} · ` + (
           dif > 0.01 ? `Cobrado adicional ${formatPEN(dif)}` :

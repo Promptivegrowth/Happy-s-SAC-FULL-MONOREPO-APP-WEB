@@ -56,16 +56,44 @@ export type VentaRow = {
   cliente: string;
   cliente_documento: string;
   total: number;
-  // Tipo y N° del comprobante emitido (BOLETA/FACTURA/NOTA_VENTA — null si no se emitió)
-  tipo_comprobante: 'BOLETA' | 'FACTURA' | 'NOTA_VENTA' | null;
+  /**
+   * Parte del total pagada con el crédito de un cambio (el valor de la prenda
+   * devuelta). No es plata nueva: esa prenda ya está contada en su venta
+   * original. Ver `esCreditoDeCambio`.
+   */
+  credito_cambio: number;
+  /** Lo que de verdad entró por esta venta: total − crédito de cambio. */
+  neto: number;
+  // Tipo y N° del comprobante emitido (BOLETA/FACTURA/NOTA_VENTA — null si no se
+  // emitió). CAMBIO = la venta que registra la caja al cambiar una prenda.
+  tipo_comprobante: 'BOLETA' | 'FACTURA' | 'NOTA_VENTA' | 'CAMBIO' | null;
   numero_comprobante: string | null;
   // Métodos de pago usados en la venta (concatenados con coma) — útil para reporte consolidado
   metodos_pago: string;
 };
 
+/**
+ * El pago "Crédito" que la caja registra al hacer un cambio.
+ *
+ * En un cambio la caja crea una venta nueva por la prenda que se lleva el
+ * cliente y la paga con el valor de la que devolvió (CREDITO, referencia
+ * "Aplicado de devolución …"). Contarla como venta duplicaba ese monto: el
+ * 30/09/2026 el reporte de septiembre sumaba S/ 345 que nunca entraron. El
+ * crédito del adelanto de un cliente también es CREDITO, pero ese sí es venta
+ * (la plata entró antes, como adelanto), y se distingue por la referencia.
+ */
+function esCreditoDeCambio(metodo: string, referencia: string | null): boolean {
+  return metodo === 'CREDITO' && /^Aplicado de devoluci/i.test(referencia ?? '');
+}
+
 export type ReporteVentasResult = {
   metricas: {
+    /** Neto: lo cobrado en ventas menos el crédito de cambios y la plata devuelta. */
     total_ventas: number;
+    /** Ventas por cambio: cuántas, cuánto fue crédito y cuánto se cobró de diferencia. */
+    cambios: { cantidad: number; credito: number; diferencia: number };
+    /** Plata devuelta a clientes en el período (devoluciones y vueltos de cambios). */
+    devoluciones: { cantidad: number; monto: number };
     cantidad_comprobantes: number;
     ticket_promedio: number;
     pct_vs_anterior: number;
@@ -176,14 +204,20 @@ export async function reporteVentas(f: FiltrosVentas): Promise<ReporteVentasResu
    * hay dos bancos y dos billeteras, y la columna no decía cuál.
    */
   const pagosPorVenta = new Map<string, string[]>();
+  const creditoCambio = new Map<string, number>();
   for (let i = 0; i < ventasIds.length; i += 150) {
     const { data: pagos } = await sb
       .from('ventas_pagos')
-      .select('venta_id, metodo, referencia')
+      .select('venta_id, metodo, monto, referencia')
       .in('venta_id', ventasIds.slice(i, i + 150));
-    for (const p of (pagos ?? []) as { venta_id: string; metodo: string; referencia: string | null }[]) {
+    for (const p of (pagos ?? []) as { venta_id: string; metodo: string; monto: number | string; referencia: string | null }[]) {
       const arr = pagosPorVenta.get(p.venta_id) ?? [];
-      arr.push(etiquetaPago(p.metodo, p.referencia));
+      if (esCreditoDeCambio(p.metodo, p.referencia)) {
+        creditoCambio.set(p.venta_id, (creditoCambio.get(p.venta_id) ?? 0) + Number(p.monto ?? 0));
+        arr.push('Crédito de cambio');
+      } else {
+        arr.push(etiquetaPago(p.metodo, p.referencia));
+      }
       pagosPorVenta.set(p.venta_id, arr);
     }
   }
@@ -208,7 +242,9 @@ export async function reporteVentas(f: FiltrosVentas): Promise<ReporteVentasResu
         '—',
       cliente_documento: v.cliente?.numero_documento || v.documento_cliente || '',
       total: Number(v.total),
-      tipo_comprobante: comp?.tipo ?? null,
+      credito_cambio: creditoCambio.get(v.id) ?? 0,
+      neto: +(Number(v.total) - (creditoCambio.get(v.id) ?? 0)).toFixed(2),
+      tipo_comprobante: comp?.tipo ?? (creditoCambio.has(v.id) ? 'CAMBIO' : null),
       numero_comprobante: comp?.numero_completo ?? null,
       metodos_pago: metodos.join(', '),
     };
@@ -219,31 +255,84 @@ export async function reporteVentas(f: FiltrosVentas): Promise<ReporteVentasResu
     rows = rows.filter((r) => r.tipo_comprobante === f.tipo_comprobante);
   }
 
-  const total_ventas = rows.reduce((s, r) => s + r.total, 0);
+  const devoluciones = await plataDevuelta(sb, f, f.desde, f.hasta);
+  const enCambios = rows.filter((r) => r.credito_cambio > 0);
+  const cambios = {
+    cantidad: enCambios.length,
+    credito: +enCambios.reduce((s, r) => s + r.credito_cambio, 0).toFixed(2),
+    diferencia: +enCambios.reduce((s, r) => s + r.neto, 0).toFixed(2),
+  };
+  const total_ventas = +(rows.reduce((s, r) => s + r.neto, 0) - devoluciones.monto).toFixed(2);
+  // El ticket promedio es de las ventas de verdad: un cambio no es una compra nueva.
+  const ventasReales = rows.filter((r) => r.tipo_comprobante !== 'CAMBIO');
   const cant = rows.length;
-  const ticket_promedio = cant > 0 ? total_ventas / cant : 0;
+  const ticket_promedio = ventasReales.length > 0
+    ? ventasReales.reduce((s, r) => s + r.neto, 0) / ventasReales.length
+    : 0;
 
-  // Comparativa con período anterior (mismo nº de días)
+  // Comparativa con período anterior (mismo nº de días), con la misma regla.
   const prev = rangoAnterior(f.desde, f.hasta);
-  let qPrev = sb
-    .from('ventas')
-    .select('total', { count: 'exact', head: false })
-    .gte('fecha', `${prev.desde}T00:00:00`)
-    .lte('fecha', `${prev.hasta}T23:59:59`)
-    .neq('estado', 'ANULADA');
-  if (f.canal) qPrev = qPrev.eq('canal', f.canal);
-  if (f.almacen_id) qPrev = qPrev.eq('almacen_id', f.almacen_id);
-  const { data: prevData } = await qPrev;
-  const total_anterior = ((prevData ?? []) as { total: number | string }[]).reduce(
-    (s, r) => s + Number(r.total),
-    0,
-  );
+  const total_anterior = await netoPeriodo(sb, f, prev.desde, prev.hasta);
   const pct_vs_anterior = diffPct(total_ventas, total_anterior);
 
   return {
-    metricas: { total_ventas, cantidad_comprobantes: cant, ticket_promedio, pct_vs_anterior, total_anterior },
+    metricas: { total_ventas, cambios, devoluciones, cantidad_comprobantes: cant, ticket_promedio, pct_vs_anterior, total_anterior },
     rows,
   };
+}
+
+type SbLectura = Awaited<ReturnType<typeof sbReadonly>>;
+
+/**
+ * Plata devuelta a clientes en un período: devoluciones con reembolso y el
+ * vuelto de los cambios en que la prenda nueva costaba menos. Respeta los
+ * filtros de tienda, canal, vendedor y tipo de comprobante de la venta original.
+ */
+async function plataDevuelta(sb: SbLectura, f: FiltrosVentas, desde: string, hasta: string): Promise<{ cantidad: number; monto: number }> {
+  // Las devoluciones son de la caja: con otro canal elegido no corresponde ninguna.
+  if (f.canal && f.canal !== 'POS') return { cantidad: 0, monto: 0 };
+  let q = sb.from('devoluciones')
+    .select('id, venta_id, monto_devuelto')
+    .gt('monto_devuelto', 0)
+    .gte('fecha', `${desde}T00:00:00-05:00`)
+    .lte('fecha', `${hasta}T23:59:59.999-05:00`);
+  if (f.almacen_id) q = q.eq('almacen_id', f.almacen_id);
+  if (f.vendedor_id) q = q.eq('atendido_por', f.vendedor_id);
+  const { data } = await q.limit(1000);
+  let devs = (data ?? []) as Array<{ id: string; venta_id: string; monto_devuelto: number | string }>;
+  if (f.tipo_comprobante && devs.length) {
+    const { data: comps } = await sb.from('comprobantes')
+      .select('venta_id').in('venta_id', devs.map((d) => d.venta_id)).eq('tipo', f.tipo_comprobante);
+    const ok = new Set(((comps ?? []) as { venta_id: string }[]).map((c) => c.venta_id));
+    devs = devs.filter((d) => ok.has(d.venta_id));
+  }
+  return { cantidad: devs.length, monto: +devs.reduce((s, d) => s + Number(d.monto_devuelto ?? 0), 0).toFixed(2) };
+}
+
+/** Neto de un período (para comparar): ventas − crédito de cambios − plata devuelta. */
+async function netoPeriodo(sb: SbLectura, f: FiltrosVentas, desde: string, hasta: string): Promise<number> {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const aplicar = (q: any, pref = '') => {
+    q = q.gte(`${pref}fecha`, `${desde}T00:00:00-05:00`).lte(`${pref}fecha`, `${hasta}T23:59:59.999-05:00`).neq(`${pref}estado`, 'ANULADA');
+    if (f.canal) q = q.eq(`${pref}canal`, f.canal);
+    if (f.almacen_id) q = q.eq(`${pref}almacen_id`, f.almacen_id);
+    return q;
+  };
+  let total = 0;
+  for (let i = 0; i < 20000; i += 1000) {
+    const { data } = await aplicar(sb.from('ventas').select('total')).order('id').range(i, i + 999);
+    total += ((data ?? []) as { total: number | string }[]).reduce((s, r) => s + Number(r.total), 0);
+    if (!data || data.length < 1000) break;
+  }
+  const { data: creditos } = await aplicar(
+    sb.from('ventas_pagos').select('monto, referencia, ventas!inner(fecha, estado, canal, almacen_id)').eq('metodo', 'CREDITO'),
+    'ventas.',
+  ).limit(1000);
+  const credito = ((creditos ?? []) as { monto: number | string; referencia: string | null }[])
+    .filter((p) => esCreditoDeCambio('CREDITO', p.referencia))
+    .reduce((s, p) => s + Number(p.monto ?? 0), 0);
+  const dev = await plataDevuelta(sb, { ...f, tipo_comprobante: '' }, desde, hasta);
+  return +(total - credito - dev.monto).toFixed(2);
 }
 
 // ============================================================================

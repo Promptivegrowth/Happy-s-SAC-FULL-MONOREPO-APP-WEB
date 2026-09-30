@@ -24,6 +24,60 @@ import { formatTallaChip } from '@happy/lib';
 
 type ActionResult<T = null> = { ok: true; data: T } | { ok: false; error: string };
 
+/**
+ * La plata devuelta sale de la caja del turno (mig 110).
+ *
+ * Una devolución con reembolso, o el vuelto de un cambio, saca plata del
+ * cajón, pero el cierre no se enteraba y el cajero cuadraba con un faltante que
+ * no era suyo (septiembre 2026: S/ 50 y S/ 25). Se registra como salida de caja
+ * chica del turno abierto porque el cuadre ya descuenta esas salidas en todos
+ * lados: caja, cierre parcial, Excel del cierre y cuadres del ERP.
+ *
+ * No hay salida cuando no sale plata: saldo a favor (CREDITO) o un pago que
+ * todavía no llegó (WHATSAPP_PENDIENTE). Solo el efectivo mueve el cuadre, pero
+ * Yape, Plin o transferencia también se anotan para que quede el rastro.
+ *
+ * Devuelve un aviso si no pudo registrarla (sin caja abierta): la devolución
+ * igual queda hecha, y el cajero sabe que tiene que anotarla a mano.
+ */
+async function salidaDeCaja(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  sb: any,
+  a: { devId: string; devNumero: string; ventaNumero: string; monto: number; metodo: string | null | undefined; sesionId?: string | null; userId: string },
+): Promise<string | null> {
+  if (!(a.monto > 0.009) || !a.metodo || a.metodo === 'CREDITO' || a.metodo === 'WHATSAPP_PENDIENTE') return null;
+
+  let sesion: { id: string; caja_id: string } | null = null;
+  if (a.sesionId) {
+    const { data } = await sb.from('cajas_sesiones').select('id, caja_id, cerrada_en').eq('id', a.sesionId).maybeSingle();
+    if (data && !data.cerrada_en) sesion = { id: data.id, caja_id: data.caja_id };
+  }
+  if (!sesion) {
+    const { data } = await sb.from('cajas_sesiones').select('id, caja_id')
+      .is('cerrada_en', null).eq('abierta_por', a.userId).limit(1).maybeSingle();
+    if (data) sesion = data;
+  }
+  if (!sesion) {
+    return `No hay una caja abierta a tu nombre: los S/ ${a.monto.toFixed(2)} devueltos no se descontaron del cuadre. Anótalos como gasto.`;
+  }
+
+  const { data: cat } = await sb.from('caja_chica_categorias').select('id').eq('codigo', 'DEVOLUCION_CLIENTE').maybeSingle();
+  const { error } = await sb.from('caja_chica_movimientos').insert({
+    sesion_id: sesion.id,
+    caja_id: sesion.caja_id,
+    tipo: 'EGRESO',
+    concepto: `Devolución ${a.devNumero} al cliente (venta ${a.ventaNumero})`,
+    categoria_id: cat?.id ?? null,
+    monto: Math.round(a.monto * 100) / 100,
+    metodo: a.metodo,
+    comprobante_ref: a.devNumero,
+    registrado_por: a.userId,
+    devolucion_id: a.devId,
+  });
+  if (error) return `La devolución quedó hecha, pero no se pudo descontar de la caja (${error.message}). Anótala como gasto.`;
+  return null;
+}
+
 async function requireUserId(): Promise<string> {
   const sb = await createClient();
   const { data: { user } } = await sb.auth.getUser();
@@ -206,11 +260,13 @@ const devolucionSchema = z.object({
   ]).nullable().optional(),
   monto_devuelto: z.number().min(0).default(0),
   lineas: z.array(lineaInputSchema).min(1),
+  /** Turno de caja de donde sale la plata devuelta. */
+  caja_sesion_id: z.string().uuid().nullable().optional(),
 });
 
 export async function registrarDevolucion(
   input: z.input<typeof devolucionSchema>,
-): Promise<ActionResult<{ id: string; numero: string }>> {
+): Promise<ActionResult<{ id: string; numero: string; aviso: string | null }>> {
   try {
     const userId = await requireUserId();
     const data = devolucionSchema.parse(input);
@@ -306,7 +362,14 @@ export async function registrarDevolucion(
       }
     }
 
-    return { ok: true, data: { id: devId, numero: devIns.numero as string } };
+    const aviso = data.tipo === 'DEVOLUCION'
+      ? await salidaDeCaja(sb, {
+        devId, devNumero: devIns.numero as string, ventaNumero: venta.numero_venta,
+        monto: data.monto_devuelto, metodo: data.metodo_devolucion, sesionId: data.caja_sesion_id, userId,
+      })
+      : null;
+
+    return { ok: true, data: { id: devId, numero: devIns.numero as string, aviso } };
   } catch (e) {
     return { ok: false, error: (e as Error).message };
   }
@@ -415,7 +478,7 @@ const cambioSchema = z.object({
 
 export async function registrarCambio(
   input: z.input<typeof cambioSchema>,
-): Promise<ActionResult<{ devolucion_id: string; devolucion_numero: string; venta_id: string; venta_numero: string; diferencia: number }>> {
+): Promise<ActionResult<{ devolucion_id: string; devolucion_numero: string; venta_id: string; venta_numero: string; diferencia: number; aviso: string | null }>> {
   try {
     const userId = await requireUserId();
     const data = cambioSchema.parse(input);
@@ -655,6 +718,14 @@ export async function registrarCambio(
       }
     }
 
+    // El vuelto, si la prenda nueva costaba menos, también sale de la caja.
+    const aviso = diferencia < -0.01
+      ? await salidaDeCaja(sb, {
+        devId, devNumero, ventaNumero: venta.numero_venta, monto: Math.abs(diferencia),
+        metodo: data.metodo_diferencia_devuelta, sesionId: data.caja_sesion_id, userId,
+      })
+      : null;
+
     return {
       ok: true,
       data: {
@@ -663,6 +734,7 @@ export async function registrarCambio(
         venta_id: ventaNuevaId,
         venta_numero: ventaNumero,
         diferencia,
+        aviso,
       },
     };
   } catch (e) {

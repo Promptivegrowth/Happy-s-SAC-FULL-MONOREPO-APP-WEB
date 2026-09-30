@@ -108,7 +108,7 @@ export async function listarCuadres(f: FiltrosCuadres): Promise<CuadreRow[]> {
   const [cajas, ventasRes, gastosRes, nombres] = await Promise.all([
     sb.from('cajas').select('id, nombre, almacenes(nombre)').in('id', [...new Set(filas.map((s) => s.caja_id))]),
     sb.from('ventas').select('id, caja_sesion_id, total, estado').in('caja_sesion_id', ids).limit(20000),
-    sb.from('caja_chica_movimientos').select('sesion_id, tipo, monto').in('sesion_id', ids).limit(5000),
+    sb.from('caja_chica_movimientos').select('sesion_id, tipo, monto, metodo').in('sesion_id', ids).limit(5000),
     nombresDe(sb, filas.flatMap((s) => [s.abierta_por, s.cerrada_por ?? ''])),
   ]);
 
@@ -153,7 +153,10 @@ export async function listarCuadres(f: FiltrosCuadres): Promise<CuadreRow[]> {
   }
 
   const gastosPorSesion = new Map<string, number>();
-  for (const g of (gastosRes.data ?? []) as Array<{ sesion_id: string; tipo: string; monto: number | string }>) {
+  for (const g of (gastosRes.data ?? []) as Array<{ sesion_id: string; tipo: string; monto: number | string; metodo: string | null }>) {
+    // Solo el efectivo toca el cajón, igual que en el cierre de la caja: un gasto
+    // o una devolución pagada por Yape no cambia lo que tiene que haber adentro.
+    if (g.metodo && g.metodo !== 'EFECTIVO') continue;
     // Un ingreso de caja chica suma al cajón; un gasto lo resta.
     const signo = String(g.tipo).toUpperCase() === 'INGRESO' ? 1 : -1;
     gastosPorSesion.set(g.sesion_id, (gastosPorSesion.get(g.sesion_id) ?? 0) + signo * Number(g.monto ?? 0));
