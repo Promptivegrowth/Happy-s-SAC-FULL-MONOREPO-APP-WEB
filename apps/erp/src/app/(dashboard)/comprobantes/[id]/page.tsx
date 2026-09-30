@@ -45,6 +45,24 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
     pdfInternoPath = venta?.comprobante_pdf_path ?? null;
   }
 
+  /*
+   * La anulación, con quién, cuándo y por qué (desde la caja o desde acá).
+   * Una factura no cambia de estado ante SUNAT: la anula su nota de crédito,
+   * que se lista para poder abrirla.
+   */
+  const sbA = sb as unknown as { from: (t: string) => any };
+  // Columnas de anulación (mig 90+): aún no están en los tipos generados.
+  const anul = comp as unknown as {
+    anulado_en: string | null; anulado_por: string | null; motivo_anulacion: string | null; anulacion_informada_en: string | null;
+  };
+  const [{ data: anulador }, { data: notasCredito }] = await Promise.all([
+    anul.anulado_por
+      ? sbA.from('perfiles').select('nombre_completo').eq('id', anul.anulado_por).maybeSingle()
+      : Promise.resolve({ data: null }),
+    sbA.from('comprobantes').select('id, numero_completo, estado').eq('documento_referencia_id', id).eq('tipo', 'NOTA_CREDITO'),
+  ]);
+  const ncs = (notasCredito ?? []) as Array<{ id: string; numero_completo: string; estado: string }>;
+
   return (
     <PageShell
       title={comp.numero_completo ?? `${comp.serie}-${comp.numero}`}
@@ -82,6 +100,27 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
         </div>
       }
     >
+      {anul.anulado_en && (
+        <Card className="border-rose-200 bg-rose-50/60 p-4 text-sm text-rose-900">
+          <p className="font-semibold">
+            Anulado el {formatDateTime(anul.anulado_en)}
+            {(anulador as { nombre_completo?: string } | null)?.nombre_completo ? ` por ${(anulador as { nombre_completo: string }).nombre_completo}` : ''}
+          </p>
+          {anul.motivo_anulacion && <p className="mt-1">Motivo: “{anul.motivo_anulacion}”</p>}
+          {ncs.map((n) => (
+            <p key={n.id} className="mt-1">
+              Anulada ante SUNAT con la nota de crédito{' '}
+              <Link href={`/comprobantes/${n.id}`} className="font-mono underline">{n.numero_completo}</Link> ({n.estado}).
+            </p>
+          ))}
+          {comp.tipo === 'BOLETA' && (
+            <p className="mt-1 text-xs">
+              {anul.anulacion_informada_en ? `SUNAT la recibió en el resumen del ${formatDateTime(anul.anulacion_informada_en)}.` : 'La baja viaja a SUNAT en el resumen diario de las 23:00.'}
+            </p>
+          )}
+        </Card>
+      )}
+
       <div className="grid gap-3 sm:grid-cols-4">
         <Stat label="Estado SUNAT" value={<Badge variant={TONO[comp.estado] ?? 'secondary'}>{comp.estado}</Badge>} />
         <Stat label="Fecha emisión" value={formatDateTime(comp.fecha_emision)} />

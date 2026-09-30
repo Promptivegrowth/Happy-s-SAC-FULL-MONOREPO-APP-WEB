@@ -21,7 +21,7 @@ import { Card } from '@happy/ui/card';
 import { Button } from '@happy/ui/button';
 import { Badge } from '@happy/ui/badge';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@happy/ui/table';
-import { X, Loader2, History, Send, Clock, User, Users, Banknote, Receipt as ReceiptIcon, FileText, Search, Printer } from 'lucide-react';
+import { X, Loader2, History, Send, Clock, User, Users, Banknote, Receipt as ReceiptIcon, FileText, Search, Printer, Ban } from 'lucide-react';
 import { formatPEN, formatDateTime } from '@happy/lib';
 import { toast } from 'sonner';
 import {
@@ -36,6 +36,14 @@ import type { TransaccionRow, SesionCajaDTO, BalanceCajaDTO } from '@/server/act
 import { construirMensajeWhatsApp, abrirWhatsApp } from './whatsapp-helper';
 import { generarTicket, abrirPDF } from './comprobante-pdf';
 import { reimprimirComprobante, type EmpresaTicket } from './imprimir-ticket';
+import { anularVentaPos } from '@/server/actions/anulacion';
+
+/** Qué pasa al anular, según el documento, dicho antes de confirmar. */
+function queVaAPasar(tipo: string | undefined): string {
+  if (tipo === 'FACTURA') return 'La factura ya está en SUNAT: se emite una nota de crédito que la anula y se envía sola en unos minutos.';
+  if (tipo === 'BOLETA') return 'La boleta queda anulada y SUNAT se entera en el resumen diario de las 23:00.';
+  return 'La nota de venta queda anulada.';
+}
 
 type CierreParcial = {
   id: string;
@@ -70,6 +78,9 @@ export function HistorialModal({
   const [sesion, setSesion] = useState<SesionCajaDTO | null>(null);
   const [balance, setBalance] = useState<BalanceCajaDTO | null>(null);
   const [cierresParciales, setCierresParciales] = useState<CierreParcial[]>([]);
+  const [anulando, setAnulando] = useState<TransaccionRow | null>(null);
+  const [motivo, setMotivo] = useState('');
+  const [enviandoAnulacion, setEnviandoAnulacion] = useState(false);
 
   // Cargar metadata de sesión + balance + cierres parciales (no depende del alcance)
   useEffect(() => {
@@ -99,7 +110,46 @@ export function HistorialModal({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [alcance, buscarTick]);
 
-  const total = rows.reduce((s, r) => s + r.total, 0);
+  // Las anuladas no suman: esa plata se devolvió.
+  const total = rows.filter((r) => r.estado !== 'ANULADA').reduce((s, r) => s + r.total, 0);
+
+  /**
+   * Anula la venta completa con su motivo (pedido de Javier, 29/09/2026).
+   *
+   * El motivo es obligatorio y queda guardado con quién y cuándo. La mercadería
+   * vuelve al stock y la venta sale del cuadre de caja, así que la plata se
+   * devuelve de este cajón.
+   */
+  async function confirmarAnulacion() {
+    if (!anulando) return;
+    if (motivo.trim().length < 5) {
+      toast.error('Escribe el motivo de la anulación');
+      return;
+    }
+    setEnviandoAnulacion(true);
+    try {
+      const res = await anularVentaPos({ venta_id: anulando.venta_id, motivo });
+      if (!res.ok) {
+        toast.error(res.error, { duration: 10000 });
+        return;
+      }
+      const d = res.data;
+      setRows((prev) => prev.map((x) => (x.venta_id === anulando.venta_id ? { ...x, estado: 'ANULADA' } : x)));
+      toast.success(
+        `${d.documento} anulada. ${d.unidades} prenda${d.unidades === 1 ? '' : 's'} de vuelta al stock.` +
+          (d.notaCredito ? ` Nota de crédito ${d.notaCredito}.` : ''),
+        { duration: 8000 },
+      );
+      if (d.devolver.length > 0) {
+        toast.info(`Devuelve al cliente: ${d.devolver.join(' · ')}`, { duration: 15000 });
+      }
+      obtenerSesionActiva().then((r) => setBalance(r?.balance ?? null));
+      setAnulando(null);
+      setMotivo('');
+    } finally {
+      setEnviandoAnulacion(false);
+    }
+  }
 
   async function abrirPdf(r: TransaccionRow) {
     setPdfLoadingId(r.venta_id);
@@ -503,6 +553,16 @@ export function HistorialModal({
                             <FileText className="h-3.5 w-3.5 text-happy-600" />
                           )}
                         </Button>
+                        {r.estado !== 'ANULADA' && sesion && r.caja_sesion_id === sesion.id && (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => { setAnulando(r); setMotivo(''); }}
+                            title="Anular la venta completa (pide el motivo)"
+                          >
+                            <Ban className="h-3.5 w-3.5 text-rose-600" />
+                          </Button>
+                        )}
                         {r.cliente_telefono && r.estado !== 'ANULADA' && (
                           <Button
                             variant="ghost"
@@ -522,6 +582,59 @@ export function HistorialModal({
           )}
         </div>
       </Card>
+
+      {anulando && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-corp-900/50 p-4"
+          onClick={(e) => { e.stopPropagation(); if (!enviandoAnulacion) setAnulando(null); }}
+        >
+          <Card className="w-full max-w-md space-y-4 p-5 shadow-2xl" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-start gap-3">
+              <Ban className="mt-0.5 h-5 w-5 shrink-0 text-rose-600" />
+              <div>
+                <h3 className="font-display text-base font-semibold text-corp-900">
+                  Anular {anulando.comprobante?.numero_completo ?? anulando.numero_venta}
+                </h3>
+                <p className="text-sm text-slate-600">
+                  {anulando.cliente_nombre} · <span className="font-mono font-semibold">{formatPEN(anulando.total)}</span>
+                </p>
+              </div>
+            </div>
+
+            <ul className="space-y-1 rounded-lg bg-slate-50 p-3 text-xs text-slate-600">
+              <li>• Se anula la venta completa y las prendas vuelven al stock.</li>
+              <li>• {queVaAPasar(anulando.comprobante?.tipo)}</li>
+              <li>• Sale del cuadre de caja: devuelve la plata al cliente{anulando.metodos.length ? ` (${anulando.metodos.join(', ')})` : ''}.</li>
+              <li>• Queda registrado quién la anuló, cuándo y por qué. No se puede deshacer.</li>
+            </ul>
+
+            <label className="block text-sm font-medium text-corp-900">
+              Motivo <span className="text-rose-600">*</span>
+              <textarea
+                autoFocus
+                value={motivo}
+                onChange={(e) => setMotivo(e.target.value)}
+                maxLength={300}
+                rows={3}
+                placeholder="Ej: se cobró dos veces / el cliente pidió factura / talla equivocada"
+                className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm font-normal"
+              />
+            </label>
+
+            <div className="flex justify-end gap-2">
+              <Button variant="ghost" onClick={() => setAnulando(null)} disabled={enviandoAnulacion}>Cancelar</Button>
+              <Button
+                onClick={confirmarAnulacion}
+                disabled={enviandoAnulacion || motivo.trim().length < 5}
+                className="bg-rose-600 text-white hover:bg-rose-700"
+              >
+                {enviandoAnulacion ? <Loader2 className="h-4 w-4 animate-spin" /> : <Ban className="h-4 w-4" />}
+                Anular venta
+              </Button>
+            </div>
+          </Card>
+        </div>
+      )}
     </div>
   );
 }

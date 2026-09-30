@@ -24,9 +24,9 @@ export default async function VentasPage() {
   // tipos generados → cast puntual para evitar el SelectQueryError.
   const sbAny = sb as unknown as { from: (t: string) => any };
   const { data } = await sbAny.from('ventas')
-    .select('id, numero, canal, fecha, total, estado, comprobante_pdf_path, almacenes(nombre), clientes(razon_social, nombres, apellido_paterno)')
+    .select('id, numero, canal, fecha, total, estado, comprobante_pdf_path, anulada_en, anulada_por, motivo_anulacion, almacenes(nombre), clientes(razon_social, nombres, apellido_paterno)')
     .order('fecha', { ascending: false }).limit(200) as {
-      data: Array<{ id: string; numero: string; canal: string; fecha: string; total: number; estado: string; comprobante_pdf_path: string | null }> | null;
+      data: Array<{ id: string; numero: string; canal: string; fecha: string; total: number; estado: string; comprobante_pdf_path: string | null; anulada_en: string | null; anulada_por: string | null; motivo_anulacion: string | null }> | null;
     };
 
   /*
@@ -49,6 +49,13 @@ export default async function VentasPage() {
           data: Array<{ venta_id: string; numero_completo: string; tipo: string }> | null;
         }
     : { data: [] };
+
+  // Quién anuló cada venta anulada (se anula desde la caja, con motivo; mig 108).
+  const anuladores = [...new Set((data ?? []).map((v) => v.anulada_por).filter(Boolean))] as string[];
+  const { data: perfilesAnul } = anuladores.length
+    ? await sbAny.from('perfiles').select('id, nombre_completo').in('id', anuladores) as { data: Array<{ id: string; nombre_completo: string | null }> | null }
+    : { data: [] };
+  const nombreDe = new Map((perfilesAnul ?? []).map((p) => [p.id, p.nombre_completo ?? '']));
 
   const documento = new Map<string, { numero: string; tipo: string }>();
   for (const c of comps ?? []) {
@@ -102,7 +109,16 @@ export default async function VentasPage() {
                     <TableCell className="text-sm">{a?.nombre}</TableCell>
                     <TableCell className="text-sm">{cliente}</TableCell>
                     <TableCell className="text-right font-medium">{formatPEN(Number(v.total))}</TableCell>
-                    <TableCell><Badge variant={v.estado === 'COMPLETADA' ? 'success' : v.estado === 'ANULADA' ? 'destructive' : 'warning'}>{v.estado}</Badge></TableCell>
+                    <TableCell>
+                      <Badge variant={v.estado === 'COMPLETADA' ? 'success' : v.estado === 'ANULADA' ? 'destructive' : 'warning'}>{v.estado}</Badge>
+                      {v.estado === 'ANULADA' && v.motivo_anulacion && (
+                        <div className="mt-1 max-w-[220px] text-[10px] leading-tight text-slate-500" title={v.motivo_anulacion}>
+                          {v.anulada_por ? `${nombreDe.get(v.anulada_por) ?? 'Usuario'} · ` : ''}
+                          {v.anulada_en ? formatDateTime(v.anulada_en) : ''}
+                          <div className="truncate italic">“{v.motivo_anulacion}”</div>
+                        </div>
+                      )}
+                    </TableCell>
                     <TableCell className="text-right">
                       <VerComprobanteButton path={(v as unknown as { comprobante_pdf_path?: string | null }).comprobante_pdf_path} />
                     </TableCell>

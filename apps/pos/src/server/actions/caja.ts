@@ -466,7 +466,7 @@ export async function obtenerHistorialSesion(
   let ventasQ = sbF
     .from('ventas')
     .select(
-      'id, numero, fecha, total, estado, nombre_cliente_rapido, documento_cliente, comprobante_pdf_path, ' +
+      'id, numero, fecha, total, estado, nombre_cliente_rapido, documento_cliente, comprobante_pdf_path, caja_sesion_id, ' +
         'cliente:cliente_id(razon_social, nombres, apellido_paterno, apellido_materno, telefono)',
     )
     .order('fecha', { ascending: false })
@@ -511,6 +511,7 @@ export async function obtenerHistorialSesion(
     nombre_cliente_rapido: string | null;
     documento_cliente: string | null;
     comprobante_pdf_path: string | null;
+    caja_sesion_id: string | null;
     cliente: {
       razon_social: string | null;
       nombres: string | null;
@@ -575,6 +576,7 @@ export async function obtenerHistorialSesion(
       comprobante: compPorVenta.get(v.id) ?? null,
       estado: v.estado,
       comprobante_pdf_path: v.comprobante_pdf_path ?? null,
+      caja_sesion_id: v.caja_sesion_id ?? null,
     };
   });
 }

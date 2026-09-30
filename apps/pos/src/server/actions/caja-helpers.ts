@@ -37,6 +37,8 @@ export type TransaccionRow = {
   estado: string;
   /** Ruta del PDF guardado (bucket privado) para re-imprimir/descargar. */
   comprobante_pdf_path: string | null;
+  /** Turno en que se hizo: solo se anulan las del turno abierto. */
+  caja_sesion_id: string | null;
 };
 
 // ----------------------------------------------------------------------------
