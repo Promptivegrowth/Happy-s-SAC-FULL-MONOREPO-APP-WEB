@@ -15,6 +15,15 @@
  * guardada aunque sea vieja, se usa esa: un nombre de hace un año sirve más que
  * ninguno, y la cajera igual puede corregirlo a mano.
  *
+ * 29/09/2026, pedido de no gastar cupo en clientes repetidos, en ningún lado:
+ *   - El RUC de un cliente registrado tampoco se vuelve a consultar, y lo
+ *     consultado se guarda un año (antes 30 días). Si una empresa cambió de
+ *     dirección, se corrige a mano en la venta o en la ficha del cliente.
+ *   - Un número que RENIEC/SUNAT no encuentra también se guarda (30 días): antes
+ *     cada reintento de un DNI mal escrito volvía a gastar una consulta.
+ *   - Si llegan dos pedidos del mismo número a la vez (el autocompletado de la
+ *     caja y la ventana de cobro), sale una sola consulta.
+ *
  * Lo usan las tres aplicaciones con el mismo cliente de servicio, así que lo
  * que consulta una caja le sirve a todas.
  */
@@ -27,14 +36,26 @@ type ClienteDb = { from: (tabla: string) => any };
 export type TipoDocumento = 'dni' | 'ruc';
 export type FuenteConsulta = 'guardado' | 'clientes' | 'reniec-sunat' | 'guardado-viejo';
 
-/**
- * Cuánto se confía en una respuesta guardada. Un nombre de RENIEC no cambia; la
- * razón social y sobre todo la dirección de un RUC sí pueden cambiar, y la
- * factura tiene que llevar la vigente.
- */
-const VIGENCIA_DIAS: Record<TipoDocumento, number> = { dni: 365, ruc: 30 };
+/** Cuánto se confía en una respuesta guardada antes de volver a gastar una consulta. */
+const VIGENCIA_DIAS: Record<TipoDocumento, number> = { dni: 365, ruc: 365 };
+/** Cuánto se recuerda que un número no existe (por si RENIEC/SUNAT lo da de alta después). */
+const VIGENCIA_NO_ENCONTRADO_DIAS = 30;
 
-type Guardado = { datos: ConsultaDNI | ConsultaRUC; consultado_en: string };
+/** Lo que se guarda cuando RENIEC/SUNAT dice que el número no existe o no es válido. */
+type NoEncontrado = { noEncontrado: true; mensaje: string };
+type Guardado = { datos: ConsultaDNI | ConsultaRUC | NoEncontrado; consultado_en: string };
+
+function esNoEncontrado(d: Guardado['datos']): d is NoEncontrado {
+  return (d as NoEncontrado).noEncontrado === true;
+}
+
+/** Las respuestas "no existe" que vale la pena recordar; el cupo agotado o un corte no. */
+function esRespuestaDefinitiva(msg: string): boolean {
+  return /no encontrado|Documento inválido/i.test(msg);
+}
+
+/** Consultas en curso en esta instancia, para no pedir dos veces el mismo número a la vez. */
+const enCurso = new Map<string, Promise<{ datos: ConsultaDNI | ConsultaRUC; fuente: FuenteConsulta }>>();
 
 async function leerGuardado(sb: ClienteDb, tipo: TipoDocumento, numero: string): Promise<Guardado | null> {
   try {
@@ -50,7 +71,7 @@ async function leerGuardado(sb: ClienteDb, tipo: TipoDocumento, numero: string):
   }
 }
 
-async function guardar(sb: ClienteDb, tipo: TipoDocumento, numero: string, datos: ConsultaDNI | ConsultaRUC) {
+async function guardar(sb: ClienteDb, tipo: TipoDocumento, numero: string, datos: ConsultaDNI | ConsultaRUC | NoEncontrado) {
   try {
     await sb
       .from('documentos_consultados')
@@ -103,7 +124,9 @@ async function desdeClientes(sb: ClienteDb, tipo: TipoDocumento, numero: string)
 /**
  * `usarClientes: false` es para lo público (el checkout de la web): ahí no se
  * puede devolver lo que Happy's tiene registrado de sus clientes, o cualquiera
- * podría averiguar datos de un cliente escribiendo su DNI.
+ * podría averiguar datos de un cliente escribiendo su DNI. Por eso lo que sale
+ * de `clientes` nunca se copia a la tabla compartida: ahí solo va lo que
+ * respondió RENIEC/SUNAT.
  */
 export async function consultarDocumento(
   sb: ClienteDb,
@@ -112,32 +135,49 @@ export async function consultarDocumento(
   opciones: { usarClientes?: boolean } = {},
 ): Promise<{ datos: ConsultaDNI | ConsultaRUC; fuente: FuenteConsulta }> {
   const usarClientes = opciones.usarClientes ?? true;
+  const clave = `${tipo}:${numero}:${usarClientes ? 'c' : 'p'}`;
+  const previa = enCurso.get(clave);
+  if (previa) return previa;
+  const promesa = resolver(sb, tipo, numero, usarClientes).finally(() => enCurso.delete(clave));
+  enCurso.set(clave, promesa);
+  return promesa;
+}
+
+async function resolver(
+  sb: ClienteDb,
+  tipo: TipoDocumento,
+  numero: string,
+  usarClientes: boolean,
+): Promise<{ datos: ConsultaDNI | ConsultaRUC; fuente: FuenteConsulta }> {
   const guardado = await leerGuardado(sb, tipo, numero);
   if (guardado) {
     const dias = (Date.now() - new Date(guardado.consultado_en).getTime()) / 86_400_000;
-    if (dias <= VIGENCIA_DIAS[tipo]) return { datos: guardado.datos, fuente: 'guardado' };
+    if (esNoEncontrado(guardado.datos)) {
+      if (dias <= VIGENCIA_NO_ENCONTRADO_DIAS) throw new Error(guardado.datos.mensaje);
+    } else if (dias <= VIGENCIA_DIAS[tipo]) {
+      return { datos: guardado.datos, fuente: 'guardado' };
+    }
   }
 
-  // Un DNI de un cliente registrado se usa sin gastar cupo. Un RUC no: la
-  // dirección fiscal cargada a mano hace meses es justo lo que conviene
-  // refrescar con SUNAT, así que el cliente registrado queda de respaldo.
-  if (tipo === 'dni' && usarClientes) {
+  // Un cliente ya registrado (DNI o RUC) se usa sin gastar cupo.
+  if (usarClientes) {
     const cliente = await desdeClientes(sb, tipo, numero);
     if (cliente) return { datos: cliente, fuente: 'clientes' };
   }
 
+  const viejo = guardado && !esNoEncontrado(guardado.datos) ? guardado.datos : null;
   try {
     const datos = tipo === 'dni' ? await consultaDNI(numero) : await consultaRUC(numero);
     await guardar(sb, tipo, numero, datos);
     return { datos, fuente: 'reniec-sunat' };
   } catch (e) {
-    // El servicio no respondió: mejor un dato guardado viejo, o el del cliente
-    // registrado, que nada.
-    if (guardado) return { datos: guardado.datos, fuente: 'guardado-viejo' };
-    if (usarClientes) {
-      const cliente = await desdeClientes(sb, tipo, numero);
-      if (cliente) return { datos: cliente, fuente: 'clientes' };
+    const msg = (e as Error).message;
+    if (esRespuestaDefinitiva(msg)) {
+      await guardar(sb, tipo, numero, { noEncontrado: true, mensaje: msg });
+      throw e;
     }
+    // El servicio no respondió (cupo, conexión): mejor un dato guardado viejo que nada.
+    if (viejo) return { datos: viejo, fuente: 'guardado-viejo' };
     throw e;
   }
 }
