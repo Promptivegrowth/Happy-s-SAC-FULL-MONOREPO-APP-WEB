@@ -22,6 +22,8 @@ export type ExportOpts = {
   cols: ColExport[];
   rows: Record<string, unknown>[];
   totales?: Record<string, number>;
+  /** Cómo se titula la línea de `filtros` (por defecto "Filtros"; un reporte puede usarla de resumen). */
+  etiquetaFiltros?: string;
 };
 
 export type ExportResult = { base64: string; filename: string; mime: string };
@@ -104,7 +106,7 @@ function pintarHoja(wb: ExcelJS.Workbook, nombre: string, opts: ExportOpts, logo
   if (opts.filtros && opts.filtros.length) {
     ws.mergeCells(rowIdx, 1, rowIdx, opts.cols.length);
     const c = ws.getCell(rowIdx, 1);
-    c.value = 'Filtros: ' + opts.filtros.join(' · ');
+    c.value = `${opts.etiquetaFiltros ?? 'Filtros'}: ` + opts.filtros.join(' · ');
     c.font = { name: 'Calibri', size: 9, italic: true, color: { argb: 'FF94A3B8' } };
     rowIdx++;
   }
@@ -334,9 +336,11 @@ export async function generarPDFBrandeado(opts: ExportOpts): Promise<ExportResul
   if (opts.filtros && opts.filtros.length) {
     doc.setFontSize(8);
     doc.setFont('helvetica', 'italic');
-    doc.text('Filtros: ' + opts.filtros.join(' · '), 30, y);
+    // Partida en renglones: una línea larga se salía de la hoja.
+    const lineas = doc.splitTextToSize(`${opts.etiquetaFiltros ?? 'Filtros'}: ` + opts.filtros.join(' · '), pageW - 60) as string[];
+    doc.text(lineas, 30, y);
     doc.setFont('helvetica', 'normal');
-    y += 12;
+    y += 12 * lineas.length;
   }
   y += 6;
 
@@ -363,6 +367,8 @@ export async function generarPDFBrandeado(opts: ExportOpts): Promise<ExportResul
     head,
     body,
     foot,
+    // El total va una sola vez, al final, y no al pie de cada página.
+    showFoot: 'lastPage',
     theme: 'grid',
     headStyles: {
       fillColor: [30, 58, 95], // BRAND.azul
@@ -386,11 +392,12 @@ export async function generarPDFBrandeado(opts: ExportOpts): Promise<ExportResul
       fontSize: 9,
       cellPadding: 6,
     },
-    columnStyles: opts.cols.reduce<Record<number, Partial<{ halign: 'left' | 'right' | 'center' }>>>(
+    columnStyles: opts.cols.reduce<Record<number, Partial<{ halign: 'left' | 'right' | 'center'; minCellWidth: number }>>>(
       (acc, c, i) => {
-        if (c.formato === 'moneda' || c.formato === 'numero' || c.formato === 'porcentaje') {
-          acc[i] = { halign: 'right' };
-        }
+        // Los montos en un solo renglón, incluido el total del pie: "S/ 12.97"
+        // partido en dos no se lee. 72 pt alcanza para "S/ 999,999.99".
+        if (c.formato === 'moneda') acc[i] = { halign: 'right', minCellWidth: 72 };
+        else if (c.formato === 'numero' || c.formato === 'porcentaje') acc[i] = { halign: 'right' };
         return acc;
       },
       {},

@@ -84,18 +84,27 @@ export async function reporteVentas(f: FiltrosVentas): Promise<ReporteVentasResu
         'cliente:cliente_id(razon_social, nombres, apellido_paterno, apellido_materno, tipo_documento, numero_documento), ' +
         'nombre_cliente_rapido, vendedor_usuario_id, vendedor_b2b_id',
     )
-    .gte('fecha', `${f.desde}T00:00:00`)
-    .lte('fecha', `${f.hasta}T23:59:59`)
+    // Día de Perú (UTC-5): sin la zona, la base tomaba el día UTC y se perdían
+    // las ventas de la noche del último día del rango.
+    .gte('fecha', `${f.desde}T00:00:00-05:00`)
+    .lte('fecha', `${f.hasta}T23:59:59.999-05:00`)
     .neq('estado', 'ANULADA')
     .order('fecha', { ascending: false })
-    .limit(5000);
+    .order('id', { ascending: false });
   if (f.canal) q = q.eq('canal', f.canal);
   if (f.almacen_id) q = q.eq('almacen_id', f.almacen_id);
   if (f.vendedor_id) {
     q = q.or(`vendedor_usuario_id.eq.${f.vendedor_id},vendedor_b2b_id.eq.${f.vendedor_id}`);
   }
-  const { data, error } = await q;
-  if (error) throw new Error(error.message);
+  // La base devuelve como máximo 1.000 filas por consulta: se lee por páginas
+  // para que un período largo no quede cortado sin aviso.
+  const data: unknown[] = [];
+  for (let desde = 0; desde < 20000; desde += 1000) {
+    const { data: pagina, error } = await q.range(desde, desde + 999);
+    if (error) throw new Error(error.message);
+    data.push(...(pagina ?? []));
+    if (!pagina || pagina.length < 1000) break;
+  }
 
   type VentaRaw = {
     id: string;
@@ -143,11 +152,14 @@ export async function reporteVentas(f: FiltrosVentas): Promise<ReporteVentasResu
 
   // Cargar comprobantes (tipo + número) — UNA fila por venta (la última emitida)
   const compPorVenta = new Map<string, { tipo: 'BOLETA' | 'FACTURA' | 'NOTA_VENTA'; numero_completo: string }>();
-  if (ventasIds.length > 0) {
+  // En tandas de 150: con cientos de ids la URL se vuelve demasiado larga y
+  // cada respuesta también tiene el tope de 1.000 filas.
+  for (let i = 0; i < ventasIds.length; i += 150) {
     const { data: comps } = await sb
       .from('comprobantes')
       .select('venta_id, tipo, numero_completo')
-      .in('venta_id', ventasIds)
+      .in('venta_id', ventasIds.slice(i, i + 150))
+      .in('tipo', ['BOLETA', 'FACTURA', 'NOTA_VENTA'])
       .order('created_at', { ascending: false });
     for (const c of (comps ?? []) as { venta_id: string; tipo: 'BOLETA' | 'FACTURA' | 'NOTA_VENTA'; numero_completo: string }[]) {
       if (!compPorVenta.has(c.venta_id)) {
@@ -164,11 +176,11 @@ export async function reporteVentas(f: FiltrosVentas): Promise<ReporteVentasResu
    * hay dos bancos y dos billeteras, y la columna no decía cuál.
    */
   const pagosPorVenta = new Map<string, string[]>();
-  if (ventasIds.length > 0) {
+  for (let i = 0; i < ventasIds.length; i += 150) {
     const { data: pagos } = await sb
       .from('ventas_pagos')
       .select('venta_id, metodo, referencia')
-      .in('venta_id', ventasIds);
+      .in('venta_id', ventasIds.slice(i, i + 150));
     for (const p of (pagos ?? []) as { venta_id: string; metodo: string; referencia: string | null }[]) {
       const arr = pagosPorVenta.get(p.venta_id) ?? [];
       arr.push(etiquetaPago(p.metodo, p.referencia));

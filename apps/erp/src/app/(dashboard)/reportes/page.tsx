@@ -33,6 +33,14 @@ type ReporteCard = {
 
 const REPORTES: ReporteCard[] = [
   {
+    href: '/reportes/comprobantes',
+    titulo: 'Comprobantes del mes',
+    descripcion: 'Lo enviado a SUNAT (boletas, facturas, notas de crédito), las notas de venta y el consolidado. Por día y detallado, en Excel y PDF.',
+    icono: ClipboardList,
+    categoria: 'Ventas',
+    badge: 'Nuevo',
+  },
+  {
     href: '/reportes/ventas',
     titulo: 'Ventas',
     descripcion: 'Por período, canal, tienda y vendedor. Comparativa vs período anterior.',
