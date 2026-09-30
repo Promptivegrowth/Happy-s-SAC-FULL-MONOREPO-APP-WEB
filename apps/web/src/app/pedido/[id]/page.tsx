@@ -121,7 +121,16 @@ export default async function PedidoPage({ params }: { params: Promise<{ id: str
   const pedido = data as unknown as Pedido | null;
   if (!pedido) notFound();
 
-  const cartel = CARTEL[pedido.estado] ?? {
+  // Yape, Plin o transferencia: el pago se confirma cuando llega la captura
+  // por WhatsApp, no lo avisa ningún banco.
+  const conCaptura = ['yape', 'plin', 'transferencia'].includes(String(pedido.metodo_pago_seleccionado ?? ''));
+  const cartel = (pedido.estado === 'PENDIENTE_PAGO' && conCaptura
+    ? {
+      titulo: 'Esperando tu pago',
+      detalle: 'Envíanos por WhatsApp la captura de tu pago. Apenas la verifiquemos, preparamos tu pedido y te avisamos.',
+      tono: 'espera' as const,
+    }
+    : CARTEL[pedido.estado]) ?? {
     titulo: 'Pedido registrado',
     detalle: 'Te contactaremos para coordinar los siguientes pasos.',
     tono: 'espera' as const,

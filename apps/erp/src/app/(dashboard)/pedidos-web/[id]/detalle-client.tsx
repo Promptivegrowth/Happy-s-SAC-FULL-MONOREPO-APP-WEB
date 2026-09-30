@@ -20,8 +20,10 @@ import {
   prepararPedidoWeb,
   cambiarEstadoPedidoWeb,
   cancelarPedidoWeb,
+  emitirComprobantePedidoWeb,
   type PedidoWebDetalle,
 } from '@/server/actions/pedidos-web';
+import { DescargarComprobanteA4 } from '@/components/comprobante-a4-pdf';
 import {
   ESTADO_LABEL, ESTADO_TONO, TRANSICIONES, type EstadoPedidoWeb, type Tono,
 } from '@/server/actions/pedidos-web-helpers';
@@ -65,12 +67,14 @@ export function DetalleClient({
   }
 
   function preparar() {
-    if (!almacenSel) { toast.error('Seleccioná el almacén desde donde se prepara'); return; }
-    if (!confirm('¿Preparar pedido? Se descontará el stock y se generará la venta + comprobante.')) return;
+    if (!almacenSel) { toast.error('Selecciona el almacén desde donde se prepara'); return; }
+    if (!confirm('¿Preparar pedido? Se descontará el stock, se generará la venta y se emitirá la boleta o factura.')) return;
     start(async () => {
       const r = await prepararPedidoWeb(pedido.id, { almacen_id: almacenSel, notas_internas: notasPrep || '' });
       if (r.ok) {
-        toast.success(`Pedido en preparación · Venta ${r.data?.venta_numero}`);
+        toast.success(`Pedido en preparación · Venta ${r.data?.venta_numero}`
+          + (r.data?.comprobante ? ` · ${r.data.comprobante.tipo === 'FACTURA' ? 'Factura' : 'Boleta'} ${r.data.comprobante.numero}` : ''));
+        if (r.data?.aviso) toast.warning(r.data.aviso, { duration: 12000 });
         refresh();
       } else toast.error(r.error ?? 'Error');
     });
@@ -86,8 +90,11 @@ export function DetalleClient({
   }
 
   function cancelar() {
-    const motivo = prompt('Motivo de la cancelación:');
+    const motivo = prompt(pedido.venta_id
+      ? 'Motivo de la cancelación (se anula la venta, el stock vuelve y el comprobante se anula ante SUNAT):'
+      : 'Motivo de la cancelación:');
     if (!motivo || !motivo.trim()) return;
+    if (pedido.venta_id && motivo.trim().length < 5) { toast.error('Escribe el motivo (al menos 5 letras)'); return; }
     start(async () => {
       const r = await cancelarPedidoWeb(pedido.id, motivo.trim());
       if (r.ok) {
@@ -116,13 +123,13 @@ export function DetalleClient({
             )}
           </div>
           <div className="flex flex-wrap items-center gap-2">
-            {pedido.estado === 'PENDIENTE_PAGO' && (
+            {(pedido.estado === 'PENDIENTE_PAGO' || pedido.estado === 'WHATSAPP_DERIVADO') && (
               <Button variant="premium" size="sm" onClick={confirmarPago} disabled={pending}>
                 <CheckCircle2 className="h-4 w-4" /> Confirmar pago
               </Button>
             )}
             {pedido.estado === 'PAGO_VERIFICADO' && (
-              <p className="text-xs text-slate-500">↓ Prepará el pedido abajo (descuenta stock)</p>
+              <p className="text-xs text-slate-500">↓ Prepara el pedido abajo (descuenta stock y emite la boleta o factura)</p>
             )}
             {transiciones
               .filter((t) => t !== 'EN_PREPARACION' && t !== 'CANCELADO' && t !== 'PAGO_VERIFICADO' && t !== 'WHATSAPP_DERIVADO')
@@ -313,9 +320,21 @@ export function DetalleClient({
               </span>
             )}
             {pedido.comprobante_id && (
-              <span className="flex items-center gap-1">
-                <FileText className="h-3 w-3" /> Comprobante: <strong className="text-corp-900">{comprobante_numero ?? pedido.comprobante_id.slice(0, 8)}</strong>
+              <span className="flex items-center gap-2">
+                <FileText className="h-3 w-3" /> Comprobante:{' '}
+                <Link href={`/comprobantes/${pedido.comprobante_id}`} className="font-semibold text-corp-900 underline">
+                  {comprobante_numero ?? pedido.comprobante_id.slice(0, 8)}
+                </Link>
+                <DescargarComprobanteA4 comprobanteId={pedido.comprobante_id} label="PDF para el cliente" />
               </span>
+            )}
+            {pedido.venta_id && !pedido.comprobante_id && pedido.estado !== 'CANCELADO' && (
+              <Button size="sm" variant="outline" disabled={pending} onClick={() => start(async () => {
+                const r = await emitirComprobantePedidoWeb(pedido.id);
+                if (r.ok) { toast.success(`Emitido ${r.data?.numero}`); refresh(); } else toast.error(r.error ?? 'Error');
+              })}>
+                <FileText className="h-3 w-3" /> Emitir boleta / factura
+              </Button>
             )}
           </div>
         </Card>

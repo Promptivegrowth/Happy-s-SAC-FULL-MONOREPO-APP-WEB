@@ -49,7 +49,9 @@ export const TRANSICIONES: Record<EstadoPedidoWeb, EstadoPedidoWeb[]> = {
   EN_DELIVERY: ['ENTREGADO', 'CANCELADO'],
   ENTREGADO: [],
   CANCELADO: [],
-  WHATSAPP_DERIVADO: ['CANCELADO'],
+  // Un pedido coordinado por WhatsApp se confirma igual que uno con Yape: al
+  // llegar la captura del pago (30/09/2026).
+  WHATSAPP_DERIVADO: ['PAGO_VERIFICADO', 'CANCELADO'],
 };
 
 // Estados en los que el stock YA está descontado (necesitan reintegración al cancelar)

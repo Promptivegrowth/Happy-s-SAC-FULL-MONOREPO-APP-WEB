@@ -19,7 +19,7 @@ import { createServiceClient } from '@happy/db/service';
 import { runAction, requireUser, bumpPaths, type ActionResult } from './_helpers';
 import { formatTallaChip } from '@happy/lib';
 import {
-  ESTADOS_PEDIDO_WEB, TRANSICIONES, STOCK_RESERVADO, type EstadoPedidoWeb,
+  ESTADOS_PEDIDO_WEB, TRANSICIONES, type EstadoPedidoWeb,
 } from './pedidos-web-helpers';
 
 // Cast pragmático — pedidos_web no estaba en los types autogenerados originales.
@@ -306,7 +306,7 @@ const prepararSchema = z.object({
 export async function prepararPedidoWeb(
   id: string,
   input: z.input<typeof prepararSchema>,
-): Promise<ActionResult<{ venta_numero: string }>> {
+): Promise<ActionResult<{ venta_numero: string; comprobante: { tipo: string; numero: string } | null; aviso: string | null }>> {
   const r = await runAction(async () => {
     const { userId } = await requireUser();
     const data = prepararSchema.parse(input);
@@ -456,7 +456,16 @@ export async function prepararPedidoWeb(
     if (data.notas_internas) update.notas_internas = data.notas_internas;
     await sb.from('pedidos_web').update(update).eq('id', id);
 
-    return { venta_numero: ventaNumero };
+    /*
+     * La boleta o factura del pedido (mig 112). Hasta el 30/09/2026 un pedido
+     * web nunca tenía comprobante. Si fallara, el pedido igual queda preparado
+     * —el stock ya salió— y se puede volver a emitir con el botón del pedido.
+     */
+    const { data: rc, error: errC } = await sb.rpc('emitir_comprobante_pedido_web', { p_pedido: id });
+    const comprobante = !errC && rc?.numero ? { tipo: rc.tipo as string, numero: rc.numero as string } : null;
+    const aviso = errC ? `El pedido quedó preparado, pero no se pudo emitir el comprobante: ${errC.message}` : null;
+
+    return { venta_numero: ventaNumero, comprobante, aviso };
   });
   if (r.ok) await bumpPaths(`/pedidos-web/${id}`, '/pedidos-web', '/inventario');
   return r;
@@ -473,6 +482,19 @@ function mapeaMetodoPagoWeb(m: string | null): string | null {
     case 'whatsapp': return null; // no genera pago automático
     default: return null;
   }
+}
+
+/** Emite el comprobante de un pedido ya preparado que quedó sin él. */
+export async function emitirComprobantePedidoWeb(id: string): Promise<ActionResult<{ tipo: string; numero: string }>> {
+  const r = await runAction(async () => {
+    await requireUser();
+    const sb = createServiceClient() as unknown as AnyClient;
+    const { data, error } = await sb.rpc('emitir_comprobante_pedido_web', { p_pedido: id });
+    if (error) throw new Error(error.message);
+    return { tipo: data.tipo as string, numero: data.numero as string };
+  });
+  if (r.ok) await bumpPaths(`/pedidos-web/${id}`, '/pedidos-web', '/comprobantes');
+  return r;
 }
 
 // ============================================================================
@@ -524,32 +546,21 @@ export async function cancelarPedidoWeb(id: string, motivo: string): Promise<Act
     if (p.estado === 'CANCELADO') throw new Error('Pedido ya cancelado');
     if (p.estado === 'ENTREGADO') throw new Error('No se puede cancelar un pedido ya entregado');
 
-    // Si tenía stock reservado, reintegrar
-    if (STOCK_RESERVADO.includes(p.estado as EstadoPedidoWeb) && p.venta_id) {
-      // Reusamos las líneas de la venta para el kardex compensatorio
-      const { data: vlineas } = await sb
-        .from('ventas_lineas')
-        .select('variante_id, cantidad, precio_unitario')
-        .eq('venta_id', p.venta_id);
-      const { data: venta } = await sb.from('ventas').select('almacen_id').eq('id', p.venta_id).single();
-      if (vlineas && venta) {
-        const kx = (vlineas as { variante_id: string; cantidad: number; precio_unitario: string | number }[]).map((l) => ({
-          fecha: new Date().toISOString(),
-          tipo: 'ENTRADA_AJUSTE',
-          almacen_id: venta.almacen_id as string,
-          variante_id: l.variante_id,
-          cantidad: l.cantidad,
-          costo_unitario: Number(l.precio_unitario),
-          costo_total: Number(l.precio_unitario) * l.cantidad,
-          referencia_tipo: 'PEDIDO_WEB',
-          referencia_id: p.id,
-          observacion: `Cancelación pedido web ${p.numero} — stock reintegrado. Motivo: ${motivo}`,
-          usuario_id: userId,
-        }));
-        await sb.from('kardex_movimientos').insert(kx);
+    /*
+     * Si ya se había preparado, se anula su venta con la misma función que la
+     * caja (mig 108), en una sola transacción: el stock vuelve al almacén, la
+     * boleta queda anulada (va en el resumen) o a la factura se le emite nota
+     * de crédito, y queda en la auditoría con el motivo.
+     */
+    if (p.venta_id) {
+      const { data: venta } = await sb.from('ventas').select('estado').eq('id', p.venta_id).maybeSingle();
+      if (venta?.estado === 'COMPLETADA') {
+        if (motivo.trim().length < 5) throw new Error('Escribe el motivo de la cancelación (al menos 5 letras).');
+        const { error: errA } = await sb.rpc('anular_venta', {
+          p_venta_id: p.venta_id, p_motivo: `Cancelación del pedido web ${p.numero}: ${motivo.trim()}`, p_usuario: userId,
+        });
+        if (errA) throw new Error(errA.message);
       }
-      // Anular la venta también (sin borrarla, queda con estado ANULADA)
-      await sb.from('ventas').update({ estado: 'ANULADA' }).eq('id', p.venta_id);
     }
 
     const observacionFinal = [p.notas_internas, `Cancelado: ${motivo}`].filter(Boolean).join('\n');

@@ -202,7 +202,51 @@ export function CheckoutClient({
     if (faltaDestino) return toast.error('Elegí si el envío va a Lima Metropolitana o a provincia');
 
     if (metodo === 'whatsapp' || CON_CAPTURA.includes(metodo)) {
+      /*
+       * El pedido se guarda ANTES de abrir WhatsApp (30/09/2026).
+       *
+       * Hasta hoy estos pedidos solo abrían WhatsApp y no quedaban en ningún
+       * lado: no llegaban al ERP, no descontaban stock ni tenían comprobante.
+       * Ahora quedan como pedido web con su número, que viaja en el mensaje.
+       *
+       * La pestaña de WhatsApp se abre en el mismo clic, antes de esperar al
+       * servidor: si se abriera después, el navegador la bloquearía.
+       */
+      const ventana = window.open('', '_blank');
+      setEnviando(true);
+      let pedido: { id: string; numero: string } | null = null;
+      try {
+        const res = await fetch('/api/pedidos', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            cliente: { tipoDoc, doc, nombre, email, telefono },
+            entrega: { metodo: entrega, direccion, referencia, ubigeo, destino },
+            metodoPago: metodo,
+            necesitaFactura,
+            items: items.map((i) => ({ ...i, precio: precioEfectivoLinea(i, escalon) })),
+            envio: envio ?? 0,
+            total: totalFinal,
+          }),
+        });
+        const json = await res.json();
+        if (res.ok) {
+          pedido = { id: json.id, numero: json.numero };
+        } else if (res.status === 409 && json.mensaje) {
+          // Sin stock o precio cambiado: se corrige antes de seguir.
+          ventana?.close();
+          toast.error(json.mensaje, { duration: 10000 });
+          return;
+        }
+        // Otro error: se sigue por WhatsApp igual, para no perder la venta.
+      } catch {
+        /* sin conexión con el servidor: se sigue por WhatsApp */
+      } finally {
+        setEnviando(false);
+      }
+
       const msg = buildPedidoWaMessage({
+        numero: pedido?.numero,
         cliente: { nombre, documento: `${tipoDoc} ${doc}`, telefono },
         direccion,
         ubigeo,
@@ -217,12 +261,20 @@ export function CheckoutClient({
           ? { metodo: metodo as 'yape' | 'plin' | 'transferencia', destino: destinoDePago }
           : undefined,
       });
-      window.open(buildWhatsappUrl(msg), '_blank');
+      const urlWa = buildWhatsappUrl(msg);
+      if (ventana) ventana.location.href = urlWa;
       toast.info(
         CON_CAPTURA.includes(metodo)
           ? 'Abriendo WhatsApp con tu pedido y los datos para pagar'
           : 'Abriendo WhatsApp con tu pedido...',
       );
+      if (pedido) {
+        clear();
+        if (ventana) router.push(`/pedido/${pedido.id}`);
+        else window.location.href = urlWa;
+      } else if (!ventana) {
+        window.location.href = urlWa;
+      }
       return;
     }
 

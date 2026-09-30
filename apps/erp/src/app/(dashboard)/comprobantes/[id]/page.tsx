@@ -8,6 +8,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { PageShell } from '@/components/page-shell';
 import { EmitirSunatButton } from './client';
 import { AnularBoletaButton } from './anular-client';
+import { DescargarComprobanteA4 } from '@/components/comprobante-a4-pdf';
 import { VerComprobanteButton } from '../../ventas/ver-comprobante-button';
 import { formatDateTime, formatPEN } from '@happy/lib';
 import { Download, Truck } from 'lucide-react';
@@ -73,7 +74,9 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
       }
       actions={
         <div className="flex gap-2">
-          {pdfInternoPath && <VerComprobanteButton path={pdfInternoPath} label="Descargar PDF" size="default" />}
+          {pdfInternoPath
+            ? <VerComprobanteButton path={pdfInternoPath} label="Descargar PDF" size="default" />
+            : <DescargarComprobanteA4 comprobanteId={id} label="Descargar PDF" />}
           {comp.pdf_url && (
             <a href={comp.pdf_url} target="_blank" rel="noopener noreferrer">
               <Button variant="outline"><Download className="h-4 w-4" /> PDF SUNAT</Button>
