@@ -8,6 +8,7 @@ import { ResumenBoletasButton } from './resumen-boletas-button';
 import { PanelSunat } from './panel-sunat';
 import { estadoSunat } from '@/server/actions/sunat-monitor';
 import { HORA_RESUMEN } from '@/server/actions/sunat-monitor-tipos';
+import { BarraFiltro, Paginado, leerFiltro, rangoLima, textoBusqueda, POR_PAGINA } from '@/components/filtro-listado';
 
 export const metadata = { title: 'Comprobantes SUNAT' };
 export const dynamic = 'force-dynamic';
@@ -32,7 +33,10 @@ function enCastellano(estado: string, tipo: string, fechaEmision: string): strin
   return tipo === 'BOLETA' ? `EN COLA · ${HORA_RESUMEN}:00` : 'ENVIANDO';
 }
 
-export default async function ComprobantesPage() {
+export default async function ComprobantesPage({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
+  const f = leerFiltro(await searchParams);
+  const { desde, hasta } = rangoLima(f);
+  const t = textoBusqueda(f.q);
   const sb = await createClient();
   const panel = await estadoSunat();
   /*
@@ -43,12 +47,17 @@ export default async function ComprobantesPage() {
    * comprobante electrónico y no tiene nada que hacer en esta pantalla, que se
    * llama "Comprobantes SUNAT". Las notas se ven en la lista de ventas.
    */
-  const { data } = await sb
+  let consulta = sb
     .from('comprobantes')
-    .select('id, tipo, serie, numero, numero_completo, fecha_emision, total, estado, razon_social_cliente, numero_documento_cliente')
-    .in('tipo', ['BOLETA', 'FACTURA', 'NOTA_CREDITO', 'NOTA_DEBITO'])
+    .select('id, tipo, serie, numero, numero_completo, fecha_emision, total, estado, razon_social_cliente, numero_documento_cliente', { count: 'exact' })
+    .in('tipo', ['BOLETA', 'FACTURA', 'NOTA_CREDITO', 'NOTA_DEBITO']);
+  if (desde) consulta = consulta.gte('fecha_emision', desde);
+  if (hasta) consulta = consulta.lt('fecha_emision', hasta);
+  // Por número (B005-00004175 o solo 4175), cliente o DNI/RUC.
+  if (t) consulta = consulta.or(`numero_completo.ilike.%${t}%,razon_social_cliente.ilike.%${t}%,numero_documento_cliente.ilike.%${t}%`);
+  const { data, count } = await consulta
     .order('fecha_emision', { ascending: false })
-    .limit(200);
+    .range((f.pag - 1) * POR_PAGINA, f.pag * POR_PAGINA - 1);
   return (
     <PageShell
       title="Comprobantes Electrónicos SUNAT"
@@ -56,6 +65,9 @@ export default async function ComprobantesPage() {
       actions={<ResumenBoletasButton />}
     >
       <div className="mb-4"><PanelSunat e={panel} /></div>
+
+      <BarraFiltro base="/comprobantes" f={f} placeholder="N° de boleta/factura, cliente o DNI/RUC" />
+      <Paginado base="/comprobantes" f={f} total={count ?? 0} />
 
       <Card><CardContent className="p-0">
         <Table>
@@ -87,6 +99,7 @@ export default async function ComprobantesPage() {
           </TableBody>
         </Table>
       </CardContent></Card>
+      <Paginado base="/comprobantes" f={f} total={count ?? 0} />
     </PageShell>
   );
 }

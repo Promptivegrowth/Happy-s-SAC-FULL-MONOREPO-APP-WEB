@@ -5,6 +5,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { PageShell } from '@/components/page-shell';
 import { formatDateTime, formatPEN } from '@happy/lib';
 import { VerComprobanteButton } from './ver-comprobante-button';
+import { BarraFiltro, Paginado, leerFiltro, rangoLima, textoBusqueda, POR_PAGINA } from '@/components/filtro-listado';
 
 export const metadata = { title: 'Ventas' };
 export const dynamic = 'force-dynamic';
@@ -18,15 +19,44 @@ const ETIQUETA_TIPO: Record<string, string> = {
   NOTA_DEBITO: 'Nota de débito',
 };
 
-export default async function VentasPage() {
+export default async function VentasPage({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
+  const f = leerFiltro(await searchParams);
+  const { desde, hasta } = rangoLima(f);
   const sb = await createClient();
   // `comprobante_pdf_path` es columna nueva (mig 85) aún no reflejada en los
   // tipos generados → cast puntual para evitar el SelectQueryError.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const sbAny = sb as unknown as { from: (t: string) => any };
-  const { data } = await sbAny.from('ventas')
-    .select('id, numero, canal, fecha, total, estado, comprobante_pdf_path, anulada_en, anulada_por, motivo_anulacion, almacenes(nombre), clientes(razon_social, nombres, apellido_paterno)')
-    .order('fecha', { ascending: false }).limit(200) as {
+
+  /*
+   * La búsqueda encuentra la venta por lo que la persona tenga a mano: el
+   * número del papel (005-00011776, o solo 11776), el interno (VEN-000475), el
+   * nombre del cliente o su DNI/RUC.
+   */
+  const t = textoBusqueda(f.q);
+  let ors: string[] = [];
+  if (t) {
+    const [{ data: porDoc }, { data: porCliente }] = await Promise.all([
+      sbAny.from('comprobantes').select('venta_id').ilike('numero_completo', `%${t}%`).not('venta_id', 'is', null).limit(150),
+      sbAny.from('clientes').select('id').or(`razon_social.ilike.%${t}%,nombres.ilike.%${t}%,apellido_paterno.ilike.%${t}%,numero_documento.ilike.%${t}%`).limit(150),
+    ]);
+    const ventaIds = [...new Set(((porDoc ?? []) as { venta_id: string }[]).map((c) => c.venta_id))];
+    const clienteIds = ((porCliente ?? []) as { id: string }[]).map((c) => c.id);
+    ors = [`numero.ilike.%${t}%`, `nombre_cliente_rapido.ilike.%${t}%`, `documento_cliente.ilike.%${t}%`];
+    if (ventaIds.length) ors.push(`id.in.(${ventaIds.join(',')})`);
+    if (clienteIds.length) ors.push(`cliente_id.in.(${clienteIds.join(',')})`);
+  }
+
+  let consulta = sbAny.from('ventas')
+    .select('id, numero, canal, fecha, total, estado, comprobante_pdf_path, anulada_en, anulada_por, motivo_anulacion, almacenes(nombre), clientes(razon_social, nombres, apellido_paterno)', { count: 'exact' });
+  if (desde) consulta = consulta.gte('fecha', desde);
+  if (hasta) consulta = consulta.lt('fecha', hasta);
+  if (ors.length) consulta = consulta.or(ors.join(','));
+  const { data, count } = await consulta
+    .order('fecha', { ascending: false })
+    .range((f.pag - 1) * POR_PAGINA, f.pag * POR_PAGINA - 1) as {
       data: Array<{ id: string; numero: string; canal: string; fecha: string; total: number; estado: string; comprobante_pdf_path: string | null; anulada_en: string | null; anulada_por: string | null; motivo_anulacion: string | null }> | null;
+      count: number | null;
     };
 
   /*
@@ -69,6 +99,8 @@ export default async function VentasPage() {
       title="Ventas (consolidadas)"
       description="Todas las ventas: POS (tiendas), Web y B2B."
     >
+      <BarraFiltro base="/ventas" f={f} placeholder="N° de nota/boleta/factura, VEN-…, cliente o DNI/RUC" />
+      <Paginado base="/ventas" f={f} total={count ?? 0} />
       <Card>
         <CardContent className="p-0">
           <Table>
@@ -80,7 +112,7 @@ export default async function VentasPage() {
               <TableHead className="text-right">PDF</TableHead>
             </TableRow></TableHeader>
             <TableBody>
-              {(data ?? []).length === 0 && <TableRow><TableCell colSpan={9} className="py-10 text-center text-sm text-slate-500">Sin ventas registradas.</TableCell></TableRow>}
+              {(data ?? []).length === 0 && <TableRow><TableCell colSpan={9} className="py-10 text-center text-sm text-slate-500">{f.desde || f.hasta || f.q ? 'No hay ventas con esos filtros.' : 'Sin ventas registradas.'}</TableCell></TableRow>}
               {data?.map((v) => {
                 const a = (v as unknown as { almacenes?: { nombre: string } }).almacenes;
                 const c = (v as unknown as { clientes?: { razon_social?: string; nombres?: string; apellido_paterno?: string } }).clientes;
@@ -129,6 +161,7 @@ export default async function VentasPage() {
           </Table>
         </CardContent>
       </Card>
+      <Paginado base="/ventas" f={f} total={count ?? 0} />
     </PageShell>
   );
 }
