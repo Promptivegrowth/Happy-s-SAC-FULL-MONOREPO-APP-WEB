@@ -10,7 +10,7 @@ import { FormGrid, FormRow, FormSection } from '@happy/ui/form-row';
 import { UbigeoSelect } from '@/components/forms/ubigeo-select';
 import { MOTIVOS_TRASLADO, validarGuia, type MotivoTraslado } from '@happy/lib/sunat-ubl/despatch';
 import { emitirGuia, buscarVariantesGuia, type VarianteGuia } from '@/server/actions/guias';
-import { AlertTriangle, CheckCircle2, Loader2, Search, Send, Trash2, Truck, Car } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, Loader2, Plus, Search, Send, Trash2, Truck, Car } from 'lucide-react';
 
 export type ItemGuia = { variante_id?: string | null; codigo: string; descripcion: string; cantidad: number };
 
@@ -58,10 +58,20 @@ type Empresa = { ruc: string; razonSocial: string; direccionFiscal: string; ubig
 const selectCls = 'h-10 w-full rounded-md border border-input bg-background px-3 text-sm';
 
 /** Consulta DNI/RUC con el mismo servicio de la caja (usa lo ya guardado antes de gastar cupo). */
+/**
+ * Consulta un DNI o RUC. Primero mira que el número esté completo: con la lupa
+ * tocada y el campo vacío, la consulta iba a una dirección que no existe y la
+ * pantalla mostraba "Unexpected token '<'…" (30/09/2026).
+ */
 async function consultar(tipo: 'dni' | 'ruc', numero: string): Promise<{ nombre: string; direccion?: string; ubigeo?: string } | null> {
+  const largo = tipo === 'ruc' ? 11 : 8;
+  if (!new RegExp(`^\\d{${largo}}$`).test(numero)) {
+    toast.error(`Escribe el ${tipo.toUpperCase()} completo (${largo} dígitos) y vuelve a tocar la lupa.`);
+    return null;
+  }
   try {
     const r = await fetch(`/api/sunat/${tipo}/${numero}`);
-    const d = await r.json();
+    const d = await r.json().catch(() => ({ error: 'No se pudo consultar' }));
     if (!r.ok) throw new Error(d.error ?? 'No se encontró');
     return {
       nombre: d.razonSocial ?? d.nombreCompleto ?? [d.nombres, d.apellidoPaterno, d.apellidoMaterno].filter(Boolean).join(' '),
@@ -209,6 +219,22 @@ export function GuiaForm({ inicial, aviso, hoy, empresa, almacenes, transportist
     });
   }
 
+  /*
+   * Línea escrita a mano: "300 DISFRACES PARA NIÑOS" queda como 300 ×
+   * DISFRACES PARA NIÑOS. Para consignaciones o envíos que no se cargan prenda
+   * por prenda; el buscador solo encuentra productos del inventario.
+   */
+  const textoLibre = busca.trim();
+  const lineaLibre = (() => {
+    const m = textoLibre.match(/^(\d+(?:[.,]\d+)?)\s*(?:x|×|u\.?|und\.?|unid\.?)?\s+(.+)$/i);
+    return m ? { cantidad: Number(m[1]!.replace(',', '.')), descripcion: m[2]!.trim() } : { cantidad: 1, descripcion: textoLibre };
+  })();
+  const agregarLineaLibre = () => {
+    if (lineaLibre.descripcion.length < 3) { toast.error('Escribe qué se envía'); return; }
+    setItems((xs) => [...xs, { variante_id: null, codigo: '', descripcion: lineaLibre.descripcion.toUpperCase(), cantidad: lineaLibre.cantidad }]);
+    setBusca(''); setResultados([]);
+  };
+
   const tocarItem = (i: number, cambio: Partial<ItemGuia>) => setItems((xs) => xs.map((x, j) => (j === i ? { ...x, ...cambio } : x)));
 
   return (
@@ -334,10 +360,11 @@ export function GuiaForm({ inicial, aviso, hoy, empresa, almacenes, transportist
                     <Input value={condDni} inputMode="numeric" maxLength={8} onChange={(e) => setCondDni(e.target.value.replace(/\D/g, ''))} />
                     <Button type="button" variant="corp" disabled={consultando === 'cond'} title="Buscar en RENIEC"
                       onClick={async () => {
+                        if (!/^\d{8}$/.test(condDni)) { toast.error('Escribe el DNI del conductor (8 dígitos) y vuelve a tocar la lupa.'); return; }
                         setConsultando('cond');
                         try {
                           const r = await fetch(`/api/sunat/dni/${condDni}`);
-                          const d = await r.json();
+                          const d = await r.json().catch(() => ({ error: 'No se pudo consultar' }));
                           if (!r.ok) throw new Error(d.error ?? 'No se encontró');
                           setCondNombres(d.nombres ?? ''); setCondApellidos([d.apellidoPaterno, d.apellidoMaterno].filter(Boolean).join(' '));
                         } catch (e) { toast.error(`${(e as Error).message}. Escríbelo a mano.`); }
@@ -434,10 +461,20 @@ export function GuiaForm({ inicial, aviso, hoy, empresa, almacenes, transportist
       <FormSection title="Productos" description="Lo que viaja. La guía no descuenta stock: eso ya lo hizo la venta o el traslado.">
         <div className="relative">
           <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-          <Input className="pl-9" value={busca} onChange={(e) => setBusca(e.target.value)} placeholder="Agregar producto: nombre, SKU o código de barras" />
+          <Input className="pl-9" value={busca} onChange={(e) => setBusca(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); if (resultados.length === 0 && !buscando) agregarLineaLibre(); } }}
+            placeholder="Busca una prenda (nombre, SKU, código de barras) o escribe la línea, ej: 300 DISFRACES PARA NIÑOS" />
           {buscando && <Loader2 className="absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 animate-spin text-slate-400" />}
-          {resultados.length > 0 && (
-            <div className="absolute z-20 mt-1 max-h-64 w-full overflow-auto rounded-lg border bg-white shadow-xl">
+          {textoLibre.length >= 2 && !buscando && (
+            <div className="absolute z-20 mt-1 max-h-72 w-full overflow-auto rounded-lg border bg-white shadow-xl">
+              {resultados.length === 0 && (
+                <p className="border-b px-3 py-2 text-xs text-slate-500">No hay prendas del inventario con ese nombre.</p>
+              )}
+              <button type="button" onClick={agregarLineaLibre}
+                className="flex w-full items-center gap-2 border-b bg-happy-50/60 px-3 py-2 text-left text-sm hover:bg-happy-50">
+                <Plus className="h-4 w-4 text-happy-600" />
+                <span>Agregar como línea escrita: <strong>{lineaLibre.cantidad} × {lineaLibre.descripcion.toUpperCase()}</strong></span>
+              </button>
               {resultados.map((r) => (
                 <button key={r.variante_id} type="button" className="block w-full border-b px-3 py-2 text-left text-sm last:border-0 hover:bg-happy-50"
                   onClick={() => {
@@ -460,7 +497,7 @@ export function GuiaForm({ inicial, aviso, hoy, empresa, almacenes, transportist
               <tr><th className="px-3 py-2 text-left">Código</th><th className="px-3 py-2 text-left">Descripción</th><th className="w-28 px-3 py-2 text-right">Cantidad</th><th className="w-10" /></tr>
             </thead>
             <tbody>
-              {items.length === 0 && <tr><td colSpan={4} className="px-3 py-6 text-center text-slate-400">Agrega los productos que se envían.</td></tr>}
+              {items.length === 0 && <tr><td colSpan={4} className="px-3 py-6 text-center text-slate-400">Busca las prendas arriba, o escribe la línea a mano (ej: 300 DISFRACES PARA NIÑOS) y presiona Enter.</td></tr>}
               {items.map((it, i) => (
                 <tr key={i} className="border-t">
                   <td className="px-3 py-1.5 font-mono text-xs text-slate-500">{it.codigo || '—'}</td>
