@@ -13,6 +13,7 @@
 import { z } from 'zod';
 import { revalidatePath } from 'next/cache';
 import { createClient } from '@happy/db/server';
+import { sesionAbiertaDelUsuario } from '@/server/sesion-caja';
 
 async function requireUser(sb: Awaited<ReturnType<typeof createClient>>) {
   const { data: { user } } = await sb.auth.getUser();
@@ -81,13 +82,8 @@ export async function registrarMovimientoCajaChica(input: z.input<typeof registr
     const sb = await createClient();
     const user = await requireUser(sb);
 
-    // Buscar sesión activa
-    const { data: sesion } = await sb
-      .from('cajas_sesiones')
-      .select('id, caja_id')
-      .is('cerrada_en', null)
-      .eq('abierta_por', user.id)
-      .maybeSingle();
+    // El turno abierto de la caja del usuario, la haya abierto quien la haya abierto.
+    const sesion = await sesionAbiertaDelUsuario(sb, user.id);
     if (!sesion) return { ok: false, error: 'No hay sesión de caja abierta' };
 
     const { data: row, error } = await (sb as unknown as {
@@ -126,12 +122,7 @@ export async function listarMovimientosCajaChicaSesion(): Promise<MovimientoCaja
   const sb = await createClient();
   const user = await requireUser(sb);
 
-  const { data: sesion } = await sb
-    .from('cajas_sesiones')
-    .select('id')
-    .is('cerrada_en', null)
-    .eq('abierta_por', user.id)
-    .maybeSingle();
+  const sesion = await sesionAbiertaDelUsuario(sb, user.id);
   if (!sesion) return [];
 
   const { data: movs } = await (sb as unknown as {

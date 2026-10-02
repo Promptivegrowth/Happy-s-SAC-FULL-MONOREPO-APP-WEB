@@ -19,6 +19,7 @@
 import { variantesDeNumero } from '@happy/lib/comprobantes/numero';
 import { z } from 'zod';
 import { createClient } from '@happy/db/server';
+import { sesionAbiertaDelUsuario } from '@/server/sesion-caja';
 import { createServiceClient } from '@happy/db/service';
 import { formatTallaChip } from '@happy/lib';
 
@@ -53,12 +54,10 @@ async function salidaDeCaja(
     if (data && !data.cerrada_en) sesion = { id: data.id, caja_id: data.caja_id };
   }
   if (!sesion) {
-    const { data } = await sb.from('cajas_sesiones').select('id, caja_id')
-      .is('cerrada_en', null).eq('abierta_por', a.userId).limit(1).maybeSingle();
-    if (data) sesion = data;
+    sesion = await sesionAbiertaDelUsuario(sb, a.userId);
   }
   if (!sesion) {
-    return `No hay una caja abierta a tu nombre: los S/ ${a.monto.toFixed(2)} devueltos no se descontaron del cuadre. Anótalos como gasto.`;
+    return `Tu caja no tiene un turno abierto: los S/ ${a.monto.toFixed(2)} devueltos no se descontaron del cuadre. Anótalos como gasto.`;
   }
 
   const { data: cat } = await sb.from('caja_chica_categorias').select('id').eq('codigo', 'DEVOLUCION_CLIENTE').maybeSingle();

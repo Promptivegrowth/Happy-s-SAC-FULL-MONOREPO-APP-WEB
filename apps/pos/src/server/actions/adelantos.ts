@@ -20,6 +20,7 @@
 import { z } from 'zod';
 import { revalidatePath } from 'next/cache';
 import { createClient } from '@happy/db/server';
+import { sesionAbiertaDelUsuario } from '@/server/sesion-caja';
 
 async function requireUser(sb: Awaited<ReturnType<typeof createClient>>) {
   const { data: { user } } = await sb.auth.getUser();
@@ -122,12 +123,7 @@ export async function registrarEntradaAdelanto(input: z.input<typeof entradaSche
     const user = await requireUser(sb);
 
     // Buscar sesión activa para vincular
-    const { data: sesion } = await sb
-      .from('cajas_sesiones')
-      .select('id')
-      .is('cerrada_en', null)
-      .eq('abierta_por', user.id)
-      .maybeSingle();
+    const sesion = await sesionAbiertaDelUsuario(sb, user.id);
 
     const numero = await nextAdelantoNumero(sb);
 
@@ -187,12 +183,7 @@ export async function registrarDevolucionAdelanto(input: z.input<typeof devoluci
       return { ok: false, error: `Saldo insuficiente (disponible: S/ ${saldo.toFixed(2)})` };
     }
 
-    const { data: sesion } = await sb
-      .from('cajas_sesiones')
-      .select('id')
-      .is('cerrada_en', null)
-      .eq('abierta_por', user.id)
-      .maybeSingle();
+    const sesion = await sesionAbiertaDelUsuario(sb, user.id);
 
     const numero = await nextAdelantoNumero(sb);
 

@@ -7,6 +7,7 @@
  */
 
 import { createClient } from '@happy/db/server';
+import { sesionAbiertaDelUsuario } from '@/server/sesion-caja';
 
 export type StockPorAlmacenItem = {
   almacen_id: string;
@@ -45,13 +46,7 @@ export async function obtenerStockPorAlmacen(varianteId: string): Promise<{
   // 2. Almacén actual (de la sesión POS activa del usuario)
   let almacenActualId: string | null = null;
   try {
-    const { data: sesion } = await sb
-      .from('cajas_sesiones')
-      .select('caja_id')
-      .is('cerrada_en', null)
-      .eq('abierta_por', user.id)
-      .maybeSingle();
-    const cajaId = (sesion as { caja_id: string } | null)?.caja_id;
+    const cajaId = (await sesionAbiertaDelUsuario(sb, user.id))?.caja_id;
     if (cajaId) {
       const { data: caja } = await sb
         .from('cajas')
