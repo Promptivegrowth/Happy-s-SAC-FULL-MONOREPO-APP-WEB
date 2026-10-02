@@ -372,6 +372,15 @@ export function PosTerminal({
   // Cliente pidió (2026-07-10) poder editar el precio unitario y aplicar
   // descuento sin salir del carrito, como en su sistema anterior.
   const [overridesPrecio, setOverridesPrecio] = useState<Record<string, number>>({});
+  /*
+   * Precios que vienen de una cotización cargada. No son un precio fijo: son un
+   * TOPE. Se cobra el menor entre lo cotizado y lo que corresponde hoy por
+   * cantidad. Antes se congelaban como precio manual y, si al cargar una
+   * cotización se sumaban prendas hasta pasar las 100, esas líneas se quedaban
+   * en precio mayorista y nunca bajaban a precio fábrica (COT-00007 y COT-00008,
+   * 107 y 109 prendas, reclamo de Javier del 01/10/2026).
+   */
+  const [preciosCotizacion, setPreciosCotizacion] = useState<Record<string, number>>({});
   const [descuentosLinea, setDescuentosLinea] = useState<Record<string, number>>({});
   const [vista, setVista] = useState<'busqueda' | 'catalogo'>('busqueda');
   const [catFiltro, setCatFiltro] = useState<string>('');
@@ -600,23 +609,25 @@ export function PosTerminal({
   const lineasConPrecio = useMemo(
     () => carrito.map((l) => {
       const r = calcularPrecioPorCantidad(l.variante, totalItemsCarrito, configEscalones);
-      // Prioridad: override manual del cajero > precio calculado por escalón.
+      // Prioridad: precio manual del cajero > lo cotizado como tope > escalón.
       const overrideKey = l.variante.id;
-      const precioBase = overridesPrecio[overrideKey] ?? r.precio;
+      const cotizado = preciosCotizacion[overrideKey];
+      const porCantidad = cotizado != null ? Math.min(cotizado, r.precio) : r.precio;
+      const precioBase = overridesPrecio[overrideKey] ?? porCantidad;
       const descuento = descuentosLinea[overrideKey] ?? 0;
       const precioFinal = Math.max(0, precioBase - descuento);
       const isOverride = overridesPrecio[overrideKey] != null;
       return {
         ...l,
         precio_unitario: precioFinal,
-        precio_base_calculado: r.precio,
+        precio_base_calculado: porCantidad,
         precio_override: isOverride ? precioBase : null,
         descuento_unitario: descuento,
         escalon: r.escalon,
         subtotal: l.cantidad * precioFinal,
       };
     }),
-    [carrito, configEscalones, totalItemsCarrito, overridesPrecio, descuentosLinea],
+    [carrito, configEscalones, totalItemsCarrito, overridesPrecio, preciosCotizacion, descuentosLinea],
   );
 
   const total = useMemo(() => lineasConPrecio.reduce((a, l) => a + l.subtotal, 0), [lineasConPrecio]);
@@ -771,14 +782,15 @@ export function PosTerminal({
         avisos.push(`${v.productos.nombre} T${formatTalla(v.talla)}: solo ${stock} de ${l.cantidad}`);
       }
       nuevoCarrito.push({ variante: v, cantidad: cant });
-      nuevosOverrides[v.id] = l.precio_unitario; // precio congelado
+      nuevosOverrides[v.id] = l.precio_unitario; // tope: lo cotizado (ver preciosCotizacion)
     }
     if (nuevoCarrito.length === 0) {
       toast.error('Ninguna línea de la cotización tiene stock disponible.');
       return;
     }
     setCarrito(nuevoCarrito);
-    setOverridesPrecio(nuevosOverrides);
+    setOverridesPrecio({});
+    setPreciosCotizacion(nuevosOverrides);
     setDescuentosLinea({});
     if (det.cliente_id) setClienteIdSeleccionado(det.cliente_id);
     if (det.cliente_nombre) setNombreCliente(det.cliente_nombre);
@@ -817,6 +829,12 @@ export function PosTerminal({
     // esto, si se re-escaneaba la misma variante en la misma venta, el precio
     // editado viejo se reaplicaba silenciosamente (fix 2026-07-12).
     setOverridesPrecio((prev) => {
+      if (!(varianteId in prev)) return prev;
+      const next = { ...prev };
+      delete next[varianteId];
+      return next;
+    });
+    setPreciosCotizacion((prev) => {
       if (!(varianteId in prev)) return prev;
       const next = { ...prev };
       delete next[varianteId];
@@ -1321,6 +1339,7 @@ export function PosTerminal({
     setTelefonoCliente('');
     setClienteIdSeleccionado(null);
     setOverridesPrecio({});
+    setPreciosCotizacion({});
     setDescuentosLinea({});
     setEfectivoInput('');
     setBusquedaCliente('');
