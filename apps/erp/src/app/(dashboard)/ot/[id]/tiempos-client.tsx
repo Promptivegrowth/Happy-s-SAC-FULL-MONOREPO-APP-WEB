@@ -1,6 +1,7 @@
 'use client';
 
 import Link from 'next/link';
+import { calcularStats, corteMinPorUnidad, type ProcesoCalc } from './tiempos-calc';
 import { useMemo, useState, useTransition } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@happy/ui/card';
 import { Badge } from '@happy/ui/badge';
@@ -197,6 +198,9 @@ export function TiemposCostoTab({ otId, procesos, lineas, registros, operarios, 
 
   // Totales GLOBALES de la orden (todas las tallas) — para el resumen global.
   const unidadesGlobal = lineasProducto.reduce((s, l) => s + Number(l.cantidad_cortada ?? 0), 0);
+  // El corte se liquida para toda la orden (todos sus productos y tallas): sus
+  // minutos se reparten por unidad cortada de la OT.
+  const unidadesCorteOT = lineas.reduce((s, l) => s + Number(l.cantidad_cortada ?? 0), 0);
   const unidadesPlanGlobal = lineasProducto.reduce((s, l) => s + Number(l.cantidad_planificada ?? 0), 0);
   // Registros de este producto (todas las tallas) para el resumen global.
   const registrosProducto = useMemo(
@@ -346,6 +350,8 @@ export function TiemposCostoTab({ otId, procesos, lineas, registros, operarios, 
             registros={registrosProducto}
             unidades={unidadesGlobal}
             unidadesPlan={unidadesPlanGlobal}
+            corteResumen={corteResumen}
+            unidadesCorteOT={unidadesCorteOT}
           />
         </CardContent>
         <CardContent className="p-0">
@@ -354,6 +360,7 @@ export function TiemposCostoTab({ otId, procesos, lineas, registros, operarios, 
             registros={registrosProducto}
             unidades={unidadesGlobal}
             corteResumen={corteResumen}
+            unidadesCorteOT={unidadesCorteOT}
           />
         </CardContent>
       </Card>
@@ -389,6 +396,8 @@ export function TiemposCostoTab({ otId, procesos, lineas, registros, operarios, 
             registros={registrosTalla}
             unidades={unidades}
             unidadesPlan={unidadesPlan}
+            corteResumen={corteResumen}
+            unidadesCorteOT={unidadesCorteOT}
           />
         </CardContent>
         <CardContent className="p-0">
@@ -399,6 +408,8 @@ export function TiemposCostoTab({ otId, procesos, lineas, registros, operarios, 
             procesos={procesosTalla}
             registros={registrosTalla}
             unidades={unidades}
+            corteResumen={corteResumen}
+            unidadesCorteOT={unidadesCorteOT}
             marcarCortePorUnidades
           />
         </CardContent>
@@ -423,33 +434,22 @@ export function TiemposCostoTab({ otId, procesos, lineas, registros, operarios, 
  * Se usa dos veces: global de la orden y por talla.
  */
 function StatsAvance({
-  procesos, registros, unidades, unidadesPlan,
+  procesos, registros, unidades, unidadesPlan, corteResumen, unidadesCorteOT = 0,
 }: {
   procesos: Proceso[];
   registros: RegistroTiempo[];
   unidades: number;
   unidadesPlan: number;
+  corteResumen?: CorteResumen;
+  unidadesCorteOT?: number;
 }) {
-  let totalEstandarMin = 0;
-  let totalRealMin = 0;
-  let totalCostoEstandarUnit = 0;
-  let totalCostoRealUnit = 0;
-  let opsConRegistro = 0;
-  for (const p of procesos) {
-    const std = Number(p.tiempo_estandar_min ?? 0);
-    const vmin = Number(p.area?.valor_minuto ?? 0);
-    const regs = registros.filter((r) => r.proceso_id === p.id);
-    const tiempoTotal = regs.reduce((s, r) => s + Number(r.tiempo_total_min), 0);
-    const unidadesProcesadasOp = regs.reduce((s, r) => s + Number(r.unidades_procesadas ?? 0), 0);
-    const denominador = unidadesProcesadasOp > 0 ? unidadesProcesadasOp : unidades;
-    const tiempoRealUnit = denominador > 0 ? tiempoTotal / denominador : 0;
-    if (tiempoRealUnit > 0) opsConRegistro++;
-    totalEstandarMin += std;
-    totalRealMin += tiempoRealUnit > 0 ? tiempoRealUnit : std;
-    totalCostoEstandarUnit += std * vmin;
-    totalCostoRealUnit += (tiempoRealUnit > 0 ? tiempoRealUnit : std) * vmin;
-  }
-  const totalOps = procesos.length;
+  const st = calcularStats({ procesos, registros, unidades, corteResumen, unidadesCorteOT });
+  const totalEstandarMin = st.estandarMin;
+  const totalRealMin = st.realMin;
+  const totalCostoEstandarUnit = st.costoEstandarUnit;
+  const totalCostoRealUnit = st.costoRealUnit;
+  const opsConRegistro = st.opsConRegistro;
+  const totalOps = st.totalOps;
   const hayRegistros = opsConRegistro > 0;
   const parcial = hayRegistros && opsConRegistro < totalOps;
   const totalCostoEstandar = totalCostoEstandarUnit * unidades;
@@ -499,12 +499,14 @@ function StatsAvance({
  *  Para las operaciones del área de CORTE, el tiempo se toma de la LIQUIDACIÓN
  *  del corte (no de registros de la OT), sumando por tipo de operación. */
 function ResumenOperacionesTabla({
-  procesos, registros, unidades, corteResumen, marcarCortePorUnidades = false,
+  procesos, registros, unidades, corteResumen, unidadesCorteOT = 0, marcarCortePorUnidades = false,
 }: {
   procesos: Proceso[];
   registros: RegistroTiempo[];
   unidades: number;
   corteResumen?: CorteResumen;
+  /** Unidades cortadas de toda la OT (para repartir los minutos del corte). */
+  unidadesCorteOT?: number;
   /** Vista POR TALLA: el corte no se registra por talla, pero si la talla ya se
    *  cortó (unidades > 0) sus operaciones de área CORTE están 100% avanzadas
    *  (pedido cliente 2026-08-16). El tiempo/costo queda en blanco (se liquida
@@ -545,7 +547,8 @@ function ResumenOperacionesTabla({
           const vmin = Number(p.area?.valor_minuto ?? 0);
           const regs = registros.filter((r) => r.proceso_id === p.id);
           // El tiempo de las operaciones de CORTE viene de la liquidación del corte.
-          const corteMin = corteMinDeOp(p);
+          const corteU = corteMinPorUnidad(p as ProcesoCalc, corteResumen, unidadesCorteOT);
+          const corteMin = corteU !== null ? corteU * unidades : corteMinDeOp(p);
           const inyectadoCorte = corteMin !== null;
           const totalRegistrado = inyectadoCorte ? (corteMin ?? 0) : regs.reduce((s, r) => s + Number(r.tiempo_total_min), 0);
           const unidadesProcOp = regs.reduce((s, r) => s + Number(r.unidades_procesadas ?? 0), 0);

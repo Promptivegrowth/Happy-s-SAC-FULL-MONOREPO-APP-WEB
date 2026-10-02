@@ -54,7 +54,7 @@ const COLS_TIEMPOS: ColExport[] = [
   { header: 'OT', key: 'ot_numero', width: 14 },
   { header: 'Producto', key: 'producto', width: 34 },
   { header: 'Área', key: 'area', width: 18 },
-  { header: 'Proceso', key: 'proceso', width: 24 },
+  { header: 'Operación', key: 'proceso', width: 26 },
   { header: 'Tercerizado', key: 'tercerizado', width: 12 },
   { header: 'Unidades', key: 'unidades', formato: 'numero', width: 10 },
   { header: 'Estándar min/u', key: 'estandar_min_u', width: 14 },
@@ -98,11 +98,11 @@ export default async function Page({ searchParams }: { searchParams: Promise<SP>
     { indicador: 'Materiales — valor real consumido', valor: formatPEN(metricas.valor_real), detalle: 'Salidas de producción del kardex, menos devoluciones de material' },
     { indicador: 'Materiales — diferencia', valor: formatPEN(metricas.valor_diferencia), detalle: `${metricas.desviacion_consumo_pct.toFixed(2)}% respecto de la receta (positivo = se consumió más)` },
     { indicador: 'Materiales consumidos fuera de receta', valor: metricas.materiales_sin_receta, detalle: 'Líneas con consumo real pero sin estar en la receta del producto' },
-    { indicador: 'Tiempos — estándar de receta (min)', valor: formatNumber(metricas.estandar_min, 1), detalle: 'Tiempo estándar del proceso × unidades procesadas (sólo procesos con estándar en la receta)' },
+    { indicador: 'Tiempos — estándar de receta (min)', valor: formatNumber(metricas.estandar_min, 1), detalle: 'Tiempo estándar de cada operación × unidades procesadas (sólo operaciones con estándar en la receta)' },
     { indicador: 'Tiempos — real declarado (min)', valor: formatNumber(metricas.real_min, 1), detalle: 'Registros de tiempo de las operaciones de la OT' },
     { indicador: 'Tiempos — diferencia', valor: formatNumber(metricas.diferencia_min, 1), detalle: `${metricas.desviacion_tiempo_pct.toFixed(2)}% respecto de la receta (positivo = tomó más tiempo)` },
     { indicador: 'Minutos reales en procesos sin estándar', valor: formatNumber(metricas.real_min_sin_estandar, 1), detalle: 'Trabajo declarado en procesos que no tienen tiempo estándar cargado en la receta (no se puede comparar)' },
-    { indicador: 'Minutos liquidados en corte', valor: formatNumber(metricas.corte_liquidado_min, 1), detalle: 'Tendido + corte + habilitado de la liquidación de corte (informativo, no entra en el cuadro de procesos)' },
+    { indicador: 'Minutos liquidados en corte', valor: formatNumber(metricas.corte_liquidado_min, 1), detalle: 'Tendido + corte + habilitado de la liquidación de corte (ya incluidos en el cuadro por operación)' },
   ];
 
   const hojas: HojaReporte[] = [
@@ -376,7 +376,7 @@ export default async function Page({ searchParams }: { searchParams: Promise<SP>
 
           <Card>
             <div className="flex items-center justify-between border-b bg-slate-50 p-3">
-              <h3 className="flex items-center gap-2 text-sm font-semibold text-corp-900"><Clock className="h-4 w-4 text-slate-400" />Tiempos por OT y proceso</h3>
+              <h3 className="flex items-center gap-2 text-sm font-semibold text-corp-900"><Clock className="h-4 w-4 text-slate-400" />Tiempos por OT y operación</h3>
               <span className="text-[11px] text-slate-500">{tiempos.length} líneas{tiempos.length > 200 ? ' · se muestran las primeras 200' : ''}</span>
             </div>
             <div className="overflow-x-auto p-0">
@@ -384,7 +384,7 @@ export default async function Page({ searchParams }: { searchParams: Promise<SP>
                 <TableHeader>
                   <TableRow>
                     <TableHead>OT</TableHead>
-                    <TableHead>Proceso</TableHead>
+                    <TableHead>Operación</TableHead>
                     <TableHead>Área</TableHead>
                     <TableHead className="text-right">Und.</TableHead>
                     <TableHead className="text-right">Est. min/u</TableHead>

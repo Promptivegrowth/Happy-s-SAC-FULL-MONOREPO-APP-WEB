@@ -20,12 +20,11 @@
  *        viene NULL), así que ambos lados se valorizan con
  *        materiales.precio_unitario para que la comparación sea homogénea.
  *
- *   B) TIEMPOS por OT y proceso
- *      · Estándar = productos_procesos.tiempo_estandar_min × unidades procesadas.
- *      · Real     = ot_registros_tiempo.tiempo_total_min.
- *      NO se mezclan acá los minutos de la liquidación de corte
- *      (ot_corte_tiempos) para no duplicar el proceso CORTE: van aparte como
- *      métrica informativa.
+ *   B) TIEMPOS por OT y OPERACIÓN (ver server/tiempos-por-operacion.ts)
+ *      · Estándar = tiempo estándar de la receta (por talla) × unidades.
+ *      · Real     = ot_registros_tiempo.tiempo_total_min; las operaciones de
+ *        corte, con los minutos de la liquidación del corte (no se registran
+ *        en la OT, así que no hay doble conteo).
  *
  * Alcance: OTs con ACTIVIDAD en el período (abiertas antes de "hasta" y que
  * seguían abiertas o cerraron después de "desde"), no solamente las cerradas.
@@ -34,6 +33,7 @@
 import { createClient } from '@happy/db/server';
 import { redirect } from 'next/navigation';
 import { precioPorUnidadDeConsumo } from '@/server/costo-material';
+import { tiemposPorOperacion, type RegTiempo, type ProcReceta, type CorteTiempo } from '@/server/tiempos-por-operacion';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 async function sbReadonly(): Promise<{ from: (t: string) => any }> {
@@ -45,6 +45,19 @@ async function sbReadonly(): Promise<{ from: (t: string) => any }> {
 }
 
 const r2 = (n: number) => Math.round(n * 100) / 100;
+
+/** Lee todas las filas de una consulta de a 1.000 (el tope de la base). */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function todasLasFilas<T>(armar: () => any): Promise<T[]> {
+  const out: T[] = [];
+  for (let desde = 0; desde < 50000; desde += 1000) {
+    const { data, error } = await armar().range(desde, desde + 999);
+    if (error) throw new Error(error.message);
+    out.push(...((data ?? []) as T[]));
+    if (!data || data.length < 1000) break;
+  }
+  return out;
+}
 
 export type ConsumoRow = {
   ot_id: string;
@@ -344,83 +357,64 @@ export async function reporteConsumosYTiempos(
   // =========================================================================
   // B) TIEMPOS POR PROCESO
   // =========================================================================
-  const { data: regsRaw } = await sb.from('ot_registros_tiempo')
-    .select('ot_id, proceso_id, unidades_procesadas, tiempo_total_min')
-    .in('ot_id', otIds);
-  type Reg = { ot_id: string; proceso_id: string; unidades_procesadas: number | null; tiempo_total_min: number | string | null };
-  const regs = (regsRaw ?? []) as Reg[];
+  // Una fila por OPERACIÓN (ver tiempos-por-operacion.ts). Antes se agrupaba
+  // por categoría y las operaciones de acabado salían mezcladas en una sola.
+  const regs = await todasLasFilas<RegTiempo>(() => sb.from('ot_registros_tiempo')
+    .select('ot_id, proceso_id, talla, unidades_procesadas, tiempo_total_min')
+    .in('ot_id', otIds).order('id'));
+  const procesosReceta = productoIds.length
+    ? await todasLasFilas<ProcReceta>(() => sb.from('productos_procesos')
+      .select('id, producto_id, talla, proceso, descripcion_operativa, orden, tiempo_estandar_min, es_tercerizado, areas_produccion:area_id(codigo, nombre)')
+      .in('producto_id', productoIds).order('id'))
+    : [];
 
-  const procesoIds = Array.from(new Set(regs.map((r) => r.proceso_id).filter(Boolean)));
-  type Proc = { id: string; proceso: string; orden: number | null; tiempo_estandar_min: number | string | null; es_tercerizado: boolean | null; areas_produccion: { nombre: string | null } | null };
-  const procById = new Map<string, Proc>();
-  if (procesoIds.length > 0) {
-    const { data: procRaw } = await sb.from('productos_procesos')
-      .select('id, proceso, orden, tiempo_estandar_min, es_tercerizado, areas_produccion:area_id(nombre)')
-      .in('id', procesoIds);
-    for (const p of (procRaw ?? []) as unknown as Proc[]) procById.set(p.id, p);
-  }
-
-  type TAcc = {
-    ot_id: string; proceso: string; area: string; orden: number; tercerizado: boolean;
-    unidades: number; estandar: number; real: number; registros: number; stdU: number;
-  };
-  const tacc = new Map<string, TAcc>();
-  for (const r of regs) {
-    const p = procById.get(r.proceso_id);
-    const proceso = p?.proceso ?? 'Proceso eliminado';
-    const k = `${r.ot_id}::${proceso}`;
-    const stdU = Number(p?.tiempo_estandar_min ?? 0);
-    const cur = tacc.get(k) ?? {
-      ot_id: r.ot_id, proceso, area: p?.areas_produccion?.nombre ?? '—',
-      orden: Number(p?.orden ?? 999), tercerizado: Boolean(p?.es_tercerizado),
-      unidades: 0, estandar: 0, real: 0, registros: 0, stdU,
-    };
-    const und = Number(r.unidades_procesadas ?? 0);
-    cur.unidades += und;
-    cur.estandar += stdU * und;
-    cur.real += Number(r.tiempo_total_min ?? 0);
-    cur.registros += 1;
-    cur.stdU = stdU || cur.stdU;
-    tacc.set(k, cur);
-  }
-
-  const tiempos: TiempoProcesoRow[] = [...tacc.values()].map((t) => {
-    const ot = otById.get(t.ot_id)!;
-    const dif = t.real - t.estandar;
-    return {
-      ot_id: t.ot_id,
-      ot_numero: ot.numero,
-      producto: productoDeOt.get(t.ot_id) ?? '—',
-      area: t.area,
-      proceso: t.proceso,
-      orden: t.orden,
-      tercerizado: t.tercerizado ? 'Sí' : 'No',
-      unidades: t.unidades,
-      estandar_min_u: r2(t.stdU),
-      estandar_min: r2(t.estandar),
-      real_min: r2(t.real),
-      real_min_u: t.unidades > 0 ? r2(t.real / t.unidades) : 0,
-      diferencia_min: r2(dif),
-      desviacion_pct: t.estandar > 0 ? r2((dif / t.estandar) * 100) : 0,
-      registros: t.registros,
-    };
-  }).sort((a, b) =>
-    a.ot_numero === b.ot_numero
-      ? a.orden - b.orden
-      : a.ot_numero < b.ot_numero ? 1 : -1,
-  );
-
-  // Minutos de la liquidación de corte (informativo, no se mezcla arriba).
-  let corteLiquidadoMin = 0;
+  // Tiempos de la liquidación del corte (por tela) y de la cabecera del corte.
   const corteIds = ((cortesRaw ?? []) as { id: string }[]).map((c) => c.id);
+  const otDeCorte = new Map(((cortesRaw ?? []) as { id: string; ot_id: string }[]).map((c) => [c.id, c.ot_id]));
+  const cortesTiempo: CorteTiempo[] = [];
+  let corteLiquidadoMin = 0;
   if (corteIds.length > 0) {
-    const { data: ctRaw } = await sb.from('ot_corte_tiempos')
-      .select('tiempo_tendido_min, tiempo_corte_min, tiempo_habilitado_min')
-      .in('corte_id', corteIds);
-    for (const t of (ctRaw ?? []) as { tiempo_tendido_min: number | string | null; tiempo_corte_min: number | string | null; tiempo_habilitado_min: number | string | null }[]) {
-      corteLiquidadoMin += Number(t.tiempo_tendido_min ?? 0) + Number(t.tiempo_corte_min ?? 0) + Number(t.tiempo_habilitado_min ?? 0);
+    const [{ data: ctRaw }, { data: cabRaw }] = await Promise.all([
+      sb.from('ot_corte_tiempos').select('corte_id, tiempo_tendido_min, tiempo_corte_min, tiempo_habilitado_min').in('corte_id', corteIds),
+      sb.from('ot_corte').select('id, tiempo_tendido_min, tiempo_corte_min, tiempo_habilitado_min').in('id', corteIds),
+    ]);
+    type CT = { corte_id?: string; id?: string; tiempo_tendido_min: number | string | null; tiempo_corte_min: number | string | null; tiempo_habilitado_min: number | string | null };
+    for (const t of [...((ctRaw ?? []) as CT[]), ...((cabRaw ?? []) as CT[])]) {
+      const otId = otDeCorte.get((t.corte_id ?? t.id)!);
+      if (!otId) continue;
+      const c = { ot_id: otId, tendido: Number(t.tiempo_tendido_min ?? 0), corte: Number(t.tiempo_corte_min ?? 0), habilitado: Number(t.tiempo_habilitado_min ?? 0) };
+      corteLiquidadoMin += c.tendido + c.corte + c.habilitado;
+      cortesTiempo.push(c);
     }
   }
+
+  const tiempos: TiempoProcesoRow[] = tiemposPorOperacion({ regs, procesos: procesosReceta, lineas, cortes: cortesTiempo })
+    .map((t) => {
+      const ot = otById.get(t.ot_id)!;
+      const dif = t.real - t.estandar;
+      return {
+        ot_id: t.ot_id,
+        ot_numero: ot.numero,
+        producto: productoDeOt.get(t.ot_id) ?? '—',
+        area: t.area,
+        proceso: t.proceso,
+        orden: t.orden,
+        tercerizado: t.tercerizado ? 'Sí' : 'No',
+        unidades: t.unidades,
+        estandar_min_u: t.unidades > 0 ? r2(t.estandar / t.unidades) : 0,
+        estandar_min: r2(t.estandar),
+        real_min: r2(t.real),
+        real_min_u: t.unidades > 0 ? r2(t.real / t.unidades) : 0,
+        diferencia_min: r2(dif),
+        desviacion_pct: t.estandar > 0 ? r2((dif / t.estandar) * 100) : 0,
+        registros: t.registros,
+      };
+    })
+    .sort((a, b) =>
+      a.ot_numero === b.ot_numero
+        ? a.orden - b.orden
+        : a.ot_numero < b.ot_numero ? 1 : -1,
+    );
 
   // Los indicadores se calculan sólo sobre lo COMPARABLE, para que el resumen no
   // quede dominado por lo que todavía no se registró:
