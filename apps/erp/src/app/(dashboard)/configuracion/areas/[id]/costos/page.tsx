@@ -10,6 +10,7 @@ import { ArrowLeft, Calculator, Info } from 'lucide-react';
 import { formatPEN, formatNumber, formatDate } from '@happy/lib';
 import { getJornadaEstandar, minutosEfectivos, formatoHoras, resumenJornada } from '../../../../operarios/_jornada';
 import { CostosEditor, ParametrosEditor, AplicarValorMinutoButton, TraerPlanillaButton } from './client';
+import { repartoPorPersonas, valorMinutoArea } from '@/server/reparto-por-personas';
 
 export const metadata = { title: 'Centro de costos del área' };
 export const dynamic = 'force-dynamic';
@@ -66,7 +67,7 @@ export default async function Page({
 
   const { data: area } = await sbAny
     .from('areas_produccion')
-    .select('id, codigo, nombre, valor_minuto, activa, prorrateo_pct')
+    .select('id, codigo, nombre, valor_minuto, activa')
     .eq('id', id)
     .maybeSingle();
   if (!area) notFound();
@@ -115,22 +116,30 @@ export default async function Page({
   /*
    * La parte de los costos generales que carga esta área.
    *
-   * La luz y el agua llegan en un recibo por todo el local; se cargan una sola
-   * vez en Configuración → Costos generales y cada área toma su porcentaje. Sin
-   * esto había que partir el recibo a mano y tipearlo una vez por área todos
-   * los meses, que es justo lo que pidió evitar el cliente (16/09/2026).
+   * La luz, el agua y el alquiler llegan en un recibo por todo el local; se
+   * cargan una sola vez en Configuración → Costos generales y cada área toma
+   * un % según sus personas: operarios activos del área ÷ operarios activos de
+   * todas las áreas (regla del cliente, 01/10/2026; ver reparto-por-personas.ts).
    */
-  const { data: generalesRaw } = await sbAny
-    .from('costos_generales_mensuales')
-    .select('categoria, concepto, monto')
-    .eq('periodo', periodo);
+  const [{ data: generalesRaw }, { data: areasActRaw }, { data: todosOpsRaw }] = await Promise.all([
+    sbAny.from('costos_generales_mensuales').select('categoria, concepto, monto').eq('periodo', periodo),
+    sbAny.from('areas_produccion').select('id').eq('activa', true),
+    sbAny.from('operarios').select('area_id').eq('activo', true),
+  ]);
   const generales = (generalesRaw ?? []) as { categoria: string; concepto: string; monto: number | string }[];
   const totalGenerales = generales.reduce((s, g) => s + Number(g.monto ?? 0), 0);
-  const prorrateoPct = Number(area.prorrateo_pct ?? 0);
-  const costoGeneralProrrateado = (totalGenerales * prorrateoPct) / 100;
+  const reparto = repartoPorPersonas(
+    ((areasActRaw ?? []) as { id: string }[]).map((a) => a.id),
+    (todosOpsRaw ?? []) as { area_id: string | null }[],
+  );
+  const prorrateoPct = reparto.porArea.get(id)?.pct ?? 0;
+  const personasArea = reparto.porArea.get(id)?.personas ?? 0;
+  const prorrateoTxt = `${Number(prorrateoPct.toFixed(2))}%`;
 
   const costosPropios = costos.reduce((s, c) => s + Number(c.monto), 0);
-  const totalCostos = costosPropios + costoGeneralProrrateado;
+  const { parteGenerales: costoGeneralProrrateado, totalCostos, valor: valorCalculado } = valorMinutoArea({
+    costosPropios, totalGenerales, pct: prorrateoPct, minutos: minutosProductivos,
+  });
   const porCategoria = new Map<string, number>();
   for (const c of costos) porCategoria.set(c.categoria, (porCategoria.get(c.categoria) ?? 0) + Number(c.monto));
   // Los generales entran en su categoría, para que el desglose siga cuadrando.
@@ -138,8 +147,9 @@ export default async function Page({
     const parte = (Number(g.monto ?? 0) * prorrateoPct) / 100;
     if (parte > 0) porCategoria.set(g.categoria, (porCategoria.get(g.categoria) ?? 0) + parte);
   }
+  // Luz o alquiler cargados como costo propio: casi siempre son del local entero.
+  const pareceGeneral = costos.filter((c) => c.categoria === 'SERVICIOS' || c.categoria === 'ALQUILER');
 
-  const valorCalculado = minutosProductivos > 0 ? totalCostos / minutosProductivos : 0;
   const valorActual = Number(area.valor_minuto ?? 0);
   const diferencia = valorActual > 0 ? ((valorCalculado - valorActual) / valorActual) * 100 : 0;
 
@@ -147,7 +157,7 @@ export default async function Page({
     `${nombreMes(periodo)}: ${formatPEN(totalCostos)} de costos ÷ ${formatNumber(minutosProductivos, 0)} min productivos ` +
     `(${operarios.length} operario(s), ${diasHabiles} días, ${ocupacionPct}% de ocupación)` +
     (costoGeneralProrrateado > 0
-      ? ` · incluye ${formatPEN(costoGeneralProrrateado)} de costos generales (${prorrateoPct}%)`
+      ? ` · incluye ${formatPEN(costoGeneralProrrateado)} de costos generales (${prorrateoTxt}: ${personasArea} de ${reparto.totalPersonas} personas)`
       : '');
 
   const periodos: string[] = [];
@@ -188,8 +198,14 @@ export default async function Page({
           <div className="space-y-1 text-[12px] leading-relaxed text-sky-900">
             <p className="font-semibold">Dónde se registra cada cosa</p>
             <p>
-              <strong>Acá</strong> van los costos y pagos del mes que pertenecen a esta área: planilla, alquiler del local,
-              luz y agua, depreciación de las máquinas, mantenimiento e insumos indirectos. Es el centro de costo del área.
+              <strong>Acá</strong> van solo los costos propios de esta área: su planilla, la depreciación y el mantenimiento
+              de sus máquinas, y sus insumos indirectos (por ejemplo, el papel de plotter en corte).
+            </p>
+            <p>
+              <strong>La luz, el agua y el alquiler del local NO van acá</strong>: se cargan una sola vez en{' '}
+              <Link href="/configuracion/costos-generales" className="font-semibold underline">Costos generales</Link> y
+              cada área toma un % según sus personas. Esta área tiene {personasArea} de {reparto.totalPersonas} personas,
+              así que carga el {prorrateoTxt}.
             </p>
             <p>
               <strong>La planilla</strong> puedes traerla con un botón: suma el sueldo base de los operarios activos
@@ -200,7 +216,7 @@ export default async function Page({
               Talleres → Pagos; el valor minuto es el costo de la hora propia de la planta.
             </p>
             <p>
-              <strong>El cálculo:</strong> valor minuto = costos del mes ÷ minutos productivos del mes. Los minutos salen de
+              <strong>El cálculo:</strong> valor minuto = (costos propios + su % de los costos generales) ÷ minutos productivos del mes. Los minutos salen de
               la jornada estándar ({resumenJornada(jornada)}) × operarios del área × % de ocupación. Al aplicarlo, el valor
               queda en el área y en su histórico.
             </p>
@@ -223,11 +239,11 @@ export default async function Page({
           </p>
           {costoGeneralProrrateado > 0 ? (
             <p className="mt-0.5 text-[10px] text-corp-700">
-              + {formatPEN(costoGeneralProrrateado)} de costos generales ({prorrateoPct}% de {formatPEN(totalGenerales)})
+              + {formatPEN(costoGeneralProrrateado)} de costos generales ({prorrateoTxt} de {formatPEN(totalGenerales)} · {personasArea} de {reparto.totalPersonas} personas)
             </p>
           ) : totalGenerales > 0 ? (
-            <Link href="/configuracion/costos-generales" className="mt-0.5 block text-[10px] text-amber-700 underline">
-              Hay {formatPEN(totalGenerales)} de costos generales sin repartir a esta área
+            <Link href="/operarios" className="mt-0.5 block text-[10px] text-amber-700 underline">
+              No carga costos generales ({formatPEN(totalGenerales)}): no tiene operarios activos
             </Link>
           ) : null}
         </Card>
@@ -277,6 +293,18 @@ export default async function Page({
             planilla={operarios.reduce((s, o) => s + Number(o.sueldo_base ?? 0), 0)}
           />
         </div>
+        {pareceGeneral.length > 0 && (
+          <div className="flex gap-2 border-b border-amber-200 bg-amber-50 px-3 py-2 text-[12px] text-amber-900">
+            <Info className="mt-0.5 h-4 w-4 flex-shrink-0" />
+            <p>
+              {pareceGeneral.map((c) => `"${c.concepto}"`).join(', ')} {pareceGeneral.length === 1 ? 'parece un costo' : 'parecen costos'} de
+              todo el local. Si el recibo es de toda la empresa, bórralo de acá y cárgalo en{' '}
+              <Link href={`/configuracion/costos-generales?periodo=${periodo}`} className="font-semibold underline">Costos generales</Link>:
+              así se reparte entre todas las áreas según sus personas. Déjalo acá solo si es un gasto exclusivo de esta área
+              (por ejemplo, un medidor de luz propio).
+            </p>
+          </div>
+        )}
         <div className="p-0">
           <CostosEditor
             areaId={id}

@@ -3,6 +3,7 @@ import { requireRol } from '@/server/session';
 import { createClient } from '@happy/db/server';
 import { CostosGeneralesClient } from './client';
 import type { CostoGeneral } from '@/server/actions/costos-generales';
+import { repartoPorPersonas } from '@/server/reparto-por-personas';
 
 export const metadata = { title: 'Costos generales' };
 export const dynamic = 'force-dynamic';
@@ -32,7 +33,7 @@ export default async function CostosGeneralesPage({
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const sbAny = sb as unknown as { from: (t: string) => any };
 
-  const [{ data: costosRaw }, { data: areasRaw }] = await Promise.all([
+  const [{ data: costosRaw }, { data: areasRaw }, { data: opsRaw }] = await Promise.all([
     sbAny
       .from('costos_generales_mensuales')
       .select('id, periodo, categoria, concepto, monto, observacion')
@@ -41,25 +42,30 @@ export default async function CostosGeneralesPage({
       .order('concepto'),
     sbAny
       .from('areas_produccion')
-      .select('id, codigo, nombre, prorrateo_pct')
+      .select('id, codigo, nombre')
       .eq('activa', true)
       .order('codigo'),
+    sbAny.from('operarios').select('area_id').eq('activo', true),
   ]);
 
   const costos = ((costosRaw ?? []) as CostoGeneral[]).map((c) => ({ ...c, monto: Number(c.monto) }));
-  const areas = ((areasRaw ?? []) as Array<{ id: string; codigo: string; nombre: string; prorrateo_pct: number | string }>)
-    .map((a) => ({ ...a, prorrateo_pct: Number(a.prorrateo_pct ?? 0) }));
+  // El % de cada área sale de sus personas (ver reparto-por-personas.ts).
+  const areasBase = (areasRaw ?? []) as Array<{ id: string; codigo: string; nombre: string }>;
+  const reparto = repartoPorPersonas(areasBase.map((a) => a.id), (opsRaw ?? []) as { area_id: string | null }[]);
+  const areas = areasBase.map((a) => ({ ...a, ...(reparto.porArea.get(a.id) ?? { personas: 0, pct: 0 }) }));
 
   return (
     <PageShell
       title="Costos generales de la empresa"
-      description="La luz, el agua y el alquiler llegan en un recibo por todo el local. Se cargan una vez y se reparten entre las áreas."
+      description="La luz, el agua y el alquiler llegan en un recibo por todo el local. Se cargan una vez y se reparten entre las áreas según sus personas."
     >
       <CostosGeneralesClient
         periodo={periodo}
         periodos={periodos}
         costos={costos}
         areas={areas}
+        totalPersonas={reparto.totalPersonas}
+        sinArea={reparto.sinArea}
       />
     </PageShell>
   );
