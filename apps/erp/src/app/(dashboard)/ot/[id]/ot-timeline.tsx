@@ -21,6 +21,8 @@ export type EtapaTimeline = {
   codigo: string;
   estado: 'done' | 'current' | 'pending';
   fecha: string | null;
+  /** Qué es la fecha cuando no es la de inicio, ej. "retornó" (orden de servicio del taller). */
+  etiquetaFecha?: string | null;
 };
 
 const ICON_AREA: Record<string, LucideIcon> = {
@@ -87,7 +89,10 @@ export function OtTimeline({ etapas, cancelada = false }: { etapas: EtapaTimelin
                   {et.label.toLowerCase()}
                 </p>
                 {fmtFecha(et.fecha) && (
-                  <span className="mt-0.5 font-mono text-[10px] text-slate-500">{fmtFecha(et.fecha)}</span>
+                  <span className="mt-0.5 text-center font-mono text-[10px] leading-tight text-slate-500">
+                    {et.etiquetaFecha && <span className="block font-sans text-[9px] text-slate-400">{et.etiquetaFecha}</span>}
+                    {fmtFecha(et.fecha)}
+                  </span>
                 )}
                 {current && <span className="mt-0.5 rounded-full bg-happy-100 px-1.5 text-[9px] font-semibold uppercase text-happy-700">Aquí</span>}
               </div>

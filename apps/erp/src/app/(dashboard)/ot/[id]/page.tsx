@@ -12,6 +12,7 @@ import { OtAcciones, OtNotaForm, AgregarLineaOTForm, EliminarLineaOT } from './c
 import { TiemposCostoTab } from './tiempos-client';
 import { EstadoBanner } from './estado-banner';
 import { OtTimeline } from './ot-timeline';
+import { retornoDeEtapa } from './retorno-os';
 import { formatDate, formatDateTime, formatNumber , formatTallaChip } from '@happy/lib';
 import { Calendar, AlertTriangle, User, ShieldCheck, Scissors, Clock } from 'lucide-react';
 
@@ -105,7 +106,7 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
     // (pedido del cliente 21/07/2026).
     sbAny
       .from('ordenes_servicio')
-      .select('estado, proceso')
+      .select('estado, proceso, fecha_recepcion')
       .eq('ot_id', id),
   ]);
   const procesos = ((procesosRaw ?? []) as Array<{
@@ -166,7 +167,7 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
   const ordenConfeccion = ((procesos ?? []) as { proceso: string; orden: number }[])
     .filter((p) => p.proceso === 'COSTURA')
     .reduce((max, p) => Math.max(max, Number(p.orden ?? 0)), -1);
-  const osArr = (osRaw ?? []) as { estado: string; proceso: string }[];
+  const osArr = (osRaw ?? []) as { estado: string; proceso: string; fecha_recepcion: string | null }[];
   // Recepción parcial (campaña) también cuenta como retorno: las unidades que
   // ya volvieron habilitan las operaciones post-confección.
   const osRetornada = osArr.some((o) => ['RECEPCION_PARCIAL', 'RECEPCIONADA', 'CERRADA'].includes(o.estado));
@@ -288,7 +289,10 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
     // TODO el acabado delante de confección. Con tramos, cada área aparece en la
     // posición que le da la receta (y puede repetirse si la receta la repite).
     // Pedido cliente 2026-09-04.
-    type Tramo = { codigo: string; nombre: string; procs: typeof procesos; total: number; hechos: number; fecha: string | null };
+    type Tramo = {
+      codigo: string; nombre: string; procs: typeof procesos; total: number; hechos: number; fecha: string | null;
+      etiquetaFecha?: string | null;
+    };
     const tramos: Tramo[] = [];
     for (const p of [...procesos].sort((a, b) => a.orden - b.orden)) {
       const cod = p.area?.codigo;
@@ -317,6 +321,18 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
         }
       }
     }
+    /*
+     * Etapas que hace un taller (confección, bordado…): la fecha que importa es
+     * cuándo RETORNÓ la última orden de servicio, no cuándo empezó (pedido del
+     * cliente, 01/10/2026). Si todavía falta que vuelva alguna, se muestra la del
+     * último retorno con esa aclaración.
+     */
+    for (const t of tramos) {
+      const r = retornoDeEtapa(t.procs.map((p) => p.proceso), osArr);
+      if (!r) continue;
+      t.fecha = r.fecha;
+      t.etiquetaFecha = r.etiqueta;
+    }
     const areasOrden = tramos;
 
     const cancelada = ot.estado === 'CANCELADA';
@@ -337,7 +353,7 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
       if (done) estado = 'done';
       else if (!currentAssigned) { estado = 'current'; currentAssigned = true; }
       else estado = 'pending';
-      etapas.push({ label: a.nombre, codigo: a.codigo, estado, fecha: a.fecha });
+      etapas.push({ label: a.nombre, codigo: a.codigo, estado, fecha: a.fecha, etiquetaFecha: a.etiquetaFecha ?? null });
     }
     etapas.push({
       label: 'Enviado a almacén',

@@ -50,6 +50,7 @@ import {
   type CotizacionDetalle,
 } from '@/server/actions/cotizaciones';
 import { construirMensajeWhatsApp, abrirWhatsApp } from './whatsapp-helper';
+import { precioDeLinea, type ConfigEscalones } from './precio-linea';
 
 type Variante = {
   id: string;
@@ -88,35 +89,7 @@ type Caja = { id: string; codigo: string; nombre: string; almacen_id: string };
 type AlmacenTienda = { id: string; codigo: string; nombre: string; direccion: string | null };
 type Categoria = { id: string; nombre: string; activo: boolean };
 type LineaCarrito = { variante: Variante; cantidad: number };
-type ConfigEscalones = { mayorista_desde: number; industrial_desde: number; activos: boolean };
-type EscalonAplicado = 'PUBLICO' | 'MAYORISTA' | 'INDUSTRIAL';
-
-/**
- * Calcula el precio unitario según la cantidad y la configuración de escalones.
- * - Si los escalones están desactivados, siempre devuelve precio_publico.
- * - Si la variante no tiene precio_mayorista_a / precio_industrial cargados,
- *   cae a precio_publico (no se rompe el flujo de venta).
- */
-function calcularPrecioPorCantidad(
-  v: Variante,
-  cantidad: number,
-  cfg: ConfigEscalones,
-): { precio: number; escalon: EscalonAplicado } {
-  const publico = Number(v.precio_publico ?? 0);
-  if (!cfg.activos || cantidad < cfg.mayorista_desde) {
-    return { precio: publico, escalon: 'PUBLICO' };
-  }
-  if (cantidad >= cfg.industrial_desde) {
-    const industrial = Number(v.precio_industrial ?? 0);
-    return industrial > 0
-      ? { precio: industrial, escalon: 'INDUSTRIAL' }
-      : { precio: Number(v.precio_mayorista_a ?? publico), escalon: 'MAYORISTA' };
-  }
-  const mayorista = Number(v.precio_mayorista_a ?? 0);
-  return mayorista > 0
-    ? { precio: mayorista, escalon: 'MAYORISTA' }
-    : { precio: publico, escalon: 'PUBLICO' };
-}
+// Precio por cantidad, cotización y precio manual: ver ./precio-linea.
 type MetodoCarrito = 'EFECTIVO' | 'YAPE' | 'PLIN' | 'TARJETA_DEBITO' | 'TARJETA_CREDITO' | 'TRANSFERENCIA' | 'DEPOSITO' | 'CREDITO' | 'WHATSAPP_PENDIENTE';
 /** Nueva: incluye referencia a la cuenta bancaria elegida (BCP HAPPYS, etc)
  *  para que quede registrado a qué cuenta destino se cobró. */
@@ -608,23 +581,21 @@ export function PosTerminal({
   );
   const lineasConPrecio = useMemo(
     () => carrito.map((l) => {
-      const r = calcularPrecioPorCantidad(l.variante, totalItemsCarrito, configEscalones);
       // Prioridad: precio manual del cajero > lo cotizado como tope > escalón.
-      const overrideKey = l.variante.id;
-      const cotizado = preciosCotizacion[overrideKey];
-      const porCantidad = cotizado != null ? Math.min(cotizado, r.precio) : r.precio;
-      const precioBase = overridesPrecio[overrideKey] ?? porCantidad;
-      const descuento = descuentosLinea[overrideKey] ?? 0;
-      const precioFinal = Math.max(0, precioBase - descuento);
-      const isOverride = overridesPrecio[overrideKey] != null;
+      const k = l.variante.id;
+      const descuento = descuentosLinea[k] ?? 0;
+      const r = precioDeLinea({
+        variante: l.variante, totalItems: totalItemsCarrito, cfg: configEscalones,
+        manual: overridesPrecio[k], cotizado: preciosCotizacion[k], descuento,
+      });
       return {
         ...l,
-        precio_unitario: precioFinal,
-        precio_base_calculado: porCantidad,
-        precio_override: isOverride ? precioBase : null,
+        precio_unitario: r.precioFinal,
+        precio_base_calculado: r.porCantidad,
+        precio_override: r.precioManual,
         descuento_unitario: descuento,
         escalon: r.escalon,
-        subtotal: l.cantidad * precioFinal,
+        subtotal: l.cantidad * r.precioFinal,
       };
     }),
     [carrito, configEscalones, totalItemsCarrito, overridesPrecio, preciosCotizacion, descuentosLinea],
