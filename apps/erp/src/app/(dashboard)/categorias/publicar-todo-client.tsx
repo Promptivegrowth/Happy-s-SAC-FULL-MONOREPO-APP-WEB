@@ -16,7 +16,7 @@ export function PublicarTodoElCatalogoButton({ totalSinPublicar }: { totalSinPub
     if (
       !confirm(
         `Esto publicará ${totalSinPublicar} productos sin publicar de TODAS las categorías activas en la web. ` +
-          '\n\nÚsalo solo para poblar la web por primera vez. Después podés ocultar productos individualmente desde /web-catalogo.\n\n¿Continuar?',
+          '\n\nÚsalo solo para poblar la web por primera vez. Después puedes ocultar productos individualmente desde /web-catalogo.\n\n¿Continuar?',
       )
     ) {
       return;

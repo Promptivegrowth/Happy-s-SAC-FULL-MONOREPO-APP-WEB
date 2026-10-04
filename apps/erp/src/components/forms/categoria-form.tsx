@@ -107,7 +107,7 @@ export function CategoriaForm({ initial }: { initial?: Categoria }) {
             error={state.fields?.codigo}
             hint={isEdit
               ? 'Cambiar este código rompe los SKUs ya emitidos. Edítalo solo si sabes lo que haces.'
-              : 'Se autocompleta del nombre. Editable si querés override.'}
+              : 'Se autocompleta del nombre. Puedes cambiarlo si quieres.'}
           >
             <div className="relative">
               <Input

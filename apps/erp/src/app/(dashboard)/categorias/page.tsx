@@ -157,7 +157,7 @@ export default async function CategoriasPage({ searchParams }: { searchParams: P
             </li>
             <li>
               ¿Necesitas ocultar UN producto puntual sin afectar al resto de la categoría? Ve
-              a <code className="rounded bg-slate-100 px-1">/web-catalogo</code> y usá el toggle
+              a <code className="rounded bg-slate-100 px-1">/web-catalogo</code> y usa el interruptor
               individual de ese producto.
             </li>
           </ul>

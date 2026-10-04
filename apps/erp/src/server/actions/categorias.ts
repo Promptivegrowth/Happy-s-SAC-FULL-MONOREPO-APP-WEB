@@ -432,8 +432,24 @@ export async function despublicarTodosCategoria(categoriaId: string): Promise<Ac
 export async function eliminarCategoria(id: string): Promise<ActionResult> {
   const r = await runAction(async () => {
     const { sb } = await requireUser();
+    // Con productos o subcategorías la base no deja borrarla; se explica en vez
+    // de mostrar el error técnico de la clave foránea.
+    const [{ count: productos }, { count: hijas }] = await Promise.all([
+      sb.from('productos').select('id', { count: 'exact', head: true }).eq('categoria_id', id),
+      sb.from('categorias').select('id', { count: 'exact', head: true }).eq('padre_id', id),
+    ]);
+    if ((productos ?? 0) > 0) {
+      throw new Error(`No se puede eliminar: tiene ${productos} producto(s). Pásalos a otra categoría o desactívala para ocultarla.`);
+    }
+    if ((hijas ?? 0) > 0) {
+      throw new Error(`No se puede eliminar: tiene ${hijas} subcategoría(s). Muévelas o elimínalas primero.`);
+    }
     const { error } = await sb.from('categorias').delete().eq('id', id);
-    if (error) throw new Error(error.message);
+    if (error) {
+      throw new Error(error.code === '23503'
+        ? 'No se puede eliminar: la usan cupones u otros registros. Desactívala para ocultarla.'
+        : error.message);
+    }
     return null;
   });
   if (r.ok) await bumpPaths('/categorias', '/web-catalogo');
