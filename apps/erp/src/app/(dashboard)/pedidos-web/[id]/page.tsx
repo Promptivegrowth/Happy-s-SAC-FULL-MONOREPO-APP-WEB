@@ -22,7 +22,7 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
   return (
     <PageShell
       title={data.pedido.numero}
-      description={`Pedido web recibido el ${new Date(data.pedido.fecha).toLocaleString('es-PE')}`}
+      description={`Pedido web recibido el ${new Date(data.pedido.fecha).toLocaleString('es-PE', { timeZone: 'America/Lima' })}`}
       actions={
         <Link href="/pedidos-web" className="text-sm text-slate-500 hover:text-corp-900">
           ← Volver al listado

@@ -143,7 +143,7 @@ export default async function Page({ searchParams }: { searchParams: Promise<SP>
                     <TableRow key={r.id}>
                       <TableCell className="font-mono text-xs font-medium">{r.numero}</TableCell>
                       <TableCell className="text-xs">
-                        {new Date(r.fecha).toLocaleString('es-PE', { dateStyle: 'short', timeStyle: 'short' })}
+                        {new Date(r.fecha).toLocaleString('es-PE', { dateStyle: 'short', timeStyle: 'short', timeZone: 'America/Lima' })}
                       </TableCell>
                       <TableCell>
                         <div className="text-sm font-medium text-corp-900">{r.cliente_nombre}</div>

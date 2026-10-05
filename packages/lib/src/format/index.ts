@@ -16,6 +16,14 @@ const DF_DATE = new Intl.DateTimeFormat('es-PE', {
   year: 'numeric',
 });
 
+/** El día en Lima de un instante con hora (ver formatDate). */
+const DF_DATE_LIMA = new Intl.DateTimeFormat('es-PE', {
+  day: '2-digit',
+  month: '2-digit',
+  year: 'numeric',
+  timeZone: 'America/Lima',
+});
+
 const DF_DATETIME = new Intl.DateTimeFormat('es-PE', {
   day: '2-digit',
   month: '2-digit',
@@ -53,6 +61,10 @@ export function formatNumber(value: number | null | undefined, decimals = 0): st
 
 export function formatDate(value: string | Date | null | undefined): string {
   if (!value) return '—';
+  // Un texto con hora ("2026-10-05T21:55:19Z") es un instante: se muestra el
+  // día de Lima, si no lo hecho después de las 7 p. m. salía con el día
+  // siguiente. Una fecha sola ("2026-10-05") o un Date se dejan como estaban.
+  if (typeof value === 'string' && /\d{2}:\d{2}/.test(value)) return DF_DATE_LIMA.format(new Date(value));
   const d = typeof value === 'string' ? new Date(value) : value;
   return DF_DATE.format(d);
 }
