@@ -650,10 +650,32 @@ export function PosTerminal({
     return grupos.sort((a, b) => a.nombre.localeCompare(b.nombre));
   }, [variantes]);
 
+  /*
+   * Al buscar, primero lo que hay en esta tienda.
+   *
+   * Los resultados salían en orden alfabético y el Enter abría el primero. Con
+   * dos productos de nombre casi igual —"booz lightyear" (sin stock, mal
+   * escrito) y "buzz lightyear" (el que se trasladó)— la cajera caía siempre en
+   * el que no tiene nada y parecía que el traslado no había llegado al POS
+   * (05/10/2026). Entre los que tienen stock, y entre los que no, sigue el
+   * orden alfabético.
+   */
+  const stockDeGrupo = useCallback(
+    (g: GrupoVenta) => g.variantesTodas.reduce((a, v) => a + Math.max(0, stockPorVariante[v.id] ?? 0), 0),
+    [stockPorVariante],
+  );
+  const conStockPrimero = useCallback(
+    (lista: GrupoVenta[]) => lista
+      .map((g) => ({ g, st: stockDeGrupo(g) }))
+      .sort((a, b) => Number(b.st > 0) - Number(a.st > 0))
+      .map((x) => x.g),
+    [stockDeGrupo],
+  );
+
   // Vista filtrada del catálogo (categoría + texto del buscador).
   const productosAgrupados = useMemo(() => {
     const q = search.trim();
-    return gruposBase.filter((g) => {
+    const filtrados = gruposBase.filter((g) => {
       if (catFiltro && !g.categoriaIds.has(catFiltro)) return false;
       if (!q) return true;
       const hay = [
@@ -663,7 +685,8 @@ export function PosTerminal({
       ].join(' ');
       return coincideBusqueda(q, hay);
     });
-  }, [gruposBase, catFiltro, search]);
+    return q ? conStockPrimero(filtrados) : filtrados;
+  }, [gruposBase, catFiltro, search, conStockPrimero]);
 
   function agregarPorBarcode(input: string) {
     const barcode = input.trim();
@@ -686,9 +709,9 @@ export function PosTerminal({
     //    matchea el nombre, abrir el modal de tallas del primero para que
     //    el cajero elija talla. Si hay varios, tambien abrimos el primero
     //    (el dropdown de sugerencias ya listaba todos abajo del input).
-    const grupoMatch = gruposBase.find((g) =>
+    const grupoMatch = conStockPrimero(gruposBase.filter((g) =>
       coincideBusqueda(barcode, [g.nombre, ...g.colores.map((c) => c.etiqueta)].join(' ')),
-    );
+    ))[0];
     if (grupoMatch) {
       abrirModalTallas(grupoMatch.key);
       // Cliente pidió (2026-07-10) que el buscador quede libre al elegir
@@ -1351,7 +1374,7 @@ export function PosTerminal({
   const sugerencias = useMemo(() => {
     const q = search.trim();
     if (!q) return [];
-    return gruposBase
+    return conStockPrimero(gruposBase
       .filter((g) =>
         coincideBusqueda(
           q,
@@ -1361,15 +1384,16 @@ export function PosTerminal({
             ...g.variantesTodas.map((v) => `${v.sku} ${v.codigo_barras ?? ''}`),
           ].join(' '),
         ),
-      )
+      ))
       .map((g) => ({
         grupo: g,
         tallasCount: g.variantesTodas.length,
         coloresCount: g.colores.length,
         precioMin: Math.min(...g.variantesTodas.map((v) => Number(v.precio_publico ?? 0)).filter((x) => x > 0), Infinity),
+        stock: stockDeGrupo(g),
       }))
       .slice(0, 20);
-  }, [search, gruposBase]);
+  }, [search, gruposBase, conStockPrimero, stockDeGrupo]);
 
   /** Grupo abierto en el modal de tallas + color activo. */
   const grupoOpen = useMemo(
@@ -1580,7 +1604,7 @@ export function PosTerminal({
           </div>
           {sugerencias.length > 0 && (
             <div className="mt-2 max-h-96 overflow-auto rounded-md border bg-white shadow-sm" data-pos-no-focus>
-              {sugerencias.map(({ grupo, tallasCount, coloresCount, precioMin }) => (
+              {sugerencias.map(({ grupo, tallasCount, coloresCount, precioMin, stock }) => (
                 <button
                   key={grupo.key}
                   onClick={() => { abrirModalTallas(grupo.key); setSearch(''); }}
@@ -1595,6 +1619,9 @@ export function PosTerminal({
                   <Badge variant="outline" className="text-[10px]">
                     {tallasCount} {tallasCount === 1 ? 'talla' : 'tallas'}
                   </Badge>
+                  <span className={`text-[10px] font-semibold ${stock > 0 ? 'text-emerald-700' : 'text-red-500'}`}>
+                    {stock > 0 ? `${stock} en tienda` : 'sin stock'}
+                  </span>
                   <div className="font-semibold text-happy-600">
                     desde {Number.isFinite(precioMin) ? formatPEN(precioMin) : 'S/—'}
                   </div>
