@@ -13,6 +13,7 @@
  */
 
 import { etiquetaPago } from '@happy/lib/pagos/etiqueta';
+import { costosDeVariantes } from '@/server/costo-variante';
 import { createClient } from '@happy/db/server';
 import { redirect } from 'next/navigation';
 import { formatTallaChip } from '@happy/lib';
@@ -1074,6 +1075,12 @@ export type StockValorizadoRow = {
   precio_venta?: number;
   /** Valor a precio de venta = cantidad × precio_venta (variantes). */
   valor_venta?: number;
+  /** Desglose del costo unitario de una variante (ver server/costo-variante.ts). */
+  costo_materiales?: number;
+  costo_mano_obra?: number;
+  costo_servicios?: number;
+  /** De dónde sale el costo: "Manual", "Receta", "Receta T10 (estimado)", "Sin costo". */
+  origen_costo?: string;
 };
 
 export type ReporteStockValorizadoResult = {
@@ -1081,11 +1088,26 @@ export type ReporteStockValorizadoResult = {
     valor_total: number;
     items_con_stock: number;
     items_sin_costo: number;
+    /** Variantes valorizadas con la receta de otra talla (la suya no existe). */
+    items_estimados: number;
     valor_variantes: number;
     valor_materiales: number;
   };
   rows: StockValorizadoRow[];
 };
+
+/** Lee todas las filas de una consulta de a 1.000 (el tope de la base). */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function filasPaginadas<T>(armar: () => any): Promise<T[]> {
+  const out: T[] = [];
+  for (let desde = 0; desde < 100000; desde += 1000) {
+    const { data, error } = await armar().range(desde, desde + 999);
+    if (error) throw new Error(error.message);
+    out.push(...((data ?? []) as T[]));
+    if (!data || data.length < 1000) break;
+  }
+  return out;
+}
 
 export async function reporteStockValorizado(
   f: FiltrosStockValorizado,
@@ -1095,86 +1117,82 @@ export async function reporteStockValorizado(
   let valor_variantes = 0;
   let valor_materiales = 0;
   let items_sin_costo = 0;
+  let items_estimados = 0;
 
   // --- VARIANTES ---
   if (!f.tipo || f.tipo === 'VARIANTE') {
-    let q = sb
-      .from('stock_actual')
-      .select('cantidad, variante_id, almacen:almacen_id(codigo, nombre)')
-      .not('variante_id', 'is', null)
-      .gt('cantidad', 0)
-      .limit(20000);
-    if (f.almacen_id) q = q.eq('almacen_id', f.almacen_id);
-    const { data: stocks } = await q;
-
     type SR = {
       cantidad: string | number;
       variante_id: string;
       almacen: { codigo: string; nombre: string } | null;
     };
-    const varianteIds = Array.from(
-      new Set(((stocks ?? []) as SR[]).map((s) => s.variante_id)),
-    );
+    const stocks = await filasPaginadas<SR>(() => {
+      let q = sb
+        .from('stock_actual')
+        .select('cantidad, variante_id, almacen:almacen_id(codigo, nombre)')
+        .not('variante_id', 'is', null)
+        .gt('cantidad', 0)
+        .order('id');
+      if (f.almacen_id) q = q.eq('almacen_id', f.almacen_id);
+      return q;
+    });
+    const varianteIds = Array.from(new Set(stocks.map((s) => s.variante_id)));
     if (varianteIds.length > 0) {
-      const CHUNK = 500;
-      const varMap = new Map<
-        string,
-        {
-          sku: string;
-          talla: string;
-          costo: number;
-          precio_venta: number;
-          producto_nombre: string;
-          categoria: string;
-        }
-      >();
-      for (let i = 0; i < varianteIds.length; i += CHUNK) {
-        const ids = varianteIds.slice(i, i + CHUNK);
-        const { data: vs } = await sb
+      type VR = {
+        id: string;
+        producto_id: string;
+        sku: string;
+        talla: string;
+        precio_costo_estandar: string | number | null;
+        precio_publico: string | number | null;
+        producto: { nombre: string; categoria: { codigo: string } | null } | null;
+      };
+      const vars: VR[] = [];
+      for (let i = 0; i < varianteIds.length; i += 150) {
+        const { data: vs, error } = await sb
           .from('productos_variantes')
-          .select(
-            'id, sku, talla, precio_costo_estandar, precio_publico, producto:producto_id(nombre, categoria:categoria_id(codigo))',
-          )
-          .in('id', ids);
-        for (const v of (vs ?? []) as {
-          id: string;
-          sku: string;
-          talla: string;
-          precio_costo_estandar: string | number | null;
-          precio_publico: string | number | null;
-          producto: { nombre: string; categoria: { codigo: string } | null } | null;
-        }[]) {
-          varMap.set(v.id, {
-            sku: v.sku,
-            talla: v.talla,
-            costo: Number(v.precio_costo_estandar ?? 0),
-            precio_venta: Number(v.precio_publico ?? 0),
-            producto_nombre: v.producto?.nombre ?? '—',
-            categoria: v.producto?.categoria?.codigo ?? '—',
-          });
-        }
+          .select('id, producto_id, sku, talla, precio_costo_estandar, precio_publico, producto:producto_id(nombre, categoria:categoria_id(codigo))')
+          .in('id', varianteIds.slice(i, i + 150));
+        if (error) throw new Error(error.message);
+        vars.push(...((vs ?? []) as unknown as VR[]));
       }
+      const varMap = new Map(vars.map((v) => [v.id, v]));
+      // Costo: el manual si lo hay; si no, receta + mano de obra + taller.
+      const costos = await costosDeVariantes(sb, vars);
 
-      for (const s of (stocks ?? []) as SR[]) {
+      for (const s of stocks) {
         const v = varMap.get(s.variante_id);
         if (!v) continue;
+        const c = costos.get(v.id);
         const cant = Number(s.cantidad);
-        const costo = v.costo;
-        const valor = cant * costo;
+        const costo = Math.round((c?.costo ?? 0) * 100) / 100;
+        const valor = Math.round(cant * costo * 100) / 100;
         if (costo === 0) items_sin_costo++;
+        if (c?.origen === 'RECETA_ESTIMADA') items_estimados++;
         valor_variantes += valor;
+        const precioVenta = Number(v.precio_publico ?? 0);
         rows.push({
           tipo: 'VARIANTE',
           almacen: s.almacen ? `${s.almacen.codigo} · ${s.almacen.nombre}` : '—',
           codigo: v.sku,
-          nombre: v.producto_nombre,
+          nombre: v.producto?.nombre ?? '—',
           detalle: `Talla ${formatTallaChip(v.talla)}`,
           cantidad: cant,
           costo_unitario: costo,
           valor_total: valor,
-          categoria: v.categoria,
-          precio_venta: v.precio_venta,
-          valor_venta: Math.round(cant * v.precio_venta * 100) / 100,
+          categoria: v.producto?.categoria?.codigo ?? '—',
+          precio_venta: precioVenta,
+          valor_venta: Math.round(cant * precioVenta * 100) / 100,
+          costo_materiales: Math.round((c?.materiales ?? 0) * 100) / 100,
+          costo_mano_obra: Math.round((c?.mano_obra ?? 0) * 100) / 100,
+          costo_servicios: Math.round((c?.servicios ?? 0) * 100) / 100,
+          origen_costo: !c || c.origen === 'SIN_COSTO'
+            ? 'Sin costo'
+            : c.origen === 'MANUAL'
+              ? 'Manual'
+              : c.origen === 'RECETA'
+                ? 'Receta'
+                : `Receta ${formatTallaChip(c.talla_receta ?? '')} (estimado)`,
         });
       }
     }
@@ -1182,20 +1200,21 @@ export async function reporteStockValorizado(
 
   // --- MATERIALES ---
   if (!f.tipo || f.tipo === 'MATERIAL') {
-    let q = sb
-      .from('stock_actual')
-      .select('cantidad, material_id, almacen:almacen_id(codigo, nombre)')
-      .not('material_id', 'is', null)
-      .gt('cantidad', 0)
-      .limit(20000);
-    if (f.almacen_id) q = q.eq('almacen_id', f.almacen_id);
-    const { data: stocks } = await q;
-
     type SR = {
       cantidad: string | number;
       material_id: string;
       almacen: { codigo: string; nombre: string } | null;
     };
+    const stocks = await filasPaginadas<SR>(() => {
+      let q = sb
+        .from('stock_actual')
+        .select('cantidad, material_id, almacen:almacen_id(codigo, nombre)')
+        .not('material_id', 'is', null)
+        .gt('cantidad', 0)
+        .order('id');
+      if (f.almacen_id) q = q.eq('almacen_id', f.almacen_id);
+      return q;
+    });
     const matIds = Array.from(new Set(((stocks ?? []) as SR[]).map((s) => s.material_id)));
     if (matIds.length > 0) {
       const CHUNK = 500;
@@ -1260,6 +1279,7 @@ export async function reporteStockValorizado(
       valor_total: valor_variantes + valor_materiales,
       items_con_stock: rows.length,
       items_sin_costo,
+      items_estimados,
       valor_variantes,
       valor_materiales,
     },

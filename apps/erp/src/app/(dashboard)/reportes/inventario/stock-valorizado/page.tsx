@@ -42,7 +42,7 @@ export default async function Page({ searchParams }: { searchParams: Promise<SP>
 
   const exportPayload = {
     titulo: 'Stock valorizado',
-    subtitulo: `Snapshot al ${new Date().toLocaleString('es-PE')}`,
+    subtitulo: `Snapshot al ${new Date().toLocaleString('es-PE', { timeZone: 'America/Lima' })}`,
     filtros: [
       almacen_id
         ? `Almacén: ${almacenes.find((a) => a.id === almacen_id)?.codigo ?? almacen_id}`
@@ -57,8 +57,15 @@ export default async function Page({ searchParams }: { searchParams: Promise<SP>
       { header: 'Detalle', key: 'detalle', width: 16 },
       { header: 'Categoría', key: 'categoria', width: 16 },
       { header: 'Cantidad', key: 'cantidad', formato: 'numero' as const, width: 12 },
+      // Desglose del costo de las prendas: así se ve de dónde sale cada número.
+      ...(tipo === 'MATERIAL' ? [] : [
+        { header: 'Materiales', key: 'costo_materiales', formato: 'moneda' as const, width: 12 },
+        { header: 'Mano de obra', key: 'costo_mano_obra', formato: 'moneda' as const, width: 12 },
+        { header: 'Taller', key: 'costo_servicios', formato: 'moneda' as const, width: 12 },
+      ]),
       { header: 'Costo unit.', key: 'costo_unitario', formato: 'moneda' as const, width: 14 },
       { header: 'Valor total', key: 'valor_total', formato: 'moneda' as const, width: 14 },
+      ...(tipo === 'MATERIAL' ? [] : [{ header: 'Origen del costo', key: 'origen_costo', width: 20 }]),
     ],
     rows,
     totales: { valor_total: metricas.valor_total },
@@ -112,6 +119,13 @@ export default async function Page({ searchParams }: { searchParams: Promise<SP>
         </form>
       </Card>
 
+      <Card className="border-sky-200 bg-sky-50/60 p-3 text-[12px] leading-relaxed text-sky-900">
+        <b>Cómo se calcula el costo de cada prenda:</b> si la variante tiene un costo escrito a mano, se usa ese.
+        Si no, sale de su receta: materiales de esa talla + mano de obra (tiempo estándar × valor minuto del área)
+        + tarifas de taller. Si la receta no tiene esa talla, se toma la más cercana y se marca como estimado.
+        Los materiales se valorizan a su precio de compra.
+      </Card>
+
       <div className="grid gap-3 sm:grid-cols-4">
         <Card className="p-4">
           <p className="text-xs text-slate-500">Valor total</p>
@@ -141,7 +155,10 @@ export default async function Page({ searchParams }: { searchParams: Promise<SP>
             {metricas.items_con_stock}
           </p>
           {metricas.items_sin_costo > 0 && (
-            <p className="text-[10px] text-amber-700">⚠ {metricas.items_sin_costo} sin costo cargado</p>
+            <p className="text-[10px] text-amber-700">⚠ {metricas.items_sin_costo} sin costo (sin receta ni costo manual)</p>
+          )}
+          {metricas.items_estimados > 0 && (
+            <p className="text-[10px] text-slate-500">{metricas.items_estimados} con la receta de otra talla (estimado)</p>
           )}
         </Card>
       </div>
@@ -210,6 +227,11 @@ export default async function Page({ searchParams }: { searchParams: Promise<SP>
                     </TableCell>
                     <TableCell className="text-right font-mono text-xs text-slate-500">
                       {r.costo_unitario === 0 ? <span className="text-amber-600">—</span> : PEN(r.costo_unitario)}
+                      {r.origen_costo && (
+                        <div className={`font-sans text-[10px] ${r.origen_costo === 'Sin costo' ? 'text-amber-600' : 'text-slate-400'}`}>
+                          {r.origen_costo}
+                        </div>
+                      )}
                     </TableCell>
                     <TableCell className="text-right font-mono text-sm font-semibold text-corp-900">
                       {PEN(r.valor_total)}
@@ -220,7 +242,7 @@ export default async function Page({ searchParams }: { searchParams: Promise<SP>
             </Table>
             {rows.length > 200 && (
               <div className="border-t bg-slate-50/50 p-3 text-center text-xs text-slate-500">
-                Mostrando 200 de {rows.length} items. Exportá a Excel para verlos todos.
+                Mostrando 200 de {rows.length} items. Exporta a Excel para verlos todos.
               </div>
             )}
           </CardContent>
