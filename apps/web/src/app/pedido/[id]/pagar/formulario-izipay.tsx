@@ -32,7 +32,6 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import KRGlue from '@lyracom/embedded-form-glue';
 import { Loader2, Lock, ArrowLeft } from 'lucide-react';
@@ -92,6 +91,26 @@ function cargarScript(src: string): Promise<void> {
 const AVISAR_LENTO_MS = 20000;
 const RENDIRSE_MS = 90000;
 
+/**
+ * Cuánto se espera la confirmación después de pagar antes de llevar igual al
+ * comprador a su pedido. Allá el estado sale de la base, y el aviso de izipay
+ * al servidor lo confirma aunque esta respuesta no llegue.
+ */
+const CONFIRMAR_MAX_MS = 20000;
+
+/**
+ * Lleva al pedido con una carga COMPLETA de la página.
+ *
+ * Con la navegación interna de Next (`router.push`) el comprador se quedaba en
+ * "Confirmando tu pago…" para siempre, con el cobro hecho y el pedido ya en el
+ * ERP (primer pago real, 05/10/2026): la librería de izipay sigue viva en la
+ * página y la navegación no termina. Es el mismo motivo por el que el botón de
+ * reintento del pedido es un <a> y no un <Link>.
+ */
+function irAlPedido(pedidoId: string, pagado: boolean) {
+  window.location.assign(`/pedido/${pedidoId}${pagado ? '?pagado=1' : ''}`);
+}
+
 /** Espera a que los campos de tarjeta estén realmente en pantalla. */
 function esperarFormulario(avisarLento: () => void): Promise<boolean> {
   const desde = Date.now();
@@ -132,7 +151,6 @@ export function FormularioIzipay({
   numero: string;
   total: number;
 }) {
-  const router = useRouter();
   const vaciarCarrito = useCart((s) => s.clear);
   const [estado, setEstado] = useState<'cargando' | 'listo' | 'procesando' | 'error'>('cargando');
   const [error, setError] = useState('');
@@ -155,6 +173,11 @@ export function FormularioIzipay({
   const confirmar = useCallback(
     async (ev: RespuestaKrypton) => {
       setEstado('procesando');
+      setError('');
+      const corte = new AbortController();
+      const reloj = setTimeout(() => corte.abort(), CONFIRMAR_MAX_MS);
+      let json: { pagado?: boolean; mensaje?: string; error?: string } = {};
+      let ok = false;
       try {
         const res = await fetch('/api/pagos/izipay/confirmar', {
           method: 'POST',
@@ -165,20 +188,37 @@ export function FormularioIzipay({
             firma: ev.hash,
             claveUsada: ev.hashKey,
           }),
+          signal: corte.signal,
         });
-        const json = await res.json();
-        if (!res.ok) throw new Error(json.error ?? 'No pudimos confirmar el pago');
-        if (!json.pagado) throw new Error(json.mensaje ?? 'El pago no se completó');
+        ok = res.ok;
+        json = await res.json().catch(() => ({}));
+      } catch {
+        // Sin respuesta (se cortó la red o tardó demasiado): el cobro pudo
+        // salir igual. Se sigue al pedido, que muestra lo que realmente pasó.
+        clearTimeout(reloj);
+        irAlPedido(pedidoId, false);
+        return;
+      }
+      clearTimeout(reloj);
+
+      if (ok && json.pagado) {
         // Recién con el pago confirmado se vacía el carrito: si el cobro no
         // salía, el comprador conserva lo que había elegido.
         vaciarCarrito();
-        router.push(`/pedido/${pedidoId}`);
-      } catch (e) {
-        setError(describirFallo(e));
-        setEstado('error');
+        irAlPedido(pedidoId, true);
+        return;
       }
+      if (ok) {
+        // El banco lo rechazó: se queda acá para reintentar con otra tarjeta.
+        setError(json.mensaje ?? 'El pago no se completó');
+        setEstado('error');
+        return;
+      }
+      // El servidor no pudo confirmarlo (firma, base caída…): el estado real
+      // lo tiene el pedido, y el aviso de izipay al servidor llega igual.
+      irAlPedido(pedidoId, false);
     },
-    [pedidoId, router, vaciarCarrito],
+    [pedidoId, vaciarCarrito],
   );
 
   /*
@@ -229,9 +269,11 @@ export function FormularioIzipay({
           // banco. No sacan al comprador de la página, puede reintentar.
           setError(e.detailedErrorMessage || e.errorMessage || 'Ocurrió un problema con el pago');
         });
-        KR.onSubmit(async (ev: RespuestaKrypton) => {
-          await confirmarRef.current(ev);
-          return false; // nos encargamos nosotros; sin esto izipay redirige
+        KR.onSubmit((ev: RespuestaKrypton) => {
+          // Como en el ejemplo oficial: se lanza y se devuelve `false` en el
+          // acto (una promesa no es `false`). Sin esto izipay redirige.
+          void confirmarRef.current(ev);
+          return false;
         });
 
         await KR.setFormConfig({ formToken: json.formToken, 'kr-language': 'es-PE' });

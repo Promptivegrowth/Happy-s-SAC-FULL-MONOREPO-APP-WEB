@@ -19,6 +19,7 @@ import { Badge } from '@happy/ui/badge';
 import { CheckCircle2, Clock, XCircle, MessageCircle, CreditCard } from 'lucide-react';
 import { obtenerContenidoWeb } from '@/lib/contenido-web';
 import { enlaceWhatsApp, telefonoLegible } from '@happy/lib/web/contenido';
+import { EsperarConfirmacion, VaciarCarrito } from './seguimiento-client';
 
 export const metadata = { title: 'Tu pedido' };
 export const dynamic = 'force-dynamic';
@@ -58,7 +59,7 @@ const CARTEL: Record<string, { titulo: string; detalle: string; tono: 'ok' | 'es
     tono: 'espera',
   },
   PAGO_VERIFICADO: {
-    titulo: '¡Pago confirmado!',
+    titulo: '¡Gracias por tu compra! Pago confirmado',
     detalle: 'Recibimos tu pago. Estamos preparando tu pedido y te avisamos apenas esté listo.',
     tono: 'ok',
   },
@@ -100,9 +101,16 @@ const ESTILO = {
   mal: { borde: 'border-red-200 bg-red-50', texto: 'text-red-900', Icono: XCircle },
 };
 
-export default async function PedidoPage({ params }: { params: Promise<{ id: string }> }) {
+export default async function PedidoPage({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ id: string }>;
+  searchParams: Promise<{ pagado?: string }>;
+}) {
   const { contacto } = await obtenerContenidoWeb();
   const { id } = await params;
+  const vieneDePagar = (await searchParams).pagado === '1';
   // Un id que no es UUID no puede existir: se corta antes de ir a la base.
   if (!/^[0-9a-f-]{36}$/i.test(id)) notFound();
 
@@ -145,6 +153,14 @@ export default async function PedidoPage({ params }: { params: Promise<{ id: str
     <div className="container max-w-2xl px-4 py-10">
       <p className="text-xs uppercase tracking-wider text-slate-500">Pedido</p>
       <h1 className="font-display text-3xl font-semibold">{pedido.numero}</h1>
+
+      {/* Recién pagado: el carrito ya no tiene que mostrar lo que se compró. */}
+      {vieneDePagar && pedido.estado !== 'PENDIENTE_PAGO' && <VaciarCarrito />}
+      {/*
+        Pagó con tarjeta pero el aviso del banco todavía no llegó: la página se
+        actualiza sola unos segundos en vez de pedirle que recargue.
+      */}
+      {pedido.estado === 'PENDIENTE_PAGO' && pedido.metodo_pago_seleccionado === 'izipay_card' && <EsperarConfirmacion />}
 
       <div className={`mt-5 flex gap-3 rounded-lg border p-4 ${borde} ${texto}`}>
         <Icono className="mt-0.5 h-5 w-5 shrink-0" />
