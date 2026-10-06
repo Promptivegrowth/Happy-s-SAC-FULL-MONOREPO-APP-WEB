@@ -11,6 +11,8 @@ import { reporteStockValorizado, listarAlmacenesLookup } from '@/server/actions/
 
 export const metadata = { title: 'Stock valorizado' };
 export const dynamic = 'force-dynamic';
+// El cálculo de costos puede tardar si la caché está vacía (ver costo-variante.ts).
+export const maxDuration = 60;
 
 type SP = { almacen?: string; tipo?: string };
 

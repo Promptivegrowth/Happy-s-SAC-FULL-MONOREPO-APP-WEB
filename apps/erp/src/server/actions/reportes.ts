@@ -13,7 +13,7 @@
  */
 
 import { etiquetaPago } from '@happy/lib/pagos/etiqueta';
-import { costosDeVariantes } from '@/server/costo-variante';
+import { costosDeTodasLasVariantes } from '@/server/costo-variante';
 import { createClient } from '@happy/db/server';
 import { redirect } from 'next/navigation';
 import { formatTallaChip } from '@happy/lib';
@@ -1136,51 +1136,29 @@ export async function reporteStockValorizado(
       if (f.almacen_id) q = q.eq('almacen_id', f.almacen_id);
       return q;
     });
-    const varianteIds = Array.from(new Set(stocks.map((s) => s.variante_id)));
-    if (varianteIds.length > 0) {
-      type VR = {
-        id: string;
-        producto_id: string;
-        sku: string;
-        talla: string;
-        precio_costo_estandar: string | number | null;
-        precio_publico: string | number | null;
-        producto: { nombre: string; categoria: { codigo: string } | null } | null;
-      };
-      const vars: VR[] = [];
-      for (let i = 0; i < varianteIds.length; i += 150) {
-        const { data: vs, error } = await sb
-          .from('productos_variantes')
-          .select('id, producto_id, sku, talla, precio_costo_estandar, precio_publico, producto:producto_id(nombre, categoria:categoria_id(codigo))')
-          .in('id', varianteIds.slice(i, i + 150));
-        if (error) throw new Error(error.message);
-        vars.push(...((vs ?? []) as unknown as VR[]));
-      }
-      const varMap = new Map(vars.map((v) => [v.id, v]));
-      // Costo: el manual si lo hay; si no, receta + mano de obra + taller.
-      const costos = await costosDeVariantes(sb, vars);
-
+    if (stocks.length > 0) {
+      // Costo y datos de cada variante, ya calculados (ver costo-variante.ts).
+      const datos = await costosDeTodasLasVariantes();
       for (const s of stocks) {
-        const v = varMap.get(s.variante_id);
-        if (!v) continue;
-        const c = costos.get(v.id);
+        const c = datos[s.variante_id];
+        if (!c) continue;
         const cant = Number(s.cantidad);
         const costo = Math.round((c?.costo ?? 0) * 100) / 100;
         const valor = Math.round(cant * costo * 100) / 100;
         if (costo === 0) items_sin_costo++;
         if (c?.origen === 'RECETA_ESTIMADA') items_estimados++;
         valor_variantes += valor;
-        const precioVenta = Number(v.precio_publico ?? 0);
+        const precioVenta = c.precio_publico;
         rows.push({
           tipo: 'VARIANTE',
           almacen: s.almacen ? `${s.almacen.codigo} · ${s.almacen.nombre}` : '—',
-          codigo: v.sku,
-          nombre: v.producto?.nombre ?? '—',
-          detalle: `Talla ${formatTallaChip(v.talla)}`,
+          codigo: c.sku,
+          nombre: c.producto_nombre,
+          detalle: `Talla ${formatTallaChip(c.talla)}`,
           cantidad: cant,
           costo_unitario: costo,
           valor_total: valor,
-          categoria: v.producto?.categoria?.codigo ?? '—',
+          categoria: c.categoria,
           precio_venta: precioVenta,
           valor_venta: Math.round(cant * precioVenta * 100) / 100,
           costo_materiales: Math.round((c?.materiales ?? 0) * 100) / 100,

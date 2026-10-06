@@ -16,6 +16,8 @@
  *      "estimado" para que se sepa que no es exacto.
  */
 
+import { unstable_cache } from 'next/cache';
+import { createServiceClient } from '@happy/db/service';
 import { precioPorUnidadDeConsumo } from '@/server/costo-material';
 
 export type VarianteCosto = { id: string; producto_id: string; talla: string; precio_costo_estandar: number | string | null };
@@ -114,61 +116,106 @@ export function calcularCostosVariantes(a: {
   return out;
 }
 
-/** Lee todas las filas de una consulta de a 1.000 (el tope de la base). */
+/**
+ * Lee todas las filas de una consulta de a 1.000 (el tope de la base).
+ *
+ * Después de la primera página pide de a cinco en paralelo: cada página es una
+ * lectura simple de pocos milisegundos en la base, y lo que demora es el viaje
+ * de ida y vuelta.
+ */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 async function todasLasFilas<T>(armar: () => any): Promise<T[]> {
-  const out: T[] = [];
-  for (let desde = 0; desde < 100000; desde += 1000) {
-    const { data, error } = await armar().range(desde, desde + 999);
+  const pagina = async (n: number): Promise<T[]> => {
+    const { data, error } = await armar().range(n * 1000, n * 1000 + 999);
     if (error) throw new Error(error.message);
-    out.push(...((data ?? []) as T[]));
-    if (!data || data.length < 1000) break;
+    return (data ?? []) as T[];
+  };
+  const out = await pagina(0);
+  if (out.length < 1000) return out;
+  for (let n = 1; n < 100; n += 5) {
+    const tanda = await Promise.all([n, n + 1, n + 2, n + 3, n + 4].map(pagina));
+    for (const filas of tanda) out.push(...filas);
+    if (tanda.some((filas) => filas.length < 1000)) break;
   }
   return out;
 }
 
-/** Carga recetas, operaciones y tarifas de esas variantes y calcula su costo. */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-export async function costosDeVariantes(sb: any, variantes: VarianteCosto[]): Promise<Map<string, CostoVariante>> {
-  const productoIds = [...new Set(variantes.map((v) => v.producto_id))];
-  const lineas: LineaReceta[] = [];
-  const procesos: ProcesoCosto[] = [];
-  const tarifas: TarifaCosto[] = [];
-  const hoy = new Date().toISOString().slice(0, 10);
+/** Datos de una variante para el reporte, junto con su costo. */
+export type VarianteValorizada = CostoVariante & {
+  sku: string;
+  talla: string;
+  precio_publico: number;
+  producto_nombre: string;
+  categoria: string;
+};
 
-  for (let i = 0; i < productoIds.length; i += 150) {
-    const ids = productoIds.slice(i, i + 150);
-    const [recs, procs, tars] = await Promise.all([
-      todasLasFilas<{ producto_id: string; recetas_lineas: { id: string; talla: string; cantidad: number | string | null; materiales: { precio_unitario: number | string | null; factor_conversion: number | string | null } | null }[] }>(
-        () => sb.from('recetas')
-          .select('producto_id, recetas_lineas(id, talla, cantidad, materiales:material_id(precio_unitario, factor_conversion))')
-          .in('producto_id', ids).eq('activa', true).order('id'),
-      ),
-      todasLasFilas<{ producto_id: string; talla: string | null; proceso: string; tiempo_estandar_min: number | string | null; es_tercerizado: boolean | null; areas_produccion: { valor_minuto: number | string | null } | null }>(
-        () => sb.from('productos_procesos')
-          .select('producto_id, talla, proceso, tiempo_estandar_min, es_tercerizado, areas_produccion:area_id(valor_minuto)')
-          .in('producto_id', ids).eq('activo', true).order('id'),
-      ),
-      todasLasFilas<{ producto_id: string; talla: string | null; proceso: string; precio_unitario: number | string | null; vigente_hasta: string | null }>(
-        () => sb.from('tarifas_servicios')
-          .select('producto_id, talla, proceso, precio_unitario, vigente_hasta')
-          .in('producto_id', ids)
-          // Las tarifas sin fecha de inicio valen desde siempre (ver tarifas-servicios).
-          .or(`vigente_desde.is.null,vigente_desde.lte.${hoy}`).order('id'),
-      ),
-    ]);
-    for (const r of recs) {
-      for (const l of r.recetas_lineas ?? []) {
-        lineas.push({
-          producto_id: r.producto_id, talla: l.talla, cantidad: l.cantidad,
-          precio_unitario: l.materiales?.precio_unitario ?? null, factor_conversion: l.materiales?.factor_conversion ?? null,
-        });
-      }
-    }
-    for (const p of procs) {
-      procesos.push({ ...p, valor_minuto: p.areas_produccion?.valor_minuto ?? null });
-    }
-    for (const t of tars) if (!t.vigente_hasta || t.vigente_hasta >= hoy) tarifas.push(t);
+/*
+ * Todo se lee con consultas PLANAS, sin recetas con sus líneas incrustadas.
+ *
+ * La primera versión (05/10/2026) pedía las recetas con sus líneas y
+ * materiales anidados, de a 150 productos: cada tanda tardaba 3,7 s en la
+ * base. La página no mostraba nada mientras tanto, el gerente volvió a hacer
+ * clic varias veces y cada clic lanzó otro cálculo completo. La base se saturó
+ * y se pusieron lentos la web pública y el POS (06/10/2026). Leer las tablas
+ * enteras de forma simple y juntar en memoria cuesta una fracción de eso.
+ */
+export async function calcularTodas(): Promise<Record<string, VarianteValorizada>> {
+  const sb = createServiceClient();
+  const hoy = new Date().toISOString().slice(0, 10);
+  type V = { id: string; producto_id: string; sku: string; talla: string; precio_costo_estandar: number | string | null; precio_publico: number | string | null; productos: { nombre: string; categorias: { codigo: string } | null } | null };
+  type R = { id: string; producto_id: string };
+  type L = { receta_id: string; talla: string; cantidad: number | string | null; material_id: string | null };
+  type M = { id: string; precio_unitario: number | string | null; factor_conversion: number | string | null };
+  type P = { producto_id: string; talla: string | null; proceso: string; tiempo_estandar_min: number | string | null; es_tercerizado: boolean | null; area_id: string | null };
+  type A = { id: string; valor_minuto: number | string | null };
+  type T = TarifaCosto & { vigente_desde: string | null; vigente_hasta: string | null };
+
+  const [vars, recetas, lineasRaw, mats, procs, areas, tars] = await Promise.all([
+    todasLasFilas<V>(() => sb.from('productos_variantes')
+      .select('id, producto_id, sku, talla, precio_costo_estandar, precio_publico, productos:producto_id(nombre, categorias:categoria_id(codigo))').order('id')),
+    todasLasFilas<R>(() => sb.from('recetas').select('id, producto_id').eq('activa', true).order('id')),
+    todasLasFilas<L>(() => sb.from('recetas_lineas').select('receta_id, talla, cantidad, material_id').order('id')),
+    todasLasFilas<M>(() => sb.from('materiales').select('id, precio_unitario, factor_conversion').order('id')),
+    todasLasFilas<P>(() => sb.from('productos_procesos')
+      .select('producto_id, talla, proceso, tiempo_estandar_min, es_tercerizado, area_id').eq('activo', true).order('id')),
+    todasLasFilas<A>(() => sb.from('areas_produccion').select('id, valor_minuto').order('id')),
+    todasLasFilas<T>(() => sb.from('tarifas_servicios')
+      .select('producto_id, talla, proceso, precio_unitario, vigente_desde, vigente_hasta').order('id')),
+  ]);
+
+  const productoDeReceta = new Map(recetas.map((r) => [r.id, r.producto_id]));
+  const mat = new Map(mats.map((m) => [m.id, m]));
+  const vm = new Map(areas.map((a) => [a.id, a.valor_minuto]));
+  const lineas: LineaReceta[] = [];
+  for (const l of lineasRaw) {
+    const producto = productoDeReceta.get(l.receta_id);
+    if (!producto) continue; // línea de una versión vieja de la receta
+    const m = l.material_id ? mat.get(l.material_id) : undefined;
+    lineas.push({ producto_id: producto, talla: l.talla, cantidad: l.cantidad, precio_unitario: m?.precio_unitario ?? null, factor_conversion: m?.factor_conversion ?? null });
   }
-  return calcularCostosVariantes({ variantes, lineas, procesos, tarifas });
+  const procesos: ProcesoCosto[] = procs.map((p) => ({ ...p, valor_minuto: p.area_id ? vm.get(p.area_id) ?? null : null }));
+  // Las tarifas sin fecha de inicio valen desde siempre (ver tarifas-servicios).
+  const tarifas = tars.filter((t) => (!t.vigente_desde || t.vigente_desde <= hoy) && (!t.vigente_hasta || t.vigente_hasta >= hoy));
+
+  const costos = calcularCostosVariantes({ variantes: vars, lineas, procesos, tarifas });
+  const out: Record<string, VarianteValorizada> = {};
+  for (const v of vars) {
+    out[v.id] = {
+      ...(costos.get(v.id) ?? { costo: 0, materiales: 0, mano_obra: 0, servicios: 0, origen: 'SIN_COSTO' as const }),
+      sku: v.sku,
+      talla: v.talla,
+      precio_publico: Number(v.precio_publico ?? 0),
+      producto_nombre: v.productos?.nombre ?? '—',
+      categoria: v.productos?.categorias?.codigo ?? '—',
+    };
+  }
+  return out;
 }
+
+/**
+ * Costo y datos de todas las variantes, guardado 10 minutos.
+ *
+ * Las recetas y los valores minuto cambian pocas veces al día; recalcular en
+ * cada visita (o en cada clic impaciente) no aporta nada y carga la base.
+ */
+export const costosDeTodasLasVariantes = unstable_cache(calcularTodas, ['costos-variantes-v2'], { revalidate: 600 });
