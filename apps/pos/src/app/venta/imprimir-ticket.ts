@@ -122,17 +122,37 @@ export type ResultadoImpresion =
  * lo ignora y se sigue con el mejor disponible.
  */
 export async function equipoParaImprimir(almacenId?: string | null): Promise<EquipoImpresion | null> {
-  const lista = await equiposDisponibles(almacenId);
+  /*
+   * Solo impresoras de ESTA tienda (07/10/2026).
+   *
+   * Antes, si en la tienda no había ninguna lista, se usaba cualquiera que
+   * estuviera prendida: el cierre de Huallaga del 04/10 salió en la ticketera
+   * de La Quinta, y podía terminar en la de etiquetas del almacén. Un papel en
+   * otra tienda no le sirve a nadie; mejor el PDF y avisar.
+   */
+  const todas = await equiposDisponibles(almacenId);
+  const lista = almacenId ? todas.filter((e) => e.almacen_id === almacenId) : todas;
   if (lista.length === 0) return null;
 
+  /*
+   * La que se fijó en esta computadora manda, aunque esté apagada.
+   *
+   * Con dos ticketeras en la misma tienda (La Quinta: piso 1 y piso 3), si la
+   * fijada no responde no se salta a la del otro piso: el ticket saldría donde
+   * nadie lo espera. Se devuelve igual y quien imprime avisa "sin conexión".
+   */
   const fijado = equipoElegido();
   const elegido = fijado ? lista.find((e) => e.id === fijado) : undefined;
-  const deOtraTienda = Boolean(almacenId && elegido && elegido.almacen_id !== almacenId);
-  if (elegido && listoParaImprimir(elegido) && !deOtraTienda) return elegido;
+  if (elegido) return elegido;
 
-  // `equiposDisponibles` ya ordena poniendo primero los de esta tienda que
-  // están listos, así que el primero es la mejor opción disponible.
+  // Sin elección: la primera de la tienda que esté lista.
   return lista.find(listoParaImprimir) ?? lista[0] ?? null;
+}
+
+/** Las ticketeras de una tienda, para elegir en cuál imprime esta computadora. */
+export async function equiposDeLaTienda(almacenId?: string | null): Promise<EquipoImpresion[]> {
+  const todas = await equiposDisponibles(almacenId);
+  return almacenId ? todas.filter((e) => e.almacen_id === almacenId) : todas;
 }
 
 /**

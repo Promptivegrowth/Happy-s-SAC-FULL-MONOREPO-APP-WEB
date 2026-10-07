@@ -10,8 +10,8 @@ import { toast } from 'sonner';
 import { generarTicketPrueba, type MuestraPrueba } from './ticket-prueba';
 import { abrirPDF } from './comprobante-pdf';
 import { construirTicketPrueba } from '@happy/lib/escpos/prueba';
-import { encolarTicket, esperarImpresion } from './cola-impresion';
-import { equipoParaImprimir } from './imprimir-ticket';
+import { encolarTicket, esperarImpresion, equipoElegido, guardarEquipo, conectado } from './cola-impresion';
+import { equipoParaImprimir, equiposDeLaTienda } from './imprimir-ticket';
 import type { EquipoImpresion } from './cola-impresion';
 
 type VarianteMin = {
@@ -56,12 +56,30 @@ export function PruebaImpresionModal({
    * ese caso el botón sigue sacando el PDF como antes.
    */
   const [equipo, setEquipo] = useState<EquipoImpresion | null | undefined>(undefined);
+  /** Las ticketeras de esta tienda y la que quedó fijada en esta computadora. */
+  const [deLaTienda, setDeLaTienda] = useState<EquipoImpresion[]>([]);
+  const [fijado, setFijado] = useState<string>(() => equipoElegido() ?? '');
 
   useEffect(() => {
     let vivo = true;
     void equipoParaImprimir(almacenId).then((e) => { if (vivo) setEquipo(e); });
+    void equiposDeLaTienda(almacenId).then((l) => { if (vivo) setDeLaTienda(l); });
     return () => { vivo = false; };
-  }, [almacenId]);
+  }, [almacenId, fijado]);
+
+  /*
+   * Fijar la ticketera de ESTA computadora (07/10/2026).
+   *
+   * En La Quinta hay ventas en el piso 1 y en el piso 3. Sin fijarla, el POS
+   * toma la primera disponible de la tienda y el ticket del piso 3 salía abajo.
+   * Queda guardado en este navegador.
+   */
+  function elegirEquipo(id: string) {
+    guardarEquipo(id || null);
+    setFijado(id);
+    setEquipo(undefined);
+    toast.success(id ? 'Esta computadora imprimirá siempre por esa ticketera' : 'Esta computadora usará la primera ticketera disponible de la tienda');
+  }
   /** Cambia la tanda de productos para no probar siempre con los mismos. */
   const [tanda, setTanda] = useState(0);
 
@@ -247,6 +265,30 @@ export function PruebaImpresionModal({
             )}
           </div>
 
+          {/* En qué ticketera imprime ESTA computadora. */}
+          {deLaTienda.length > 0 && (
+            <div className="rounded-lg border border-slate-200 p-2.5 text-xs">
+              <label className="mb-1 block font-medium text-slate-700">Esta computadora imprime en:</label>
+              <select
+                value={fijado}
+                onChange={(e) => elegirEquipo(e.target.value)}
+                className="h-8 w-full rounded-md border border-slate-300 bg-white px-2 text-xs"
+              >
+                <option value="">Automático (la primera disponible de la tienda)</option>
+                {deLaTienda.map((e) => (
+                  <option key={e.id} value={e.id}>
+                    {e.nombre} {conectado(e) ? '· conectada' : '· apagada'}
+                  </option>
+                ))}
+              </select>
+              {deLaTienda.length > 1 && !fijado && (
+                <p className="mt-1 text-[11px] text-amber-700">
+                  Esta tienda tiene {deLaTienda.length} ticketeras: elige la de esta computadora para que el ticket no salga en otro piso.
+                </p>
+              )}
+            </div>
+          )}
+
           {/* Por dónde va a salir: es lo primero que hay que saber antes de
               interpretar el resultado de la prueba. */}
           {equipo === undefined ? (
@@ -260,8 +302,9 @@ export function PruebaImpresionModal({
             </p>
           ) : (
             <p className="rounded-lg border border-amber-200 bg-amber-50 p-2.5 text-xs text-amber-800">
-              No hay ninguna computadora con el agente de impresión instalado, así que la prueba sale
-              como PDF por el diálogo de Windows. Al imprimir elige <b>Tamaño real</b> o 100 %: con
+              Esta tienda no tiene ninguna computadora con el agente de impresión instalado, así que la
+              prueba sale como PDF por el diálogo de Windows. Para que salga directo por la ticketera,
+              instala el agente en la computadora que la tiene conectada (ERP → Configuración → Impresión de tickets). Al imprimir elige <b>Tamaño real</b> o 100 %: con
               “ajustar a la página” las barras se deforman y la pistola falla.
             </p>
           )}

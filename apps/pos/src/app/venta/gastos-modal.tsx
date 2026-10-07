@@ -34,9 +34,12 @@ type Tipo = 'INGRESO' | 'EGRESO';
 
 export function GastosModal({
   cabecera,
+  almacenId,
   onClose,
 }: {
   cabecera: EncabezadoCaja | null;
+  /** Tienda de la caja: el ticket sale por su ticketera y nunca por la de otra tienda. */
+  almacenId?: string | null;
   onClose: () => void;
 }) {
   const [pending, start] = useTransition();
@@ -148,6 +151,7 @@ export function GastosModal({
             { avanceCorteMm: avance },
           ),
         'Caja chica - movimientos del turno',
+        almacenId ?? null,
       );
       if (r.via === 'agente' && r.estado === 'impreso') {
         toast.success(`Impreso en ${r.equipo}`);

@@ -2719,7 +2719,7 @@ export function PosTerminal({
 
       {/* MODAL — Gastos / Caja chica */}
       {gastosOpen && sesionActiva && (
-        <GastosModal cabecera={cabeceraDeCaja()} onClose={() => setGastosOpen(false)} />
+        <GastosModal cabecera={cabeceraDeCaja()} almacenId={sesionActiva?.almacen_id ?? null} onClose={() => setGastosOpen(false)} />
       )}
 
       {/* MODAL — Adelantos de cliente */}
