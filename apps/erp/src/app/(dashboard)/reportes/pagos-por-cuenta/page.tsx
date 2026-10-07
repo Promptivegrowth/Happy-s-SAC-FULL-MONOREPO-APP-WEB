@@ -26,7 +26,7 @@ export default async function Page({ searchParams }: { searchParams: Promise<SP>
   const desde = sp.desde || inicioDeMes();
   const hasta = sp.hasta || hoy();
 
-  const { filas, totalPeriodo, totalPorMetodo, totalPorBanco } = await reportePagosPorCuenta(desde, hasta);
+  const { filas, totalPeriodo, totalDevuelto, totalNeto, totalPorMetodo, totalPorBanco } = await reportePagosPorCuenta(desde, hasta);
 
   const exportPayload = {
     titulo: 'Pagos por cuenta / método',
@@ -37,10 +37,12 @@ export default async function Page({ searchParams }: { searchParams: Promise<SP>
       { header: 'Cuenta destino', key: 'cuenta', width: 28 },
       { header: 'Método', key: 'metodo', width: 16 },
       { header: 'N° pagos', key: 'cantidad', width: 10 },
-      { header: 'Monto', key: 'monto', formato: 'moneda' as const, width: 16 },
+      { header: 'Cobrado', key: 'monto', formato: 'moneda' as const, width: 16 },
+      { header: 'Devuelto', key: 'devuelto', formato: 'moneda' as const, width: 14 },
+      { header: 'Neto', key: 'neto', formato: 'moneda' as const, width: 16 },
     ],
     rows: filas.map((f) => ({ ...f, banco: f.banco ?? '—', metodo: METODO_LABEL[f.metodo] ?? f.metodo })),
-    totales: { monto: totalPeriodo },
+    totales: { monto: totalPeriodo, devuelto: totalDevuelto, neto: totalNeto },
   };
 
   return (
@@ -67,8 +69,11 @@ export default async function Page({ searchParams }: { searchParams: Promise<SP>
       {/* Totales por banco — lo que el cliente concilia contra sus estados de cuenta */}
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <Card className="p-4">
-          <p className="text-xs text-slate-500">Total cobrado en el período</p>
-          <p className="mt-1 font-display text-2xl font-semibold text-emerald-600">{formatPEN(totalPeriodo)}</p>
+          <p className="text-xs text-slate-500">Neto del período</p>
+          <p className="mt-1 font-display text-2xl font-semibold text-emerald-600">{formatPEN(totalNeto)}</p>
+          <p className="text-[10px] text-slate-400">
+            cobrado {formatPEN(totalPeriodo)}{totalDevuelto > 0 ? ` − devuelto ${formatPEN(totalDevuelto)}` : ''}
+          </p>
         </Card>
         {totalPorBanco.map((b) => (
           <Card key={b.banco} className="p-4">
@@ -109,7 +114,9 @@ export default async function Page({ searchParams }: { searchParams: Promise<SP>
                   <TableHead>Cuenta destino</TableHead>
                   <TableHead>Método</TableHead>
                   <TableHead className="text-right">N° pagos</TableHead>
-                  <TableHead className="text-right">Monto</TableHead>
+                  <TableHead className="text-right">Cobrado</TableHead>
+                  <TableHead className="text-right">Devuelto</TableHead>
+                  <TableHead className="text-right">Neto</TableHead>
                   <TableHead className="text-right">% del total</TableHead>
                 </TableRow>
               </TableHeader>
@@ -130,9 +137,14 @@ export default async function Page({ searchParams }: { searchParams: Promise<SP>
                       <Badge variant="outline" className="text-[10px]">{METODO_LABEL[f.metodo] ?? f.metodo}</Badge>
                     </TableCell>
                     <TableCell className="text-right font-mono text-sm">{f.cantidad}</TableCell>
-                    <TableCell className="text-right font-mono font-semibold">{formatPEN(f.monto)}</TableCell>
+                    <TableCell className="text-right font-mono">{formatPEN(f.monto)}</TableCell>
+                    <TableCell className={`text-right font-mono text-sm ${f.devuelto > 0 ? 'text-rose-600' : 'text-slate-300'}`}>
+                      {f.devuelto > 0 ? `− ${formatPEN(f.devuelto)}` : '—'}
+                      {f.devoluciones > 0 && <span className="block text-[10px] text-slate-400">{f.devoluciones} devolución(es)</span>}
+                    </TableCell>
+                    <TableCell className="text-right font-mono font-semibold">{formatPEN(f.neto)}</TableCell>
                     <TableCell className="text-right font-mono text-xs text-slate-500">
-                      {totalPeriodo > 0 ? ((f.monto / totalPeriodo) * 100).toFixed(1) : '0.0'}%
+                      {totalNeto > 0 ? ((f.neto / totalNeto) * 100).toFixed(1) : '0.0'}%
                     </TableCell>
                   </TableRow>
                 ))}
@@ -149,6 +161,9 @@ export default async function Page({ searchParams }: { searchParams: Promise<SP>
           <li><strong>Cuenta destino</strong>: el botón exacto que el cajero eligió al cobrar.</li>
           <li><strong>Método</strong>: cómo pagó el cliente (Yape separado de Plin y de transferencia).</li>
           <li><strong>(sin cuenta)</strong>: pagos registrados sin botón de cuenta (ej. ventas antiguas o botones genéricos ya retirados).</li>
+          <li>Los <strong>adelantos</strong> de clientes suman a su cuenta el día que se reciben (y restan el día que se devuelven).</li>
+          <li><strong>Devuelto</strong>: lo que se devolvió a clientes por esa cuenta (devoluciones y vueltos de cambios). <strong>Neto</strong> es lo que quedó: cobrado − devuelto.</li>
+          <li>Los cambios de prenda y los adelantos aplicados no figuran: se pagaron con algo cobrado antes y no entró dinero nuevo.</li>
         </ul>
       </div>
     </PageShell>

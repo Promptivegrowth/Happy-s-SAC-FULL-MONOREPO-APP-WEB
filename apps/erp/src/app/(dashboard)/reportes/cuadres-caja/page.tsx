@@ -46,7 +46,7 @@ export default async function Page({ searchParams }: { searchParams: Promise<SP>
       { header: 'Abrió', key: 'abierta_por', width: 22 },
       { header: 'Cerró', key: 'cerro_txt', width: 22 },
       { header: 'Ventas', key: 'cantidad_ventas', formato: 'numero' as const, width: 10 },
-      { header: 'Total vendido', key: 'total_vendido', formato: 'moneda' as const, width: 16 },
+      { header: 'Total cobrado', key: 'total_vendido', formato: 'moneda' as const, width: 16 },
       { header: 'Efectivo cobrado', key: 'total_efectivo', formato: 'moneda' as const, width: 16 },
       { header: 'Otros medios (banco)', key: 'otros_medios', formato: 'moneda' as const, width: 18 },
       { header: 'Apertura S/', key: 'monto_apertura', formato: 'moneda' as const, width: 14 },
@@ -79,7 +79,7 @@ export default async function Page({ searchParams }: { searchParams: Promise<SP>
           <p className="text-[10px] text-slate-400">{cerrados.length} cerrados</p>
         </Card>
         <Card className="p-4">
-          <p className="text-xs text-slate-500">Total vendido</p>
+          <p className="text-xs text-slate-500">Total cobrado</p>
           <p className="mt-1 font-display text-2xl font-semibold text-emerald-600">{formatPEN(totalVendido)}</p>
         </Card>
         <Card className={`p-4 ${conDiferencia > 0 ? 'border-amber-300 bg-amber-50/40' : ''}`}>
@@ -99,7 +99,9 @@ export default async function Page({ searchParams }: { searchParams: Promise<SP>
       </div>
 
       <p className="rounded-lg border border-sky-200 bg-sky-50/60 p-3 text-xs leading-relaxed text-sky-900">
-        <b>Vendido</b> es todo lo cobrado, por cualquier medio. <b>Esperado en el cajón</b> es sólo la
+        <b>Cobrado</b> es el dinero que entró por ventas, por cualquier medio. No incluye lo pagado con
+        saldo —un cambio de prenda o un adelanto—, que ya se había cobrado antes y se contaría dos veces.
+        <b> Esperado en el cajón</b> es sólo la
         plata física: el fondo de apertura más lo cobrado en efectivo, menos los gastos de caja chica.
         Lo que entró por Yape, Plin, transferencia o tarjeta va al banco y nunca pasa por el cajón, así
         que las dos cifras no tienen por qué coincidir — y casi nunca coinciden.
@@ -142,7 +144,7 @@ export default async function Page({ searchParams }: { searchParams: Promise<SP>
                   <TableHead>Cajero</TableHead>
                   <TableHead className="text-right">Ventas</TableHead>
                   <TableHead className="text-right">
-                    Vendido
+                    Cobrado
                     <span className="block text-[9px] font-normal normal-case text-slate-400">todos los medios</span>
                   </TableHead>
                   <TableHead className="text-right">

@@ -84,6 +84,47 @@ export function etiquetaPago(metodo: string, referencia?: string | null): string
   return `${nombre} · ${cuenta}`;
 }
 
+/**
+ * ¿Se pagó con algo que ya se había cobrado antes?
+ *
+ * El método CREDITO no es dinero que entra: es lo que el cliente ya pagó en la
+ * venta original de un cambio ("Aplicado de devolución 000006") o un adelanto
+ * que dejó otro día ("ADELANTO"). Contarlo como venta del día lo cuenta dos
+ * veces: el 02/10/2026 el cierre de Huallaga dijo S/ 2380 cuando entraron
+ * S/ 2335, porque un cambio de talla se sumó encima de la venta original de esa
+ * misma mañana (lo notó el cliente).
+ */
+export function esPagoConSaldo(metodo: string | null | undefined): boolean {
+  return (metodo ?? '').trim().toUpperCase() === 'CREDITO';
+}
+
+/** Lo pagado con saldo en un turno o período, agrupado por de dónde salió. */
+export type SaldoAplicado = { etiqueta: string; monto: number; cantidad: number };
+
+/**
+ * Agrupa lo pagado con saldo: cambios por un lado, adelantos por otro.
+ *
+ * Se muestra aparte, como información: explica por qué una venta tiene un
+ * total mayor que lo que se cobró, sin sumarlo al dinero del día.
+ */
+export function resumenSaldoAplicado(pagos: PagoAgrupable[]): SaldoAplicado[] {
+  const mapa = new Map<string, SaldoAplicado>();
+  for (const p of pagos ?? []) {
+    if (!esPagoConSaldo(p.metodo)) continue;
+    const ref = (p.referencia ?? '').trim().toUpperCase();
+    const etiqueta = ref.startsWith('APLICADO DE DEVOL')
+      ? 'Cambios (cobrado en la venta original)'
+      : ref === 'ADELANTO'
+        ? 'Adelantos (cobrados antes)'
+        : 'Saldo a favor aplicado';
+    const previo = mapa.get(etiqueta) ?? { etiqueta, monto: 0, cantidad: 0 };
+    previo.monto += Number(p.monto ?? 0);
+    previo.cantidad += 1;
+    mapa.set(etiqueta, previo);
+  }
+  return [...mapa.values()];
+}
+
 export type PagoAgrupable = {
   metodo: string;
   referencia?: string | null;
@@ -175,14 +216,17 @@ export type CuentaPos = {
  * información, y deja el papel comparable entre dos turnos distintos.
  *
  * Y al final se agregan los cobros que no correspondan a ningún botón actual
- * —una cuenta que después se ocultó, un saldo a favor aplicado—: si entró
- * plata, tiene que estar, aunque el botón ya no exista.
+ * —una cuenta que después se ocultó—: si entró plata, tiene que estar, aunque
+ * el botón ya no exista.
+ *
+ * Lo pagado con saldo (cambios, adelantos) NO entra: no es plata que haya
+ * entrado a ninguna cuenta. Va aparte, con `resumenSaldoAplicado` (06/10/2026).
  */
 export function arqueoPorCuenta(
   cuentasPos: CuentaPos[],
   pagos: PagoAgrupable[],
 ): TotalPorCuenta[] {
-  const totales = agruparPorCuenta(pagos);
+  const totales = agruparPorCuenta((pagos ?? []).filter((p) => !esPagoConSaldo(p.metodo)));
   const usados = new Set<number>();
   const clave = (s: string) => s.trim().toUpperCase();
 
@@ -225,4 +269,74 @@ export function arqueoPorCuenta(
   });
 
   return filas;
+}
+
+/** Cómo se nombra el medio por el que se devolvió dinero: "Efectivo", "INTERBANK JAVIER". */
+export function medioDeDevolucion(metodo: string | null | undefined, cuenta?: string | null): string {
+  const m = (metodo ?? '').trim().toUpperCase();
+  if (m === 'EFECTIVO') return 'Efectivo';
+  const c = (cuenta ?? '').trim();
+  // La cuenta tal cual, como el botón del POS; sin ella (devoluciones viejas), el método.
+  return c || nombreMetodo(m);
+}
+
+/** Salida de caja registrada por una devolución (caja_chica_movimientos con devolucion_id). */
+export type SalidaPorDevolucion = {
+  monto: number | string | null;
+  metodo: string | null;
+  devoluciones?: { numero?: string | null; cuenta_devolucion?: string | null; ventas?: { numero?: string | null } | null } | null;
+};
+
+export type DevolucionDelTurno = { numero: string; venta: string | null; medio: string; monto: number; efectivo: boolean };
+
+/**
+ * Las devoluciones de dinero de un turno, desde las salidas de caja que dejó
+ * cada una. Es la misma fuente para el ticket, la pantalla de cierre, el Excel
+ * y el cuadre del ERP: así los cuatro dicen lo mismo.
+ */
+export function devolucionesDelTurno(salidas: SalidaPorDevolucion[]): DevolucionDelTurno[] {
+  return (salidas ?? []).map((s) => {
+    const metodo = (s.metodo ?? '').trim().toUpperCase();
+    return {
+      numero: s.devoluciones?.numero ?? 'Devolución',
+      venta: s.devoluciones?.ventas?.numero ?? null,
+      medio: medioDeDevolucion(metodo, s.devoluciones?.cuenta_devolucion),
+      monto: Number(s.monto ?? 0),
+      efectivo: metodo === 'EFECTIVO',
+    };
+  });
+}
+
+/** Un adelanto recibido o devuelto en un turno (clientes_adelantos ENTRADA / DEVOLUCION). */
+export type AdelantoDelTurno = { numero: string; tipo: 'ENTRADA' | 'DEVOLUCION'; medio: string; monto: number; efectivo: boolean };
+
+/**
+ * Los adelantos que movieron dinero en un turno.
+ *
+ * El dinero de un adelanto entra el día que el cliente lo deja: ese día es
+ * plata del turno —al cajón si fue en efectivo, a la cuenta si no—. Cuando
+ * después se aplica a una venta, esa venta se paga con saldo y ya no se cuenta
+ * otra vez (ver `esPagoConSaldo`). Antes no figuraba en ningún lado: un
+ * adelanto en efectivo dejaba el cuadre con sobrante (06/10/2026).
+ */
+export function adelantosDelTurno(
+  filas: Array<{ numero: string | null; tipo: string; monto: number | string | null; metodo_pago: string | null; referencia: string | null }>,
+): AdelantoDelTurno[] {
+  return (filas ?? [])
+    .filter((a) => a.tipo === 'ENTRADA' || a.tipo === 'DEVOLUCION')
+    .map((a) => {
+      const metodo = (a.metodo_pago ?? '').trim().toUpperCase();
+      return {
+        numero: a.numero ?? 'Adelanto',
+        tipo: a.tipo as 'ENTRADA' | 'DEVOLUCION',
+        medio: medioDeDevolucion(metodo, a.referencia),
+        monto: Number(a.monto ?? 0),
+        efectivo: metodo === 'EFECTIVO',
+      };
+    });
+}
+
+/** Cuánto cambian los adelantos el efectivo del cajón: entradas menos devoluciones en efectivo. */
+export function adelantosEnEfectivo(a: AdelantoDelTurno[]): number {
+  return (a ?? []).filter((x) => x.efectivo).reduce((s, x) => s + (x.tipo === 'ENTRADA' ? x.monto : -x.monto), 0);
 }

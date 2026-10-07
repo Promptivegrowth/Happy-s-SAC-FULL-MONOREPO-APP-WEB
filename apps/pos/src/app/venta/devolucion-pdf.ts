@@ -39,6 +39,12 @@ function metodoLabel(m: string | null): string {
   return map[m] ?? m;
 }
 
+/** Medio y cuenta por los que salió el dinero: "Transferencia · INTERBANK JAVIER". */
+function medioDevuelto(data: DevolucionPDFData): string {
+  const metodo = metodoLabel(data.metodo_devolucion);
+  return data.cuenta_devolucion ? `${metodo} · ${data.cuenta_devolucion}` : metodo;
+}
+
 export async function generarComprobanteDevolucionPDF(data: DevolucionPDFData): Promise<void> {
   const [{ jsPDF }, autoTableMod] = await Promise.all([
     import('jspdf'),
@@ -307,7 +313,7 @@ export async function generarComprobanteDevolucionPDF(data: DevolucionPDFData): 
       doc.text(`DEVUELTO: ${fmtPEN(Math.abs(dif))}`, boxRX + boxRW / 2, y + 19, { align: 'center' });
       doc.setFont('helvetica', 'normal');
       doc.setFontSize(7);
-      doc.text(`Método: ${metodoLabel(data.metodo_devolucion)}`, boxRX + boxRW / 2, y + 25, { align: 'center' });
+      doc.text(`Devuelto por: ${medioDevuelto(data)}`, boxRX + boxRW / 2, y + 25, { align: 'center' });
     }
   } else if (esCambio) {
     // CAMBIO sin venta intercambio (legacy / fallback)
@@ -327,7 +333,7 @@ export async function generarComprobanteDevolucionPDF(data: DevolucionPDFData): 
     doc.text(fmtPEN(data.monto_devuelto || totalMonto), boxRX + 3, y + 19);
     doc.setFont('helvetica', 'normal');
     doc.setFontSize(8);
-    doc.text(`Método: ${metodoLabel(data.metodo_devolucion)}`, boxRX + 3, y + 26);
+    doc.text(`Devuelto por: ${medioDevuelto(data)}`, boxRX + 3, y + 26);
   }
   y += 34;
 

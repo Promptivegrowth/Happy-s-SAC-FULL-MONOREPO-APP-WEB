@@ -12,7 +12,7 @@
  * rangos de mes/temporada. Para data sets más grandes, restringir el rango.
  */
 
-import { etiquetaPago } from '@happy/lib/pagos/etiqueta';
+import { etiquetaPago, medioDeDevolucion } from '@happy/lib/pagos/etiqueta';
 import { costosDeTodasLasVariantes } from '@/server/costo-variante';
 import { createClient } from '@happy/db/server';
 import { redirect } from 'next/navigation';
@@ -945,25 +945,123 @@ export type ReporteCajaResult = {
 export async function reporteCaja(f: FiltrosCaja): Promise<ReporteCajaResult> {
   const sb = await sbReadonly();
 
-  // --- Ingresos: ventas (POS/WEB/B2B/...) ---
-  let qV = sb
-    .from('ventas')
-    .select('id, numero, fecha, canal, total, almacen_id')
-    .gte('fecha', `${f.desde}T00:00:00`)
-    .lte('fecha', `${f.hasta}T23:59:59`)
-    .neq('estado', 'ANULADA')
-    .limit(20000);
-  if (f.almacen_id) qV = qV.eq('almacen_id', f.almacen_id);
-  const { data: ventas } = await qV;
+  /*
+   * Desde el 06/10/2026 el flujo cuenta el DINERO, igual que el cierre de caja:
+   *   · el día es el de Lima (antes UTC: lo vendido de noche caía al día siguiente);
+   *   · una venta aporta lo cobrado, sin lo pagado con saldo (un cambio o un
+   *     adelanto ya se cobraron antes);
+   *   · entran los adelantos el día que se reciben, y salen las devoluciones de
+   *     dinero, los adelantos devueltos y los gastos de caja chica.
+   */
+  const diaLima = (iso: string) => new Date(iso).toLocaleDateString('en-CA', { timeZone: 'America/Lima' });
+  const ini = `${f.desde}T00:00:00-05:00`;
+  const fin = `${f.hasta}T23:59:59-05:00`;
 
+  // --- Ingresos: ventas (POS/WEB/B2B/...) ---
   type V = { id: string; numero: string; fecha: string; canal: string; total: string | number };
-  const ingresoRows: CajaDetalleRow[] = ((ventas ?? []) as V[]).map((v) => ({
-    fecha: v.fecha.slice(0, 10),
-    tipo: 'INGRESO' as const,
-    origen: `VENTA ${v.canal}`,
-    referencia: v.numero,
-    monto: Number(v.total),
-  }));
+  const ventas: V[] = [];
+  for (let d = 0; d < 100000; d += 1000) {
+    let qV = sb
+      .from('ventas')
+      .select('id, numero, fecha, canal, total, almacen_id')
+      .gte('fecha', ini)
+      .lte('fecha', fin)
+      .neq('estado', 'ANULADA')
+      .order('id')
+      .range(d, d + 999);
+    if (f.almacen_id) qV = qV.eq('almacen_id', f.almacen_id);
+    const { data, error } = await qV;
+    if (error) throw new Error(error.message);
+    ventas.push(...((data ?? []) as V[]));
+    if (!data || data.length < 1000) break;
+  }
+  const saldoPorVenta = new Map<string, number>();
+  for (let i = 0; i < ventas.length; i += 150) {
+    const { data } = await sb
+      .from('ventas_pagos')
+      .select('venta_id, monto')
+      .eq('metodo', 'CREDITO')
+      .in('venta_id', ventas.slice(i, i + 150).map((v) => v.id));
+    for (const p of (data ?? []) as { venta_id: string; monto: number | string }[]) {
+      saldoPorVenta.set(p.venta_id, (saldoPorVenta.get(p.venta_id) ?? 0) + Number(p.monto ?? 0));
+    }
+  }
+  const ingresoRows: CajaDetalleRow[] = ventas
+    .map((v) => ({
+      fecha: diaLima(v.fecha),
+      tipo: 'INGRESO' as const,
+      origen: `VENTA ${v.canal}`,
+      referencia: v.numero,
+      monto: Number(v.total) - (saldoPorVenta.get(v.id) ?? 0),
+    }))
+    .filter((r) => r.monto > 0.009);
+
+  // --- Cajas de la tienda filtrada (para caja chica y adelantos) ---
+  let cajasDelAlmacen: Set<string> | null = null;
+  if (f.almacen_id) {
+    const { data: cs } = await sb.from('cajas').select('id').eq('almacen_id', f.almacen_id);
+    cajasDelAlmacen = new Set(((cs ?? []) as { id: string }[]).map((c) => c.id));
+  }
+
+  // --- Adelantos: entran el día que se reciben; salen si se devuelven ---
+  const { data: adel } = await sb
+    .from('clientes_adelantos')
+    .select('numero, fecha, tipo, monto, caja_sesion_id, cajas_sesiones:caja_sesion_id(caja_id)')
+    .in('tipo', ['ENTRADA', 'DEVOLUCION'])
+    .gte('fecha', ini)
+    .lte('fecha', fin)
+    .limit(5000);
+  type A = { numero: string; fecha: string; tipo: string; monto: number | string; cajas_sesiones: { caja_id: string } | null };
+  const adelRows: CajaDetalleRow[] = ((adel ?? []) as unknown as A[])
+    .filter((a) => !cajasDelAlmacen || (a.cajas_sesiones && cajasDelAlmacen.has(a.cajas_sesiones.caja_id)))
+    .map((a) => ({
+      fecha: diaLima(a.fecha),
+      tipo: a.tipo === 'ENTRADA' ? 'INGRESO' as const : 'EGRESO' as const,
+      origen: a.tipo === 'ENTRADA' ? 'ADELANTO CLIENTE' : 'ADELANTO DEVUELTO',
+      referencia: a.numero,
+      monto: Number(a.monto ?? 0),
+    }));
+
+  // --- Devoluciones de dinero a clientes ---
+  let qD = sb
+    .from('devoluciones')
+    .select('numero, fecha, monto_devuelto, metodo_devolucion, cuenta_devolucion, almacen_id')
+    .gt('monto_devuelto', 0)
+    .gte('fecha', ini)
+    .lte('fecha', fin)
+    .limit(5000);
+  if (f.almacen_id) qD = qD.eq('almacen_id', f.almacen_id);
+  const { data: devs } = await qD;
+  type D = { numero: string; fecha: string; monto_devuelto: number | string; metodo_devolucion: string | null; cuenta_devolucion: string | null };
+  const devRows: CajaDetalleRow[] = ((devs ?? []) as unknown as D[])
+    // Saldo a favor o pendiente: no salió dinero.
+    .filter((d) => d.metodo_devolucion && !['CREDITO', 'WHATSAPP_PENDIENTE'].includes(d.metodo_devolucion))
+    .map((d) => ({
+      fecha: diaLima(d.fecha),
+      tipo: 'EGRESO' as const,
+      origen: 'DEVOLUCIÓN CLIENTE',
+      referencia: `${d.numero} · ${medioDeDevolucion(d.metodo_devolucion, d.cuenta_devolucion)}`,
+      monto: Number(d.monto_devuelto ?? 0),
+    }));
+
+  // --- Caja chica: gastos e ingresos (las salidas de devoluciones ya están arriba) ---
+  const { data: cc } = await sb
+    .from('caja_chica_movimientos')
+    .select('created_at, tipo, concepto, monto, caja_id, devolucion_id')
+    .is('devolucion_id', null)
+    .gte('created_at', ini)
+    .lte('created_at', fin)
+    .limit(10000);
+  type CC = { created_at: string; tipo: string; concepto: string; monto: number | string; caja_id: string | null };
+  const ccRows: CajaDetalleRow[] = ((cc ?? []) as unknown as CC[])
+    .filter((m) => !cajasDelAlmacen || (m.caja_id && cajasDelAlmacen.has(m.caja_id)))
+    .map((m) => ({
+      fecha: diaLima(m.created_at),
+      tipo: String(m.tipo).toUpperCase() === 'INGRESO' ? 'INGRESO' as const : 'EGRESO' as const,
+      origen: String(m.tipo).toUpperCase() === 'INGRESO' ? 'INGRESO CAJA CHICA' : 'GASTO CAJA CHICA',
+      referencia: m.concepto,
+      monto: Number(m.monto ?? 0),
+    }));
 
   // --- Egresos: pagos_talleres + pagos_proveedores ---
   // pagos_talleres no tiene almacen_id directo, pero se puede vincular vía
@@ -1016,13 +1114,15 @@ export async function reporteCaja(f: FiltrosCaja): Promise<ReporteCajaResult> {
     monto: Number(p.monto),
   }));
 
-  const rows: CajaDetalleRow[] = [...ingresoRows, ...egresosT, ...egresosP].sort((a, b) =>
+  const ingresosTodos = [...ingresoRows, ...adelRows.filter((r) => r.tipo === 'INGRESO'), ...ccRows.filter((r) => r.tipo === 'INGRESO')];
+  const egresosTodos = [...egresosT, ...egresosP, ...devRows, ...adelRows.filter((r) => r.tipo === 'EGRESO'), ...ccRows.filter((r) => r.tipo === 'EGRESO')];
+  const rows: CajaDetalleRow[] = [...ingresosTodos, ...egresosTodos].sort((a, b) =>
     a.fecha < b.fecha ? 1 : -1,
   );
 
   // --- Por canal ---
   const por_canal: Record<string, number> = {};
-  for (const r of ingresoRows) por_canal[r.origen] = (por_canal[r.origen] ?? 0) + r.monto;
+  for (const r of ingresosTodos) por_canal[r.origen] = (por_canal[r.origen] ?? 0) + r.monto;
 
   // --- Por día ---
   const mapDia = new Map<string, CajaDiaRow>();
@@ -1035,8 +1135,8 @@ export async function reporteCaja(f: FiltrosCaja): Promise<ReporteCajaResult> {
   }
   const por_dia = [...mapDia.values()].sort((a, b) => (a.fecha < b.fecha ? -1 : 1));
 
-  const ingresos_total = ingresoRows.reduce((s, r) => s + r.monto, 0);
-  const egresos_total = [...egresosT, ...egresosP].reduce((s, r) => s + r.monto, 0);
+  const ingresos_total = ingresosTodos.reduce((s, r) => s + r.monto, 0);
+  const egresos_total = egresosTodos.reduce((s, r) => s + r.monto, 0);
 
   return {
     metricas: {

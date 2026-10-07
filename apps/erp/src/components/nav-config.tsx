@@ -2,7 +2,7 @@ import {
   LayoutDashboard, Package, Layers3, FileText, Shirt, Users, Truck, Factory,
   Warehouse, ShoppingCart, Boxes, Receipt, ClipboardList, Scale,
   AlertTriangle, MessageSquareWarning, BarChart3, Settings, UserCog, Globe,
-  Tags, Scissors, Wrench, Coins, Hammer, Store, QrCode, Plane, Barcode, Sparkles,
+  Tags, Scissors, Wrench, Coins, Hammer, Store, QrCode, Plane, Barcode, Sparkles, RotateCcw,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 
@@ -88,6 +88,7 @@ export const NAV: NavGroup[] = [
     label: 'Ventas',
     items: [
       { label: 'Ventas (todas)', href: '/ventas', icon: Receipt },
+      { label: 'Devoluciones y cambios', href: '/devoluciones', icon: RotateCcw },
       { label: 'POS (simulador)', href: '/pos', icon: Store },
       { label: 'Ventas de exportación', href: '/ventas/exportacion', icon: Plane },
       { label: 'Pedidos Web', href: '/pedidos-web', icon: Globe },

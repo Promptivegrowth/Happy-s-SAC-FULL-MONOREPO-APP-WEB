@@ -110,6 +110,22 @@ export type BalanceCajaDTO = {
     monto: number;
     cantidad: number;
   }>;
+  /**
+   * El dinero que entró por ventas: total_ventas sin lo pagado con saldo.
+   *
+   * Un cambio o un adelanto se pagan con algo cobrado antes; sumarlo de nuevo
+   * contaba dos veces la misma plata (cierre de Huallaga, 02/10/2026).
+   */
+  total_cobrado: number;
+  /** Lo pagado con saldo (cambios, adelantos), aparte: no es plata nueva. */
+  saldo_aplicado: Array<{ etiqueta: string; monto: number; cantidad: number }>;
+  /** Devoluciones de dinero del turno, con medio y cuenta. Las de efectivo ya están en total_gastos. */
+  devoluciones: Array<{ numero: string; venta: string | null; medio: string; monto: number; efectivo: boolean }>;
+  /**
+   * Adelantos recibidos o devueltos en el turno. Los de efectivo ya están en
+   * esperado_efectivo (entran o salen del cajón).
+   */
+  adelantos: Array<{ numero: string; tipo: 'ENTRADA' | 'DEVOLUCION'; medio: string; monto: number; efectivo: boolean }>;
 };
 
 export type EmpresaPDF = {

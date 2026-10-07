@@ -17,7 +17,7 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
   const d = await detalleCuadre(id);
   if (!d) notFound();
 
-  const { cabecera: c, arqueo, movimientos, ventas, cierres_parciales } = d;
+  const { cabecera: c, arqueo, saldo_aplicado, devoluciones, adelantos, movimientos, ventas, cierres_parciales } = d;
   const dif = c.diferencia;
   const cuadra = dif !== null && Math.abs(dif) < 0.009;
 
@@ -99,11 +99,11 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
             <Dato etiqueta="Fondo de apertura" valor={formatPEN(c.monto_apertura)} />
             <Dato etiqueta="Efectivo cobrado" valor={formatPEN(c.total_efectivo)}
-                  ayuda={`${c.cantidad_ventas} venta(s), ${formatPEN(c.total_vendido)} en total`} />
+                  ayuda={`${c.cantidad_ventas} venta(s), ${formatPEN(c.total_vendido)} cobrados en total`} />
             <Dato etiqueta="Caja chica" valor={formatPEN(c.total_gastos)}
                   ayuda="gastos e ingresos del turno" />
             <Dato etiqueta="Efectivo esperado" valor={formatPEN(c.efectivo_esperado)}
-                  ayuda="apertura + efectivo + caja chica" />
+                  ayuda="apertura + efectivo + caja chica + adelantos en efectivo" />
             <Dato
               etiqueta="Contado por el cajero"
               valor={c.efectivo_contado === null ? '—' : formatPEN(c.efectivo_contado)}
@@ -156,10 +156,80 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
                   {formatPEN(arqueo.reduce((s, a) => s + a.monto, 0))}
                 </TableCell>
               </TableRow>
+              {/* Lo pagado con saldo ya se cobró antes: se informa, no se suma. */}
+              {saldo_aplicado.map((x) => (
+                <TableRow key={x.etiqueta} className="text-slate-500">
+                  <TableCell className="text-xs">{x.etiqueta} · no es dinero nuevo</TableCell>
+                  <TableCell className="text-right text-xs">{x.cantidad}</TableCell>
+                  <TableCell className="text-right text-xs">{formatPEN(x.monto)}</TableCell>
+                </TableRow>
+              ))}
             </TableBody>
           </Table>
         </CardContent>
       </Card>
+
+      {/* ─────────── Adelantos del turno ─────────── */}
+      {adelantos.length > 0 && (
+        <Card className="border-sky-200">
+          <CardContent className="p-4">
+            <h3 className="mb-1 font-display text-sm font-semibold text-corp-900">Adelantos del turno</h3>
+            <p className="mb-3 text-xs text-slate-500">
+              El dinero de un adelanto entra el día que el cliente lo deja. Cuando después se usa en una venta, esa venta
+              figura como pagada con saldo y no se vuelve a contar.
+            </p>
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Adelanto</TableHead><TableHead>Movimiento</TableHead>
+                  <TableHead>Medio / cuenta</TableHead><TableHead className="text-right">Monto</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {adelantos.map((a, i) => (
+                  <TableRow key={`${a.numero}-${i}`}>
+                    <TableCell className="text-sm font-medium">{a.numero}</TableCell>
+                    <TableCell className="text-xs">{a.tipo === 'ENTRADA' ? 'Recibido' : 'Devuelto'}</TableCell>
+                    <TableCell className="text-xs">{a.medio}{a.efectivo ? ' (cajón)' : ''}</TableCell>
+                    <TableCell className="text-right text-sm font-semibold">{a.tipo === 'ENTRADA' ? '' : '− '}{formatPEN(a.monto)}</TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* ─────────── Devoluciones de dinero del turno ─────────── */}
+      {devoluciones.length > 0 && (
+        <Card className="border-rose-200">
+          <CardContent className="p-4">
+            <h3 className="mb-1 font-display text-sm font-semibold text-corp-900">Devoluciones del turno</h3>
+            <p className="mb-3 text-xs text-slate-500">
+              Las registró el sistema al hacer cada devolución en el POS: la prenda volvió al stock de la tienda y la
+              salida de dinero no se puede borrar. Las de efectivo ya están descontadas del efectivo esperado.
+            </p>
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Devolución</TableHead><TableHead>Venta original</TableHead>
+                  <TableHead>Se devolvió por</TableHead><TableHead className="text-right">Monto</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {devoluciones.map((x, i) => (
+                  <TableRow key={`${x.numero}-${i}`}>
+                    <TableCell className="text-sm font-medium">{x.numero}</TableCell>
+                    <TableCell className="text-xs">{x.venta ?? '—'}</TableCell>
+                    <TableCell className="text-xs">{x.medio}{x.efectivo ? ' (salió del cajón)' : ''}</TableCell>
+                    <TableCell className="text-right text-sm font-semibold">{formatPEN(x.monto)}</TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </CardContent>
+        </Card>
+      )}
 
       {/* ─────────── Cambios de turno ─────────── */}
       {cierres_parciales.length > 0 && (
@@ -220,7 +290,14 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
                         {m.tipo}
                       </Badge>
                     </TableCell>
-                    <TableCell className="text-xs">{m.concepto}</TableCell>
+                    <TableCell className="text-xs">
+                      {m.concepto}
+                      {m.automatico && (
+                        <Badge variant="outline" className="ml-1 text-[9px]" title="La registró el sistema al hacer la devolución; no se puede borrar">
+                          Automático
+                        </Badge>
+                      )}
+                    </TableCell>
                     <TableCell className="text-xs">{m.registrado_por}</TableCell>
                     <TableCell className="text-right text-sm font-semibold">{formatPEN(m.monto)}</TableCell>
                   </TableRow>

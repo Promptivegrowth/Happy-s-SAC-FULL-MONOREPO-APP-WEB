@@ -331,3 +331,49 @@ describe('el ticket de cierre deja el cuadre a la vista', () => {
       .not.toContain('Observaciones');
   });
 });
+
+describe('el cierre separa lo que no es dinero nuevo (06/10/2026)', () => {
+  // Cierre real de Huallaga del 03/10/2026.
+  const real: DatosCierre = {
+    ...CIERRE,
+    totalVentas: 6910,
+    totalCobrado: 6875,
+    cantidadVentas: 61,
+    totalEfectivo: 1310,
+    totalGastos: 153.5,
+    totalIngresosExtra: 0,
+    montoApertura: 0,
+    esperadoEfectivo: 1156.5,
+    contadoEfectivo: 1156.5,
+    saldoAplicado: [{ etiqueta: 'Cambios (cobrado en la venta original)', monto: 35, cantidad: 1 }],
+    devoluciones: [{ numero: '000007', venta: 'VEN-000727', medio: 'Efectivo', monto: 65, efectivo: true }],
+  };
+
+  it('el total es el dinero cobrado, y el cambio va aparte', () => {
+    const r = renglones(construirTicketCierre(CAB, real));
+    expect(r.find((l) => l.startsWith('TOTAL VENTAS'))).toContain('6875.00');
+    expect(r.join('\n')).toContain('No es dinero nuevo');
+  });
+
+  it('la devolución en efectivo sale en su renglón y los gastos sin ella', () => {
+    const r = renglones(construirTicketCierre(CAB, real));
+    expect(r.join('\n')).toContain('DEVOLUCIONES DEL TURNO');
+    expect(r.find((l) => l.startsWith('- Gastos caja chica'))).toContain('88.50');
+    expect(r.find((l) => l.startsWith('- Devoluciones en efectivo'))).toContain('65.00');
+  });
+
+  it('ningún renglón nuevo se pasa del ancho del papel', () => {
+    const r = renglones(construirTicketCierre(CAB, {
+      ...real,
+      devoluciones: [{ numero: '000009', venta: 'VEN-000999', medio: 'CONTINENTAL - PLIN HAPPYS', monto: 120, efectivo: false }],
+      adelantos: [{ numero: 'ADL-000001', tipo: 'ENTRADA', medio: 'BCP HAPPYS', monto: 450, efectivo: false }],
+    }));
+    for (const l of r) expect(l.length).toBeLessThanOrEqual(COLUMNAS);
+  });
+
+  it('un ticket viejo, sin los datos nuevos, sale igual que antes', () => {
+    const r = renglones(construirTicketCierre(CAB, CIERRE));
+    expect(r.find((l) => l.startsWith('TOTAL VENTAS'))).toContain('1380.50');
+    expect(r.join('\n')).not.toContain('DEVOLUCIONES DEL TURNO');
+  });
+});

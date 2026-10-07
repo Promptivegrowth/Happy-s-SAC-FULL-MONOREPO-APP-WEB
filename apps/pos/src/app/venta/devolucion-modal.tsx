@@ -22,6 +22,7 @@ import {
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { formatPEN , formatTallaChip } from '@happy/lib';
+import { etiquetaPago } from '@happy/lib/pagos/etiqueta';
 import {
   buscarVentaParaDevolucion,
   registrarDevolucion,
@@ -206,6 +207,41 @@ export function DevolucionModal({
     setEntregaLineas(entregaLineas.filter((l) => l.variante_id !== varId));
   }
 
+  /*
+   * Se propone devolver por el mismo medio y la misma cuenta por la que pagó
+   * el cliente.
+   *
+   * Quien lleva el flujo de caja por cuenta necesita que la plata salga de
+   * donde entró (pedido del cliente, 06/10/2026). La cajera puede cambiarlo si
+   * el cliente pide otra cosa; esto solo evita que por defecto todo salga en
+   * efectivo cuando el cliente pagó por transferencia.
+   */
+  function proponerMedioDeLaVenta(v: VentaDevolucionData) {
+    const principal = [...(v.pagos ?? [])]
+      .filter((p) => p.metodo !== 'CREDITO')
+      .sort((a, b) => b.monto - a.monto)[0];
+    if (!principal || principal.metodo === 'EFECTIVO') {
+      setMetodo('EFECTIVO');
+      setCuentaNombre(null);
+      return;
+    }
+    const ref = (principal.referencia ?? '').trim().toUpperCase();
+    const cuenta = cuentasBancarias.find((c) => c.metodo_default !== 'EFECTIVO' && c.nombre_corto.trim().toUpperCase() === ref);
+    if (cuenta) {
+      setMetodo(cuenta.metodo_default as Metodo);
+      setCuentaNombre(cuenta.nombre_corto);
+    } else {
+      setMetodo('EFECTIVO');
+      setCuentaNombre(null);
+    }
+  }
+
+  /** Cómo pagó el cliente, para mostrárselo a la cajera al elegir el medio. */
+  const pagoOriginal = (venta?.pagos ?? [])
+    .filter((p) => p.metodo !== 'CREDITO')
+    .map((p) => `${etiquetaPago(p.metodo, p.referencia)} ${formatPEN(p.monto)}`)
+    .join(' + ');
+
   async function buscar() {
     if (busqueda.trim().length < 3) {
       toast.error('Ingresá al menos 3 caracteres');
@@ -219,6 +255,7 @@ export function DevolucionModal({
         return;
       }
       setVenta(v);
+      proponerMedioDeLaVenta(v);
       // Pre-inicializar cantidades en 0
       const init: Record<string, number> = {};
       for (const l of v.lineas) init[l.venta_linea_id] = 0;
@@ -290,6 +327,7 @@ export function DevolucionModal({
           motivo: motivo.trim(),
           observacion: observacion || null,
           metodo_devolucion: metodo,
+          cuenta_devolucion: cuentaNombre,
           monto_devuelto: totalSeleccionado,
           lineas: lineasDevolver,
           caja_sesion_id: sesionId,
@@ -322,6 +360,7 @@ export function DevolucionModal({
             : null,
           referencia_diferencia_cobro: diferencia > 0.01 ? cuentaNombre : null,
           metodo_diferencia_devuelta: diferencia < -0.01 ? metodo : null,
+          cuenta_diferencia_devuelta: diferencia < -0.01 ? cuentaNombre : null,
         });
         if (!r.ok) { toast.error(r.error ?? 'Error'); return; }
         devolucionId = r.data!.devolucion_id;
@@ -723,6 +762,11 @@ export function DevolucionModal({
                       y después EFECTIVO + CRÉDITO. Click en una cuenta setea
                       metodo=metodo_default de la cuenta + cuentaNombre.
                       Click en EFECTIVO/CRÉDITO limpia cuentaNombre. */}
+                  {pagoOriginal && (
+                    <p className="mt-0.5 text-[11px] text-slate-500">
+                      El cliente pagó con: <strong>{pagoOriginal}</strong>
+                    </p>
+                  )}
                   <div className="mt-1 grid grid-cols-2 gap-1.5">
                     {/* Se excluyen cuentas tipo EFECTIVO del catálogo — este
                         modal ya tiene su botón Efectivo fijo abajo y salían

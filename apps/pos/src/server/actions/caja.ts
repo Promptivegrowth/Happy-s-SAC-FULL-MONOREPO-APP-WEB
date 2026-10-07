@@ -15,7 +15,10 @@
 import { z } from 'zod';
 import { revalidatePath } from 'next/cache';
 import ExcelJS from 'exceljs';
-import { etiquetaPago, agruparPorCuenta, arqueoPorCuenta, type CuentaPos } from '@happy/lib/pagos/etiqueta';
+import {
+  etiquetaPago, agruparPorCuenta, arqueoPorCuenta, resumenSaldoAplicado, esPagoConSaldo,
+  devolucionesDelTurno, adelantosDelTurno, adelantosEnEfectivo, type CuentaPos, type SalidaPorDevolucion,
+} from '@happy/lib/pagos/etiqueta';
 import { DIGITOS_CORRELATIVO } from '@happy/lib/sunat-ubl';
 import { createClient } from '@happy/db/server';
 import { formatTallaChip } from '@happy/lib';
@@ -372,6 +375,8 @@ async function calcularBalanceInterno(
 
   let efectivo = 0, yape = 0, plin = 0, tarjeta = 0, transferencia = 0, otros = 0;
   let porCuenta: BalanceCajaDTO['por_cuenta'] = [];
+  let saldoAplicado: BalanceCajaDTO['saldo_aplicado'] = [];
+  let pagadoConSaldo = 0;
 
   // Los pagos se traen con JOIN sobre la sesión (no con .in(ventaIds)): una caja
   // puede estar abierta hasta 24 h con cientos de ventas y la lista de IDs en la
@@ -382,13 +387,13 @@ async function calcularBalanceInterno(
       .select('metodo, monto, referencia, ventas!inner(caja_sesion_id, estado)')
       .eq('ventas.caja_sesion_id', sesionId)
       .eq('ventas.estado', 'COMPLETADA');
-    porCuenta = arqueoPorCuenta(
-      await cuentasDelPos(sb),
-      (pagos ?? []) as Array<{ metodo: string; monto: number | string; referencia: string | null }>,
-    );
-    for (const p of (pagos ?? []) as Array<{ metodo: string; monto: number | string }>) {
+    const lista = (pagos ?? []) as Array<{ metodo: string; monto: number | string; referencia: string | null }>;
+    porCuenta = arqueoPorCuenta(await cuentasDelPos(sb), lista);
+    saldoAplicado = resumenSaldoAplicado(lista);
+    for (const p of lista) {
       const monto = Number(p.monto ?? 0);
       const m = String(p.metodo);
+      if (esPagoConSaldo(m)) pagadoConSaldo += monto;
       if (m === 'EFECTIVO') efectivo += monto;
       else if (m === 'YAPE') yape += monto;
       else if (m === 'PLIN') plin += monto;
@@ -401,11 +406,16 @@ async function calcularBalanceInterno(
   // Gastos e ingresos extra de caja chica (solo EFECTIVO afecta el cuadre)
   let totalGastos = 0;
   let totalIngresosExtra = 0;
+  let devoluciones: BalanceCajaDTO['devoluciones'] = [];
   try {
-    const { data: movs } = await sb
+    const { data: movs } = await (sb as unknown as { from: (t: string) => any }) // eslint-disable-line @typescript-eslint/no-explicit-any
       .from('caja_chica_movimientos')
-      .select('tipo, monto, metodo')
-      .eq('sesion_id', sesionId);
+      .select('tipo, monto, metodo, devolucion_id, devoluciones:devolucion_id(numero, cuenta_devolucion, ventas:venta_id(numero))')
+      .eq('sesion_id', sesionId)
+      .order('created_at');
+    type Mov = SalidaPorDevolucion & { tipo: string; devolucion_id: string | null };
+    // Las salidas que dejó cada devolución, con su medio y cuenta (ver la librería).
+    devoluciones = devolucionesDelTurno(((movs ?? []) as Mov[]).filter((m) => m.devolucion_id && m.tipo === 'EGRESO'));
     for (const m of (movs ?? []) as Array<{ tipo: string; monto: number | string; metodo: string }>) {
       if (m.metodo !== 'EFECTIVO') continue;  // solo efectivo afecta el cuadre
       const monto = Number(m.monto ?? 0);
@@ -415,6 +425,15 @@ async function calcularBalanceInterno(
   } catch {
     // tabla puede tener problemas de RLS, ignorar
   }
+
+  // Adelantos del turno: el dinero entra (o se devuelve) el día que pasa.
+  const { data: adelRaw } = await (sb as unknown as { from: (t: string) => any }) // eslint-disable-line @typescript-eslint/no-explicit-any
+    .from('clientes_adelantos')
+    .select('numero, tipo, monto, metodo_pago, referencia')
+    .eq('caja_sesion_id', sesionId)
+    .order('created_at');
+  const adelantos = adelantosDelTurno(adelRaw ?? []);
+  const adelantosEf = adelantosEnEfectivo(adelantos);
 
   return {
     total_efectivo: efectivo,
@@ -428,8 +447,12 @@ async function calcularBalanceInterno(
     monto_apertura: montoApertura,
     total_gastos: totalGastos,
     total_ingresos_extra: totalIngresosExtra,
-    esperado_efectivo: montoApertura + efectivo + totalIngresosExtra - totalGastos,
+    esperado_efectivo: montoApertura + efectivo + totalIngresosExtra - totalGastos + adelantosEf,
     por_cuenta: porCuenta,
+    total_cobrado: totalVentas - pagadoConSaldo,
+    saldo_aplicado: saldoAplicado,
+    devoluciones,
+    adelantos,
   };
 }
 
@@ -1176,13 +1199,25 @@ export async function generarExcelCierre(sesionId: string): Promise<{ base64: st
     row++;
   }
 
+  /*
+   * Lo mismo que el ticket y la pantalla de cierre, del mismo cálculo: el
+   * dinero cobrado sin lo pagado con saldo, las devoluciones del turno y la
+   * caja chica (06/10/2026).
+   */
+  const balanceExcel = await calcularBalanceInterno(sb, sesionId, Number(sesion.monto_apertura ?? 0));
+  const pagadoConSaldo = balanceExcel.saldo_aplicado.reduce((a, x) => a + x.monto, 0);
+
   // ---- RESUMEN DE VENTAS ----
   seccionTitulo('RESUMEN DE VENTAS');
   const resumenRows: Array<[string, string | number, 'moneda' | 'numero' | 'texto']> = [
     ['Cantidad de ventas', ventas.length, 'numero'],
     ['Sub-total (sin IGV)', totalVentas - totalIgv, 'moneda'],
     ['IGV', totalIgv, 'moneda'],
-    ['Total ventas', totalVentas, 'moneda'],
+    ['Valor de las ventas', totalVentas, 'moneda'],
+    ...(pagadoConSaldo > 0
+      ? balanceExcel.saldo_aplicado.map((x): [string, number, 'moneda'] => [`(-) ${x.etiqueta} · no es dinero nuevo`, x.monto, 'moneda'])
+      : []),
+    ['Dinero cobrado por ventas', totalVentas - pagadoConSaldo, 'moneda'],
   ];
   for (const [label, val, fmt] of resumenRows) {
     const c1 = ws.getCell(row, 1);
@@ -1199,6 +1234,48 @@ export async function generarExcelCierre(sesionId: string): Promise<{ base64: st
   }
   row++;
 
+  // ---- DEVOLUCIONES DEL TURNO ----
+  if (balanceExcel.devoluciones.length > 0) {
+    seccionTitulo('DEVOLUCIONES DEL TURNO');
+    for (const d of balanceExcel.devoluciones) {
+      const c1 = ws.getCell(row, 1);
+      c1.value = d.venta ? `${d.numero} · venta ${d.venta}` : d.numero;
+      c1.font = { size: 10 };
+      ws.mergeCells(row, 2, row, COLS - 1);
+      const filler = ws.getCell(row, 2);
+      filler.value = d.efectivo ? `${d.medio} (salió del cajón)` : d.medio;
+      filler.font = { size: 9, color: { argb: BRAND.textoOscuro } };
+      const cV = ws.getCell(row, COLS);
+      cV.value = d.monto;
+      cV.numFmt = '"S/" #,##0.00';
+      cV.font = { size: 10, bold: true };
+      cV.alignment = { horizontal: 'right' };
+      row++;
+    }
+    row++;
+  }
+
+  // ---- ADELANTOS DEL TURNO ----
+  if (balanceExcel.adelantos.length > 0) {
+    seccionTitulo('ADELANTOS DEL TURNO');
+    for (const a of balanceExcel.adelantos) {
+      const c1 = ws.getCell(row, 1);
+      c1.value = `${a.numero} · ${a.tipo === 'ENTRADA' ? 'recibido' : 'devuelto'}`;
+      c1.font = { size: 10 };
+      ws.mergeCells(row, 2, row, COLS - 1);
+      const filler = ws.getCell(row, 2);
+      filler.value = a.medio;
+      filler.font = { size: 9, color: { argb: BRAND.textoOscuro } };
+      const cV = ws.getCell(row, COLS);
+      cV.value = a.tipo === 'ENTRADA' ? a.monto : -a.monto;
+      cV.numFmt = '"S/" #,##0.00';
+      cV.font = { size: 10, bold: true };
+      cV.alignment = { horizontal: 'right' };
+      row++;
+    }
+    row++;
+  }
+
   // ---- CUADRE DE EFECTIVO ----
   seccionTitulo('CUADRE DE EFECTIVO');
   const apertura = Number(sesion.monto_apertura ?? 0);
@@ -1206,10 +1283,17 @@ export async function generarExcelCierre(sesionId: string): Promise<{ base64: st
   const esperado = Number(sesion.monto_esperado_efectivo ?? apertura + totEf);
   const contado = Number(sesion.monto_cierre_efectivo ?? 0);
   const diferencia = Number(sesion.diferencia ?? contado - esperado);
+  const devEfectivo = balanceExcel.devoluciones.filter((d) => d.efectivo).reduce((a, d) => a + d.monto, 0);
 
   const cuadre: Array<[string, number, 'apertura' | 'normal' | 'diferencia']> = [
     ['Monto de apertura', apertura, 'apertura'],
     ['(+) Efectivo cobrado', totEf, 'normal'],
+    ['(+) Ingresos caja chica', balanceExcel.total_ingresos_extra, 'normal'],
+    ['(-) Gastos caja chica', balanceExcel.total_gastos - devEfectivo, 'normal'],
+    ...(devEfectivo > 0 ? [['(-) Devoluciones en efectivo', devEfectivo, 'normal'] as [string, number, 'normal']] : []),
+    ...(adelantosEnEfectivo(balanceExcel.adelantos) !== 0
+      ? [['(+) Adelantos en efectivo (neto)', adelantosEnEfectivo(balanceExcel.adelantos), 'normal'] as [string, number, 'normal']]
+      : []),
     ['(=) Efectivo esperado', esperado, 'normal'],
     ['Efectivo contado', contado, 'normal'],
     ['(=) Diferencia', diferencia, 'diferencia'],
@@ -1805,25 +1889,40 @@ export async function cerrarParcialSesion(input: {
     }
   }
 
-  // Gastos del turno (egresos de caja chica)
+  /*
+   * Caja chica del turno: solo lo que fue en EFECTIVO toca el cajón.
+   *
+   * Antes se restaban todos los egresos: una devolución hecha por Plin o
+   * transferencia bajaba el efectivo esperado y el turno salía con sobrante.
+   * Y los ingresos de caja chica no se sumaban. Ahora es la misma regla que el
+   * cierre de fin de día (calcularBalanceInterno).
+   */
   let totalGastos = 0;
+  let totalIngresosExtra = 0;
   try {
-    const { data: gastos } = await (sb as unknown as {
-      from: (t: string) => {
-        select: (s: string) => { eq: (k: string, v: unknown) => { eq: (k: string, v: unknown) => { gte: (k: string, v: string) => Promise<{ data: Array<{ monto: number | string }> | null }> } } };
-      };
-    })
+    const { data: movs } = await (sb as unknown as { from: (t: string) => any }) // eslint-disable-line @typescript-eslint/no-explicit-any
       .from('caja_chica_movimientos')
-      .select('monto')
+      .select('tipo, monto, metodo')
       .eq('sesion_id', sesion.id)
-      .eq('tipo', 'EGRESO')
       .gte('created_at', desde);
-    for (const g of gastos ?? []) totalGastos += Number(g.monto ?? 0);
+    for (const m of (movs ?? []) as Array<{ tipo: string; monto: number | string; metodo: string | null }>) {
+      if (m.metodo && m.metodo !== 'EFECTIVO') continue;
+      if (m.tipo === 'EGRESO') totalGastos += Number(m.monto ?? 0);
+      else if (m.tipo === 'INGRESO') totalIngresosExtra += Number(m.monto ?? 0);
+    }
   } catch {
     // tabla puede no tener filas o columna distinta; ignorar errores
   }
 
-  const esperado = baseEfectivo + efectivo - totalGastos;
+  // Adelantos en efectivo del turno: entran o salen del cajón.
+  const { data: adelRaw } = await (sb as unknown as { from: (t: string) => any }) // eslint-disable-line @typescript-eslint/no-explicit-any
+    .from('clientes_adelantos')
+    .select('numero, tipo, monto, metodo_pago, referencia')
+    .eq('caja_sesion_id', sesion.id)
+    .gte('created_at', desde);
+  const adelantosEf = adelantosEnEfectivo(adelantosDelTurno(adelRaw ?? []));
+
+  const esperado = baseEfectivo + efectivo + totalIngresosExtra - totalGastos + adelantosEf;
   const diferencia = parsed.monto_contado_efectivo - esperado;
 
   // Insertar cierre parcial

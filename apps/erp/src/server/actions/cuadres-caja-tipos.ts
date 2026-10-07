@@ -5,7 +5,7 @@
  * exportar funciones async.
  */
 
-import type { TotalPorCuenta } from '@happy/lib/pagos/etiqueta';
+import type { TotalPorCuenta, SaldoAplicado, DevolucionDelTurno, AdelantoDelTurno } from '@happy/lib/pagos/etiqueta';
 
 /** Una fila del historial: un turno de caja, abierto o cerrado. */
 export type CuadreRow = {
@@ -19,7 +19,13 @@ export type CuadreRow = {
   monto_apertura: number;
   /** Ventas del turno (sin anuladas). */
   cantidad_ventas: number;
+  /**
+   * El DINERO cobrado por ventas: sin lo pagado con saldo (cambios, adelantos),
+   * que ya se había cobrado antes. Igual que el TOTAL VENTAS del ticket.
+   */
   total_vendido: number;
+  /** Lo pagado con saldo en el turno: informativo, no es plata nueva. */
+  pagado_con_saldo: number;
   /** Sólo lo cobrado en efectivo; es lo único que se cuenta a mano. */
   total_efectivo: number;
   total_gastos: number;
@@ -39,6 +45,11 @@ export type MovimientoCaja = {
   metodo: string | null;
   monto: number;
   registrado_por: string;
+  /**
+   * La salida la registró el sistema al hacer una devolución: la cajera no la
+   * escribe ni la puede borrar, y la prenda volvió al stock.
+   */
+  automatico: boolean;
 };
 
 /** Una venta del turno, como se lista en el detalle del cuadre. */
@@ -78,6 +89,12 @@ export type CuadreDetalle = {
    * hace falta saber a cuál de los dos bancos entró.
    */
   arqueo: TotalPorCuenta[];
+  /** Lo pagado con saldo (cambios, adelantos), aparte del arqueo. */
+  saldo_aplicado: SaldoAplicado[];
+  /** Devoluciones de dinero del turno, con su medio y cuenta. */
+  devoluciones: DevolucionDelTurno[];
+  /** Adelantos recibidos o devueltos en el turno. */
+  adelantos: AdelantoDelTurno[];
   movimientos: MovimientoCaja[];
   ventas: VentaDelCuadre[];
   cierres_parciales: CierreParcialRow[];

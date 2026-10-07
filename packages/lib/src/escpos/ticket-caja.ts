@@ -169,6 +169,20 @@ export type DatosCierre = {
    */
   porCuenta?: Array<{ etiqueta: string; monto: number; cantidad: number }>;
   /* (la etiqueta es el texto del botón de cobro, tal cual: "BCP JAVIER") */
+  /**
+   * El dinero que realmente entró por ventas: sin lo pagado con saldo.
+   * Si falta (ticket viejo), el total es `totalVentas` como antes.
+   */
+  totalCobrado?: number;
+  /** Lo pagado con saldo ya cobrado antes: cambios y adelantos. Informativo. */
+  saldoAplicado?: Array<{ etiqueta: string; monto: number; cantidad: number }>;
+  /**
+   * Las devoluciones de dinero del turno, con el medio y la cuenta.
+   * Las de efectivo ya están dentro de `totalGastos`.
+   */
+  devoluciones?: Array<{ numero: string; venta: string | null; medio: string; monto: number; efectivo: boolean }>;
+  /** Adelantos recibidos o devueltos en el turno. Los de efectivo ya están en `esperadoEfectivo`. */
+  adelantos?: Array<{ numero: string; tipo: 'ENTRADA' | 'DEVOLUCION'; medio: string; monto: number; efectivo: boolean }>;
   /** Cierre de fin de día o cambio de turno. */
   parcial?: boolean;
   /** A quién se le entrega la caja, en un cierre parcial. */
@@ -244,15 +258,85 @@ export function construirTicketCierre(
 
   t.separador();
   t.negrita(true);
-  t.lineaDoble(`TOTAL VENTAS (${d.cantidadVentas})`, soles(d.totalVentas));
+  /*
+   * El total es el DINERO que entró por ventas.
+   *
+   * Lo pagado con saldo —un cambio, un adelanto— ya se había cobrado antes; si
+   * se suma acá se cuenta dos veces (cierre de Huallaga del 02/10/2026: decía
+   * S/ 2380 y entraron S/ 2335). Se muestra abajo, aparte y avisando que no es
+   * plata nueva.
+   */
+  t.lineaDoble(`TOTAL VENTAS (${d.cantidadVentas})`, soles(d.totalCobrado ?? d.totalVentas));
   t.negrita(false);
+  const saldo = (d.saldoAplicado ?? []).filter((x) => x.monto > 0);
+  if (saldo.length > 0) {
+    t.linea('No es dinero nuevo (ya cobrado):');
+    for (const x of saldo) {
+      const etiqueta = `${x.etiqueta} (${x.cantidad})`;
+      const importe = soles(x.monto);
+      if (etiqueta.length + importe.length + 1 <= COLUMNAS) t.lineaDoble(etiqueta, importe);
+      else {
+        for (const l of envolver(etiqueta, COLUMNAS)) t.linea(l);
+        t.lineaDoble('', importe);
+      }
+    }
+  }
   t.salto();
+
+  /*
+   * Cada devolución de dinero, con el medio y la cuenta por la que salió.
+   *
+   * La de efectivo ya estaba descontada del cajón como gasto de caja chica,
+   * pero mezclada con las bolsas y el baño; y la de Yape o transferencia no
+   * figuraba en ningún lado. Quien lleva el flujo por cuenta necesita saber de
+   * cuál restarla (pedido del cliente, 06/10/2026).
+   */
+  const devoluciones = (d.devoluciones ?? []).filter((x) => x.monto > 0);
+  if (devoluciones.length > 0) {
+    t.negrita(true).linea('DEVOLUCIONES DEL TURNO').negrita(false);
+    for (const x of devoluciones) {
+      t.linea(x.venta ? `${x.numero} · venta ${x.venta}` : x.numero);
+      const medio = `  ${x.medio}`;
+      const importe = soles(x.monto);
+      if (medio.length + importe.length + 1 <= COLUMNAS) t.lineaDoble(medio, importe);
+      else {
+        for (const l of envolver(medio, COLUMNAS)) t.linea(l);
+        t.lineaDoble('', importe);
+      }
+    }
+    t.lineaDoble('Total devuelto', soles(devoluciones.reduce((a, x) => a + x.monto, 0)));
+    t.salto();
+  }
+  const devEfectivo = devoluciones.filter((x) => x.efectivo).reduce((a, x) => a + x.monto, 0);
+
+  // Adelantos: el dinero entra el día que el cliente lo deja.
+  const adelantos = (d.adelantos ?? []).filter((x) => x.monto > 0);
+  if (adelantos.length > 0) {
+    t.negrita(true).linea('ADELANTOS DEL TURNO').negrita(false);
+    for (const x of adelantos) {
+      t.linea(`${x.numero} · ${x.tipo === 'ENTRADA' ? 'recibido' : 'devuelto'}`);
+      const medio = `  ${x.medio}`;
+      const importe = (x.tipo === 'ENTRADA' ? '' : '-') + soles(x.monto);
+      if (medio.length + importe.length + 1 <= COLUMNAS) t.lineaDoble(medio, importe);
+      else {
+        for (const l of envolver(medio, COLUMNAS)) t.linea(l);
+        t.lineaDoble('', importe);
+      }
+    }
+    t.salto();
+  }
+  const adelEfectivo = adelantos.filter((x) => x.efectivo).reduce((a, x) => a + (x.tipo === 'ENTRADA' ? x.monto : -x.monto), 0);
 
   t.negrita(true).linea('CUADRE DE EFECTIVO').negrita(false);
   t.lineaDoble('Monto de apertura', soles(d.montoApertura));
   t.lineaDoble('+ Ventas efectivo', soles(d.totalEfectivo));
   t.lineaDoble('+ Ingresos caja chica', soles(d.totalIngresosExtra));
-  t.lineaDoble('- Gastos caja chica', soles(d.totalGastos));
+  // Las devoluciones en efectivo van en su renglón, no mezcladas con los gastos.
+  t.lineaDoble('- Gastos caja chica', soles(d.totalGastos - devEfectivo));
+  if (devEfectivo > 0) t.lineaDoble('- Devoluciones en efectivo', soles(devEfectivo));
+  if (Math.abs(adelEfectivo) > 0.009) {
+    t.lineaDoble(adelEfectivo > 0 ? '+ Adelantos en efectivo' : '- Adelantos devueltos', soles(Math.abs(adelEfectivo)));
+  }
   t.separador();
   t.lineaDoble('Esperado en caja', soles(d.esperadoEfectivo));
   t.negrita(true);

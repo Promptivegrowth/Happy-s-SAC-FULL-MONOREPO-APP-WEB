@@ -41,10 +41,17 @@ type ActionResult<T = null> = { ok: true; data: T } | { ok: false; error: string
  * Devuelve un aviso si no pudo registrarla (sin caja abierta): la devolución
  * igual queda hecha, y el cajero sabe que tiene que anotarla a mano.
  */
+/** La cuenta solo se guarda cuando el dinero salió de una cuenta (no en efectivo ni saldo a favor). */
+function cuentaSiCorresponde(metodo: string | null | undefined, cuenta: string | null | undefined): string | null {
+  const m = (metodo ?? '').toUpperCase();
+  if (!m || m === 'EFECTIVO' || m === 'CREDITO' || m === 'WHATSAPP_PENDIENTE') return null;
+  return (cuenta ?? '').trim() || null;
+}
+
 async function salidaDeCaja(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   sb: any,
-  a: { devId: string; devNumero: string; ventaNumero: string; monto: number; metodo: string | null | undefined; sesionId?: string | null; userId: string },
+  a: { devId: string; devNumero: string; ventaNumero: string; monto: number; metodo: string | null | undefined; cuenta?: string | null; sesionId?: string | null; userId: string },
 ): Promise<string | null> {
   if (!(a.monto > 0.009) || !a.metodo || a.metodo === 'CREDITO' || a.metodo === 'WHATSAPP_PENDIENTE') return null;
 
@@ -65,7 +72,7 @@ async function salidaDeCaja(
     sesion_id: sesion.id,
     caja_id: sesion.caja_id,
     tipo: 'EGRESO',
-    concepto: `Devolución ${a.devNumero} al cliente (venta ${a.ventaNumero})`,
+    concepto: `Devolución ${a.devNumero} al cliente (venta ${a.ventaNumero})${a.cuenta ? ` · ${a.cuenta}` : ''}`,
     categoria_id: cat?.id ?? null,
     monto: Math.round(a.monto * 100) / 100,
     metodo: a.metodo,
@@ -94,6 +101,8 @@ export type VentaDevolucionData = {
   almacen_id: string;
   almacen_nombre: string;
   comprobante: { tipo: string; numero_completo: string } | null;
+  /** Cómo pagó el cliente: el POS propone devolver por la misma cuenta. */
+  pagos: { metodo: string; monto: number; referencia: string | null }[];
   lineas: {
     venta_linea_id: string;
     variante_id: string;
@@ -190,6 +199,11 @@ async function obtenerVentaDevolucionInterno(sb: any, ventaId: string): Promise<
     }
   }
 
+  const { data: pagosRaw } = await sb
+    .from('ventas_pagos')
+    .select('metodo, monto, referencia')
+    .eq('venta_id', ventaId);
+
   // Comprobante asociado (el más reciente)
   const { data: comp } = await sb
     .from('comprobantes')
@@ -215,6 +229,8 @@ async function obtenerVentaDevolucionInterno(sb: any, ventaId: string): Promise<
     almacen_id: venta.almacen_id as string,
     almacen_nombre: (venta.almacen?.nombre as string) ?? '—',
     comprobante: comp ? { tipo: comp.tipo as string, numero_completo: comp.numero_completo as string } : null,
+    pagos: ((pagosRaw ?? []) as { metodo: string; monto: number | string; referencia: string | null }[])
+      .map((p) => ({ metodo: String(p.metodo), monto: Number(p.monto ?? 0), referencia: p.referencia ?? null })),
     lineas: lineasArr.map((l) => {
       const vendida = Number(l.cantidad);
       const yaDev = yaDevueltoMap.get(l.id) ?? 0;
@@ -258,6 +274,8 @@ const devolucionSchema = z.object({
     'TRANSFERENCIA', 'DEPOSITO', 'CREDITO', 'WHATSAPP_PENDIENTE',
   ]).nullable().optional(),
   monto_devuelto: z.number().min(0).default(0),
+  /** Cuenta por la que se devolvió (botón del POS: "INTERBANK JAVIER"). */
+  cuenta_devolucion: z.string().max(120).nullable().optional(),
   lineas: z.array(lineaInputSchema).min(1),
   /** Turno de caja de donde sale la plata devuelta. */
   caja_sesion_id: z.string().uuid().nullable().optional(),
@@ -306,6 +324,7 @@ export async function registrarDevolucion(
       tipo: data.tipo,
       monto_devuelto: data.tipo === 'DEVOLUCION' ? data.monto_devuelto : 0,
       metodo_devolucion: data.tipo === 'DEVOLUCION' ? data.metodo_devolucion : null,
+      cuenta_devolucion: data.tipo === 'DEVOLUCION' ? cuentaSiCorresponde(data.metodo_devolucion, data.cuenta_devolucion) : null,
       observacion: data.observacion === '' ? null : (data.observacion ?? null),
     };
     const { data: devIns, error: errCab } = await sb
@@ -364,7 +383,8 @@ export async function registrarDevolucion(
     const aviso = data.tipo === 'DEVOLUCION'
       ? await salidaDeCaja(sb, {
         devId, devNumero: devIns.numero as string, ventaNumero: venta.numero_venta,
-        monto: data.monto_devuelto, metodo: data.metodo_devolucion, sesionId: data.caja_sesion_id, userId,
+        monto: data.monto_devuelto, metodo: data.metodo_devolucion,
+        cuenta: cuentaSiCorresponde(data.metodo_devolucion, data.cuenta_devolucion), sesionId: data.caja_sesion_id, userId,
       })
       : null;
 
@@ -473,6 +493,8 @@ const cambioSchema = z.object({
     'EFECTIVO', 'YAPE', 'PLIN', 'TARJETA_DEBITO', 'TARJETA_CREDITO',
     'TRANSFERENCIA', 'DEPOSITO', 'CREDITO', 'WHATSAPP_PENDIENTE',
   ]).nullable().optional(),
+  /** Cuenta por la que se devolvió la diferencia ("INTERBANK JAVIER"). */
+  cuenta_diferencia_devuelta: z.string().max(120).nullable().optional(),
 });
 
 export async function registrarCambio(
@@ -566,6 +588,9 @@ export async function registrarCambio(
         // Si hubo que devolver dinero, lo registramos acá; si no, queda en 0
         monto_devuelto: diferencia < -0.01 ? Math.abs(diferencia) : 0,
         metodo_devolucion: diferencia < -0.01 ? data.metodo_diferencia_devuelta : null,
+        cuenta_devolucion: diferencia < -0.01
+          ? cuentaSiCorresponde(data.metodo_diferencia_devuelta, data.cuenta_diferencia_devuelta)
+          : null,
         observacion: data.observacion === '' ? null : (data.observacion ?? null),
       })
       .select('id, numero')
@@ -748,7 +773,9 @@ export async function registrarCambio(
     const aviso = diferencia < -0.01
       ? await salidaDeCaja(sb, {
         devId, devNumero, ventaNumero: venta.numero_venta, monto: Math.abs(diferencia),
-        metodo: data.metodo_diferencia_devuelta, sesionId: data.caja_sesion_id, userId,
+        metodo: data.metodo_diferencia_devuelta,
+        cuenta: cuentaSiCorresponde(data.metodo_diferencia_devuelta, data.cuenta_diferencia_devuelta),
+        sesionId: data.caja_sesion_id, userId,
       })
       : null;
 
@@ -780,6 +807,8 @@ export type DevolucionPDFData = {
   observacion: string | null;
   monto_devuelto: number;
   metodo_devolucion: string | null;
+  /** Cuenta por la que se devolvió ("INTERBANK JAVIER"); null en efectivo. */
+  cuenta_devolucion: string | null;
   atendido_por_nombre: string;
   almacen_nombre: string;
   venta: {
@@ -832,7 +861,7 @@ export async function cargarDatosDevolucionPDF(devolucionId: string): Promise<De
   const { data: dev } = await sb
     .from('devoluciones')
     .select(
-      'id, numero, fecha, tipo, motivo, observacion, monto_devuelto, metodo_devolucion, atendido_por, almacen_id, venta_id, ' +
+      'id, numero, fecha, tipo, motivo, observacion, monto_devuelto, metodo_devolucion, cuenta_devolucion, atendido_por, almacen_id, venta_id, ' +
         'almacen:almacen_id(nombre)',
     )
     .eq('id', devolucionId)
@@ -969,6 +998,7 @@ export async function cargarDatosDevolucionPDF(devolucionId: string): Promise<De
     observacion: (dev.observacion as string | null) ?? null,
     monto_devuelto: Number(dev.monto_devuelto ?? 0),
     metodo_devolucion: (dev.metodo_devolucion as string | null) ?? null,
+    cuenta_devolucion: (dev.cuenta_devolucion as string | null) ?? null,
     atendido_por_nombre: (perfil?.nombre_completo as string | null) ?? 'Cajero',
     almacen_nombre: (dev.almacen?.nombre as string) ?? '—',
     venta: {

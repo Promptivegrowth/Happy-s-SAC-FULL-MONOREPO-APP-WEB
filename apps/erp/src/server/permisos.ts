@@ -77,6 +77,8 @@ export const PERMISOS: Array<{ prefijo: string; roles: Rol[] }> = [
   // ── Administración y plata ───────────────────────────────────────────────
   { prefijo: '/reportes', roles: ['contador', 'jefe_produccion'] },
   { prefijo: '/compras/cxp', roles: ['contador'] },
+  // Control de devoluciones y cambios de las cajas (06/10/2026): gerencia y contador.
+  { prefijo: '/devoluciones', roles: ['contador'] },
 
   // ── Comercial ────────────────────────────────────────────────────────────
   { prefijo: '/ventas', roles: [...COMERCIAL, 'contador'] },

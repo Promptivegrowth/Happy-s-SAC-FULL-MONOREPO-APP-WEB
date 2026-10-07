@@ -19,7 +19,10 @@
 
 import { createClient } from '@happy/db/server';
 import { redirect } from 'next/navigation';
-import { arqueoPorCuenta, etiquetaPago, type CuentaPos } from '@happy/lib/pagos/etiqueta';
+import {
+  arqueoPorCuenta, etiquetaPago, esPagoConSaldo, resumenSaldoAplicado, devolucionesDelTurno,
+  adelantosDelTurno, adelantosEnEfectivo, type CuentaPos, type SalidaPorDevolucion,
+} from '@happy/lib/pagos/etiqueta';
 import { formatPEN } from '@happy/lib';
 
 import type {
@@ -105,12 +108,23 @@ export async function listarCuadres(f: FiltrosCuadres): Promise<CuadreRow[]> {
   if (filas.length === 0) return [];
 
   const ids = filas.map((s) => s.id);
-  const [cajas, ventasRes, gastosRes, nombres] = await Promise.all([
+  const [cajas, ventasRes, gastosRes, nombres, adelRes] = await Promise.all([
     sb.from('cajas').select('id, nombre, almacenes(nombre)').in('id', [...new Set(filas.map((s) => s.caja_id))]),
     sb.from('ventas').select('id, caja_sesion_id, total, estado').in('caja_sesion_id', ids).limit(20000),
     sb.from('caja_chica_movimientos').select('sesion_id, tipo, monto, metodo').in('sesion_id', ids).limit(5000),
     nombresDe(sb, filas.flatMap((s) => [s.abierta_por, s.cerrada_por ?? ''])),
+    sb.from('clientes_adelantos').select('caja_sesion_id, numero, tipo, monto, metodo_pago, referencia').in('caja_sesion_id', ids).limit(5000),
   ]);
+
+  // Adelantos en efectivo: entran o salen del cajón, igual que en el cierre del POS.
+  const adelantosEfPorSesion = new Map<string, number>();
+  {
+    const porSesion = new Map<string, Array<{ numero: string | null; tipo: string; monto: number | string | null; metodo_pago: string | null; referencia: string | null }>>();
+    for (const a of (adelRes.data ?? []) as Array<{ caja_sesion_id: string; numero: string | null; tipo: string; monto: number | string | null; metodo_pago: string | null; referencia: string | null }>) {
+      porSesion.set(a.caja_sesion_id, [...(porSesion.get(a.caja_sesion_id) ?? []), a]);
+    }
+    for (const [ses, lista] of porSesion) adelantosEfPorSesion.set(ses, adelantosEnEfectivo(adelantosDelTurno(lista)));
+  }
 
   const caja = new Map<string, { nombre: string; almacen: string }>();
   for (const c of (cajas.data ?? []) as Array<{ id: string; nombre: string; almacenes?: { nombre?: string } }>) {
@@ -137,6 +151,8 @@ export async function listarCuadres(f: FiltrosCuadres): Promise<CuadreRow[]> {
    */
   const idsVentas = ventas.filter((v) => v.estado !== 'ANULADA').map((v) => v.id);
   const efectivoPorSesion = new Map<string, number>();
+  // Lo pagado con saldo (cambios, adelantos): no es dinero nuevo del turno.
+  const saldoPorSesion = new Map<string, number>();
   if (idsVentas.length > 0) {
     const sesionDeVenta = new Map(ventas.map((v) => [v.id, v.caja_sesion_id]));
     for (let i = 0; i < idsVentas.length; i += 800) {
@@ -145,9 +161,14 @@ export async function listarCuadres(f: FiltrosCuadres): Promise<CuadreRow[]> {
         .select('venta_id, metodo, monto')
         .in('venta_id', idsVentas.slice(i, i + 800));
       for (const p of (data ?? []) as PagoFila[]) {
-        if (String(p.metodo).toUpperCase() !== 'EFECTIVO') continue;
         const ses = sesionDeVenta.get(p.venta_id);
-        if (ses) efectivoPorSesion.set(ses, (efectivoPorSesion.get(ses) ?? 0) + Number(p.monto ?? 0));
+        if (!ses) continue;
+        if (esPagoConSaldo(p.metodo)) {
+          saldoPorSesion.set(ses, (saldoPorSesion.get(ses) ?? 0) + Number(p.monto ?? 0));
+          continue;
+        }
+        if (String(p.metodo).toUpperCase() !== 'EFECTIVO') continue;
+        efectivoPorSesion.set(ses, (efectivoPorSesion.get(ses) ?? 0) + Number(p.monto ?? 0));
       }
     }
   }
@@ -167,7 +188,7 @@ export async function listarCuadres(f: FiltrosCuadres): Promise<CuadreRow[]> {
     const efectivo = efectivoPorSesion.get(s.id) ?? 0;
     const neto = gastosPorSesion.get(s.id) ?? 0;
     const apertura = Number(s.monto_apertura ?? 0);
-    const esperado = apertura + efectivo + neto;
+    const esperado = apertura + efectivo + neto + (adelantosEfPorSesion.get(s.id) ?? 0);
     const contado = s.cerrada_en ? Number(s.monto_cierre_efectivo ?? 0) : null;
 
     return {
@@ -180,7 +201,8 @@ export async function listarCuadres(f: FiltrosCuadres): Promise<CuadreRow[]> {
       cerrada_por: s.cerrada_por ? (nombres.get(s.cerrada_por) ?? '—') : null,
       monto_apertura: apertura,
       cantidad_ventas: v.cantidad,
-      total_vendido: v.total,
+      total_vendido: v.total - (saldoPorSesion.get(s.id) ?? 0),
+      pagado_con_saldo: saldoPorSesion.get(s.id) ?? 0,
       total_efectivo: efectivo,
       total_gastos: neto,
       efectivo_esperado: esperado,
@@ -253,19 +275,23 @@ export async function detalleCuadre(sesionId: string): Promise<CuadreDetalle | n
     }
   }
 
-  const [cuentas, movData, parcialesData] = await Promise.all([
+  const [cuentas, movData, parcialesData, adelData] = await Promise.all([
     cuentasDelPos(sb),
     sb.from('caja_chica_movimientos')
-      .select('created_at, tipo, concepto, metodo, monto, registrado_por')
+      .select('created_at, tipo, concepto, metodo, monto, registrado_por, devolucion_id, devoluciones:devolucion_id(numero, cuenta_devolucion, ventas:venta_id(numero))')
       .eq('sesion_id', sesionId).order('created_at').limit(500),
     sb.from('cajas_cierres_parciales')
       .select('fecha, cajero_saliente, cajero_entrante, total_ventas, efectivo_esperado, efectivo_contado, diferencia, observaciones')
       .eq('sesion_id', sesionId).order('fecha').limit(50),
+    sb.from('clientes_adelantos')
+      .select('numero, tipo, monto, metodo_pago, referencia')
+      .eq('caja_sesion_id', sesionId).order('created_at').limit(500),
   ]);
+  const adelantos = adelantosDelTurno(adelData.data ?? []);
 
-  type Mov = {
+  type Mov = SalidaPorDevolucion & {
     created_at: string; tipo: string; concepto: string; metodo: string | null;
-    monto: number | string; registrado_por: string | null;
+    monto: number | string; registrado_por: string | null; devolucion_id: string | null;
   };
   type Parc = {
     fecha: string; cajero_saliente: string | null; cajero_entrante: string | null;
@@ -283,7 +309,10 @@ export async function detalleCuadre(sesionId: string): Promise<CuadreDetalle | n
 
   // Sólo las ventas vivas entran al arqueo: una anulada no dejó plata en caja.
   const idsVivas = new Set(ventas.filter((v) => v.estado !== 'ANULADA').map((v) => v.id));
-  const arqueo = arqueoPorCuenta(cuentas, pagos.filter((p) => idsVivas.has(p.venta_id)));
+  const pagosVivos = pagos.filter((p) => idsVivas.has(p.venta_id));
+  const arqueo = arqueoPorCuenta(cuentas, pagosVivos);
+  const saldo_aplicado = resumenSaldoAplicado(pagosVivos);
+  const devoluciones = devolucionesDelTurno(movs.filter((m) => m.devolucion_id && String(m.tipo).toUpperCase() === 'EGRESO'));
 
   const pagosDeVenta = new Map<string, PagoFila[]>();
   for (const p of pagos) {
@@ -321,6 +350,7 @@ export async function detalleCuadre(sesionId: string): Promise<CuadreDetalle | n
     metodo: m.metodo,
     monto: Number(m.monto ?? 0),
     registrado_por: m.registrado_por ? (nombres.get(m.registrado_por) ?? '—') : '—',
+    automatico: Boolean(m.devolucion_id),
   }));
 
   const cierres_parciales: CierreParcialRow[] = parciales.map((p) => ({
@@ -334,7 +364,7 @@ export async function detalleCuadre(sesionId: string): Promise<CuadreDetalle | n
     observaciones: p.observaciones,
   }));
 
-  return { cabecera, arqueo, movimientos, ventas: ventasDetalle, cierres_parciales };
+  return { cabecera, arqueo, saldo_aplicado, devoluciones, adelantos, movimientos, ventas: ventasDetalle, cierres_parciales };
 }
 
 /** Las cajas, para el filtro. */

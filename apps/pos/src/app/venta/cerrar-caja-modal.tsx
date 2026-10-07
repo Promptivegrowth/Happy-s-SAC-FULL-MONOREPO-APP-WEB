@@ -171,6 +171,10 @@ export function CerrarCajaModal({
               totalIngresosExtra: balance.total_ingresos_extra,
               esperadoEfectivo: balance.esperado_efectivo,
               porCuenta: balance.por_cuenta,
+              totalCobrado: balance.total_cobrado,
+              saldoAplicado: balance.saldo_aplicado,
+              devoluciones: balance.devoluciones,
+              adelantos: balance.adelantos,
               contadoEfectivo: Number.isFinite(contadoNum) ? contadoNum : balance.esperado_efectivo,
               observaciones: obs || null,
               parcial: modo === 'PARCIAL',
@@ -328,7 +332,8 @@ export function CerrarCajaModal({
         {/* Stats apertura/ventas/esperado */}
         <div className="mt-5 grid gap-2 sm:grid-cols-4">
           <Stat label="Apertura" value={formatPEN(balance.monto_apertura)} />
-          <Stat label="Ventas" value={`${balance.cantidad_ventas}`} sub={formatPEN(balance.total_ventas)} />
+          {/* Lo cobrado: sin lo pagado con saldo (cambios, adelantos), que ya entró antes. */}
+          <Stat label="Ventas" value={`${balance.cantidad_ventas}`} sub={formatPEN(balance.total_cobrado ?? balance.total_ventas)} />
           {(balance.total_gastos > 0 || balance.total_ingresos_extra > 0) && (
             <Stat
               label="Caja chica"
@@ -391,7 +396,58 @@ export function CerrarCajaModal({
               </>
             )}
           </div>
+          <div className="mt-2 flex items-center justify-between border-t pt-2 text-sm font-semibold text-corp-900">
+            <span>Total cobrado</span>
+            <span className="font-mono">{formatPEN(balance.total_cobrado ?? balance.total_ventas)}</span>
+          </div>
+          {(balance.saldo_aplicado ?? []).length > 0 && (
+            <div className="mt-2 rounded-md border border-slate-200 bg-white p-2 text-[11px] text-slate-600">
+              <p className="mb-1 font-medium text-slate-500">No es dinero nuevo (ya se cobró antes):</p>
+              {balance.saldo_aplicado.map((x) => (
+                <div key={x.etiqueta} className="flex justify-between">
+                  <span>{x.etiqueta} ({x.cantidad})</span>
+                  <span className="font-mono">{formatPEN(x.monto)}</span>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
+
+        {/* Adelantos del turno: el dinero entra el día que el cliente lo deja */}
+        {(balance.adelantos ?? []).length > 0 && (
+          <div className="mt-4 rounded-lg border border-sky-200 bg-sky-50/50 p-4">
+            <h3 className="mb-2 text-xs font-semibold uppercase tracking-wider text-sky-700">Adelantos del turno</h3>
+            <div className="space-y-1 text-sm">
+              {balance.adelantos.map((a, i) => (
+                <div key={`${a.numero}-${i}`} className="flex items-center justify-between gap-2">
+                  <span className="text-slate-700">
+                    {a.numero} · {a.tipo === 'ENTRADA' ? 'recibido' : 'devuelto'}
+                    <span className="ml-1 text-[11px] text-slate-500">· {a.medio}{a.efectivo ? ' (cajón)' : ''}</span>
+                  </span>
+                  <span className="font-mono">{a.tipo === 'ENTRADA' ? '' : '−'}{formatPEN(a.monto)}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Devoluciones de dinero del turno, con el medio y la cuenta por la que salió */}
+        {(balance.devoluciones ?? []).length > 0 && (
+          <div className="mt-4 rounded-lg border border-rose-200 bg-rose-50/50 p-4">
+            <h3 className="mb-2 text-xs font-semibold uppercase tracking-wider text-rose-700">Devoluciones del turno</h3>
+            <div className="space-y-1 text-sm">
+              {balance.devoluciones.map((d, i) => (
+                <div key={`${d.numero}-${i}`} className="flex items-center justify-between gap-2">
+                  <span className="text-slate-700">
+                    {d.numero}{d.venta ? ` · venta ${d.venta}` : ''}
+                    <span className="ml-1 text-[11px] text-slate-500">· {d.medio}{d.efectivo ? ' (sale del cajón)' : ''}</span>
+                  </span>
+                  <span className="font-mono">{formatPEN(d.monto)}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
 
         {/* Cuadre de efectivo */}
         <div className="mt-4 rounded-lg border bg-white p-4">

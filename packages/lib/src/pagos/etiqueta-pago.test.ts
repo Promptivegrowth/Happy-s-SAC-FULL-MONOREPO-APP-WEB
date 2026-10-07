@@ -13,6 +13,8 @@ import {
   etiquetaPago,
   agruparPorCuenta,
   arqueoPorCuenta,
+  resumenSaldoAplicado,
+  esPagoConSaldo,
 } from './etiqueta-pago';
 
 describe('el nombre del pago', () => {
@@ -193,11 +195,29 @@ describe('el arqueo con los botones de la ventana de venta', () => {
   it('nada se pierde: un cobro de una cuenta ya oculta igual aparece', () => {
     const filas = arqueoPorCuenta(BOTONES, [
       { metodo: 'TRANSFERENCIA', referencia: 'CUENTA VIEJA', monto: 40 },
-      { metodo: 'CREDITO', referencia: 'ADELANTO', monto: 25 },
     ]);
     expect(filas.map((f) => f.etiqueta)).toContain('CUENTA VIEJA');
-    expect(filas.map((f) => f.etiqueta)).toContain('ADELANTO');
-    expect(filas.reduce((s, f) => s + f.monto, 0)).toBe(65);
+    expect(filas.reduce((s, f) => s + f.monto, 0)).toBe(40);
+  });
+
+  it('lo pagado con saldo no es dinero del arqueo: va aparte', () => {
+    // Cierre de Huallaga del 02/10/2026: un cambio de talla de S/ 45 se sumaba
+    // encima de la venta original de esa mañana y el total decía S/ 2380 en
+    // vez de S/ 2335.
+    const pagos = [
+      { metodo: 'TRANSFERENCIA', referencia: 'INTERBANK JAVIER', monto: 610 },
+      { metodo: 'CREDITO', referencia: 'Aplicado de devolución 000006', monto: 45 },
+      { metodo: 'CREDITO', referencia: 'ADELANTO', monto: 25 },
+    ];
+    const filas = arqueoPorCuenta(BOTONES, pagos);
+    expect(filas.reduce((s, f) => s + f.monto, 0)).toBe(610);
+    expect(filas.map((f) => f.etiqueta)).not.toContain('ADELANTO');
+    expect(resumenSaldoAplicado(pagos)).toEqual([
+      { etiqueta: 'Cambios (cobrado en la venta original)', monto: 45, cantidad: 1 },
+      { etiqueta: 'Adelantos (cobrados antes)', monto: 25, cantidad: 1 },
+    ]);
+    expect(esPagoConSaldo('CREDITO')).toBe(true);
+    expect(esPagoConSaldo('TARJETA_CREDITO')).toBe(false);
   });
 
   it('el total del arqueo es el total cobrado, sin contar dos veces', () => {
