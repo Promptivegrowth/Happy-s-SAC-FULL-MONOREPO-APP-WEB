@@ -385,8 +385,22 @@ const crearSchema = z.object({
   guia_proveedor: z.string().max(80).optional().or(z.literal('')),
   factura_proveedor: z.string().max(80).optional().or(z.literal('')),
   observacion: z.string().max(500).optional().or(z.literal('')),
+  /**
+   * Día en que llegó la mercadería (AAAA-MM-DD). Por defecto hoy; se cambia
+   * cuando se registra después (07/10/2026: lo recibido el 30/09 se cargó el
+   * 06/10 y la fecha se terminaba escribiendo en "vencimiento").
+   */
+  fecha_recepcion: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Fecha de recepción inválida').optional().or(z.literal('')),
   lineas: z.array(lineaSchema).min(1, 'Debe incluir al menos una línea'),
 });
+
+/** El instante a guardar para un día de recepción: ahora si es hoy, el mediodía de Lima si es otro día. */
+function instanteDeRecepcion(dia: string | undefined): string {
+  const hoy = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Lima' });
+  if (!dia || dia === hoy) return new Date().toISOString();
+  if (dia > hoy) throw new Error('La fecha de recepción no puede ser futura.');
+  return new Date(`${dia}T12:00:00-05:00`).toISOString();
+}
 
 export type CrearRecepcionInput = z.input<typeof crearSchema>;
 
@@ -453,12 +467,14 @@ export async function crearRecepcionDesdeOC(
     if (errNro) throw new Error(`No se pudo generar número: ${errNro.message}`);
     const numero = `REC-${nro}`;
 
-    // 3) Insertar cabecera.
+    // 3) Insertar cabecera, con el día en que llegó la mercadería.
+    const fechaRecepcion = instanteDeRecepcion(data.fecha_recepcion || undefined);
     const { data: cab, error: errCab } = await sb
       .from('oc_recepciones')
       .insert({
         oc_id: data.oc_id,
         numero,
+        fecha: fechaRecepcion,
         almacen_id: data.almacen_id,
         recibido_por: userId,
         guia_proveedor: data.guia_proveedor?.trim() || null,
@@ -499,6 +515,8 @@ export async function crearRecepcionDesdeOC(
       const total = Math.round(ln.cantidad_recibida * costo * 10000) / 10000;
       return {
         tipo: 'ENTRADA_COMPRA' as const,
+        // El kardex con la misma fecha que la recepción.
+        fecha: fechaRecepcion,
         almacen_id: data.almacen_id,
         material_id: ln.material_id,
         cantidad: ln.cantidad_recibida,

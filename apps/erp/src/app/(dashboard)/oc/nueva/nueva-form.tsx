@@ -151,7 +151,6 @@ export function NuevaOCForm({
   }, [lineas]);
 
   function guardar() {
-    if (!proveedorId) return toast.error('Seleccione proveedor');
     if (lineas.length === 0) return toast.error('Agregue al menos una línea');
     for (const l of lineas) {
       if (!l.material_id && !l.descripcion_libre.trim()) {
@@ -162,7 +161,7 @@ export function NuevaOCForm({
 
     startTransition(async () => {
       const r = await crearOC({
-        proveedor_id: proveedorId,
+        proveedor_id: proveedorId || null,
         tipo,
         fecha,
         fecha_entrega_esperada: fechaEntrega || null,
@@ -197,13 +196,13 @@ export function NuevaOCForm({
       <Card>
         <CardHeader><CardTitle>Datos de la OC</CardTitle></CardHeader>
         <CardContent className="grid grid-cols-1 gap-4 md:grid-cols-3">
-          <Field label="Proveedor *">
+          <Field label="Proveedor (opcional)">
             <select
               value={proveedorId}
               onChange={(e) => setProveedorId(e.target.value)}
               className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm"
             >
-              <option value="">— Seleccione —</option>
+              <option value="">— Sin proveedor —</option>
               {proveedores.map((p) => (
                 <option key={p.id} value={p.id}>
                   {p.razon_social} {p.ruc ? `(${p.ruc})` : ''}

@@ -224,7 +224,8 @@ const SchemaLinea = z.object({
 });
 
 const SchemaCrear = z.object({
-  proveedor_id: z.string().uuid('Proveedor requerido'),
+  // Opcional desde el 07/10/2026: se compra también a vendedores sin ficha.
+  proveedor_id: z.string().uuid().nullable(),
   tipo: z.enum(['NACIONAL', 'IMPORTACION', 'SERVICIO_TALLER']),
   fecha: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Fecha inválida'),
   fecha_entrega_esperada: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable(),
@@ -321,7 +322,7 @@ export async function obtenerOC(id: string): Promise<OCDetalle | null> {
        almacen_destino, moneda, tipo_cambio, sub_total, igv, total,
        condicion_pago, adelanto, saldo, observacion, importacion_id,
        solicitada_por, aprobada_por, aprobada_en,
-       proveedores!inner(razon_social, numero_documento),
+       proveedores(razon_social, numero_documento),
        almacenes(codigo, nombre)`,
     )
     .eq('id', id)
@@ -378,7 +379,7 @@ export async function obtenerOC(id: string): Promise<OCDetalle | null> {
     solicitada_por: string | null;
     aprobada_por: string | null;
     aprobada_en: string | null;
-    proveedores: { razon_social: string; numero_documento: string | null };
+    proveedores: { razon_social: string; numero_documento: string | null } | null;
     almacenes: { codigo: string; nombre: string } | null;
   };
 
@@ -388,8 +389,8 @@ export async function obtenerOC(id: string): Promise<OCDetalle | null> {
     tipo: c.tipo,
     estado: c.estado,
     proveedor_id: c.proveedor_id,
-    proveedor_razon_social: c.proveedores.razon_social,
-    proveedor_ruc: c.proveedores.numero_documento,
+    proveedor_razon_social: c.proveedores?.razon_social ?? 'Sin proveedor',
+    proveedor_ruc: c.proveedores?.numero_documento ?? null,
     fecha: c.fecha,
     fecha_entrega_esperada: c.fecha_entrega_esperada,
     almacen_destino: c.almacen_destino,

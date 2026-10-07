@@ -3827,7 +3827,7 @@ export type Database = {
           moneda: string | null
           numero: string
           observacion: string | null
-          proveedor_id: string
+          proveedor_id: string | null
           saldo: number | null
           solicitada_por: string | null
           sub_total: number | null
@@ -3853,7 +3853,7 @@ export type Database = {
           moneda?: string | null
           numero: string
           observacion?: string | null
-          proveedor_id: string
+          proveedor_id?: string | null
           saldo?: number | null
           solicitada_por?: string | null
           sub_total?: number | null
@@ -3879,7 +3879,7 @@ export type Database = {
           moneda?: string | null
           numero?: string
           observacion?: string | null
-          proveedor_id?: string
+          proveedor_id?: string | null
           saldo?: number | null
           solicitada_por?: string | null
           sub_total?: number | null
@@ -5151,7 +5151,7 @@ export type Database = {
           numero: string
           observacion: string | null
           oc_id: string | null
-          proveedor_id: string
+          proveedor_id: string | null
           referencia_bancaria: string | null
           registrado_por: string | null
           tipo_cambio: number | null
@@ -5169,7 +5169,7 @@ export type Database = {
           numero: string
           observacion?: string | null
           oc_id?: string | null
-          proveedor_id: string
+          proveedor_id?: string | null
           referencia_bancaria?: string | null
           registrado_por?: string | null
           tipo_cambio?: number | null
@@ -5187,7 +5187,7 @@ export type Database = {
           numero?: string
           observacion?: string | null
           oc_id?: string | null
-          proveedor_id?: string
+          proveedor_id?: string | null
           referencia_bancaria?: string | null
           registrado_por?: string | null
           tipo_cambio?: number | null

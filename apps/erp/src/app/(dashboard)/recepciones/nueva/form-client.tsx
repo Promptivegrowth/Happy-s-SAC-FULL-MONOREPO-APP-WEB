@@ -40,6 +40,9 @@ export function NuevaRecepcionForm({
   const [pending, start] = useTransition();
   const [ocId, setOcId] = useState<string>('');
   const [almacenId, setAlmacenId] = useState<string>('');
+  // Día en que llegó la mercadería: hoy por defecto, editable (07/10/2026).
+  const hoyLima = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Lima' });
+  const [fechaRecepcion, setFechaRecepcion] = useState(hoyLima);
   const [guia, setGuia] = useState('');
   const [factura, setFactura] = useState('');
   const [observacion, setObservacion] = useState('');
@@ -118,6 +121,7 @@ export function NuevaRecepcionForm({
     const payload = {
       oc_id: ocId,
       almacen_id: almacenId,
+      fecha_recepcion: fechaRecepcion,
       guia_proveedor: guia,
       factura_proveedor: factura,
       observacion,
@@ -205,7 +209,17 @@ export function NuevaRecepcionForm({
         title="Documentación del proveedor"
         description="Datos del documento físico que acompaña la mercadería."
       >
-        <FormGrid cols={3}>
+        <FormGrid cols={4}>
+          {/* Viene con la fecha de hoy; se cambia si la mercadería llegó otro día. */}
+          <FormRow label="Fecha de recepción">
+            <Input
+              type="date"
+              value={fechaRecepcion}
+              max={hoyLima}
+              onChange={(e) => setFechaRecepcion(e.target.value)}
+              disabled={pending}
+            />
+          </FormRow>
           <FormRow label="Guía del proveedor">
             <Input
               type="text"
@@ -256,7 +270,7 @@ export function NuevaRecepcionForm({
                   <TableHead className="text-right">Pendiente</TableHead>
                   <TableHead className="w-28 text-right">Cant. recibida</TableHead>
                   <TableHead className="w-28">Lote</TableHead>
-                  <TableHead className="w-36">Vencimiento</TableHead>
+                  <TableHead className="w-36" title="Solo para materiales que vencen. No es la fecha de recepción.">Vence (opcional)</TableHead>
                   <TableHead className="w-28 text-right">Costo unit.</TableHead>
                 </TableRow>
               </TableHeader>
