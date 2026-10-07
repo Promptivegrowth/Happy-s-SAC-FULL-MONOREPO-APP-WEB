@@ -16,6 +16,7 @@ import {
   type UnidadOpt,
   type MaterialOpt,
 } from '@/server/actions/oc';
+import { totalesOc, montosLineaOc } from '@/lib/oc-calculo';
 import { TIPOS_OC, TIPO_LABEL, type TipoOC } from '@/server/actions/oc-helpers';
 
 type LineaUI = {
@@ -29,6 +30,8 @@ type LineaUI = {
   precio_unitario: number;
   descuento_porcentaje: number;
   igv_aplicable: boolean;
+  /** El precio escrito ya incluye IGV (viene de la ficha del material). */
+  precio_incluye_igv: boolean;
 };
 
 const CONDICIONES = ['Contado', 'Crédito 15D', 'Crédito 30D', 'Crédito 45D', 'Crédito 60D', 'Crédito 90D'];
@@ -96,6 +99,9 @@ export function NuevaOCForm({
         precio_unitario: m.precio_referencial ?? 0,
         descuento_porcentaje: 0,
         igv_aplicable: true,
+        // Si la ficha del material dice que su precio incluye IGV, la línea
+        // arranca así: el IGV se descompone del precio, no se le suma.
+        precio_incluye_igv: Boolean(m.precio_incluye_igv),
       },
     ]);
     setQ('');
@@ -122,6 +128,7 @@ export function NuevaOCForm({
         precio_unitario: 0,
         descuento_porcentaje: 0,
         igv_aplicable: true,
+        precio_incluye_igv: false,
       },
     ]);
   }
@@ -134,16 +141,13 @@ export function NuevaOCForm({
     setLineas((prev) => prev.map((l) => (l.uiId === uiId ? { ...l, ...patch } : l)));
   }
 
+  // El mismo cálculo que hace el servidor (lib/oc-calculo.ts).
   const totales = useMemo(() => {
-    let sub = 0;
-    let igv = 0;
-    for (const l of lineas) {
-      const bruto = l.cantidad * l.precio_unitario;
-      const conDesc = bruto * (1 - (l.descuento_porcentaje ?? 0) / 100);
-      sub += conDesc;
-      if (l.igv_aplicable) igv += conDesc * 0.18;
-    }
-    return { sub, igv, total: sub + igv };
+    const t = totalesOc(lineas.map((l) => ({
+      cantidad: l.cantidad, precio: l.precio_unitario, descuento_porcentaje: l.descuento_porcentaje,
+      igv_aplicable: l.igv_aplicable, precio_incluye_igv: l.precio_incluye_igv,
+    })));
+    return { sub: t.sub_total, igv: t.igv, total: t.total };
   }, [lineas]);
 
   function guardar() {
@@ -176,6 +180,7 @@ export function NuevaOCForm({
           precio_unitario: l.precio_unitario,
           descuento_porcentaje: l.descuento_porcentaje,
           igv_aplicable: l.igv_aplicable,
+          precio_incluye_igv: l.precio_incluye_igv,
         })),
       });
       if (!r.ok || !r.data) {
@@ -343,14 +348,16 @@ export function NuevaOCForm({
                     <th className="px-2 py-2 text-right">P. unit.</th>
                     <th className="px-2 py-2 text-right">% Dcto</th>
                     <th className="px-2 py-2 text-center">IGV</th>
-                    <th className="px-2 py-2 text-right">Subtotal</th>
+                    <th className="px-2 py-2 text-right">Subtotal (sin IGV)</th>
                     <th className="px-2 py-2"></th>
                   </tr>
                 </thead>
                 <tbody>
                   {lineas.map((l) => {
-                    const bruto = l.cantidad * l.precio_unitario;
-                    const conDesc = bruto * (1 - l.descuento_porcentaje / 100);
+                    const m = montosLineaOc({
+                      cantidad: l.cantidad, precio: l.precio_unitario, descuento_porcentaje: l.descuento_porcentaje,
+                      igv_aplicable: l.igv_aplicable, precio_incluye_igv: l.precio_incluye_igv,
+                    });
                     return (
                       <tr key={l.uiId} className="border-b border-slate-100">
                         <td className="px-2 py-2">
@@ -407,6 +414,17 @@ export function NuevaOCForm({
                             onChange={(e) => patchLinea(l.uiId, { precio_unitario: Number(e.target.value) || 0 })}
                             className="h-7 w-24 text-right text-xs"
                           />
+                          {l.igv_aplicable && (
+                            <select
+                              value={l.precio_incluye_igv ? 'con' : 'sin'}
+                              onChange={(e) => patchLinea(l.uiId, { precio_incluye_igv: e.target.value === 'con' })}
+                              className="mt-1 h-6 w-24 rounded border border-slate-300 bg-white px-1 text-[10px]"
+                              title="¿El precio que escribiste ya incluye el IGV?"
+                            >
+                              <option value="con">con IGV</option>
+                              <option value="sin">sin IGV</option>
+                            </select>
+                          )}
                         </td>
                         <td className="px-2 py-2 text-right">
                           <Input
@@ -427,7 +445,8 @@ export function NuevaOCForm({
                           />
                         </td>
                         <td className="px-2 py-2 text-right text-xs font-medium text-slate-900">
-                          {conDesc.toFixed(2)}
+                          {m.base.toFixed(2)}
+                          {l.igv_aplicable && <div className="text-[10px] font-normal text-slate-400">+ IGV {m.igv.toFixed(2)}</div>}
                         </td>
                         <td className="px-2 py-2">
                           <Button

@@ -11,6 +11,7 @@ import { cambiarEstadoOC, eliminarOC, type OCDetalle } from '@/server/actions/oc
 import { ESTADO_LABEL, ESTADO_TONO, TIPO_LABEL, TRANSICIONES_OC, type EstadoOC } from '@/server/actions/oc-helpers';
 import { eliminarPagoOC, type PagoOCRow } from '@/server/actions/pagos-proveedores';
 import { RegistrarPagoBtn } from '../../compras/cxp/registrar-pago-btn';
+import { formatDate } from '@happy/lib';
 
 const TONE_CLS: Record<string, string> = {
   slate: 'bg-slate-100 text-slate-700 border-slate-300',
@@ -143,7 +144,7 @@ export function DetalleClient({ oc, pagos }: { oc: OCDetalle; pagos: PagoOCRow[]
           <CardHeader><CardTitle className="text-sm">Entrega</CardTitle></CardHeader>
           <CardContent className="space-y-1 text-sm">
             <div>Almacén: <span className="font-medium">{oc.almacen_nombre ?? '— Sin asignar —'}</span></div>
-            <div>Fecha entrega esperada: <span className="font-medium">{oc.fecha_entrega_esperada ? new Date(oc.fecha_entrega_esperada).toLocaleDateString('es-PE') : '—'}</span></div>
+            <div>Fecha entrega esperada: <span className="font-medium">{oc.fecha_entrega_esperada ? formatDate(oc.fecha_entrega_esperada) : '—'}</span></div>
           </CardContent>
         </Card>
         <Card>
@@ -194,7 +195,13 @@ export function DetalleClient({ oc, pagos }: { oc: OCDetalle; pagos: PagoOCRow[]
                     </td>
                     <td className="px-3 py-2 text-right">{l.cantidad}</td>
                     <td className="px-3 py-2 text-xs text-slate-600">{l.unidad_codigo}</td>
-                    <td className="px-3 py-2 text-right font-mono">{symbol} {l.precio_unitario.toFixed(2)}</td>
+                    <td className="px-3 py-2 text-right font-mono">
+                      {symbol} {l.precio_unitario.toFixed(2)}
+                      {/* El precio que conoce quien compra: con el IGV adentro. */}
+                      {l.igv_aplicable && (
+                        <div className="text-[10px] text-slate-400">{symbol} {(l.precio_unitario * 1.18).toFixed(2)} con IGV</div>
+                      )}
+                    </td>
                     <td className="px-3 py-2 text-right font-mono">{symbol} {l.sub_total.toFixed(2)}</td>
                     <td className="px-3 py-2 text-right text-emerald-700">{l.cantidad_recibida}</td>
                     <td className={`px-3 py-2 text-right font-medium ${l.cantidad_pendiente > 0 ? 'text-amber-700' : 'text-slate-400'}`}>{l.cantidad_pendiente}</td>
@@ -249,7 +256,7 @@ export function DetalleClient({ oc, pagos }: { oc: OCDetalle; pagos: PagoOCRow[]
                   {pagos.map((p) => (
                     <tr key={p.id} className="border-b border-slate-100">
                       <td className="px-3 py-2 font-mono text-xs">{p.numero}</td>
-                      <td className="px-3 py-2 text-sm">{new Date(p.fecha).toLocaleDateString('es-PE')}</td>
+                      <td className="px-3 py-2 text-sm">{formatDate(p.fecha)}</td>
                       <td className="px-3 py-2 text-xs"><Badge variant="secondary">{p.metodo}</Badge></td>
                       <td className="px-3 py-2 text-xs text-slate-600">
                         {p.referencia_bancaria ? p.referencia_bancaria : '—'}

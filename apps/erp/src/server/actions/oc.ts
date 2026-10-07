@@ -1,6 +1,7 @@
 'use server';
 
 import { z } from 'zod';
+import { totalesOc, montosLineaOc } from '@/lib/oc-calculo';
 import { runAction, requireUser, bumpPaths, type ActionResult } from './_helpers';
 import { TRANSICIONES_OC, type EstadoOC, type TipoOC } from './oc-helpers';
 
@@ -55,6 +56,8 @@ export type MaterialOpt = {
   unidad_id: string;          // unidad_compra_id del material
   unidad_codigo: string;
   precio_referencial: number | null;  // precio_unitario del material
+  /** El precio del material ya incluye IGV (ficha del material). */
+  precio_incluye_igv: boolean;
 };
 
 export type OCDetalle = {
@@ -168,7 +171,7 @@ export async function buscarMaterialesParaOC(q: string): Promise<MaterialOpt[]> 
   const { data } = await sb
     .from('materiales')
     .select(
-      'id, codigo, nombre, unidad_compra_id, unidad_consumo_id, precio_unitario, ' +
+      'id, codigo, nombre, unidad_compra_id, unidad_consumo_id, precio_unitario, precio_incluye_igv, ' +
       'unidad_compra:unidades_medida!unidad_compra_id(codigo), ' +
       'unidad_consumo:unidades_medida!unidad_consumo_id(codigo)',
     )
@@ -183,6 +186,7 @@ export async function buscarMaterialesParaOC(q: string): Promise<MaterialOpt[]> 
     unidad_compra_id: string | null;
     unidad_consumo_id: string | null;
     precio_unitario: number;
+    precio_incluye_igv: boolean | null;
     unidad_compra: { codigo: string } | null;
     unidad_consumo: { codigo: string } | null;
   };
@@ -199,6 +203,7 @@ export async function buscarMaterialesParaOC(q: string): Promise<MaterialOpt[]> 
       unidad_id: unidadId,
       unidad_codigo: r.unidad_compra?.codigo ?? r.unidad_consumo?.codigo ?? '',
       precio_referencial: Number(r.precio_unitario),
+      precio_incluye_igv: Boolean(r.precio_incluye_igv),
     });
   }
   return out;
@@ -214,6 +219,8 @@ const SchemaLinea = z.object({
   precio_unitario: z.number().nonnegative('Precio no puede ser negativo'),
   descuento_porcentaje: z.number().min(0).max(100).default(0),
   igv_aplicable: z.boolean().default(true),
+  /** El precio escrito ya incluye IGV: se descompone en vez de sumarle el 18 % (ver lib/oc-calculo.ts). */
+  precio_incluye_igv: z.boolean().default(false),
 });
 
 const SchemaCrear = z.object({
@@ -238,16 +245,16 @@ export async function crearOC(input: CrearOCInput): Promise<ActionResult<{ id: s
     const { sb, userId } = await requireUser();
     const parsed = SchemaCrear.parse(input);
 
-    // Calcular totales en server (no confiar en client)
-    let sub_total = 0;
-    let igv = 0;
-    for (const ln of parsed.lineas) {
-      const bruto = ln.cantidad * ln.precio_unitario;
-      const conDescuento = bruto * (1 - (ln.descuento_porcentaje ?? 0) / 100);
-      sub_total += conDescuento;
-      if (ln.igv_aplicable) igv += conDescuento * 0.18;
-    }
-    const total = sub_total + igv;
+    // Calcular totales en server (no confiar en client). El mismo cálculo que el
+    // formulario: con el precio con IGV se descompone, sin IGV se le suma.
+    const montoDe = (ln: (typeof parsed.lineas)[number]) => ({
+      cantidad: ln.cantidad,
+      precio: ln.precio_unitario,
+      descuento_porcentaje: ln.descuento_porcentaje,
+      igv_aplicable: ln.igv_aplicable,
+      precio_incluye_igv: ln.precio_incluye_igv,
+    });
+    const { sub_total, igv, total } = totalesOc(parsed.lineas.map(montoDe));
 
     // Obtener correlativo
     const { data: numRpc, error: errNum } = await sb.rpc('generar_numero_oc');
@@ -288,7 +295,8 @@ export async function crearOC(input: CrearOCInput): Promise<ActionResult<{ id: s
       descripcion_libre: ln.descripcion_libre,
       cantidad: ln.cantidad,
       unidad_id: ln.unidad_id,
-      precio_unitario: ln.precio_unitario,
+      // Siempre SIN IGV: es el costo del material para la recepción y el kardex.
+      precio_unitario: Math.round(montosLineaOc(montoDe(ln)).precioSinIgv * 10000) / 10000,
       descuento_porcentaje: ln.descuento_porcentaje ?? 0,
       igv_aplicable: ln.igv_aplicable,
     }));

@@ -4,6 +4,7 @@ import { PageShell } from '@/components/page-shell';
 import { obtenerOC } from '@/server/actions/oc';
 import { listarPagosOC } from '@/server/actions/pagos-proveedores';
 import { DetalleClient } from './detalle-client';
+import { formatDate } from '@happy/lib';
 
 export const dynamic = 'force-dynamic';
 
@@ -22,7 +23,7 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
   return (
     <PageShell
       title={oc.numero}
-      description={`${oc.proveedor_razon_social} · ${new Date(oc.fecha).toLocaleDateString('es-PE')}`}
+      description={`${oc.proveedor_razon_social} · ${formatDate(oc.fecha)}`}
       actions={
         <Link href="/oc" className="text-sm text-slate-500 hover:text-corp-900">
           ← Volver al listado

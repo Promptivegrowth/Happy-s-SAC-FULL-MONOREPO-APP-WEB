@@ -16,6 +16,14 @@ const DF_DATE = new Intl.DateTimeFormat('es-PE', {
   year: 'numeric',
 });
 
+/** Una fecha sola ("2026-09-30") se muestra tal cual, sin zona horaria (ver formatDate). */
+const DF_DATE_SOLA = new Intl.DateTimeFormat('es-PE', {
+  day: '2-digit',
+  month: '2-digit',
+  year: 'numeric',
+  timeZone: 'UTC',
+});
+
 /** El día en Lima de un instante con hora (ver formatDate). */
 const DF_DATE_LIMA = new Intl.DateTimeFormat('es-PE', {
   day: '2-digit',
@@ -65,6 +73,9 @@ export function formatDate(value: string | Date | null | undefined): string {
   // día de Lima, si no lo hecho después de las 7 p. m. salía con el día
   // siguiente. Una fecha sola ("2026-10-05") o un Date se dejan como estaban.
   if (typeof value === 'string' && /\d{2}:\d{2}/.test(value)) return DF_DATE_LIMA.format(new Date(value));
+  // Una fecha sola es medianoche UTC: leída en Lima caía el día ANTERIOR (la OC
+  // con entrega el 30/09 decía 29/09 en la pantalla, 07/10/2026).
+  if (typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value)) return DF_DATE_SOLA.format(new Date(`${value}T00:00:00Z`));
   const d = typeof value === 'string' ? new Date(value) : value;
   return DF_DATE.format(d);
 }
