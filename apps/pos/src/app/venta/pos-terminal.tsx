@@ -371,7 +371,12 @@ export function PosTerminal({
     if (!clienteIdSeleccionado) { setSaldoAdelanto(0); return; }
     let cancel = false;
     obtenerSaldoCliente(clienteIdSeleccionado)
-      .then((s) => { if (!cancel) setSaldoAdelanto(s); })
+      .then((s) => {
+        if (cancel) return;
+        setSaldoAdelanto(s);
+        // Que la cajera lo vea sin tener que buscarlo en el panel de pagos.
+        if (s > 0.009) toast.info(`Este cliente tiene ${formatPEN(s)} de saldo a favor (adelanto). Se aplica en "Métodos de pago".`, { duration: 8000 });
+      })
       .catch(() => { if (!cancel) setSaldoAdelanto(0); });
     return () => { cancel = true; };
   }, [clienteIdSeleccionado]);
@@ -460,6 +465,21 @@ export function PosTerminal({
       const tipo = n.length === 8 ? 'dni' : 'ruc';
       setBuscandoSunat(true);
       try {
+        /*
+         * Primero, ¿ya es cliente? (07/10/2026)
+         *
+         * Escribir el DNI solo consultaba RENIEC: completaba el nombre pero no
+         * enlazaba al cliente del sistema, así que su saldo a favor nunca se
+         * cargaba. Una clienta volvió con su adelanto del día anterior y no se
+         * le pudo aplicar. Si el documento ya está registrado, se toma ese
+         * cliente —con su saldo— y no hace falta consultar afuera.
+         */
+        const yaRegistrado = (await buscarClientesPOS(n).catch(() => []))
+          .find((c) => (c.numero_documento ?? '').trim() === n);
+        if (yaRegistrado) {
+          seleccionarCliente(yaRegistrado);
+          return;
+        }
         const r = await fetch(`/api/sunat/${tipo}/${n}`);
         if (!r.ok) {
           const cuerpo = await r.json().catch(() => ({})) as { error?: string };
