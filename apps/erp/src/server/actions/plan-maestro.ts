@@ -4,6 +4,7 @@ import { z } from 'zod';
 import { redirect } from 'next/navigation';
 import { runAction, requireUser, bumpPaths, esGerente, type ActionResult } from './_helpers';
 import { formatTallaChip } from '@happy/lib';
+import { productosSinOperaciones, mensajeSinOperaciones } from '@/server/operaciones-producto';
 
 const TALLAS = ['T0','T2','T4','T6','T8','T10','T12','T14','T16','TS','TAD', 'TU'] as const;
 
@@ -385,13 +386,23 @@ export async function generarOTsDelPlan(planId: string): Promise<ActionResult<{ 
     const productoIds = Array.from(porProducto.keys());
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const sbAny = sb as unknown as { from: (t: string) => any };
-    const { data: rl } = await sbAny
-      .from('recetas_lineas')
-      .select('talla, recetas!inner(producto_id, activa)')
-      .in('recetas.producto_id', productoIds)
-      .eq('recetas.activa', true);
+    // Una receta tiene ~150 líneas: se lee de a 1.000 (el tope de la base) para
+    // no dar por "sin receta" a un producto que sí la tiene.
+    const rl: Array<{ talla: string; recetas: { producto_id: string } | null }> = [];
+    for (let d = 0; d < 200000; d += 1000) {
+      const { data, error } = await sbAny
+        .from('recetas_lineas')
+        .select('id, talla, recetas!inner(producto_id, activa)')
+        .in('recetas.producto_id', productoIds)
+        .eq('recetas.activa', true)
+        .order('id')
+        .range(d, d + 999);
+      if (error) throw new Error(error.message);
+      rl.push(...((data ?? []) as typeof rl));
+      if (!data || data.length < 1000) break;
+    }
     const cobertura = new Set(
-      ((rl ?? []) as Array<{ talla: string; recetas: { producto_id: string } | null }>)
+      (rl as Array<{ talla: string; recetas: { producto_id: string } | null }>)
         .filter((r) => r.recetas)
         .map((r) => `${r.recetas!.producto_id}|${r.talla}`),
     );
@@ -410,6 +421,12 @@ export async function generarOTsDelPlan(planId: string): Promise<ActionResult<{ 
       throw new Error(
         `No se pueden generar las OTs: ${lineasSinReceta.length} línea(s) sin receta activa: ${detalle}${extra}. Cargá las recetas faltantes desde la pestaña "Explosión materiales" antes de continuar.`,
       );
+    }
+
+    // Sin secuencia de operaciones la prenda no entra a producción (06/10/2026).
+    const sinOperaciones = await productosSinOperaciones(sbAny, productoIds);
+    if (sinOperaciones.length > 0) {
+      throw new Error(`No se pueden generar las OTs. ${mensajeSinOperaciones(sinOperaciones)}`);
     }
 
     // RECLAMO ATÓMICO (fix 22/07/2026 — "duplica dos veces la OT"): antes se

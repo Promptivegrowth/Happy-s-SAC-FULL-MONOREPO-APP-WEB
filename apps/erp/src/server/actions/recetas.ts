@@ -189,6 +189,42 @@ async function bloquearSiLineaEnProduccion(sb: any, lineaId: string) {
   if (tallasCong.has(talla)) throw new Error(msgTallaCongelada(talla));
 }
 
+/**
+ * ¿Alguna operación de este producto ya tiene tiempos registrados en una OT?
+ *
+ * Las OPERACIONES se congelan recién ahí, no apenas existe una OT: el congelado
+ * protege los tiempos y costos ya medidos, y si nadie registró nada todavía no
+ * hay nada que proteger. Con la regla anterior, un producto que entró a
+ * producción sin operaciones cargadas ya no podía recibirlas nunca —ni
+ * agregándolas ni versionando, porque no había versión que copiar—: le pasó a
+ * la primera OT real, OT-26-00001, el 06/10/2026.
+ *
+ * Los MATERIALES siguen con su regla de siempre (congelados por talla con OT).
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function operacionesConTiempos(sb: any, productoId: string): Promise<boolean> {
+  const { data: procs } = await sb.from('productos_procesos').select('id').eq('producto_id', productoId).limit(5000);
+  const ids = ((procs ?? []) as { id: string }[]).map((p) => p.id);
+  if (ids.length === 0) return false;
+  for (let i = 0; i < ids.length; i += 150) {
+    const lote = ids.slice(i, i + 150);
+    const [a, b] = await Promise.all([
+      sb.from('ot_registros_tiempo').select('id', { count: 'exact', head: true }).in('proceso_id', lote),
+      sb.from('ot_tiempos_reales').select('id', { count: 'exact', head: true }).in('proceso_id', lote),
+    ]);
+    if ((a.count ?? 0) > 0 || (b.count ?? 0) > 0) return true;
+  }
+  return false;
+}
+
+function msgOperacionesCongeladas(talla: string) {
+  return (
+    `Las operaciones de la talla ${formatTallaChip(talla)} ya tienen tiempos registrados en una OT, ` +
+    'así que no se pueden cambiar para no alterar lo medido. ' +
+    'Para cambiarlas, crea una nueva versión de Procesos desde el banner.'
+  );
+}
+
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 async function bloquearSiProcesoEnProduccion(sb: any, procesoId: string) {
   const { data } = await sb
@@ -201,12 +237,11 @@ async function bloquearSiProcesoEnProduccion(sb: any, procesoId: string) {
   // Procesos no están atados a receta — usar el set global por producto.
   const tallas = await tallasEnProduccion(sb, pid);
   const talla = data?.talla as string | undefined;
-  // Sin talla específica = aplica a todas; bloquear si hay CUALQUIER talla en producción.
-  if (!talla) {
-    if (tallas.size > 0) throw new Error(msgTallaCongelada(Array.from(tallas)[0] ?? 'T?'));
-    return;
-  }
-  if (tallas.has(talla)) throw new Error(msgTallaCongelada(talla));
+  const afectadas = !talla ? tallas.size > 0 : tallas.has(talla);
+  if (!afectadas) return;
+  // Con OTs pero sin tiempos registrados, las operaciones siguen editables.
+  if (!(await operacionesConTiempos(sb, pid))) return;
+  throw new Error(msgOperacionesCongeladas(talla ?? Array.from(tallas)[0] ?? 'T?'));
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -215,19 +250,22 @@ async function bloquearSiProductoEnProduccion(sb: any, productoId: string) {
   // bloquea acciones globales (reorder, duplicar masivo). Para acciones por talla
   // específica usá bloquearSiTallaEnRecetaPosterior o bloquearSiTallaEnProductoProduccion.
   const tallas = await tallasEnProduccion(sb, productoId);
-  if (tallas.size > 0) throw new Error(msgTallaCongelada(Array.from(tallas)[0] ?? 'T?'));
+  if (tallas.size === 0) return;
+  // Solo se usa para operaciones (reordenar, duplicar): ver operacionesConTiempos.
+  if (!(await operacionesConTiempos(sb, productoId))) return;
+  throw new Error(msgOperacionesCongeladas(Array.from(tallas)[0] ?? 'T?'));
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 async function bloquearSiTallaEnProductoProduccion(sb: any, productoId: string, talla: string | null | undefined) {
-  // Para procesos: si no hay talla específica (aplica a todas), bloquear si hay CUALQUIER
-  // talla en producción. Si hay talla específica, bloquear solo esa.
+  // Para procesos: si no hay talla específica (aplica a todas), cuenta CUALQUIER
+  // talla en producción; si hay talla específica, solo esa. Y aun así, solo se
+  // bloquea si las operaciones ya tienen tiempos registrados.
   const tallas = await tallasEnProduccion(sb, productoId);
-  if (!talla) {
-    if (tallas.size > 0) throw new Error(msgTallaCongelada(Array.from(tallas)[0] ?? 'T?'));
-    return;
-  }
-  if (tallas.has(talla)) throw new Error(msgTallaCongelada(talla));
+  const afectadas = !talla ? tallas.size > 0 : tallas.has(talla);
+  if (!afectadas) return;
+  if (!(await operacionesConTiempos(sb, productoId))) return;
+  throw new Error(msgOperacionesCongeladas(talla ?? Array.from(tallas)[0] ?? 'T?'));
 }
 
 const lineaSchema = z.object({
@@ -924,7 +962,7 @@ export async function versionarProcesosProducto(
       .eq('activo', true);
     if (errV) throw new Error(errV.message);
     if (!vigentes || vigentes.length === 0) {
-      throw new Error('Este producto no tiene procesos activos para versionar.');
+      throw new Error('Este producto todavía no tiene operaciones, así que no hay versión que copiar: agrégalas directamente con «Agregar operación».');
     }
 
     // 2) Todas las versiones (vigentes + históricas) para calcular siguiente

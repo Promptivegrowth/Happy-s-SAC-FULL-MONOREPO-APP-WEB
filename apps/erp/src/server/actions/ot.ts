@@ -6,6 +6,7 @@ import { z } from 'zod';
 import { redirect } from 'next/navigation';
 import { runAction, requireUser, bumpPaths, esGerente, type ActionResult } from './_helpers';
 import { formatTallaChip } from '@happy/lib';
+import { productosSinOperaciones, mensajeSinOperaciones } from '@/server/operaciones-producto';
 
 const ESTADOS = ['BORRADOR','PLANIFICADA','EN_CORTE','EN_HABILITADO','EN_SERVICIO','EN_DECORADO','EN_CONTROL_CALIDAD','COMPLETADA','CANCELADA'] as const;
 type EstadoOT = typeof ESTADOS[number];
@@ -79,6 +80,11 @@ export async function agregarLineaOT(otId: string, _prev: unknown, fd: FormData)
         'Esta OT ya tiene líneas de otro producto. Una OT corresponde a un solo producto: para producir otro, generá una OT separada en el mismo plan.',
       );
     }
+
+    // Sin secuencia de operaciones la prenda no entra a producción (06/10/2026).
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const sinOperaciones = await productosSinOperaciones(sb as unknown as { from: (t: string) => any }, [data.producto_id]);
+    if (sinOperaciones.length > 0) throw new Error(mensajeSinOperaciones(sinOperaciones));
 
     const { error } = await sb.from('ot_lineas').insert({
       ot_id: otId,
