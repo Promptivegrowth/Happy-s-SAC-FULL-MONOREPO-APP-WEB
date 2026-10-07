@@ -44,6 +44,7 @@ import { StockAlmacenesModal } from './stock-almacenes-modal';
 import { PruebaImpresionModal } from './prueba-impresion-modal';
 import { DevolucionModal } from './devolucion-modal';
 import { CotizacionesModal } from './cotizaciones-modal';
+import { CierresAnterioresModal } from './cierres-anteriores-modal';
 import {
   guardarCotizacion,
   marcarCotizacionConvertida,
@@ -193,6 +194,15 @@ export function PosTerminal({
   }, [router]);
 
   const almacenEnUso = sesionActiva?.almacen_id ?? cajaDefault?.almacen_id ?? null;
+  const cajaEnUso = sesionActiva?.caja_id ?? cajaDefault?.id ?? null;
+  /*
+   * El turno se vuelve a leer cuando la caja se abre o se cierra en OTRA
+   * computadora (La Quinta trabaja con dos, 07/10/2026). Sin esto la segunda
+   * seguía mostrando el turno abierto: no dejaba cerrar ("No hay una sesión de
+   * caja abierta") y, si vendía, se abría sola una caja nueva.
+   * Va en una referencia porque `refrescarSesion` se declara más abajo.
+   */
+  const refrescarSesionRef = useRef<() => void>(() => {});
 
   useEffect(() => {
     const sb = createClient();
@@ -233,8 +243,16 @@ export function PosTerminal({
           'postgres_changes',
           { event: '*', schema: 'public', table: 'productos_variantes' },
           refrescarCatalogo,
-        )
-        .subscribe();
+        );
+      // Aperturas y cierres de ESTA caja, hechos en cualquier computadora.
+      if (cajaEnUso) {
+        canal = canal.on(
+          'postgres_changes',
+          { event: '*', schema: 'public', table: 'cajas_sesiones', filter: `caja_id=eq.${cajaEnUso}` },
+          () => refrescarSesionRef.current(),
+        );
+      }
+      canal = canal.subscribe();
     })();
 
     /*
@@ -245,7 +263,11 @@ export function PosTerminal({
      * justamente el momento en que la cajera acaba de hacer algo en el ERP.
      */
     const alVolver = () => {
-      if (document.visibilityState === 'visible') refrescarCatalogo();
+      if (document.visibilityState === 'visible') {
+        refrescarCatalogo();
+        // Por si la caja se cerró en otra computadora mientras no se miraba.
+        refrescarSesionRef.current();
+      }
     };
     document.addEventListener('visibilitychange', alVolver);
     window.addEventListener('focus', alVolver);
@@ -257,7 +279,7 @@ export function PosTerminal({
       window.removeEventListener('focus', alVolver);
       if (canal) void sb.removeChannel(canal);
     };
-  }, [almacenEnUso, refrescarCatalogo]);
+  }, [almacenEnUso, cajaEnUso, refrescarCatalogo]);
 
   /*
    * Quién, dónde y en qué caja: la cabecera de los papeles de caja.
@@ -277,6 +299,18 @@ export function PosTerminal({
       cajero: sesionActiva.cajero_nombre || cajeroNombre,
     };
   }
+  /** Encabezado del ticket para reimprimir el cierre de otra caja o turno. */
+  function cabeceraPara(caja: string, almacenId: string | null, cajero: string): EncabezadoCaja | null {
+    if (!empresaTicket) return null;
+    return {
+      empresa: empresaTicket.nombre_comercial || empresaTicket.razon_social,
+      ruc: empresaTicket.ruc,
+      establecimiento: almacenes.find((a) => a.id === almacenId)?.nombre ?? null,
+      caja,
+      cajero,
+    };
+  }
+  const [cierresOpen, setCierresOpen] = useState(false);
   const [adelantosOpen, setAdelantosOpen] = useState(false);
   const [stockAlmacenesVarianteId, setStockAlmacenesVarianteId] = useState<string | null>(null);
   // Modal de apertura de caja — solo se abre cuando el cajero clickea
@@ -522,6 +556,7 @@ export function PosTerminal({
     ? { id: sesionActiva.caja_id, codigo: sesionActiva.caja_codigo, nombre: sesionActiva.caja_nombre, almacen_id: sesionActiva.almacen_id }
     : cajas.find((c) => c.id === cajaId) ?? null;
 
+  refrescarSesionRef.current = () => { void refrescarSesion(); };
   async function refrescarSesion() {
     const r = await obtenerSesionActiva();
     setSesionActiva(r?.sesion ?? null);
@@ -1577,6 +1612,16 @@ export function PosTerminal({
             <Button
               variant="ghost"
               size="sm"
+              onClick={() => setCierresOpen(true)}
+              data-pos-no-focus
+              className="gap-1 text-xs"
+              title="Reimprimir o descargar un cierre de caja anterior"
+            >
+              <Printer className="h-3.5 w-3.5" /> Cierres
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
               onClick={() => {
                 if (sesionActiva) {
                   if (!confirm('Tenés caja abierta. ¿Cerrar sesión sin cerrar caja? La caja queda abierta para el próximo turno.')) return;
@@ -2584,6 +2629,10 @@ export function PosTerminal({
               <UserX className="h-4 w-4" /> Entrar con otro usuario
             </Button>
 
+            <Button variant="ghost" className="mt-2 w-full text-xs" onClick={() => setCierresOpen(true)}>
+              <Printer className="h-4 w-4" /> Reimprimir un cierre anterior
+            </Button>
+
             <p className="mt-3 text-[10px] text-slate-400">
               Sin caja abierta puedes igual consultar el historial y usar el resto del sistema.
             </p>
@@ -2605,6 +2654,11 @@ export function PosTerminal({
           }}
           onClose={() => setAbrirCajaOpen(false)}
         />
+      )}
+
+      {/* MODAL — Cierres anteriores (reimprimir el voucher) */}
+      {cierresOpen && (
+        <CierresAnterioresModal cabeceraPara={cabeceraPara} onClose={() => setCierresOpen(false)} />
       )}
 
       {/* MODAL — Cierre de caja */}

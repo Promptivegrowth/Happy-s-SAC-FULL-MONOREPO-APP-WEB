@@ -97,6 +97,11 @@ export function CerrarCajaModal({
     setRefreshing(true);
     try {
       const b = await balanceCajaActiva();
+      if (!b) {
+        // La caja se cerró en otra computadora (La Quinta usa dos, 07/10/2026).
+        avisarYaCerrada();
+        return;
+      }
       if (b) {
         setBalance(b);
         // El monto contado no se toca al refrescar: lo escribió una persona
@@ -203,6 +208,12 @@ export function CerrarCajaModal({
     }
   }
 
+  /** El turno ya no está abierto: se avisa claro y el POS vuelve a "caja cerrada". */
+  function avisarYaCerrada() {
+    toast.info('Esta caja ya se cerró desde otra computadora. Para ver o imprimir ese cierre, usa «Cierres».', { duration: 10000 });
+    onCerrada();
+  }
+
   function confirmarCierre() {
     if (!hayConteo || contadoNum < 0) {
       // Vacío ya no significa "lo esperado": hay que contar y escribirlo.
@@ -235,6 +246,7 @@ export function CerrarCajaModal({
           void imprimirCierre();
           onClose();  // cierra el modal pero la sesión sigue abierta
         } catch (e) {
+          if (/no hay (una )?sesi[oó]n de caja abierta/i.test((e as Error).message ?? '')) { avisarYaCerrada(); return; }
           toast.error((e as Error).message ?? 'Error en el cierre parcial');
         }
       });
@@ -245,7 +257,11 @@ export function CerrarCajaModal({
     start(async () => {
       try {
         const r = await cerrarSesion({ monto_contado_efectivo: contadoNum, observacion: obs || null });
-        if (!r.ok) { toast.error(r.error); return; }
+        if (!r.ok) {
+          if (/no hay una sesi[oó]n de caja abierta/i.test(r.error)) { avisarYaCerrada(); return; }
+          toast.error(r.error);
+          return;
+        }
         toast.success('Caja cerrada correctamente');
         // Sin esperar: ver el comentario del cierre parcial.
         void imprimirCierre();

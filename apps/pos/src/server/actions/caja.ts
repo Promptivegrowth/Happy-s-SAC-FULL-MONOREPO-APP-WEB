@@ -2059,3 +2059,104 @@ export async function listarCierresParcialesSesion(): Promise<Array<{
     observaciones: r.observaciones,
   }));
 }
+
+// ============================================================================
+// REIMPRIMIR UN CIERRE ANTERIOR
+// ============================================================================
+/*
+ * Pedido del cliente (07/10/2026): la ticketera falló al cerrar y el voucher
+ * del cierre no salió; Javier los necesita porque son el reporte del día.
+ * Desde el POS se listan los últimos cierres de la caja y se vuelve a imprimir
+ * cualquiera, con los mismos datos que el ticket original.
+ */
+
+export type CierreRecienteDTO = {
+  id: string;
+  caja_nombre: string;
+  abierta_en: string;
+  cerrada_en: string;
+  cerrado_por: string;
+  contado: number;
+  diferencia: number;
+};
+
+/** Los últimos cierres de la caja del usuario (o de los turnos que abrió). */
+export async function listarCierresRecientes(): Promise<CierreRecienteDTO[]> {
+  const sb = await createClient();
+  const user = await requireUser(sb);
+  let cajaId: string | null = null;
+  try {
+    cajaId = (await getCajaDefault(sb, user.id)).caja.id;
+  } catch {
+    cajaId = null;
+  }
+  let q = sb
+    .from('cajas_sesiones')
+    .select('id, abierta_en, cerrada_en, cerrada_por, monto_cierre_efectivo, diferencia, cajas:caja_id(nombre)')
+    .not('cerrada_en', 'is', null)
+    .order('cerrada_en', { ascending: false })
+    .limit(10);
+  q = cajaId ? q.eq('caja_id', cajaId) : q.eq('abierta_por', user.id);
+  const { data } = await q;
+  type R = { id: string; abierta_en: string; cerrada_en: string; cerrada_por: string | null; monto_cierre_efectivo: number | string | null; diferencia: number | string | null; cajas: { nombre: string } | null };
+  const filas = (data ?? []) as unknown as R[];
+  const ids = [...new Set(filas.map((f) => f.cerrada_por).filter(Boolean))] as string[];
+  const nombres = new Map<string, string>();
+  if (ids.length > 0) {
+    const { data: ps } = await sb.from('perfiles').select('id, nombre_completo').in('id', ids);
+    for (const p of ps ?? []) nombres.set(p.id, p.nombre_completo ?? '');
+  }
+  return filas.map((f) => ({
+    id: f.id,
+    caja_nombre: f.cajas?.nombre ?? 'Caja',
+    abierta_en: f.abierta_en,
+    cerrada_en: f.cerrada_en,
+    cerrado_por: f.cerrada_por ? (nombres.get(f.cerrada_por) ?? '—') : '—',
+    contado: Number(f.monto_cierre_efectivo ?? 0),
+    diferencia: Number(f.diferencia ?? 0),
+  }));
+}
+
+/**
+ * Lo necesario para volver a imprimir el ticket de un cierre.
+ *
+ * El esperado y el contado son los que quedaron guardados al cerrar: el papel
+ * reimpreso tiene que decir lo mismo que el original (CUADRA, FALTANTE…).
+ */
+export async function datosParaReimprimirCierre(sesionId: string): Promise<{
+  caja_nombre: string;
+  almacen_id: string | null;
+  cajero_nombre: string;
+  abierta_en: string;
+  balance: BalanceCajaDTO;
+  esperado: number;
+  contado: number;
+  observaciones: string | null;
+}> {
+  const sb = await createClient();
+  await requireUser(sb);
+  const { data: s, error } = await sb
+    .from('cajas_sesiones')
+    .select('id, abierta_en, abierta_por, cerrada_por, monto_apertura, monto_esperado_efectivo, monto_cierre_efectivo, observaciones, cajas:caja_id(nombre, almacen_id)')
+    .eq('id', sesionId)
+    .single();
+  if (error || !s) throw new Error('No se encontró ese cierre.');
+  const ses = s as unknown as {
+    abierta_en: string; abierta_por: string; cerrada_por: string | null; monto_apertura: number | string | null;
+    monto_esperado_efectivo: number | string | null; monto_cierre_efectivo: number | string | null;
+    observaciones: string | null; cajas: { nombre: string; almacen_id: string | null } | null;
+  };
+  const balance = await calcularBalanceInterno(sb, sesionId, Number(ses.monto_apertura ?? 0));
+  const quien = ses.cerrada_por ?? ses.abierta_por;
+  const { data: p } = await sb.from('perfiles').select('nombre_completo').eq('id', quien).maybeSingle();
+  return {
+    caja_nombre: ses.cajas?.nombre ?? 'Caja',
+    almacen_id: ses.cajas?.almacen_id ?? null,
+    cajero_nombre: p?.nombre_completo ?? 'Cajero',
+    abierta_en: ses.abierta_en,
+    balance,
+    esperado: ses.monto_esperado_efectivo != null ? Number(ses.monto_esperado_efectivo) : balance.esperado_efectivo,
+    contado: Number(ses.monto_cierre_efectivo ?? 0),
+    observaciones: ses.observaciones,
+  };
+}
