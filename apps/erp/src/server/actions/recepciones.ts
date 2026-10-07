@@ -95,6 +95,10 @@ export type OCParaRecepcionar = {
     cantidad_pendiente: number;
     precio_unitario: number;
     descripcion_libre: string | null;
+    /** Unidad en que se pidió y en la que entra al almacén, y cuántas de una entran en la otra. */
+    unidad_compra: string | null;
+    unidad_consumo: string | null;
+    factor: number;
   }>;
 };
 
@@ -311,7 +315,12 @@ type OCRaw = {
     cantidad_pendiente: string | number | null;
     precio_unitario: string | number;
     descripcion_libre: string | null;
-    material: { codigo: string; nombre: string } | null;
+    unidad_id: string | null;
+    material: {
+      codigo: string; nombre: string; factor_conversion: number | string | null;
+      unidad_compra_id: string | null; unidad_consumo_id: string | null;
+      unidad_compra: { codigo: string } | null; unidad_consumo: { codigo: string } | null;
+    } | null;
   }> | null;
 };
 
@@ -327,7 +336,9 @@ export async function listarOCsParaRecepcionar(): Promise<ActionResult<OCParaRec
         'id, numero, fecha, estado, proveedor_id, almacen_destino, ' +
           'proveedor:proveedor_id(razon_social), ' +
           'almacen:almacen_destino(codigo, nombre), ' +
-          'lineas:oc_lineas(id, material_id, cantidad, cantidad_recibida, cantidad_pendiente, precio_unitario, descripcion_libre, material:material_id(codigo, nombre))',
+          'lineas:oc_lineas(id, material_id, cantidad, cantidad_recibida, cantidad_pendiente, precio_unitario, descripcion_libre, unidad_id, ' +
+          'material:material_id(codigo, nombre, factor_conversion, unidad_compra_id, unidad_consumo_id, ' +
+          'unidad_compra:unidades_medida!unidad_compra_id(codigo), unidad_consumo:unidades_medida!unidad_consumo_id(codigo)))',
       )
       .in('estado', ['APROBADA', 'ENVIADA', 'PARCIAL'])
       .order('fecha', { ascending: false });
@@ -346,6 +357,13 @@ export async function listarOCsParaRecepcionar(): Promise<ActionResult<OCParaRec
             cantidad_pendiente: Number(l.cantidad_pendiente ?? 0),
             precio_unitario: Number(l.precio_unitario),
             descripcion_libre: l.descripcion_libre,
+            // Mismo criterio que crearRecepcionDesdeOC: el factor solo si se pidió en unidad de compra.
+            unidad_compra: l.material?.unidad_compra?.codigo ?? null,
+            unidad_consumo: l.material?.unidad_consumo?.codigo ?? null,
+            factor: l.material && l.unidad_id && l.unidad_id === l.material.unidad_consumo_id
+              && l.material.unidad_compra_id !== l.material.unidad_consumo_id
+              ? 1
+              : Number(l.material?.factor_conversion ?? 1) || 1,
           }))
           .filter((l) => l.cantidad_pendiente > 0 && l.material_id);
         return {
@@ -354,7 +372,7 @@ export async function listarOCsParaRecepcionar(): Promise<ActionResult<OCParaRec
           fecha: o.fecha,
           estado: o.estado,
           proveedor_id: o.proveedor_id,
-          proveedor: o.proveedor?.razon_social ?? '—',
+          proveedor: o.proveedor?.razon_social ?? 'Sin proveedor',
           almacen_destino_id: o.almacen_destino,
           almacen_destino_codigo: o.almacen?.codigo ?? null,
           almacen_destino_nombre: o.almacen?.nombre ?? null,
@@ -427,9 +445,36 @@ export async function crearRecepcionDesdeOC(
 
     const { data: lineasOc, error: errLin } = await sb
       .from('oc_lineas')
-      .select('id, material_id, cantidad, cantidad_recibida, precio_unitario')
+      .select('id, material_id, cantidad, cantidad_recibida, precio_unitario, unidad_id')
       .eq('oc_id', data.oc_id);
     if (errLin) throw new Error(errLin.message);
+
+    /*
+     * Cuántas unidades de CONSUMO entran por cada unidad recibida.
+     *
+     * La OC se pide en la unidad de COMPRA (ciento, rollo, mazo) y el almacén
+     * lleva la de consumo (unid, m). La recepción metía la cantidad tal cual:
+     * 2,2 cientos de evilla entraban como 2,2 unidades en vez de 220 (reporte
+     * del cliente, 07/10/2026). Se aplica el factor del material solo cuando la
+     * línea está en la unidad de compra; si se pidió directo en la de consumo,
+     * entra tal cual.
+     */
+    const matIds = [...new Set((lineasOc ?? []).map((l) => l.material_id as string | null).filter(Boolean))] as string[];
+    const factorPorLinea = new Map<string, number>();
+    if (matIds.length > 0) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const { data: mats } = await (sb as unknown as { from: (t: string) => any })
+        .from('materiales')
+        .select('id, factor_conversion, unidad_compra_id, unidad_consumo_id')
+        .in('id', matIds);
+      const porId = new Map(((mats ?? []) as { id: string; factor_conversion: number | string | null; unidad_compra_id: string | null; unidad_consumo_id: string | null }[]).map((m) => [m.id, m]));
+      for (const l of lineasOc ?? []) {
+        const m = l.material_id ? porId.get(l.material_id as string) : undefined;
+        const factor = Number(m?.factor_conversion ?? 1) || 1;
+        const enUnidadDeConsumo = Boolean(m && l.unidad_id && l.unidad_id === m.unidad_consumo_id && m.unidad_compra_id !== m.unidad_consumo_id);
+        factorPorLinea.set(l.id as string, enUnidadDeConsumo ? 1 : factor);
+      }
+    }
 
     const lineasMap = new Map<
       string,
@@ -508,19 +553,21 @@ export async function crearRecepcionDesdeOC(
       throw new Error(`No se pudieron insertar líneas: ${errLinIns.message}`);
     }
 
-    // 5) Generar movimientos kardex ENTRADA_COMPRA.
+    // 5) Generar movimientos kardex ENTRADA_COMPRA, en unidades de CONSUMO.
     const movimientos = data.lineas.map((ln) => {
       const oclin = lineasMap.get(ln.oc_linea_id)!;
       const costo = ln.costo_unitario != null ? ln.costo_unitario : oclin.precio;
       const total = Math.round(ln.cantidad_recibida * costo * 10000) / 10000;
+      const factor = factorPorLinea.get(ln.oc_linea_id) ?? 1;
       return {
         tipo: 'ENTRADA_COMPRA' as const,
         // El kardex con la misma fecha que la recepción.
         fecha: fechaRecepcion,
         almacen_id: data.almacen_id,
         material_id: ln.material_id,
-        cantidad: ln.cantidad_recibida,
-        costo_unitario: costo,
+        // 2,2 cientos × 100 = 220 unid; el costo total no cambia, el unitario se reparte.
+        cantidad: Math.round(ln.cantidad_recibida * factor * 10000) / 10000,
+        costo_unitario: Math.round((costo / factor) * 1000000) / 1000000,
         costo_total: total,
         referencia_tipo: 'OC',
         referencia_id: data.oc_id,
@@ -599,8 +646,36 @@ export async function anularRecepcion(id: string): Promise<ActionResult<{ ok: tr
     if (errLin) throw new Error(errLin.message);
     if (!lineas || lineas.length === 0) throw new Error('Recepción sin líneas');
 
-    // 2) Generar movimientos compensatorios SALIDA_AJUSTE.
-    const movimientos = lineas.map((l) => {
+    /*
+     * 2) Revertir EXACTAMENTE lo que entró al almacén con esta recepción.
+     *
+     * Se leen sus movimientos de kardex en vez de recalcular: desde el
+     * 07/10/2026 la entrada va en unidades de consumo (cantidad × factor), y
+     * las recepciones anteriores entraron sin convertir. Recalcular revertiría
+     * mal unas u otras.
+     */
+    const { data: entradas } = await sb
+      .from('kardex_movimientos')
+      .select('material_id, cantidad, costo_unitario, costo_total, referencia_linea_id')
+      .eq('tipo', 'ENTRADA_COMPRA')
+      .eq('referencia_tipo', 'OC')
+      .eq('referencia_id', cab.oc_id as string)
+      .eq('observacion', `Recepción ${cab.numero}`);
+    const movimientos = (entradas ?? []).length > 0
+      ? (entradas ?? []).map((k) => ({
+        tipo: 'SALIDA_AJUSTE' as const,
+        almacen_id: cab.almacen_id as string,
+        material_id: k.material_id as string | null,
+        cantidad: Number(k.cantidad ?? 0),
+        costo_unitario: k.costo_unitario != null ? Number(k.costo_unitario) : null,
+        costo_total: k.costo_total != null ? Number(k.costo_total) : null,
+        referencia_tipo: 'OC',
+        referencia_id: cab.oc_id as string,
+        referencia_linea_id: k.referencia_linea_id as string | null,
+        usuario_id: userId,
+        observacion: `Anulación recepción ${cab.numero}`,
+      }))
+      : lineas.map((l) => {
       const cant = Number(l.cantidad_recibida ?? 0);
       const costo = l.costo_unitario != null ? Number(l.costo_unitario) : null;
       return {

@@ -20,6 +20,9 @@ type LineaEditable = {
   material_nombre: string;
   cantidad_pendiente: number;
   precio_unitario: number;
+  unidad_compra: string | null;
+  unidad_consumo: string | null;
+  factor: number;
   // editables:
   cantidad_recibida: string;
   numero_lote: string;
@@ -71,6 +74,9 @@ export function NuevaRecepcionForm({
         material_nombre: l.material_nombre,
         cantidad_pendiente: l.cantidad_pendiente,
         precio_unitario: l.precio_unitario,
+        unidad_compra: l.unidad_compra,
+        unidad_consumo: l.unidad_consumo,
+        factor: l.factor,
         cantidad_recibida: String(l.cantidad_pendiente),
         numero_lote: '',
         fecha_vencimiento: '',
@@ -308,6 +314,13 @@ export function NuevaRecepcionForm({
                         disabled={pending || !l.incluir}
                         className="h-8 text-right"
                       />
+                      {/* Lo que realmente entra al almacén, en la unidad en que se consume. */}
+                      {l.factor !== 1 && Number(l.cantidad_recibida) > 0 && (
+                        <div className="mt-0.5 text-right text-[10px] text-emerald-700">
+                          {Number(l.cantidad_recibida).toLocaleString('es-PE', { maximumFractionDigits: 4 })} {l.unidad_compra ?? ''} ={' '}
+                          <b>{(Number(l.cantidad_recibida) * l.factor).toLocaleString('es-PE', { maximumFractionDigits: 2 })} {l.unidad_consumo ?? ''}</b> al almacén
+                        </div>
+                      )}
                     </TableCell>
                     <TableCell>
                       <Input

@@ -274,7 +274,8 @@ async function MaterialStockTable({ almacenId, q, vista, gerente }: { almacenId:
                     <TableCell className="text-xs text-slate-500">{f.unidad ?? '—'}</TableCell>
                     <TableCell className="text-right">
                       <span className={`font-semibold ${cero ? 'text-slate-400' : bajo ? 'text-amber-600' : 'text-corp-900'}`}>
-                        {formatNumber(f.cantidad)}
+                        {/* Con 2 decimales: metros y rollos parciales se redondeaban a entero (0,255 → 0). */}
+                        {formatNumber(f.cantidad, 2)}
                       </span>
                       {bajo && <AlertTriangle className="ml-1 inline h-3 w-3 text-amber-500" />}
                     </TableCell>

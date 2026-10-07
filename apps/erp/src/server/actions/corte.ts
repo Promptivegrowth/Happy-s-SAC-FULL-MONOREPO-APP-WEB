@@ -216,6 +216,23 @@ export async function agregarLineaCorte(_prev: unknown, fd: FormData): Promise<A
     // al momento de aprobar (reporte del cliente 2026-09-04).
     const motivoLinea = (typeof data.motivo === 'string' ? data.motivo.trim() : '') || null;
 
+    /*
+     * Una talla, una sola línea por corte (07/10/2026).
+     *
+     * La pantalla ya esconde las tallas cargadas, pero con un doble clic o dos
+     * pestañas abiertas entraba repetida: COR-000001 quedó con la talla 6 dos
+     * veces. Para cambiar la cantidad se edita la línea existente.
+     */
+    const { data: repetida } = await sbEstado
+      .from('ot_corte_lineas')
+      .select('id')
+      .eq('corte_id', data.corte_id)
+      .eq('talla', data.talla)
+      .limit(1);
+    if ((repetida ?? []).length > 0) {
+      throw new Error(`La talla ${formatTallaChip(data.talla)} ya está en este corte. Para cambiar su cantidad, edita esa línea en vez de agregarla de nuevo.`);
+    }
+
     const { error } = await sb.from('ot_corte_lineas').insert({
       corte_id: data.corte_id,
       talla: data.talla,
