@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
+import { createPortal } from 'react-dom';
 import Image from 'next/image';
 import { ChevronLeft, ChevronRight, X, ZoomIn } from 'lucide-react';
 import { Badge } from '@happy/ui/badge';
@@ -138,8 +139,15 @@ export function GaleriaProducto({
         </div>
       )}
 
-      {/* Lightbox modal */}
-      {zoomOpen && (
+      {/*
+        Lightbox modal, montado en el <body> (10/10/2026).
+
+        La galería vive dentro de una columna `lg:sticky`, y `sticky` arma su
+        propia capa: por más z-index que tuviera, el visor quedaba DEBAJO de la
+        columna de al lado y las tallas y los botones de compra se veían encima
+        de la foto ampliada. Desde el <body> queda por encima de todo.
+      */}
+      {zoomOpen && typeof document !== 'undefined' && createPortal(
         <div
           className="fixed inset-0 z-[70] flex items-center justify-center bg-black/90 p-4"
           onClick={cerrarZoom}
@@ -199,6 +207,8 @@ export function GaleriaProducto({
             )}
           </div>
         </div>
+        ,
+        document.body,
       )}
     </div>
   );
