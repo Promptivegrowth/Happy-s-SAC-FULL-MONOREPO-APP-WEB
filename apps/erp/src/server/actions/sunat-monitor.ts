@@ -31,7 +31,7 @@ export async function estadoSunat(): Promise<EstadoSunat> {
 
   const [comps, log, resumenes, config] = await Promise.all([
     sbAny.from('comprobantes')
-      .select('tipo, estado, fecha_emision, anulado_en')
+      .select('tipo, estado, fecha_emision, anulado_en, venta_id')
       .in('tipo', TIPOS_SUNAT)
       .order('fecha_emision', { ascending: false })
       .limit(1000),
@@ -40,22 +40,26 @@ export async function estadoSunat(): Promise<EstadoSunat> {
       .order('ejecutado_en', { ascending: false })
       .limit(500),
     sbAny.from('sunat_resumenes')
-      .select('resumen_id, fecha_referencia, estado, cantidad_boletas, sunat_codigo, sunat_descripcion')
-      .order('fecha_referencia', { ascending: false })
-      .limit(10),
+      .select('resumen_id, fecha_referencia, estado, cantidad_boletas, sunat_codigo, sunat_descripcion, created_at')
+      .order('created_at', { ascending: false })
+      .limit(200),
     sbAny.from('sunat_config')
       .select('ambiente, certificado_vencimiento')
       .eq('activo', true)
       .maybeSingle(),
   ]);
 
-  type Comp = { tipo: string; estado: string; fecha_emision: string; anulado_en: string | null };
+  type Comp = { tipo: string; estado: string; fecha_emision: string; anulado_en: string | null; venta_id: string | null };
   const filas = (comps.data ?? []) as Comp[];
+  // Ventas que ya tienen un comprobante aceptado: si otro de la misma venta
+  // quedó rechazado, ya se reemplazó (F006-00000037 → F006-00000039).
+  const ventasResueltas = new Set(filas.filter((c) => c.estado === 'ACEPTADO' && c.venta_id).map((c) => c.venta_id as string));
 
   let aceptados = 0, enEspera = 0, atrasados = 0, conProblema = 0, anulados = 0;
   for (const c of filas) {
     if (c.estado === 'ACEPTADO') { aceptados++; continue; }
     if (c.estado === 'ANULADO') { anulados++; continue; }
+    if (c.estado === 'RECHAZADO' && c.venta_id && ventasResueltas.has(c.venta_id)) { anulados++; continue; }
     if (c.estado === 'RECHAZADO' || c.estado === 'OBSERVADO') { conProblema++; continue; }
 
     /*
@@ -88,7 +92,7 @@ export async function estadoSunat(): Promise<EstadoSunat> {
     certificadoVence: vence,
     certificadoDias: dias,
     ambiente: cfg?.ambiente ?? null,
-    resumenes: ((resumenes.data ?? []) as Array<Record<string, unknown>>).map((r) => ({
+    resumenes: unoPorDia((resumenes.data ?? []) as Array<Record<string, unknown>>).map((r) => ({
       resumen_id: String(r.resumen_id ?? ''),
       fecha_referencia: String(r.fecha_referencia ?? ''),
       estado: String(r.estado ?? ''),
@@ -97,4 +101,22 @@ export async function estadoSunat(): Promise<EstadoSunat> {
       descripcion: (r.sunat_descripcion as string | null) ?? null,
     })),
   };
+}
+
+/**
+ * Un resumen por día informado, el que cuenta: el aceptado si lo hay, si no el
+ * que espera respuesta, si no el último intento. Con SUNAT cortando envíos
+ * (11/10/2026) un mismo día junta intentos en ERROR que ya no dicen nada.
+ */
+function unoPorDia(rows: Array<Record<string, unknown>>): Array<Record<string, unknown>> {
+  const peso = (e: unknown) => (e === 'ACEPTADO' ? 3 : e === 'EN_PROCESO' ? 2 : 1);
+  const porDia = new Map<string, Record<string, unknown>>();
+  for (const r of rows) { // vienen del más nuevo al más viejo
+    const dia = String(r.fecha_referencia ?? '');
+    const prev = porDia.get(dia);
+    if (!prev || peso(r.estado) > peso(prev.estado)) porDia.set(dia, r);
+  }
+  return [...porDia.values()]
+    .sort((a, b) => String(b.fecha_referencia).localeCompare(String(a.fecha_referencia)))
+    .slice(0, 10);
 }

@@ -155,12 +155,29 @@ export async function armarReporteComprobantes(sb: Sb, mes: string): Promise<Rep
 
   const refDe = new Map(refs.map((r) => [r.id, r]));
 
+  /*
+   * Anulados que se anularon CON NOTA DE CRÉDITO: sí suman.
+   *
+   * Cuando SUNAT ya no acepta la baja por plazo (2957), la boleta sigue vigente
+   * ante SUNAT y la anula una nota de crédito, que resta. Si la boleta no
+   * sumara, el reporte restaría dos veces (B005-00004196 y B005-00004200,
+   * 11/10/2026). La nota puede ser de otro mes, por eso se busca sin fecha.
+   */
+  const anuladosIds = comps.filter((c) => c.estado === 'ANULADO' && c.tipo !== 'NOTA_VENTA').map((c) => c.id);
+  const ncDe = new Map<string, string>();
+  for (const n of await enTandas(anuladosIds, async (t) => {
+    const { data } = await sb.from('comprobantes').select('numero_completo, documento_referencia_id')
+      .eq('tipo', 'NOTA_CREDITO').in('documento_referencia_id', t).not('estado', 'in', '(ANULADO,RECHAZADO)');
+    return (data ?? []) as Array<{ numero_completo: string; documento_referencia_id: string }>;
+  })) ncDe.set(n.documento_referencia_id, n.numero_completo);
+
   const porTipo = Object.fromEntries(TIPOS.map((t) => [t, { cantidad: 0, base: 0, igv: 0, total: 0 }])) as Record<TipoDoc, ResumenTipo>;
   let noCuentan = 0;
 
   const filas: FilaComprobante[] = comps.map((c) => {
     const signo = c.tipo === 'NOTA_CREDITO' ? -1 : 1;
-    const cuenta = c.estado !== 'ANULADO' && c.estado !== 'RECHAZADO';
+    const anuladoConNc = c.estado === 'ANULADO' && ncDe.has(c.id);
+    const cuenta = (c.estado !== 'ANULADO' || anuladoConNc) && c.estado !== 'RECHAZADO';
     const ref = c.documento_referencia_id ? refDe.get(c.documento_referencia_id) : undefined;
     const ventaId = c.venta_id ?? ref?.venta_id ?? null;
     const fila: FilaComprobante = {
@@ -177,7 +194,7 @@ export async function armarReporteComprobantes(sb: Sb, mes: string): Promise<Rep
       base: signo * Number(c.sub_total ?? 0),
       igv: signo * Number(c.igv ?? 0),
       total: signo * Number(c.total ?? 0),
-      estado: estadoLegible(c.tipo, c.estado),
+      estado: anuladoConNc ? `Anulado con nota de crédito ${ncDe.get(c.id)}` : estadoLegible(c.tipo, c.estado),
       cuenta,
     };
     if (cuenta) {
