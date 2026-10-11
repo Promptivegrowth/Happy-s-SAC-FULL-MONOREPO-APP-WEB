@@ -8,6 +8,8 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { PageShell } from '@/components/page-shell';
 import { EmitirSunatButton } from './client';
 import { AnularBoletaButton } from './anular-client';
+import { ArchivosSunat, CdrEnvioButton } from './archivos-sunat';
+import { fechaLima } from '@happy/lib/format';
 import { DescargarComprobanteA4 } from '@/components/comprobante-a4-pdf';
 import { VerComprobanteButton } from '../../ventas/ver-comprobante-button';
 import { formatDateTime, formatPEN } from '@happy/lib';
@@ -64,6 +66,15 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
   ]);
   const ncs = (notasCredito ?? []) as Array<{ id: string; numero_completo: string; estado: string }>;
 
+  // Boleta: ¿hay un resumen diario aceptado de su día? (su XML/CDR es la constancia)
+  const esBoleta = comp.tipo === 'BOLETA';
+  const { count: resumenesDia } = esBoleta && (comp.estado === 'ACEPTADO' || comp.sunat_aceptado_en || anul.anulacion_informada_en)
+    ? await sbA.from('sunat_resumenes').select('id', { count: 'exact', head: true })
+      .eq('fecha_referencia', fechaLima(comp.fecha_emision)).eq('estado', 'ACEPTADO')
+    : { count: 0 };
+  // Rechazo definitivo (el cron dejó de reintentarlo): ese número ya no sirve.
+  const sinReintento = String((comp as unknown as { sunat_proximo_intento: string | null }).sunat_proximo_intento ?? '').startsWith('9999');
+
   return (
     <PageShell
       title={comp.numero_completo ?? `${comp.serie}-${comp.numero}`}
@@ -73,7 +84,7 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
         </>
       }
       actions={
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
           {pdfInternoPath
             ? <VerComprobanteButton path={pdfInternoPath} label="Descargar PDF" size="default" />
             : <DescargarComprobanteA4 comprobanteId={id} label="Descargar PDF" />}
@@ -88,7 +99,14 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
               <Button variant="outline"><Truck className="h-4 w-4" /> Guía de remisión</Button>
             </Link>
           )}
-          {comp.estado !== 'ACEPTADO' && comp.estado !== 'ANULADO' && (
+          <ArchivosSunat
+            id={id}
+            esBoleta={esBoleta}
+            tieneXml={Boolean(comp.xml_firmado_url)}
+            tieneCdr={Boolean(comp.cdr_url)}
+            tieneResumen={(resumenesDia ?? 0) > 0}
+          />
+          {comp.estado !== 'ACEPTADO' && comp.estado !== 'ANULADO' && !sinReintento && (
             <EmitirSunatButton comprobanteId={id} estado={comp.estado} />
           )}
           {/* Solo boletas: una factura ya está en SUNAT desde que se emitió y
@@ -121,6 +139,14 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
               {anul.anulacion_informada_en ? `SUNAT la recibió en el resumen del ${formatDateTime(anul.anulacion_informada_en)}.` : 'La baja viaja a SUNAT en el resumen diario de las 23:00.'}
             </p>
           )}
+        </Card>
+      )}
+
+      {sinReintento && (
+        <Card className="border-rose-200 bg-rose-50/60 p-4 text-sm text-rose-900">
+          <p className="font-semibold">SUNAT rechazó este número de forma definitiva: no se vuelve a enviar.</p>
+          {comp.sunat_mensaje && <p className="mt-1 text-xs">{comp.sunat_mensaje}</p>}
+          {comp.nota_interna && <p className="mt-1">{comp.nota_interna}</p>}
         </Card>
       )}
 
@@ -204,11 +230,7 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
                     <TableCell className="text-sm">{e.http_status ?? '—'}</TableCell>
                     <TableCell className="text-right text-xs text-slate-500">{e.duracion_ms ?? 0}ms</TableCell>
                     <TableCell>
-                      {e.cdr_path && (
-                        <Link href={`https://trkokphwmkedhxwjriod.supabase.co/storage/v1/object/sign/comprobantes/${e.cdr_path}`} target="_blank">
-                          <Button variant="ghost" size="sm"><Download className="h-3 w-3" /> CDR</Button>
-                        </Link>
-                      )}
+                      {e.cdr_path && <CdrEnvioButton id={id} envioId={String(e.id)} />}
                     </TableCell>
                   </TableRow>
                 ))}

@@ -41,8 +41,67 @@ export function generarUBLInvoice(input: ComprobanteInput): { xml: string; numer
   const hora = input.horaEmision ?? '12:00:00';
   const moneda = input.moneda;
 
+  /*
+   * Prendas entregadas GRATIS (precio 0): transferencia gratuita gravada.
+   *
+   * SUNAT no acepta una línea de venta normal (afectación 10) por S/ 0: la
+   * rechaza con 3105 (F006-00000037, 09/10/2026). Un regalo con la compra se
+   * declara como bonificación gravada (afectación 15) con el tributo 9996
+   * (GRA): la línea lleva el valor referencial (precio tipo 02) y su IGV, que
+   * NO se cobra ni se suma al total del comprobante. El documento declara el
+   * total gratuito aparte y lleva la leyenda 1002.
+   */
+  const esGratuita = (i: (typeof tot.items)[number]) =>
+    i.precioUnitarioConIgv === 0 && Number(i.valorReferencialConIgv ?? 0) > 0;
+  let gratuitoBase = 0;
+  let gratuitoIgv = 0;
+
   const items = tot.items.map((i, idx) => {
     const id = idx + 1;
+    if (esGratuita(i)) {
+      const refSinIgv = +(Number(i.valorReferencialConIgv) / (1 + IGV_RATE / 100)).toFixed(2);
+      const base = +(refSinIgv * i.cantidad).toFixed(2);
+      const igvRef = +(base * IGV_RATE / 100).toFixed(2);
+      gratuitoBase += base;
+      gratuitoIgv += igvRef;
+      return `
+    <cac:InvoiceLine>
+      <cbc:ID>${id}</cbc:ID>
+      <cbc:InvoicedQuantity unitCode="${esc(i.unidadSunat ?? 'NIU')}">${i.cantidad}</cbc:InvoicedQuantity>
+      <cbc:LineExtensionAmount currencyID="${moneda}">${base.toFixed(2)}</cbc:LineExtensionAmount>
+      <cac:PricingReference>
+        <cac:AlternativeConditionPrice>
+          <cbc:PriceAmount currencyID="${moneda}">${refSinIgv.toFixed(2)}</cbc:PriceAmount>
+          <cbc:PriceTypeCode listName="Tipo de Precio" listAgencyName="PE:SUNAT" listURI="urn:pe:gob:sunat:cpe:see:gem:catalogos:catalogo16">02</cbc:PriceTypeCode>
+        </cac:AlternativeConditionPrice>
+      </cac:PricingReference>
+      <cac:TaxTotal>
+        <cbc:TaxAmount currencyID="${moneda}">${igvRef.toFixed(2)}</cbc:TaxAmount>
+        <cac:TaxSubtotal>
+          <cbc:TaxableAmount currencyID="${moneda}">${base.toFixed(2)}</cbc:TaxableAmount>
+          <cbc:TaxAmount currencyID="${moneda}">${igvRef.toFixed(2)}</cbc:TaxAmount>
+          <cac:TaxCategory>
+            <cbc:Percent>${IGV_RATE}.00</cbc:Percent>
+            <cbc:TaxExemptionReasonCode listAgencyName="PE:SUNAT" listName="Afectacion del IGV" listURI="urn:pe:gob:sunat:cpe:see:gem:catalogos:catalogo07">15</cbc:TaxExemptionReasonCode>
+            <cac:TaxScheme>
+              <cbc:ID schemeName="Codigo de tributos" schemeAgencyName="PE:SUNAT" schemeURI="urn:pe:gob:sunat:cpe:see:gem:catalogos:catalogo05">9996</cbc:ID>
+              <cbc:Name>GRA</cbc:Name>
+              <cbc:TaxTypeCode>FRE</cbc:TaxTypeCode>
+            </cac:TaxScheme>
+          </cac:TaxCategory>
+        </cac:TaxSubtotal>
+      </cac:TaxTotal>
+      <cac:Item>
+        <cbc:Description><![CDATA[${i.descripcion}]]></cbc:Description>
+        <cac:SellersItemIdentification>
+          <cbc:ID>${esc(i.codigo)}</cbc:ID>
+        </cac:SellersItemIdentification>
+      </cac:Item>
+      <cac:Price>
+        <cbc:PriceAmount currencyID="${moneda}">0.00</cbc:PriceAmount>
+      </cac:Price>
+    </cac:InvoiceLine>`;
+    }
     const valorUnitarioSinIgv = +(i.precioUnitarioConIgv / (1 + IGV_RATE / 100)).toFixed(6);
     return `
     <cac:InvoiceLine>
@@ -99,7 +158,8 @@ export function generarUBLInvoice(input: ComprobanteInput): { xml: string; numer
   <cbc:IssueTime>${hora}</cbc:IssueTime>
   <cbc:DueDate>${fecha}</cbc:DueDate>
   <cbc:InvoiceTypeCode listID="0101" listAgencyName="PE:SUNAT" listName="Tipo de Documento" listURI="urn:pe:gob:sunat:cpe:see:gem:catalogos:catalogo01" name="${isFactura ? 'Tipo de Operacion' : 'Tipo de Comprobante'}">${tipoDoc}</cbc:InvoiceTypeCode>
-  <cbc:Note languageLocaleID="1000"><![CDATA[${esc(input.totalLetras ?? '')}]]></cbc:Note>
+  <cbc:Note languageLocaleID="1000"><![CDATA[${esc(input.totalLetras ?? '')}]]></cbc:Note>${gratuitoBase > 0 ? `
+  <cbc:Note languageLocaleID="1002"><![CDATA[TRANSFERENCIA GRATUITA DE UN BIEN Y/O SERVICIO PRESTADO GRATUITAMENTE]]></cbc:Note>` : ''}
   <cbc:DocumentCurrencyCode listID="ISO 4217 Alpha" listAgencyName="United Nations Economic Commission for Europe" listName="Currency">${moneda}</cbc:DocumentCurrencyCode>
   <cbc:LineCountNumeric>${tot.items.length}</cbc:LineCountNumeric>
 
@@ -175,7 +235,18 @@ export function generarUBLInvoice(input: ComprobanteInput): { xml: string; numer
           <cbc:TaxTypeCode>VAT</cbc:TaxTypeCode>
         </cac:TaxScheme>
       </cac:TaxCategory>
-    </cac:TaxSubtotal>
+    </cac:TaxSubtotal>${gratuitoBase > 0 ? `
+    <cac:TaxSubtotal>
+      <cbc:TaxableAmount currencyID="${moneda}">${gratuitoBase.toFixed(2)}</cbc:TaxableAmount>
+      <cbc:TaxAmount currencyID="${moneda}">${gratuitoIgv.toFixed(2)}</cbc:TaxAmount>
+      <cac:TaxCategory>
+        <cac:TaxScheme>
+          <cbc:ID schemeName="Codigo de tributos" schemeAgencyName="PE:SUNAT" schemeURI="urn:pe:gob:sunat:cpe:see:gem:catalogos:catalogo05">9996</cbc:ID>
+          <cbc:Name>GRA</cbc:Name>
+          <cbc:TaxTypeCode>FRE</cbc:TaxTypeCode>
+        </cac:TaxScheme>
+      </cac:TaxCategory>
+    </cac:TaxSubtotal>` : ''}
   </cac:TaxTotal>
 
   <cac:LegalMonetaryTotal>

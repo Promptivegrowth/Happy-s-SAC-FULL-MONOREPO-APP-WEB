@@ -32,6 +32,33 @@ const LOTE = 15;
 const PAUSA_MS = 2500;
 
 /**
+ * Rechazo DEFINITIVO: reenviar el mismo número no sirve nunca.
+ *
+ * 2000–3999 son rechazos del contenido (SUNAT ya dio de baja ese número) y
+ * 1032/1033 dicen que el número ya está registrado como rechazado o con otros
+ * datos. F006-00000037 se reintentó así por días (3105 y luego 1032). Para
+ * esos casos hay que emitir un comprobante nuevo; los errores de conexión o
+ * de SUNAT caído (0100–0199, sin código) sí se reintentan.
+ */
+export function esRechazoDefinitivo(mensaje: string): boolean {
+  const m = /^\[?(\d{4})\]?\s*-?/.exec(mensaje.trim());
+  if (!m) return false;
+  const cod = Number(m[1]);
+  return cod === 1032 || cod === 1033 || (cod >= 2000 && cod <= 3999);
+}
+/** Fecha de "próximo intento" que el cron nunca alcanza: deja de reintentarse. */
+const SIN_REINTENTO = '9999-12-31T00:00:00.000Z';
+
+/** Días de boletas que se informan por corrida. */
+const DIAS_POR_CORRIDA = 10;
+/**
+ * Rechazos seguidos de un mismo día (en 24 h) tras los que se deja de insistir
+ * con ese día y se avisa a gerencia. Así un día con un problema nuevo no
+ * genera cientos de resúmenes rechazados ni frena a los demás días.
+ */
+const MAX_RECHAZOS_DIA = 3;
+
+/**
  * Hora de Perú a partir de la cual se informan las boletas del día.
  *
  * Las boletas no se pueden mandar sueltas: van agrupadas en un resumen diario,
@@ -141,24 +168,28 @@ export async function GET(request: Request) {
         } else {
           fallidos++;
           const intentos = (comp.sunat_intentos ?? 0) + 1;
+          const msg = `[${r.codigo}] ${r.descripcion}`;
+          const definitivo = esRechazoDefinitivo(msg);
           const esperaMin = ESPERA_POR_INTENTO_MIN[Math.min(intentos - 1, ESPERA_POR_INTENTO_MIN.length - 1)]!;
           await sb.from('comprobantes').update({
             sunat_intentos: intentos,
-            sunat_ultimo_error: `[${r.codigo}] ${r.descripcion}`.slice(0, 500),
-            sunat_proximo_intento: new Date(Date.now() + esperaMin * 60_000).toISOString(),
+            sunat_ultimo_error: msg.slice(0, 500),
+            sunat_proximo_intento: definitivo ? SIN_REINTENTO : new Date(Date.now() + esperaMin * 60_000).toISOString(),
           }).eq('id', comp.id);
-          detalle.push(`${comp.numero_completo}: [${r.codigo}] ${r.descripcion.slice(0, 110)} (reintento en ${esperaMin} min)`);
+          detalle.push(`${comp.numero_completo}: ${msg.slice(0, 110)} (${definitivo ? 'rechazo definitivo, no se reintenta' : `reintento en ${esperaMin} min`})`);
         }
       } catch (e) {
         fallidos++;
         const intentos = (comp.sunat_intentos ?? 0) + 1;
+        const msg = (e as Error).message;
+        const definitivo = esRechazoDefinitivo(msg);
         const esperaMin = ESPERA_POR_INTENTO_MIN[Math.min(intentos - 1, ESPERA_POR_INTENTO_MIN.length - 1)]!;
         await sb.from('comprobantes').update({
           sunat_intentos: intentos,
-          sunat_ultimo_error: (e as Error).message.slice(0, 500),
-          sunat_proximo_intento: new Date(Date.now() + esperaMin * 60_000).toISOString(),
+          sunat_ultimo_error: msg.slice(0, 500),
+          sunat_proximo_intento: definitivo ? SIN_REINTENTO : new Date(Date.now() + esperaMin * 60_000).toISOString(),
         }).eq('id', comp.id);
-        detalle.push(`${comp.numero_completo}: error ${(e as Error).message.slice(0, 120)}`);
+        detalle.push(`${comp.numero_completo}: error ${msg.slice(0, 120)}${definitivo ? ' (rechazo definitivo, no se reintenta)' : ''}`);
       }
       await new Promise((r) => setTimeout(r, PAUSA_MS));
     }
@@ -240,13 +271,56 @@ export async function GET(request: Request) {
         .map((r) => String(r.fecha_referencia).slice(0, 10)),
     );
 
+    /*
+     * Días que SUNAT viene rechazando: se dejan de lado y se avisa.
+     *
+     * Antes se tomaban los 3 días más antiguos y punto: si esos fallaban, se
+     * reintentaban cada 15 minutos para siempre y los días siguientes no salían
+     * nunca (del 30/09 al 10/10/2026, por las anuladas). Solo cuentan los
+     * resúmenes armados desde esta corrección (guardan la lista "enviadas").
+     */
+    const hace24hRes = new Date(Date.now() - 24 * 3600 * 1000).toISOString();
+    const { data: rechazosRecientes } = await sb
+      .from('sunat_resumenes')
+      .select('fecha_referencia, sunat_descripcion')
+      .eq('estado', 'RECHAZADO')
+      .gte('created_at', hace24hRes)
+      .not('observaciones->enviadas', 'is', null);
+    const rechazosPorDia = new Map<string, { n: number; motivo: string }>();
+    for (const r of (rechazosRecientes ?? []) as Array<{ fecha_referencia: string; sunat_descripcion: string | null }>) {
+      const f = String(r.fecha_referencia).slice(0, 10);
+      const prev = rechazosPorDia.get(f);
+      rechazosPorDia.set(f, { n: (prev?.n ?? 0) + 1, motivo: r.sunat_descripcion ?? prev?.motivo ?? '' });
+    }
+    const diasTrabados = [...rechazosPorDia.entries()].filter(([, v]) => v.n >= MAX_RECHAZOS_DIA);
+
     const fechas = [...new Set([
       ...((boletasPendientes ?? []) as Array<{ fecha_emision: string }>),
       ...((bajasPendientes ?? []) as Array<{ fecha_emision: string }>),
     ].map((b) => fechaLima(b.fecha_emision)))]
       .filter((f) => f <= hasta)
       .filter((f) => !esperandoCDR.has(f))
-      .slice(0, 3); // máximo 3 días por corrida
+      .filter((f) => (rechazosPorDia.get(f)?.n ?? 0) < MAX_RECHAZOS_DIA)
+      .slice(0, DIAS_POR_CORRIDA);
+
+    if (diasTrabados.length > 0) {
+      detalle.push(`días rechazados por SUNAT (en pausa 24 h): ${diasTrabados.map(([f, v]) => `${f} ${v.motivo.slice(0, 60)}`).join('; ')}`);
+      const { data: avisoDias } = await sb
+        .from('notificaciones')
+        .select('id')
+        .eq('tipo', 'SUNAT_RESUMEN_RECHAZADO')
+        .gte('created_at', new Date(Date.now() - 20 * 3600 * 1000).toISOString())
+        .limit(1);
+      if ((avisoDias ?? []).length === 0) {
+        await sb.from('notificaciones').insert({
+          destinatario_rol: 'gerente',
+          tipo: 'SUNAT_RESUMEN_RECHAZADO',
+          titulo: `SUNAT rechaza el resumen de boletas de ${diasTrabados.map(([f]) => f).join(', ')}`,
+          mensaje: `Motivo: ${diasTrabados[0]![1].motivo.slice(0, 300)}. Se vuelve a intentar en 24 horas; avisa a soporte para revisarlo.`,
+          enlace: '/comprobantes?estado=pendientes',
+        });
+      }
+    }
 
     if (esperandoCDR.size > 0) {
       detalle.push(`esperando CDR de: ${[...esperandoCDR].join(', ')}`);

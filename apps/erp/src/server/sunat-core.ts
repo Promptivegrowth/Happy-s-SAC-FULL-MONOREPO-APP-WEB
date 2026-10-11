@@ -87,8 +87,10 @@ export async function emitirComprobanteConCliente(
       throw new Error(`Tipo no soportado: ${comp.tipo}`);
     }
 
-    const lineas = (comp as unknown as { comprobantes_lineas: { codigo: string | null; descripcion: string; cantidad: number; unidad_sunat: string | null; precio_unitario: number; descuento: number | null; afectacion_igv: string | null }[] }).comprobantes_lineas;
+    const lineas = (comp as unknown as { comprobantes_lineas: { codigo: string | null; descripcion: string; cantidad: number; unidad_sunat: string | null; precio_unitario: number; descuento: number | null; afectacion_igv: string | null; variante_id: string | null }[] }).comprobantes_lineas;
     if (!lineas || lineas.length === 0) throw new Error('Comprobante sin líneas');
+
+    const valorRefPorCodigo = await valoresReferencialesGratis(sb, comp.venta_id as string | null, lineas);
 
     // 3. Construir input UBL
     const tipoSunat = TIPO_MAP[comp.tipo as keyof typeof TIPO_MAP];
@@ -141,6 +143,10 @@ export async function emitirComprobanteConCliente(
         unidadSunat: l.unidad_sunat ?? 'NIU',
         precioUnitarioConIgv: Number(l.precio_unitario),
         descuento: Number(l.descuento ?? 0),
+        // Prenda regalada (precio 0): va como transferencia gratuita con su precio de lista.
+        ...(Number(l.precio_unitario) === 0
+          ? { valorReferencialConIgv: valorRefPorCodigo.get(l.variante_id ?? '') ?? valorRefPorCodigo.get(l.codigo ?? '') }
+          : {}),
       })),
       formaPago: comp.forma_pago === 'CREDITO' ? 'Credito' : 'Contado',
       totalLetras: numeroALetras(Number(comp.total)),
@@ -273,7 +279,7 @@ export async function generarResumenDiarioConCliente(
      * quedaría un hueco en la numeración que nadie puede explicar.
      */
     const { data: boletas } = await sbAny.from('comprobantes')
-      .select('id, serie, numero, numero_completo, tipo_documento_cliente, numero_documento_cliente, sub_total, igv, total, estado, anulacion_informada_en')
+      .select('id, serie, numero, numero_completo, tipo_documento_cliente, numero_documento_cliente, sub_total, igv, total, estado, sunat_aceptado_en, anulacion_informada_en')
       .eq('tipo', 'BOLETA')
       .gte('fecha_emision', ventanaDiaPeru(fechaRef).desde)
       .lt('fecha_emision', ventanaDiaPeru(fechaRef).hasta)
@@ -282,7 +288,7 @@ export async function generarResumenDiarioConCliente(
       id: string; serie: string; numero: number; numero_completo: string | null;
       tipo_documento_cliente: string | null; numero_documento_cliente: string | null;
       sub_total: number | null; igv: number | null; total: number | null; estado: string;
-      anulacion_informada_en: string | null;
+      sunat_aceptado_en: string | null; anulacion_informada_en: string | null;
     }>;
     // Una anulada que ya se informó no vuelve a mandarse: SUNAT la rechazaría
     // por repetida.
@@ -291,19 +297,32 @@ export async function generarResumenDiarioConCliente(
     );
     if (lista.length === 0) throw new Error(`No hay boletas por informar en ${fechaRef}.`);
 
+    /*
+     * Una anulada que SUNAT nunca conoció se informa en DOS resúmenes.
+     *
+     * SUNAT no deja dar de baja (condición 3) una boleta que no tiene
+     * registrada: responde 2663 "el documento indicado no existe" y rechaza el
+     * resumen ENTERO, con todas las boletas del día. Así quedaron sin informar
+     * todos los días con una anulada desde el 30/09/2026. Por eso primero va
+     * como emitida (condición 1) y, aceptado ese resumen, el siguiente la da de
+     * baja (condición 3).
+     */
+    const esBaja = (b: (typeof lista)[number]) => b.estado === 'ANULADO' && b.sunat_aceptado_en !== null;
     const lineas: ResumenBoletaLinea[] = lista.map((b) => ({
       tipoDoc: '03',
       serieNumero: b.numero_completo ?? formatearNumeroComprobante(b.serie, b.numero),
       clienteTipoDoc: tipoDocClienteSunat(b.tipo_documento_cliente),
       clienteNumeroDoc: b.numero_documento_cliente || '0',
-      condicion: b.estado === 'ANULADO' ? '3' : '1',
+      condicion: esBaja(b) ? '3' : '1',
       total: Number(b.total ?? 0),
       gravado: Number(b.sub_total ?? 0),
       igv: Number(b.igv ?? 0),
     }));
 
-    // Qué bajas viajan en este resumen: se marcan recién cuando SUNAT lo acepte.
-    const bajasEnviadas = lista.filter((b) => b.estado === 'ANULADO').map((b) => b.id);
+    // Qué viaja en este resumen. Se marca recién cuando SUNAT lo acepte.
+    const bajasEnviadas = lista.filter(esBaja).map((b) => b.id);
+    const adicionesAnuladas = lista.filter((b) => b.estado === 'ANULADO' && !esBaja(b)).map((b) => b.id);
+    const enviadas = lista.filter((b) => b.estado !== 'ANULADO').map((b) => b.id);
 
     // El identificador del resumen es RC-{fechaGeneracion}-{correlativo}, así que
     // el correlativo tiene que ser único por DÍA DE ENVÍO, no por día informado.
@@ -341,9 +360,9 @@ export async function generarResumenDiarioConCliente(
       empresa_id: empresa.id, resumen_id: resumenId, fecha_referencia: fechaRef,
       fecha_generacion: fechaGen, correlativo, ticket: snd.ticket, estado: 'EN_PROCESO',
       cantidad_boletas: lineas.length, xml_zip_path: zipPath,
-      // Las bajas que viajan en este resumen. Se anotan acá y no se dan por
-      // informadas hasta que SUNAT responda que aceptó el resumen.
-      observaciones: bajasEnviadas.length > 0 ? { bajas: bajasEnviadas } : null,
+      // Lo que viaja en este resumen. Se anota acá y no se da por informado
+      // hasta que SUNAT responda que aceptó el resumen.
+      observaciones: { enviadas, bajas: bajasEnviadas, adiciones_anuladas: adicionesAnuladas },
     }).select('id').single();
 
     return { rowId: insRow?.id as string, resumenId, ticket: snd.ticket, cantidad: lineas.length };
@@ -381,6 +400,13 @@ export async function consultarResumenConCliente(
     });
     if (!st.ok) throw new Error(`Error consultando SUNAT: ${st.error}`);
 
+    // Lo que viajó en el resumen (desde el 11/10/2026 se guarda la lista completa).
+    const obsRes = (res.observaciones ?? null) as {
+      enviadas?: string[]; bajas?: string[]; adiciones_anuladas?: string[]; sunat?: unknown;
+    } | null;
+    const enviadasRes = Array.isArray(obsRes?.enviadas) ? obsRes!.enviadas! : null;
+    const adicionesRes = obsRes?.adiciones_anuladas ?? [];
+
     let estado = 'EN_PROCESO';
     let cdrPath: string | null = null;
     if (!st.enProceso) {
@@ -391,17 +417,37 @@ export async function consultarResumenConCliente(
         await sb.storage.from('comprobantes').upload(cdrPath, new Blob([Uint8Array.from(atob(st.cdrZipBase64), (c) => c.charCodeAt(0))], { type: 'application/zip' }), { upsert: true, contentType: 'application/zip' });
       }
       if (aceptado) {
-        await sb.from('comprobantes').update({
-          estado: 'ACEPTADO', sunat_codigo_respuesta: '0',
+        const marcaAceptada = {
+          estado: 'ACEPTADO' as const, sunat_codigo_respuesta: '0',
           sunat_mensaje: `Aceptada por Resumen Diario ${res.resumen_id}`,
           sunat_aceptado_en: new Date().toISOString(),
-        }).eq('tipo', 'BOLETA')
-          // Misma ventana que se usó para armar el resumen: si acá se filtrara
-          // por día UTC, las boletas de la noche quedarían sin marcar aunque
-          // SUNAT sí las haya aceptado.
-          .gte('fecha_emision', ventanaDiaPeru(res.fecha_referencia as string).desde)
-          .lt('fecha_emision', ventanaDiaPeru(res.fecha_referencia as string).hasta)
-          .neq('estado', 'ANULADO');
+        };
+        if (enviadasRes) {
+          // Solo las que viajaron en ESTE resumen: una boleta emitida después
+          // de armarlo no puede darse por aceptada sin que SUNAT la conozca.
+          for (let i = 0; i < enviadasRes.length; i += 150) {
+            await sb.from('comprobantes').update(marcaAceptada)
+              .in('id', enviadasRes.slice(i, i + 150)).neq('estado', 'ANULADO');
+          }
+        } else {
+          // Resúmenes anteriores al 11/10/2026, que no guardaban la lista.
+          await sb.from('comprobantes').update(marcaAceptada).eq('tipo', 'BOLETA')
+            // Misma ventana que se usó para armar el resumen: si acá se filtrara
+            // por día UTC, las boletas de la noche quedarían sin marcar aunque
+            // SUNAT sí las haya aceptado.
+            .gte('fecha_emision', ventanaDiaPeru(res.fecha_referencia as string).desde)
+            .lt('fecha_emision', ventanaDiaPeru(res.fecha_referencia as string).hasta)
+            .neq('estado', 'ANULADO');
+        }
+
+        // Anuladas que viajaron como emitidas: SUNAT ya las conoce y el
+        // resumen siguiente las da de baja (siguen en estado ANULADO).
+        if (adicionesRes.length > 0) {
+          await sbAny.from('comprobantes').update({
+            sunat_aceptado_en: new Date().toISOString(),
+            sunat_mensaje: `Informada en Resumen Diario ${res.resumen_id}; falta comunicar su anulación`,
+          }).in('id', adicionesRes);
+        }
 
         /*
          * Las bajas que viajaron en este resumen quedan informadas.
@@ -410,7 +456,7 @@ export async function consultarResumenConCliente(
          * enviarlo y SUNAT lo rechazara, la baja quedaría dada por comunicada
          * sin estarlo, y no volvería a intentarse nunca.
          */
-        const bajas = (res.observaciones as { bajas?: string[] } | null)?.bajas ?? [];
+        const bajas = obsRes?.bajas ?? [];
         if (bajas.length > 0) {
           await sbAny.from('comprobantes').update({
             anulacion_informada_en: new Date().toISOString(),
@@ -423,10 +469,67 @@ export async function consultarResumenConCliente(
     await sbAny.from('sunat_resumenes').update({
       estado, sunat_codigo: st.cdr?.codigo ?? st.statusCode,
       sunat_descripcion: st.cdr?.descripcion ?? null, cdr_path: cdrPath,
-      observaciones: st.cdr?.observaciones?.length ? st.cdr.observaciones : null,
+      /*
+       * Se conserva lo que viajó y se suman las observaciones de SUNAT. Antes
+       * se pisaba: con el ticket todavía en proceso quedaba en null, y al
+       * aceptarse ya no se sabía qué bajas marcar como informadas.
+       */
+      observaciones: obsRes && !Array.isArray(obsRes)
+        ? { ...obsRes, sunat: st.cdr?.observaciones?.length ? st.cdr.observaciones : (obsRes.sunat ?? null) }
+        : (st.cdr?.observaciones?.length ? st.cdr.observaciones : obsRes),
       updated_at: new Date().toISOString(),
     }).eq('id', resumenRowId);
 
     return { estado, codigo: st.cdr?.codigo ?? st.statusCode, descripcion: st.cdr?.descripcion ?? null };
   
+}
+
+/**
+ * Precio de lista (con IGV) de las prendas regaladas de un comprobante, para
+ * declararlas como transferencia gratuita. Clave: variante y código.
+ *
+ * El comprobante no siempre guarda la variante (F006-00000037 no la tenía), así
+ * que se toma de la venta: sus líneas en 0 dicen qué prenda se regaló.
+ */
+async function valoresReferencialesGratis(
+  sb: ClienteSb,
+  ventaId: string | null,
+  lineas: { codigo: string | null; precio_unitario: number; variante_id: string | null }[],
+): Promise<Map<string, number>> {
+  const mapa = new Map<string, number>();
+  if (!lineas.some((l) => Number(l.precio_unitario) === 0)) return mapa;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const sbAny = sb as unknown as { from: (t: string) => any };
+
+  const varIds = new Set(lineas.filter((l) => Number(l.precio_unitario) === 0 && l.variante_id).map((l) => l.variante_id as string));
+  if (ventaId) {
+    const { data: vl } = await sbAny.from('ventas_lineas').select('variante_id, precio_unitario').eq('venta_id', ventaId);
+    for (const l of (vl ?? []) as { variante_id: string | null; precio_unitario: number }[]) {
+      if (Number(l.precio_unitario) === 0 && l.variante_id) varIds.add(l.variante_id);
+    }
+  }
+  if (varIds.size > 0) {
+    const { data: vars } = await sbAny.from('productos_variantes')
+      .select('id, precio_publico, producto:producto_id(codigo)').in('id', [...varIds]);
+    for (const v of (vars ?? []) as { id: string; precio_publico: number | null; producto: { codigo: string | null } | null }[]) {
+      const precio = Number(v.precio_publico ?? 0);
+      if (precio <= 0) continue;
+      mapa.set(v.id, precio);
+      const cod = v.producto?.codigo;
+      if (cod) mapa.set(cod, Math.max(mapa.get(cod) ?? 0, precio));
+    }
+  }
+  // Sin venta (o sin variante): el mayor precio de lista del modelo.
+  const sinPrecio = [...new Set(lineas
+    .filter((l) => Number(l.precio_unitario) === 0 && l.codigo && !mapa.has(l.codigo) && !(l.variante_id && mapa.has(l.variante_id)))
+    .map((l) => l.codigo as string))];
+  if (sinPrecio.length > 0) {
+    const { data: prods } = await sbAny.from('productos')
+      .select('codigo, productos_variantes(precio_publico)').in('codigo', sinPrecio);
+    for (const p of (prods ?? []) as { codigo: string; productos_variantes: { precio_publico: number | null }[] }[]) {
+      const precio = Math.max(0, ...(p.productos_variantes ?? []).map((v) => Number(v.precio_publico ?? 0)));
+      if (precio > 0) mapa.set(p.codigo, precio);
+    }
+  }
+  return mapa;
 }

@@ -41,7 +41,13 @@ export type Item = {
   unidadSunat?: string;          // "NIU" por default
   precioUnitarioConIgv: number;  // precio unitario al consumidor (con IGV)
   descuento?: number;             // descuento total de la línea
-  afectacionIgv?: '10'|'20'|'21'|'30'|'31'|'32'|'33'|'34'|'35'|'36'|'37';
+  afectacionIgv?: '10'|'11'|'12'|'13'|'14'|'15'|'16'|'20'|'21'|'30'|'31'|'32'|'33'|'34'|'35'|'36'|'37';
+  /**
+   * Precio de lista (con IGV) de una prenda que se entrega GRATIS (precio 0).
+   * Con él la línea se declara como transferencia gratuita (ver xml.ts); sin él,
+   * SUNAT rechaza la línea en 0 (3105, F006-00000037, 09/10/2026).
+   */
+  valorReferencialConIgv?: number;
 };
 
 export type Cliente = {
