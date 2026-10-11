@@ -211,9 +211,15 @@ export async function GET(request: Request) {
       .not('ticket', 'is', null)
       .limit(10);
     for (const res of (enProceso ?? []) as Array<{ id: string; resumen_id: string }>) {
-      const r = await consultarResumenConCliente(sb, res.id);
-      if (r.estado !== 'EN_PROCESO') resumenesCerrados++;
-      detalle.push(`ticket ${res.resumen_id}: ${r.estado}${r.codigo ? ` (${r.codigo})` : ''}`);
+      // Cada ticket por separado: si SUNAT corta una consulta (502), los demás
+      // igual se consultan en esta corrida.
+      try {
+        const r = await consultarResumenConCliente(sb, res.id);
+        if (r.estado !== 'EN_PROCESO') resumenesCerrados++;
+        detalle.push(`ticket ${res.resumen_id}: ${r.estado}${r.codigo ? ` (${r.codigo})` : ''}`);
+      } catch (e) {
+        detalle.push(`ticket ${res.resumen_id}: ${(e as Error).message.slice(0, 100)}`);
+      }
       await new Promise((x) => setTimeout(x, 1500));
     }
   } catch (e) {
