@@ -96,6 +96,8 @@ type Props = {
   osRetornada?: boolean;
   /** ¿Existe alguna OS para esta OT? */
   hayOs?: boolean;
+  /** ¿Ya se generó la OS de confección (COSTURA)? Sin ella, lo posterior se bloquea. */
+  hayOsConfeccion?: boolean;
   /** Resumen de la liquidación de tiempos de corte (se declara en la orden de corte). */
   corteResumen?: CorteResumen;
   /** ¿La OT tiene algún corte SIN CERRAR (ABIERTO/EN_PROCESO)? Mientras lo haya
@@ -113,7 +115,7 @@ type Props = {
 
 const PEN = (n: number) => `S/ ${n.toFixed(2)}`;
 
-export function TiemposCostoTab({ otId, procesos, lineas, registros, operarios, disabled, ordenConfeccion = -1, osRetornada = false, hayOs = false, corteResumen, corteAbierto = false, horariosJornada = {} }: Props) {
+export function TiemposCostoTab({ otId, procesos, lineas, registros, operarios, disabled, ordenConfeccion = -1, osRetornada = false, hayOs = false, hayOsConfeccion = false, corteResumen, corteAbierto = false, horariosJornada = {} }: Props) {
   // Productos únicos en las líneas de la OT
   const productos = useMemo(() => {
     const map = new Map<string, { id: string; nombre: string; codigo: string }>();
@@ -325,6 +327,8 @@ export function TiemposCostoTab({ otId, procesos, lineas, registros, operarios, 
                         // Post-confección: bloqueado hasta que retorne la OS.
                         esperandoTaller={ordenConfeccion >= 0 && p.orden > ordenConfeccion && !osRetornada}
                         hayOs={hayOs}
+                        // Sin OS de confección generada: lo posterior no se registra.
+                        sinOsConfeccion={ordenConfeccion >= 0 && p.orden > ordenConfeccion && !hayOsConfeccion}
                         // Corte sin liquidar: no se registra nada aguas abajo.
                         corteSinCerrar={corteAbierto && areaCodigo !== 'CORTE'}
                       />
@@ -749,7 +753,7 @@ function CorteAreaInfo({ procesos, resumen }: { procesos: Proceso[]; resumen?: C
 function OperacionBlock({
   otId, proceso, tallaActual, tallasDisponibles, registros, operarios, esAreaCorte, disabled,
   bloqueado = false, operacionAnterior = '', faltanAnterior = 0,
-  esperandoTaller = false, hayOs = false, corteSinCerrar = false, horariosJornada = {},
+  esperandoTaller = false, hayOs = false, sinOsConfeccion = false, corteSinCerrar = false, horariosJornada = {},
 }: {
   otId: string;
   proceso: Proceso;
@@ -767,6 +771,13 @@ function OperacionBlock({
    *  un aviso (ya NO bloquea el registro; se puede trabajar en paralelo). */
   esperandoTaller?: boolean;
   hayOs?: boolean;
+  /**
+   * Operación posterior a la confección y todavía no se generó la orden de
+   * servicio de confección: BLOQUEA el registro (pedido del cliente,
+   * 10/10/2026). Antes era solo un aviso (02/09/2026: trabajar en paralelo);
+   * con la OS ya generada vuelve a ser solo aviso.
+   */
+  sinOsConfeccion?: boolean;
   /** La OT tiene un corte SIN CERRAR: bloquea el registro (pedido 2026-09-04). */
   corteSinCerrar?: boolean;
   /** Horario de planta por día: acota el intervalo y descuenta el refrigerio. */
@@ -810,7 +821,12 @@ function OperacionBlock({
           {/* Aviso NO bloqueante: operación posterior a la confección. Se puede
               registrar igual si trabajan en paralelo (cliente 2026-09-02: no
               bloquear el registro aunque la OS del taller aún no retorne). */}
-          {esperandoTaller && (
+          {sinOsConfeccion && !corteSinCerrar && (
+            <p className="mt-0.5 text-[10px] font-medium text-rose-700">
+              🔒 Va después de la confección: primero genera la orden de servicio de confección para registrar esta operación.
+            </p>
+          )}
+          {esperandoTaller && !sinOsConfeccion && (
             <p className="mt-0.5 text-[10px] text-amber-600">
               ⚠ {hayOs
                 ? 'La orden de servicio del taller aún no retorna (recepcionada) — puedes registrar igual si trabajan en paralelo.'
@@ -825,7 +841,7 @@ function OperacionBlock({
             </p>
           )}
         </div>
-        {!disabled && !corteSinCerrar && (
+        {!disabled && !corteSinCerrar && !sinOsConfeccion && (
           completo && !openForm ? (
             <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2 py-1 text-[10px] font-semibold text-emerald-700" title="Todas las unidades cortadas ya fueron registradas">
               ✓ Completo

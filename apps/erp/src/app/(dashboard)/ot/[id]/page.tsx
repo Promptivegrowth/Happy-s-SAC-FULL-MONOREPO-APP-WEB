@@ -177,6 +177,9 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
     osArr.filter((o) => ['RECEPCION_PARCIAL', 'RECEPCIONADA', 'CERRADA'].includes(o.estado)).map((o) => o.proceso),
   );
   const hayOs = osArr.length > 0;
+  // ¿Ya se generó la OS de CONFECCIÓN (COSTURA)? Sin ella, las operaciones
+  // posteriores quedan bloqueadas (pedido del cliente, 10/10/2026).
+  const hayOsConfeccion = osArr.some((o) => o.proceso === 'COSTURA' && o.estado !== 'ANULADA');
 
   // TIEMPOS DEL ÁREA DE CORTE (pedido del cliente 21/07/2026): se declaran en
   // la ORDEN DE CORTE (liquidación), no en la OT. Acá solo se muestran como
@@ -585,6 +588,7 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
             ordenConfeccion={ordenConfeccion}
             osRetornada={osRetornada}
             hayOs={hayOs}
+            hayOsConfeccion={hayOsConfeccion}
             corteResumen={corteResumen}
             corteAbierto={hayCorteAbierto}
           />

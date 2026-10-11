@@ -767,11 +767,38 @@ export async function crearRegistroTiempoOT(
     // Producto + área del proceso (para el gate de corte y el tope de unidades).
     const { data: procRow } = await sbAny
       .from('productos_procesos')
-      .select('producto_id, areas_produccion(codigo)')
+      .select('producto_id, orden, areas_produccion(codigo)')
       .eq('id', data.proceso_id)
       .maybeSingle();
     const productoId = procRow?.producto_id as string | undefined;
     const areaCod = (procRow?.areas_produccion as { codigo?: string } | null)?.codigo ?? null;
+
+    /*
+     * Lo posterior a la confección no se registra sin la OS de confección
+     * (pedido del cliente, 10/10/2026). La pantalla ya oculta el botón; acá se
+     * valida por si la pantalla estaba abierta desde antes.
+     */
+    if (productoId) {
+      const { data: costura } = await sbAny
+        .from('productos_procesos')
+        .select('orden')
+        .eq('producto_id', productoId)
+        .eq('proceso', 'COSTURA')
+        .eq('activo', true);
+      const ordenConfeccion = ((costura ?? []) as { orden: number | null }[])
+        .reduce((m, p) => Math.max(m, Number(p.orden ?? 0)), -1);
+      if (ordenConfeccion >= 0 && Number(procRow?.orden ?? 0) > ordenConfeccion) {
+        const { count: osConf } = await sbAny
+          .from('ordenes_servicio')
+          .select('id', { count: 'exact', head: true })
+          .eq('ot_id', otId)
+          .eq('proceso', 'COSTURA')
+          .neq('estado', 'ANULADA');
+        if ((osConf ?? 0) === 0) {
+          throw new Error('Esta operación va después de la confección: primero genera la orden de servicio de confección.');
+        }
+      }
+    }
 
     let cortadaTalla = 0;
     if (productoId) {
