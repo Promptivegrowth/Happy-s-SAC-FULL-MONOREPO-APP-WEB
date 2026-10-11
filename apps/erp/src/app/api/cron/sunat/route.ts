@@ -35,8 +35,8 @@ const PAUSA_MS = 2500;
  * Rechazo DEFINITIVO: reenviar el mismo número no sirve nunca.
  *
  * 2000–3999 son rechazos del contenido (SUNAT ya dio de baja ese número) y
- * 1032/1033 dicen que el número ya está registrado como rechazado o con otros
- * datos. F006-00000037 se reintentó así por días (3105 y luego 1032). Para
+ * 1032 dice que el número ya está registrado como rechazado. (1033, ya
+ * registrado, no llega acá: sunat-core lo da por aceptado.) F006-00000037 se reintentó así por días (3105 y luego 1032). Para
  * esos casos hay que emitir un comprobante nuevo; los errores de conexión o
  * de SUNAT caído (0100–0199, sin código) sí se reintentan.
  */
@@ -44,7 +44,7 @@ export function esRechazoDefinitivo(mensaje: string): boolean {
   const m = /^\[?(\d{4})\]?\s*-?/.exec(mensaje.trim());
   if (!m) return false;
   const cod = Number(m[1]);
-  return cod === 1032 || cod === 1033 || (cod >= 2000 && cod <= 3999);
+  return cod === 1032 || (cod >= 2000 && cod <= 3999);
 }
 /** Fecha de "próximo intento" que el cron nunca alcanza: deja de reintentarse. */
 const SIN_REINTENTO = '9999-12-31T00:00:00.000Z';
@@ -140,14 +140,16 @@ export async function GET(request: Request) {
     const refIds = ((refs ?? []) as { id: string; documento_referencia_id: string | null }[])
       .map((r) => r.documento_referencia_id).filter(Boolean) as string[];
     const { data: estados } = refIds.length
-      ? await sb.from('comprobantes').select('id, numero_completo, estado').in('id', refIds)
+      ? await sb.from('comprobantes').select('id, numero_completo, estado, sunat_aceptado_en').in('id', refIds)
       : { data: [] };
-    const estadoDe = new Map(((estados ?? []) as { id: string; numero_completo: string; estado: string }[]).map((e) => [e.id, e]));
+    const estadoDe = new Map(((estados ?? []) as { id: string; numero_completo: string; estado: string; sunat_aceptado_en: string | null }[]).map((e) => [e.id, e]));
     const refDe = new Map(((refs ?? []) as { id: string; documento_referencia_id: string | null }[]).map((r) => [r.id, r.documento_referencia_id]));
     cola = cola.filter((c) => {
       if (c.tipo !== 'NOTA_CREDITO' && c.tipo !== 'NOTA_DEBITO') return true;
       const ref = estadoDe.get(refDe.get(c.id) ?? '');
-      const listo = ref && (ref.estado === 'ACEPTADO' || ref.estado === 'OBSERVADO');
+      // Una boleta ANULADA que SUNAT ya conoce también sirve: su baja venció por
+      // plazo (2957) y justamente se anula con esta nota de crédito.
+      const listo = ref && (ref.estado === 'ACEPTADO' || ref.estado === 'OBSERVADO' || Boolean(ref.sunat_aceptado_en));
       if (!listo) detalle.push(`${c.numero_completo}: espera que SUNAT acepte ${ref?.numero_completo ?? 'su comprobante'}`);
       return Boolean(listo);
     });
@@ -162,7 +164,7 @@ export async function GET(request: Request) {
       enviados++;
       try {
         const r = await emitirComprobanteConCliente(sb, comp.id);
-        if (r.codigo === '0') {
+        if (r.codigo === '0' || r.codigo === '1033') {
           aceptados++;
           detalle.push(`${comp.numero_completo}: aceptado (${r.codigo})`);
         } else {

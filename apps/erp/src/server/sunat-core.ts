@@ -132,8 +132,10 @@ export async function emitirComprobanteConCliente(
       },
       cliente: {
         tipoDoc: (comp.tipo_documento_cliente === 'RUC' ? '6' : comp.tipo_documento_cliente === 'DNI' ? '1' : comp.tipo_documento_cliente === 'CE' ? '4' : comp.tipo_documento_cliente === 'PASAPORTE' ? '7' : '0'),
-        numeroDoc: comp.numero_documento_cliente ?? '00000000',
-        razonSocial: comp.razon_social_cliente ?? 'CLIENTE VARIOS',
+        numeroDoc: comp.numero_documento_cliente || '00000000',
+        // Con || y no ??: el POS guarda '' cuando no se pidió el nombre, y SUNAT
+        // rechaza la razón social vacía.
+        razonSocial: comp.razon_social_cliente || 'CLIENTE VARIOS',
         direccion: comp.direccion_cliente ?? undefined,
       },
       items: lineas.map((l) => ({
@@ -226,18 +228,32 @@ export async function emitirComprobanteConCliente(
       else if (r.cdr.observaciones?.length) nuevoEstado = 'OBSERVADO';
       else nuevoEstado = 'RECHAZADO';
     }
+
+    /*
+     * 1033 "registrado previamente": SUNAT YA TIENE este número aceptado.
+     *
+     * Pasa cuando un envío anterior le llegó pero la respuesta se cortó (HTTP
+     * 502, 11/10/2026). Los números son únicos en el sistema, así que lo
+     * registrado es nuestro envío; si SUNAT lo hubiera rechazado, respondería
+     * 1032. Se da por aceptado; el CDR queda por recuperar desde SUNAT.
+     */
+    const yaRegistrado = !r.ok && /^\[?1033\b/.test(String(r.error ?? '').trim());
+    if (yaRegistrado) nuevoEstado = 'ACEPTADO';
+
     await sb.from('comprobantes').update({
       estado: nuevoEstado,
       xml_firmado_url: xmlPath,
-      cdr_url: cdrPath,
+      cdr_url: cdrPath ?? (comp.cdr_url as string | null) ?? null,
       hash_firma: hashFirma,
-      sunat_codigo_respuesta: r.ok ? r.cdr.codigo : null,
-      sunat_mensaje: r.ok ? r.cdr.descripcion : r.error,
+      sunat_codigo_respuesta: r.ok ? r.cdr.codigo : yaRegistrado ? '1033' : null,
+      sunat_mensaje: r.ok ? r.cdr.descripcion
+        : yaRegistrado ? 'SUNAT ya lo tenía registrado de un envío anterior (1033): aceptado. El CDR se recupera desde la consulta de SUNAT.'
+        : r.error,
       sunat_enviado_en: new Date().toISOString(),
-      sunat_aceptado_en: r.ok && r.cdr.codigo === '0' ? new Date().toISOString() : null,
+      sunat_aceptado_en: (r.ok && r.cdr.codigo === '0') || yaRegistrado ? new Date().toISOString() : null,
     }).eq('id', comprobanteId);
 
-
+    if (yaRegistrado) return { codigo: '1033', descripcion: 'Ya registrado en SUNAT', estado: nuevoEstado };
     if (!r.ok) throw new Error(r.error);
 
     return {
