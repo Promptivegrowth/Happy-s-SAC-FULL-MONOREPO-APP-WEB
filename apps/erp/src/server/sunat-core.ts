@@ -354,7 +354,22 @@ export async function generarResumenDiarioConCliente(
       usuarioSol: config.usuario_sol, claveSol: config.clave_sol,
       zipBytes, nombreArchivoZip: nombreArchivo,
     });
-    if (!snd.ok) throw new Error(`SUNAT rechazó el resumen: ${snd.error}`);
+    if (!snd.ok) {
+      /*
+       * Se deja constancia aunque no haya ticket, para que el próximo intento
+       * use otro correlativo. Con SUNAT caído (502) a veces el resumen sí le
+       * llega: reenviarlo con el mismo identificador da "Existe un Documento
+       * igual en Proceso" (11/10/2026). Estado ERROR no cuenta como rechazo.
+       */
+      await sbAny.from('sunat_resumenes').insert({
+        empresa_id: empresa.id, resumen_id: resumenId, fecha_referencia: fechaRef,
+        fecha_generacion: fechaGen, correlativo, ticket: null, estado: 'ERROR',
+        cantidad_boletas: lineas.length, xml_zip_path: zipPath,
+        sunat_descripcion: String(snd.error).slice(0, 500),
+        observaciones: { enviadas, bajas: bajasEnviadas, adiciones_anuladas: adicionesAnuladas },
+      });
+      throw new Error(`SUNAT no recibió el resumen: ${snd.error}`);
+    }
 
     const { data: insRow } = await sbAny.from('sunat_resumenes').insert({
       empresa_id: empresa.id, resumen_id: resumenId, fecha_referencia: fechaRef,
