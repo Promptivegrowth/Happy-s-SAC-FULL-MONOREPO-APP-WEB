@@ -279,7 +279,7 @@ export async function generarResumenDiarioConCliente(
      * quedaría un hueco en la numeración que nadie puede explicar.
      */
     const { data: boletas } = await sbAny.from('comprobantes')
-      .select('id, serie, numero, numero_completo, tipo_documento_cliente, numero_documento_cliente, sub_total, igv, total, estado, sunat_aceptado_en, anulacion_informada_en')
+      .select('id, serie, numero, numero_completo, tipo_documento_cliente, numero_documento_cliente, sub_total, igv, total, estado, sunat_aceptado_en, anulacion_informada_en, sunat_proximo_intento')
       .eq('tipo', 'BOLETA')
       .gte('fecha_emision', ventanaDiaPeru(fechaRef).desde)
       .lt('fecha_emision', ventanaDiaPeru(fechaRef).hasta)
@@ -289,11 +289,15 @@ export async function generarResumenDiarioConCliente(
       tipo_documento_cliente: string | null; numero_documento_cliente: string | null;
       sub_total: number | null; igv: number | null; total: number | null; estado: string;
       sunat_aceptado_en: string | null; anulacion_informada_en: string | null;
+      sunat_proximo_intento: string | null;
     }>;
     // Una anulada que ya se informó no vuelve a mandarse: SUNAT la rechazaría
     // por repetida.
+    // Tampoco la anulada cuya baja SUNAT ya no acepta por plazo (2957): esa se
+    // anula con nota de crédito.
     const lista = todas.filter(
-      (b) => b.estado !== 'ANULADO' || b.anulacion_informada_en === null,
+      (b) => b.estado !== 'ANULADO'
+        || (b.anulacion_informada_en === null && !String(b.sunat_proximo_intento ?? '').startsWith('9999')),
     );
     if (lista.length === 0) throw new Error(`No hay boletas por informar en ${fechaRef}.`);
 
@@ -427,6 +431,20 @@ export async function consultarResumenConCliente(
     if (!st.enProceso) {
       const aceptado = st.cdr?.codigo === '0';
       estado = aceptado ? 'ACEPTADO' : 'RECHAZADO';
+
+      /*
+       * 2957: SUNAT ya no acepta la baja por resumen (pasó el plazo desde la
+       * emisión; 30/09 informada el 11/10/2026). La boleta queda válida en
+       * SUNAT y se anula con nota de crédito. Se marca para que el resumen no
+       * la vuelva a mandar y el día no quede trabado.
+       */
+      const bajasRech = obsRes?.bajas ?? [];
+      if (!aceptado && st.cdr?.codigo === '2957' && bajasRech.length > 0) {
+        await sbAny.from('comprobantes').update({
+          sunat_proximo_intento: '9999-12-31T00:00:00.000Z',
+          sunat_mensaje: 'SUNAT ya no acepta la baja por plazo (2957): para anularla ante SUNAT hay que emitir una nota de crédito.',
+        }).in('id', bajasRech);
+      }
       if (st.cdrZipBase64) {
         cdrPath = `comprobantes/${empresa.ruc}/RC/R-${res.resumen_id}.zip`;
         await sb.storage.from('comprobantes').upload(cdrPath, new Blob([Uint8Array.from(atob(st.cdrZipBase64), (c) => c.charCodeAt(0))], { type: 'application/zip' }), { upsert: true, contentType: 'application/zip' });

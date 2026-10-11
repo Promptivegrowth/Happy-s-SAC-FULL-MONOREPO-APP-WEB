@@ -136,7 +136,9 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
           ))}
           {comp.tipo === 'BOLETA' && (
             <p className="mt-1 text-xs">
-              {anul.anulacion_informada_en ? `SUNAT la recibió en el resumen del ${formatDateTime(anul.anulacion_informada_en)}.` : 'La baja viaja a SUNAT en el resumen diario de las 23:00.'}
+              {anul.anulacion_informada_en
+                ? `SUNAT la recibió en el resumen del ${formatDateTime(anul.anulacion_informada_en)}.`
+                : sinReintento ? 'SUNAT no aceptó la baja por plazo.' : 'La baja viaja a SUNAT en el resumen diario de las 23:00.'}
             </p>
           )}
         </Card>
@@ -144,7 +146,11 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
 
       {sinReintento && (
         <Card className="border-rose-200 bg-rose-50/60 p-4 text-sm text-rose-900">
-          <p className="font-semibold">SUNAT rechazó este número de forma definitiva: no se vuelve a enviar.</p>
+          <p className="font-semibold">
+            {comp.tipo === 'BOLETA' && comp.estado === 'ANULADO'
+              ? 'SUNAT ya no acepta la baja de esta boleta por resumen (pasó el plazo): ante SUNAT sigue vigente y se anula con una nota de crédito.'
+              : 'SUNAT rechazó este número de forma definitiva: no se vuelve a enviar.'}
+          </p>
           {comp.sunat_mensaje && <p className="mt-1 text-xs">{comp.sunat_mensaje}</p>}
           {comp.nota_interna && <p className="mt-1">{comp.nota_interna}</p>}
         </Card>

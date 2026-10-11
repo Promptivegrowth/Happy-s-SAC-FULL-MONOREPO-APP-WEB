@@ -250,6 +250,8 @@ export async function GET(request: Request) {
       .eq('tipo', 'BOLETA')
       .eq('estado', 'ANULADO')
       .is('anulacion_informada_en', null)
+      // Las que SUNAT ya no deja dar de baja por plazo (2957) van por nota de crédito.
+      .or('sunat_proximo_intento.is.null,sunat_proximo_intento.lt.9999-01-01')
       .order('fecha_emision', { ascending: true })
       .limit(500);
 

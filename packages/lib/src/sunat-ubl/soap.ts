@@ -210,6 +210,15 @@ export async function consultarGetStatus(args: {
 
   const statusCode = text.match(/<statusCode>([\s\S]*?)<\/statusCode>/i)?.[1]?.trim() ?? '';
   const content = text.match(/<content>([\s\S]*?)<\/content>/i)?.[1]?.trim();
+  /*
+   * Sin statusCode ni CDR no es una respuesta de SUNAT: es su servidor cortando
+   * la conexión (HTTP 502 con una página HTML). Antes caía como "procesado sin
+   * aceptar" y el resumen quedaba RECHAZADO sin código aunque SUNAT lo tuviera
+   * (11/10/2026). Se devuelve como error para volver a consultar el ticket.
+   */
+  if (!statusCode && !content) {
+    return { ok: false, error: `SUNAT no respondió la consulta (HTTP ${response.status})`, soapFault: text, httpStatus: response.status };
+  }
   // 0/1 = procesado (CDR en content). 98 = en proceso. 99 / otros = error (content puede traer CDR con el error).
   const enProceso = statusCode === '98';
   const procesado = statusCode === '0' || statusCode === '1';
