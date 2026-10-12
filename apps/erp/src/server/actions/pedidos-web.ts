@@ -41,6 +41,11 @@ export type PedidoWebRow = {
   metodo_pago: string | null;
   total: number;
   cantidad_items: number;
+  /**
+   * Pedido sin pagar que el mismo cliente reemplazó con otro posterior (otro
+   * intento de compra): el número del más nuevo. Ver VistaPedidosWeb.
+   */
+  reemplazado_por: string | null;
 };
 
 export async function listarPedidosWeb(opts: {
@@ -53,7 +58,7 @@ export async function listarPedidosWeb(opts: {
   let q = sb
     .from('pedidos_web')
     .select(
-      'id, numero, fecha, estado, contacto_nombre, contacto_telefono, ' +
+      'id, numero, fecha, estado, cliente_id, contacto_nombre, contacto_telefono, ' +
         'metodo_entrega, metodo_pago_seleccionado, total, ' +
         'cliente:cliente_id(razon_social, nombres, apellido_paterno, apellido_materno, numero_documento, telefono)',
     )
@@ -70,6 +75,7 @@ export async function listarPedidosWeb(opts: {
     numero: string;
     fecha: string;
     estado: EstadoPedidoWeb;
+    cliente_id: string | null;
     contacto_nombre: string | null;
     contacto_telefono: string | null;
     metodo_entrega: 'DELIVERY' | 'RECOJO_TIENDA';
@@ -99,6 +105,35 @@ export async function listarPedidosWeb(opts: {
     }
   }
 
+  /*
+   * Intentos reemplazados: un pedido sin pagar del que el MISMO cliente hizo
+   * otro pedido después. Se busca en toda la tabla (no solo en lo filtrado),
+   * así el más nuevo cuenta aunque esté en otra página o con otro estado.
+   */
+  const reemplazo = new Map<string, string>();
+  const esperando = filas.filter((f) => (f.estado === 'PENDIENTE_PAGO' || f.estado === 'WHATSAPP_DERIVADO') && f.cliente_id);
+  const clientes = [...new Set(esperando.map((f) => f.cliente_id as string))];
+  if (clientes.length > 0) {
+    const { data: otros } = await sb
+      .from('pedidos_web')
+      .select('numero, fecha, cliente_id, estado')
+      .in('cliente_id', clientes.slice(0, 150))
+      .order('fecha', { ascending: true });
+    const porCliente = new Map<string, { numero: string; fecha: string; estado: string }[]>();
+    for (const o of (otros ?? []) as { numero: string; fecha: string; cliente_id: string; estado: string }[]) {
+      const l = porCliente.get(o.cliente_id) ?? [];
+      l.push(o);
+      porCliente.set(o.cliente_id, l);
+    }
+    for (const f of esperando) {
+      const posteriores = (porCliente.get(f.cliente_id as string) ?? []).filter((o) => o.fecha > f.fecha && o.estado !== 'CANCELADO');
+      // El último intento es el que vale; si hay uno pagado, ese.
+      const pagado = posteriores.find((o) => o.estado !== 'PENDIENTE_PAGO' && o.estado !== 'WHATSAPP_DERIVADO');
+      const ultimo = pagado ?? posteriores[posteriores.length - 1];
+      if (ultimo) reemplazo.set(f.id, ultimo.numero);
+    }
+  }
+
   return filas.map((f) => {
     const nombre =
       f.cliente?.razon_social ||
@@ -120,6 +155,7 @@ export async function listarPedidosWeb(opts: {
       metodo_pago: f.metodo_pago_seleccionado,
       total: Number(f.total ?? 0),
       cantidad_items: cantByPedido.get(f.id) ?? 0,
+      reemplazado_por: reemplazo.get(f.id) ?? null,
     };
   });
 }

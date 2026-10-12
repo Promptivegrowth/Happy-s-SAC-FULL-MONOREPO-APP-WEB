@@ -9,12 +9,27 @@ import { PageShell } from '@/components/page-shell';
 import { FilterChip } from '@/components/filter-chip';
 import { formatPEN } from '@happy/lib';
 import { listarPedidosWeb } from '@/server/actions/pedidos-web';
-import { ESTADOS_PEDIDO_WEB, ESTADO_LABEL, ESTADO_TONO, type EstadoPedidoWeb, type Tono } from '@/server/actions/pedidos-web-helpers';
+import {
+  ESTADO_LABEL, ESTADO_TONO, VISTA_LABEL, DIAS_SIN_PAGO, vistaDePedido,
+  type EstadoPedidoWeb, type Tono, type VistaPedidosWeb,
+} from '@/server/actions/pedidos-web-helpers';
 
 export const metadata = { title: 'Pedidos web' };
 export const dynamic = 'force-dynamic';
 
-type SP = { estado?: string; q?: string; desde?: string; hasta?: string };
+type SP = { vista?: string; estado?: string; q?: string; desde?: string; hasta?: string };
+
+const VISTAS: VistaPedidosWeb[] = ['despachar', 'pago', 'sin_concretar', 'entregados', 'cancelados', 'todos'];
+
+/** Qué hace cada vista, dicho para quien la mira. */
+const VISTA_AYUDA: Record<VistaPedidosWeb, string> = {
+  despachar: 'Pedidos ya pagados: son los únicos que el almacén tiene que preparar y despachar.',
+  pago: 'El cliente eligió Yape, Plin, transferencia o WhatsApp. Cuando veas el dinero en la cuenta, abre el pedido y presiona "Confirmar pago"; recién ahí pasa a "Por despachar". Los pagos con tarjeta se confirman solos.',
+  sin_concretar: `Intentos de compra que no se pagaron: el cliente hizo otro pedido después, o pasaron más de ${DIAS_SIN_PAGO} días sin pago. No se despachan. Si un cliente sí pagó uno de estos, ábrelo y confirma el pago.`,
+  entregados: 'Pedidos ya entregados al cliente.',
+  cancelados: 'Pedidos cancelados.',
+  todos: 'Todos los pedidos, en cualquier estado.',
+};
 
 const TONO_CLASES: Record<Tono, string> = {
   amber: 'bg-amber-100 text-amber-800',
@@ -29,20 +44,27 @@ const TONO_CLASES: Record<Tono, string> = {
 
 export default async function Page({ searchParams }: { searchParams: Promise<SP> }) {
   const sp = await searchParams;
+  // ?estado=… sigue funcionando para enlaces viejos; si no, se trabaja por vista.
   const estado = (sp.estado as EstadoPedidoWeb | '') || '';
-  const rows = await listarPedidosWeb({
+  const vista: VistaPedidosWeb = VISTAS.includes(sp.vista as VistaPedidosWeb) ? (sp.vista as VistaPedidosWeb) : 'despachar';
+  const todas = await listarPedidosWeb({
     estado: estado || undefined,
     q: sp.q,
     desde: sp.desde,
     hasta: sp.hasta,
   });
+  const ahora = Date.now();
+  const vistaDe = new Map(todas.map((r) => [r.id, vistaDePedido(r, ahora)]));
+  const conteos = new Map<VistaPedidosWeb, number>();
+  for (const v of vistaDe.values()) conteos.set(v, (conteos.get(v) ?? 0) + 1);
+  const rows = estado || vista === 'todos' ? todas : todas.filter((r) => vistaDe.get(r.id) === vista);
 
   function chip(params: Record<string, string | undefined>) {
     const sp2 = new URLSearchParams();
     if (sp.q) sp2.set('q', sp.q);
     if (sp.desde) sp2.set('desde', sp.desde);
     if (sp.hasta) sp2.set('hasta', sp.hasta);
-    if (sp.estado) sp2.set('estado', sp.estado);
+    if (sp.vista) sp2.set('vista', sp.vista);
     for (const [k, v] of Object.entries(params)) {
       if (v === undefined || v === '') sp2.delete(k);
       else sp2.set(k, v);
@@ -51,31 +73,28 @@ export default async function Page({ searchParams }: { searchParams: Promise<SP>
     return s ? `?${s}` : '?';
   }
 
-  // Conteo por estado
-  const conteos = new Map<EstadoPedidoWeb, number>();
-  for (const r of rows) conteos.set(r.estado, (conteos.get(r.estado) ?? 0) + 1);
-
   return (
     <PageShell
       title="Pedidos Web"
-      description="Pedidos recibidos por la tienda online. Confirmá el pago, prepará y despachá desde acá."
+      description="Pedidos recibidos por la tienda online. Confirma el pago, prepara y despacha desde aquí."
     >
-      {/* Filtros por estado */}
+      {/* Vistas: lo pagado, lo que espera pago y los intentos que no se concretaron */}
       <div className="flex flex-wrap items-center gap-1.5">
-        <span className="self-center text-xs font-medium text-slate-500">Estado:</span>
-        <FilterChip href={chip({ estado: '' })} active={!estado}>
-          Todos ({rows.length})
-        </FilterChip>
-        {ESTADOS_PEDIDO_WEB.map((e) => {
-          const n = conteos.get(e) ?? 0;
-          if (n === 0 && estado !== e) return null;
+        {VISTAS.map((v) => {
+          const n = v === 'todos' ? todas.length : (conteos.get(v) ?? 0);
           return (
-            <FilterChip key={e} href={chip({ estado: e })} active={estado === e}>
-              {ESTADO_LABEL[e]} {n > 0 && `(${n})`}
+            <FilterChip key={v} href={chip({ vista: v, estado: undefined })} active={!estado && vista === v}>
+              {VISTA_LABEL[v]} ({n})
             </FilterChip>
           );
         })}
+        {estado && (
+          <FilterChip href={chip({ estado: '' })} active>
+            Estado: {ESTADO_LABEL[estado as EstadoPedidoWeb]} ✕
+          </FilterChip>
+        )}
       </div>
+      {!estado && <p className="-mt-2 text-xs text-slate-500">{VISTA_AYUDA[vista]}</p>}
 
       {/* Filtro búsqueda + fechas */}
       <form className="flex flex-wrap items-end gap-2">
@@ -106,7 +125,8 @@ export default async function Page({ searchParams }: { searchParams: Promise<SP>
             className="mt-1 h-9 rounded-md border border-input bg-white px-2 text-sm"
           />
         </div>
-        <input type="hidden" name="estado" value={estado} />
+        <input type="hidden" name="vista" value={vista} />
+        {estado && <input type="hidden" name="estado" value={estado} />}
         <Button type="submit" variant="premium" size="sm">Filtrar</Button>
         <Link href="/pedidos-web">
           <Button type="button" variant="outline" size="sm">Limpiar</Button>
@@ -117,7 +137,10 @@ export default async function Page({ searchParams }: { searchParams: Promise<SP>
         <EmptyState
           icon={<ShoppingCart className="h-6 w-6" />}
           title="Sin pedidos"
-          description={estado ? `No hay pedidos en estado "${ESTADO_LABEL[estado as EstadoPedidoWeb]}".` : 'Todavía no hay pedidos web recibidos.'}
+          description={estado
+            ? `No hay pedidos en estado "${ESTADO_LABEL[estado as EstadoPedidoWeb]}".`
+            : vista === 'despachar' ? 'No hay pedidos pagados por despachar.'
+            : `No hay pedidos en "${VISTA_LABEL[vista]}".`}
         />
       ) : (
         <Card>
@@ -163,6 +186,11 @@ export default async function Page({ searchParams }: { searchParams: Promise<SP>
                         <span className={`inline-flex rounded-full px-2 py-0.5 text-[10px] font-medium ${TONO_CLASES[tono]}`}>
                           {ESTADO_LABEL[r.estado]}
                         </span>
+                        {vistaDe.get(r.id) === 'sin_concretar' && (
+                          <div className="mt-0.5 text-[10px] text-slate-500">
+                            {r.reemplazado_por ? `El cliente hizo otro pedido después: ${r.reemplazado_por}` : `Más de ${DIAS_SIN_PAGO} días sin pago`}
+                          </div>
+                        )}
                       </TableCell>
                       <TableCell>
                         <Link href={`/pedidos-web/${r.id}`}>

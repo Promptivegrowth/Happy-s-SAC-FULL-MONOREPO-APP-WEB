@@ -232,6 +232,13 @@ export function DetalleClient({
                 <div className="mt-2 rounded border border-amber-200 bg-amber-50 p-2">
                   <p className="text-[10px] font-semibold text-amber-700">REQUIERE FACTURA</p>
                   {pedido.ruc_facturacion && <p className="text-xs">RUC: {pedido.ruc_facturacion}</p>}
+                  {/* La factura sale solo si el cliente compró con RUC (mig 112). */}
+                  {!pedido.ruc_facturacion && !/\b\d{11}\b/.test(cliente.documento ?? '') && (
+                    <p className="mt-1 text-[11px] text-amber-800">
+                      Pidió factura pero compró con DNI, no con RUC: al preparar se emitirá <b>boleta</b>.
+                      Si necesita factura, pídele su RUC y que haga el pedido con RUC.
+                    </p>
+                  )}
                   {pedido.razon_social_facturacion && <p className="text-xs">{pedido.razon_social_facturacion}</p>}
                 </div>
               )}

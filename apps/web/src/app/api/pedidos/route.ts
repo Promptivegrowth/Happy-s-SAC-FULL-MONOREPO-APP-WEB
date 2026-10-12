@@ -46,6 +46,15 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: (e as Error).message }, { status: 400 });
   }
 
+  // La factura sale al RUC con que se compra (emitir_comprobante_pedido_web):
+  // con DNI se emitía boleta aunque el cliente hubiera marcado factura.
+  if (body.necesitaFactura && body.cliente.tipoDoc !== 'RUC') {
+    return NextResponse.json(
+      { error: 'Factura sin RUC', mensaje: 'Para recibir factura elige RUC como tipo de documento e ingresa el RUC de la empresa.' },
+      { status: 409 },
+    );
+  }
+
   const sb = createServiceClient();
 
   // 0. VALIDACIÓN DE STOCK — sumar cantidades por variante (por si el carrito

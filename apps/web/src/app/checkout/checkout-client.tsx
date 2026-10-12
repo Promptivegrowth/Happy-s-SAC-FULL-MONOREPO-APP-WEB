@@ -199,7 +199,11 @@ export function CheckoutClient({
     if (items.length === 0) return toast.error('Carrito vacío');
     if (!nombre || !telefono) return toast.error('Completa nombre y teléfono');
     if (entrega === 'DELIVERY' && !direccion) return toast.error('Ingresa la dirección de envío');
-    if (faltaDestino) return toast.error('Elegí si el envío va a Lima Metropolitana o a provincia');
+    if (faltaDestino) return toast.error('Elige si el envío va a Lima Metropolitana o a provincia');
+    // La factura se emite al RUC con que se compra: con DNI saldría boleta.
+    if (necesitaFactura && tipoDoc !== 'RUC') {
+      return toast.error('Para factura elige RUC en "Tipo de documento" e ingresa el RUC de la empresa');
+    }
 
     if (metodo === 'whatsapp' || CON_CAPTURA.includes(metodo)) {
       /*
@@ -389,7 +393,15 @@ export function CheckoutClient({
               <Input type="tel" value={telefono} onChange={(e) => setTelefono(e.target.value)} maxLength={9} required placeholder="9XXXXXXXX" />
             </div>
             <label className="mt-7 inline-flex items-center gap-2 text-sm">
-              <input type="checkbox" checked={necesitaFactura} onChange={(e) => setNecesitaFactura(e.target.checked)} />
+              <input
+                type="checkbox"
+                checked={necesitaFactura}
+                onChange={(e) => {
+                  setNecesitaFactura(e.target.checked);
+                  // Con factura el documento es el RUC: se cambia solo.
+                  if (e.target.checked && tipoDoc !== 'RUC') { setTipoDoc('RUC'); setDoc(''); }
+                }}
+              />
               Necesito factura (RUC obligatorio)
             </label>
           </div>
