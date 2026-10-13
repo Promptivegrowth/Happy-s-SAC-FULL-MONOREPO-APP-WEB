@@ -10,6 +10,7 @@ import { getSession } from '../session';
 import { puedeVer } from '../permisos';
 import { enviarGuiaConCliente, consultarGuiaConCliente, hayCredencialesGRE, type ResultadoGuia } from '../gre-core';
 import { cargarEmpresaPDF, type EmpresaPDFData } from '../empresa-pdf-helper';
+import { consultarDocumento } from '@happy/lib/sunat/consulta-guardada';
 import { qrComoImagen } from '@happy/lib/sunat-ubl';
 
 /*
@@ -111,6 +112,27 @@ export async function emitirGuia(datos: GuiaFormData): Promise<ActionResult<{ id
     };
     const errores = validarGuia(paraValidar, hoy);
     if (errores.length) throw new Error(errores.join(' '));
+
+    /*
+     * La agencia tiene que tener el RUC ACTIVO: si no, SUNAT rechaza la guía
+     * (3349) y el número se pierde. Pasó tres veces seguidas el 13/10/2026
+     * (T001-42, 43 y 44) con un RUC en BAJA DE OFICIO que el sistema ya tenía
+     * consultado. Se mira antes de gastar el número; si la consulta no se puede
+     * hacer (servicio caído, sin cupo), no se traba la emisión.
+     */
+    if (publico && d.transportista_ruc && /^\d{11}$/.test(d.transportista_ruc)) {
+      let estadoRuc: string | null = null;
+      try {
+        const { datos } = await consultarDocumento(sb, 'ruc', d.transportista_ruc);
+        estadoRuc = ((datos as { estado?: string }).estado ?? '').trim().toUpperCase() || null;
+      } catch { /* sin consulta no se bloquea */ }
+      if (estadoRuc && estadoRuc !== 'ACTIVO') {
+        throw new Error(
+          `El RUC ${d.transportista_ruc} de la agencia figura en SUNAT como "${estadoRuc}": SUNAT rechazaría la guía y se perdería el número. `
+          + 'Pide a la agencia su RUC vigente (está en su boleta, factura o voucher) y vuelve a emitir.',
+        );
+      }
+    }
 
     // Sin credenciales la guía no puede llegar a SUNAT: se corta acá, antes de
     // gastar un número y dejar una guía colgada que después se mande sola.

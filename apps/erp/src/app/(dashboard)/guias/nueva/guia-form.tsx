@@ -63,7 +63,7 @@ const selectCls = 'h-10 w-full rounded-md border border-input bg-background px-3
  * tocada y el campo vacío, la consulta iba a una dirección que no existe y la
  * pantalla mostraba "Unexpected token '<'…" (30/09/2026).
  */
-async function consultar(tipo: 'dni' | 'ruc', numero: string): Promise<{ nombre: string; direccion?: string; ubigeo?: string } | null> {
+async function consultar(tipo: 'dni' | 'ruc', numero: string): Promise<{ nombre: string; direccion?: string; ubigeo?: string; estado?: string } | null> {
   const largo = tipo === 'ruc' ? 11 : 8;
   if (!new RegExp(`^\\d{${largo}}$`).test(numero)) {
     toast.error(`Escribe el ${tipo.toUpperCase()} completo (${largo} dígitos) y vuelve a tocar la lupa.`);
@@ -75,7 +75,7 @@ async function consultar(tipo: 'dni' | 'ruc', numero: string): Promise<{ nombre:
     if (!r.ok) throw new Error(d.error ?? 'No se encontró');
     return {
       nombre: d.razonSocial ?? d.nombreCompleto ?? [d.nombres, d.apellidoPaterno, d.apellidoMaterno].filter(Boolean).join(' '),
-      direccion: d.direccion, ubigeo: d.ubigeo,
+      direccion: d.direccion, ubigeo: d.ubigeo, estado: d.estado,
     };
   } catch (e) {
     // Aviso, no error: la búsqueda solo ayuda a llenar; escribiéndolo a mano la
@@ -333,7 +333,15 @@ export function GuiaForm({ inicial, aviso, hoy, empresa, almacenes, transportist
                 <div className="flex gap-2">
                   <Input value={trRuc} inputMode="numeric" maxLength={11} onChange={(e) => setTrRuc(e.target.value.replace(/\D/g, ''))} />
                   <Button type="button" variant="corp" disabled={consultando === 'tr'} title="Buscar en SUNAT"
-                    onClick={async () => { setConsultando('tr'); const r = await consultar('ruc', trRuc); setConsultando(null); if (r) setTrNombre(r.nombre); }}>
+                    onClick={async () => {
+                      setConsultando('tr'); const r = await consultar('ruc', trRuc); setConsultando(null);
+                      if (!r) return;
+                      setTrNombre(r.nombre);
+                      // Con el RUC dado de baja SUNAT rechaza la guía (3349): se avisa de entrada.
+                      if (r.estado && r.estado.toUpperCase() !== 'ACTIVO') {
+                        toast.error(`Ojo: el RUC de esta agencia figura en SUNAT como "${r.estado}". SUNAT rechazará la guía: pide a la agencia su RUC vigente.`, { duration: 15000 });
+                      }
+                    }}>
                     {consultando === 'tr' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
                   </Button>
                 </div>
