@@ -161,6 +161,43 @@ export function ReporteComprobantes({ mes, nombreMes, desde, hasta, filas, vista
           return;
         }
 
+        /*
+         * Registro de ventas, en el orden y con los códigos que usa la
+         * contadora (pedido de Javier, 13/10/2026): fecha como fecha, código de
+         * comprobante y de documento SUNAT, serie y número aparte. Solo lo que
+         * va a SUNAT; lo anulado va en cero con su estado.
+         */
+        const COD_CP: Record<TipoDoc, string> = { FACTURA: '01', BOLETA: '03', NOTA_CREDITO: '07', NOTA_DEBITO: '08', NOTA_VENTA: '' };
+        const COD_DOC: Record<string, string> = { RUC: '6', DNI: '1', CE: '4', PASAPORTE: '7' };
+        const registro = filas
+          .filter((f) => ES_SUNAT.includes(f.tipo) && (!diaDesde || f.dia >= diaDesde) && (!diaHasta || f.dia <= diaHasta))
+          .map((f) => {
+            const [serie, numero] = f.numero.split('-');
+            const [tdoc, ...ndoc] = (f.doc_cliente || '').split(' ');
+            return {
+              fecha: f.dia, cod: COD_CP[f.tipo], tipo: NOMBRE[f.tipo], serie, numero,
+              tdoc: COD_DOC[tdoc ?? ''] ?? '0', ndoc: ndoc.join(' ') || '-', cliente: f.cliente,
+              base: f.cuenta ? f.base : 0, igv: f.cuenta ? f.igv : 0, total: f.cuenta ? f.total : 0,
+              estado: f.cuenta ? f.estado : `${f.estado} (no suma: ${f.total.toFixed(2)})`, referencia: f.referencia,
+            };
+          });
+        const sumReg = registro.reduce((a, r) => ({ base: a.base + r.base, igv: a.igv + r.igv, total: a.total + r.total }), { base: 0, igv: 0, total: 0 });
+        const hojaRegistro: Hoja = {
+          nombre: 'Registro de ventas', titulo: 'Registro de ventas', subtitulo: `${nombreMes} · comprobantes enviados a SUNAT ${textoRango}`,
+          cols: [
+            { header: 'Fecha emisión', key: 'fecha', formato: 'fecha', width: 13 },
+            { header: 'Tipo CP', key: 'cod', width: 8 }, { header: 'Comprobante', key: 'tipo', width: 15 },
+            { header: 'Serie', key: 'serie', width: 8 }, { header: 'Número', key: 'numero', width: 11 },
+            { header: 'Tipo doc.', key: 'tdoc', width: 9 }, { header: 'N° documento', key: 'ndoc', width: 13 },
+            { header: 'Cliente / Razón social', key: 'cliente', width: 34 },
+            { header: 'Base imponible', key: 'base', formato: 'moneda', width: 14 }, { header: 'IGV', key: 'igv', formato: 'moneda', width: 12 },
+            { header: 'Importe total', key: 'total', formato: 'moneda', width: 14 },
+            { header: 'Estado', key: 'estado', width: 22 }, { header: 'Doc. que modifica', key: 'referencia', width: 16 },
+          ],
+          rows: registro,
+          totales: { base: r2(sumReg.base), igv: r2(sumReg.igv), total: r2(sumReg.total) },
+        };
+
         const hojas: Hoja[] = [
           {
             nombre: 'Resumen', titulo: 'Resumen del mes', subtitulo: nombreMes,
@@ -176,6 +213,8 @@ export function ReporteComprobantes({ mes, nombreMes, desde, hasta, filas, vista
               { tipo: 'TOTAL GENERAL', cantidad: null, base: null, igv: null, total: r2(totalSunat + totalNotas) },
             ],
           },
+          // Para la contadora, apenas después del resumen (vistas con comprobantes SUNAT).
+          ...(vista !== 'notas' ? [hojaRegistro] : []),
           {
             nombre: 'Por día', titulo: 'Ventas por día', subtitulo: nombreMes,
             cols: [

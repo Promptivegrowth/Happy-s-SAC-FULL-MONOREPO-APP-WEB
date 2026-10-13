@@ -61,7 +61,8 @@ async function cargarLogoWorkbook(wb: ExcelJS.Workbook): Promise<number | null> 
  */
 function pintarHoja(wb: ExcelJS.Workbook, nombre: string, opts: ExportOpts, logoId: number | null): void {
   const ws = wb.addWorksheet(nombre.slice(0, 31) || 'Reporte', {
-    pageSetup: { paperSize: 9, orientation: 'landscape', margins: { left: 0.5, right: 0.5, top: 0.6, bottom: 0.6, header: 0.3, footer: 0.3 } },
+    // Al imprimir, todas las columnas entran en el ancho de la hoja.
+    pageSetup: { paperSize: 9, orientation: 'landscape', fitToPage: true, fitToWidth: 1, fitToHeight: 0, margins: { left: 0.5, right: 0.5, top: 0.6, bottom: 0.6, header: 0.3, footer: 0.3 } },
     views: [{ state: 'frozen', ySplit: 4 + (opts.subtitulo ? 1 : 0) + (opts.filtros?.length ? 1 : 0) }],
   });
 
@@ -126,6 +127,12 @@ function pintarHoja(wb: ExcelJS.Workbook, nombre: string, opts: ExportOpts, logo
     };
   });
   headerRow.height = 28;
+  // Filtros en los encabezados (ordenar y filtrar sin preparar nada).
+  if (opts.rows.length > 0) {
+    ws.autoFilter = { from: { row: rowIdx, column: 1 }, to: { row: rowIdx, column: opts.cols.length } };
+  }
+  // Que el encabezado se repita en cada página impresa.
+  ws.pageSetup.printTitlesRow = `${rowIdx}:${rowIdx}`;
 
   // Set column widths/keys. Cuando hay logo: las cols 1-3 deben ser
   // suficientemente anchas para que el logo se vea bien, y la col 4 (donde
@@ -195,8 +202,9 @@ function pintarHoja(wb: ExcelJS.Workbook, nombre: string, opts: ExportOpts, logo
   // ---- Footer ----
   const footerRow = ws.addRow([]);
   footerRow.height = 6;
+  // Hora de Lima: el servidor corre en UTC y la hora salía 5 h adelantada.
   const fr = ws.addRow([
-    `Generado el ${new Date().toLocaleString('es-PE')} por HAPPY SAC ERP`,
+    `Generado el ${new Date().toLocaleString('es-PE', { timeZone: 'America/Lima' })} por HAPPY SAC ERP`,
   ]);
   ws.mergeCells(fr.number, 1, fr.number, opts.cols.length);
   const fc = ws.getCell(fr.number, 1);
