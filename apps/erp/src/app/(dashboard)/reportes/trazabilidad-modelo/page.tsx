@@ -12,42 +12,56 @@ export const metadata = { title: 'Trazabilidad producción → venta' };
 export const dynamic = 'force-dynamic';
 
 export default async function Page() {
-  const { metricas, rows } = await reporteTrazabilidadProduccionVenta({});
+  // Si la consulta falla se dice, en vez de mostrar "Sin datos" como si no hubiera producción.
+  let errorCarga: string | null = null;
+  let rep: Awaited<ReturnType<typeof reporteTrazabilidadProduccionVenta>> = {
+    metricas: { producido: 0, vendido: 0, stock: 0, variantes: 0, modelos: 0 }, rows: [],
+  };
+  try {
+    rep = await reporteTrazabilidadProduccionVenta({});
+  } catch (e) {
+    errorCarga = (e as Error).message;
+  }
+  const { metricas, rows } = rep;
+  const dma = (iso: string) => iso.split('-').reverse().join('/');
 
   const exportPayload = {
     titulo: 'Trazabilidad producción → venta',
-    subtitulo: 'Por modelo y talla',
+    subtitulo: 'Por modelo y talla · lo producido (cierres de OT), lo vendido desde su ingreso y el stock actual',
     filtros: [],
     cols: [
       { header: 'Modelo', key: 'producto_nombre', width: 30 },
       { header: 'Talla', key: 'talla', width: 8 },
       { header: 'SKU', key: 'sku', width: 12 },
+      { header: 'OT', key: 'ots', width: 16 },
+      { header: 'Ingresó', key: 'desde', width: 12 },
       { header: 'Producido', key: 'producido', formato: 'numero' as const, width: 12 },
-      { header: 'Vendido', key: 'vendido', formato: 'numero' as const, width: 12 },
-      { header: 'Devuelto', key: 'devuelto', formato: 'numero' as const, width: 12 },
-      { header: 'En stock', key: 'stock', formato: 'numero' as const, width: 12 },
+      { header: 'Vendido desde el ingreso', key: 'vendido', formato: 'numero' as const, width: 14 },
+      { header: 'Devuelto', key: 'devuelto', formato: 'numero' as const, width: 11 },
+      { header: 'En stock', key: 'stock', formato: 'numero' as const, width: 11 },
+      { header: 'Vendido histórico', key: 'vendido_total', formato: 'numero' as const, width: 13 },
     ],
-    rows: rows.map((r) => ({ ...r, talla: formatTallaChip(r.talla) })),
+    rows: rows.map((r) => ({ ...r, talla: formatTallaChip(r.talla), desde: dma(r.desde) })),
     totales: { producido: metricas.producido, vendido: metricas.vendido, stock: metricas.stock },
   };
 
   return (
     <PageShell
       title="Trazabilidad producción → venta"
-      description="Cuánto se produjo, se vendió y queda en stock, por modelo y talla. Sigue el flujo desde la producción hasta la venta."
+      description="Lo que entró al almacén por cierre de OT, cuánto se vendió desde ese ingreso y cuánto queda en stock, por modelo y talla."
       actions={<ExportButtons payload={exportPayload} />}
     >
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <Card className="p-4">
-          <p className="text-xs text-slate-500">Variantes</p>
-          <p className="mt-1 flex items-center gap-2 font-display text-2xl font-semibold text-corp-900"><Route className="h-5 w-5 text-slate-400" />{metricas.variantes}</p>
+          <p className="text-xs text-slate-500">Modelos · tallas</p>
+          <p className="mt-1 flex items-center gap-2 font-display text-2xl font-semibold text-corp-900"><Route className="h-5 w-5 text-slate-400" />{metricas.modelos} · {metricas.variantes}</p>
         </Card>
         <Card className="p-4">
           <p className="text-xs text-slate-500">Producido</p>
           <p className="mt-1 flex items-center gap-2 font-display text-2xl font-semibold text-emerald-700"><Factory className="h-5 w-5 text-emerald-500" />{metricas.producido.toLocaleString('es-PE')}</p>
         </Card>
         <Card className="p-4">
-          <p className="text-xs text-slate-500">Vendido</p>
+          <p className="text-xs text-slate-500">Vendido desde el ingreso</p>
           <p className="mt-1 flex items-center gap-2 font-display text-2xl font-semibold text-corp-900"><ShoppingCart className="h-5 w-5 text-slate-400" />{metricas.vendido.toLocaleString('es-PE')}</p>
         </Card>
         <Card className="p-4">
@@ -56,8 +70,10 @@ export default async function Page() {
         </Card>
       </div>
 
-      {rows.length === 0 ? (
-        <EmptyState icon={<Route className="h-6 w-6" />} title="Sin datos" description="Aún no hay producción registrada (cierres de OT que generen PT)." />
+      {errorCarga ? (
+        <EmptyState icon={<Route className="h-6 w-6" />} title="No se pudo cargar el reporte" description={`${errorCarga}. Recarga la página; si sigue, avisa a soporte.`} />
+      ) : rows.length === 0 ? (
+        <EmptyState icon={<Route className="h-6 w-6" />} title="Sin producción ingresada" description="Todavía no se cerró ninguna OT que ingrese prendas terminadas al almacén." />
       ) : (
         <Card>
           <div className="border-b bg-slate-50 p-3"><h3 className="text-sm font-semibold text-corp-900">Detalle por modelo y talla</h3></div>
@@ -68,10 +84,13 @@ export default async function Page() {
                   <TableHead>Modelo</TableHead>
                   <TableHead>Talla</TableHead>
                   <TableHead>SKU</TableHead>
+                  <TableHead>OT</TableHead>
+                  <TableHead>Ingresó</TableHead>
                   <TableHead className="text-right">Producido</TableHead>
-                  <TableHead className="text-right">Vendido</TableHead>
+                  <TableHead className="text-right">Vendido desde el ingreso</TableHead>
                   <TableHead className="text-right">Devuelto</TableHead>
                   <TableHead className="text-right">En stock</TableHead>
+                  <TableHead className="text-right" title="Todo lo vendido de esta talla en el sistema, incluido el stock que había antes de la OT">Vendido histórico</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -80,10 +99,13 @@ export default async function Page() {
                     <TableCell className="text-sm font-medium">{r.producto_nombre}</TableCell>
                     <TableCell><Badge variant="outline" className="text-[10px]">{formatTallaChip(r.talla)}</Badge></TableCell>
                     <TableCell className="font-mono text-[10px] text-slate-500">{r.sku}</TableCell>
+                    <TableCell className="font-mono text-[11px]">{r.ots || '—'}</TableCell>
+                    <TableCell className="text-xs">{dma(r.desde)}</TableCell>
                     <TableCell className="text-right font-mono text-sm text-emerald-700">{r.producido.toLocaleString('es-PE')}</TableCell>
                     <TableCell className="text-right font-mono text-sm">{r.vendido.toLocaleString('es-PE')}</TableCell>
                     <TableCell className="text-right font-mono text-xs text-amber-600">{r.devuelto > 0 ? r.devuelto.toLocaleString('es-PE') : '—'}</TableCell>
                     <TableCell className="text-right font-mono text-sm font-semibold">{r.stock.toLocaleString('es-PE')}</TableCell>
+                    <TableCell className="text-right font-mono text-xs text-slate-500">{r.vendido_total.toLocaleString('es-PE')}</TableCell>
                   </TableRow>
                 ))}
               </TableBody>

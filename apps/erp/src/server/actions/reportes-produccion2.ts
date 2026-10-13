@@ -134,75 +134,13 @@ export async function reporteTiempoRecetaVsReal(
 }
 
 // ============================================================================
-// D) TRAZABILIDAD producción → venta por MODELO y TALLA
+// D) TRAZABILIDAD producción → venta por MODELO y TALLA (ver trazabilidad-core)
 // ============================================================================
-export type TrazaRow = {
-  variante_id: string; sku: string; producto_id: string; producto_nombre: string; talla: string;
-  producido: number; vendido: number; devuelto: number; stock: number;
-};
-export type ReporteTrazabilidadResult = {
-  metricas: { producido: number; vendido: number; stock: number; variantes: number };
-  rows: TrazaRow[];
-};
+export type { TrazaRow, ReporteTrazabilidadResult } from '../trazabilidad-core';
 
 export async function reporteTrazabilidadProduccionVenta(
   f: { producto_id?: string } = {},
-): Promise<ReporteTrazabilidadResult> {
-  const sb = await sbReadonly();
-
-  // Movimientos de kardex por variante: producción y ventas.
-  let q = sb.from('kardex_movimientos')
-    .select('variante_id, tipo, cantidad')
-    .in('tipo', ['ENTRADA_PRODUCCION', 'SALIDA_VENTA', 'ENTRADA_DEVOLUCION_CLIENTE']);
-  const { data: kdxRaw } = await q;
-  type K = { variante_id: string; tipo: string; cantidad: number | string | null };
-  const kdx = (kdxRaw ?? []) as K[];
-
-  const prod = new Map<string, number>();
-  const vend = new Map<string, number>();
-  const dev = new Map<string, number>();
-  for (const m of kdx) {
-    const c = Number(m.cantidad ?? 0);
-    if (m.tipo === 'ENTRADA_PRODUCCION') prod.set(m.variante_id, (prod.get(m.variante_id) ?? 0) + c);
-    else if (m.tipo === 'SALIDA_VENTA') vend.set(m.variante_id, (vend.get(m.variante_id) ?? 0) + c);
-    else if (m.tipo === 'ENTRADA_DEVOLUCION_CLIENTE') dev.set(m.variante_id, (dev.get(m.variante_id) ?? 0) + c);
-  }
-
-  // Variantes producidas (base del reporte) + info del modelo/talla.
-  const variantesIds = Array.from(new Set([...prod.keys(), ...vend.keys()]));
-  if (variantesIds.length === 0) return { metricas: { producido: 0, vendido: 0, stock: 0, variantes: 0 }, rows: [] };
-
-  let vq = sb.from('productos_variantes')
-    .select('id, sku, talla, producto_id, productos:producto_id(nombre)')
-    .in('id', variantesIds);
-  if (f.producto_id) vq = vq.eq('producto_id', f.producto_id);
-  const { data: varsRaw } = await vq;
-  type V = { id: string; sku: string; talla: string; producto_id: string; productos: { nombre: string } | null };
-  const vars = (varsRaw ?? []) as unknown as V[];
-
-  // Stock actual por variante.
-  const { data: stockRaw } = await sb.from('v_stock_variante_total').select('variante_id, stock_total').in('variante_id', variantesIds);
-  const stockMap = new Map<string, number>();
-  for (const s of (stockRaw ?? []) as { variante_id: string; stock_total: number | string | null }[]) {
-    stockMap.set(s.variante_id, Number(s.stock_total ?? 0));
-  }
-
-  const rows: TrazaRow[] = vars.map((v) => ({
-    variante_id: v.id, sku: v.sku, producto_id: v.producto_id,
-    producto_nombre: v.productos?.nombre ?? '—', talla: v.talla,
-    producido: prod.get(v.id) ?? 0,
-    vendido: vend.get(v.id) ?? 0,
-    devuelto: dev.get(v.id) ?? 0,
-    stock: stockMap.get(v.id) ?? 0,
-  })).sort((a, b) => a.producto_nombre.localeCompare(b.producto_nombre, 'es') || a.talla.localeCompare(b.talla));
-
-  return {
-    metricas: {
-      producido: rows.reduce((s, r) => s + r.producido, 0),
-      vendido: rows.reduce((s, r) => s + r.vendido, 0),
-      stock: rows.reduce((s, r) => s + r.stock, 0),
-      variantes: rows.length,
-    },
-    rows,
-  };
+): Promise<import('../trazabilidad-core').ReporteTrazabilidadResult> {
+  const { armarTrazabilidad } = await import('../trazabilidad-core');
+  return armarTrazabilidad(await sbReadonly(), f);
 }
