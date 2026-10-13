@@ -17,6 +17,8 @@ import { z } from 'zod';
 import { createClient } from '@happy/db/server';
 import { createServiceClient } from '@happy/db/service';
 import { runAction, requireUser, bumpPaths, type ActionResult } from './_helpers';
+import { getSession } from '../session';
+import { puedeVer } from '../permisos';
 import { formatTallaChip } from '@happy/lib';
 import {
   ESTADOS_PEDIDO_WEB, TRANSICIONES, type EstadoPedidoWeb,
@@ -316,15 +318,35 @@ function validarTransicion(actual: EstadoPedidoWeb, nuevo: EstadoPedidoWeb): voi
   }
 }
 
+/**
+ * Cliente para ESCRIBIR en pedidos_web, con el permiso de la pantalla.
+ *
+ * La tabla no tiene política de UPDATE para el personal: con el cliente del
+ * usuario, "Confirmar pago" y "Entregado" no cambiaban nada y la pantalla
+ * igual decía "Pago confirmado" (PW-261012-0004 y PW-261005-0001,
+ * 12/10/2026). Se escribe con el cliente de servicio, como Preparar y
+ * Cancelar, pero solo si el usuario puede entrar a Pedidos Web.
+ */
+async function escrituraPedidosWeb(): Promise<AnyClient> {
+  const s = await getSession();
+  if (!puedeVer(s.roles, '/pedidos-web')) throw new Error('Tu usuario no tiene acceso a Pedidos Web.');
+  return createServiceClient() as unknown as AnyClient;
+}
+
+/** Cambia el estado y comprueba que de verdad quedó guardado. */
+async function guardarEstado(sb: AnyClient, id: string, desde: EstadoPedidoWeb, update: Record<string, unknown>) {
+  const { data, error } = await sb.from('pedidos_web').update(update).eq('id', id).eq('estado', desde).select('id');
+  if (error) throw new Error(error.message);
+  if (!data || data.length === 0) throw new Error('No se pudo guardar el cambio: el pedido cambió mientras tanto. Recarga la página.');
+}
+
 export async function confirmarPagoPedidoWeb(id: string): Promise<ActionResult> {
   const r = await runAction(async () => {
-    const { sb: sbRaw } = await requireUser();
-    const sb = sbRaw as unknown as AnyClient;
+    const sb = await escrituraPedidosWeb();
     const { data: p } = await sb.from('pedidos_web').select('estado').eq('id', id).single();
     if (!p) throw new Error('Pedido no encontrado');
     validarTransicion(p.estado as EstadoPedidoWeb, 'PAGO_VERIFICADO');
-    const { error } = await sb.from('pedidos_web').update({ estado: 'PAGO_VERIFICADO' }).eq('id', id);
-    if (error) throw new Error(error.message);
+    await guardarEstado(sb, id, p.estado as EstadoPedidoWeb, { estado: 'PAGO_VERIFICADO' });
     return null;
   });
   if (r.ok) await bumpPaths(`/pedidos-web/${id}`, '/pedidos-web');
@@ -546,20 +568,18 @@ export async function cambiarEstadoPedidoWeb(
   input: z.input<typeof cambioEstadoSchema>,
 ): Promise<ActionResult> {
   const r = await runAction(async () => {
-    const { sb: sbRaw } = await requireUser();
-    const sb = sbRaw as unknown as AnyClient;
+    const sb = await escrituraPedidosWeb();
     const data = cambioEstadoSchema.parse(input);
     const { data: p } = await sb.from('pedidos_web').select('estado').eq('id', id).single();
     if (!p) throw new Error('Pedido no encontrado');
     validarTransicion(p.estado as EstadoPedidoWeb, data.nuevo);
     // PREPARAR tiene su acción especial (descuenta stock) — bloquear esta ruta
     if (data.nuevo === 'EN_PREPARACION') {
-      throw new Error('Para preparar usá la acción específica (requiere almacén)');
+      throw new Error('Para preparar usa el botón "Preparar" (pide el almacén)');
     }
     const update: Record<string, unknown> = { estado: data.nuevo };
     if (data.notas_internas) update.notas_internas = data.notas_internas;
-    const { error } = await sb.from('pedidos_web').update(update).eq('id', id);
-    if (error) throw new Error(error.message);
+    await guardarEstado(sb, id, p.estado as EstadoPedidoWeb, update);
     return null;
   });
   if (r.ok) await bumpPaths(`/pedidos-web/${id}`, '/pedidos-web');
