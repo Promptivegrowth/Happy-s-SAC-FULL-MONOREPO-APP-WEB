@@ -73,12 +73,35 @@ async function leerGuardado(sb: ClienteDb, tipo: TipoDocumento, numero: string):
 
 async function guardar(sb: ClienteDb, tipo: TipoDocumento, numero: string, datos: ConsultaDNI | ConsultaRUC | NoEncontrado) {
   try {
-    await sb
+    const { error } = await sb
       .from('documentos_consultados')
       .upsert({ tipo, numero, datos, consultado_en: new Date().toISOString() }, { onConflict: 'tipo,numero' });
-  } catch {
+    // Que quede rastro: sin guardar, ese número se volvería a pagar la próxima vez.
+    if (error) console.error(`[consulta-guardada] no se guardó ${tipo} ${numero}: ${error.message}`);
+  } catch (e) {
     /* guardar es un extra: si falla, la consulta igual se devuelve */
+    console.error(`[consulta-guardada] no se guardó ${tipo} ${numero}: ${(e as Error).message}`);
   }
+}
+
+/**
+ * Token de Decolecta guardado en la base (mig 116, tabla sin acceso para
+ * usuarios). Manda sobre la variable de Vercel: así se cambia sin redesplegar
+ * los tres proyectos (13/10/2026). Se recuerda 1 minuto para no leerlo en cada
+ * consulta; si no hay, se usa DECOLECTA_TOKEN como antes.
+ */
+let tokenCache: { valor: string | null; hasta: number } | null = null;
+async function tokenDecolecta(sb: ClienteDb): Promise<string | undefined> {
+  if (tokenCache && tokenCache.hasta > Date.now()) return tokenCache.valor ?? undefined;
+  let valor: string | null = null;
+  try {
+    const { data } = await sb.from('secretos_integracion').select('valor').eq('clave', 'DECOLECTA_TOKEN').maybeSingle();
+    valor = (data as { valor?: string } | null)?.valor?.trim() || null;
+  } catch {
+    valor = null;
+  }
+  tokenCache = { valor, hasta: Date.now() + 60_000 };
+  return valor ?? undefined;
 }
 
 /** Un cliente ya registrado, llevado a la misma forma que devuelve RENIEC/SUNAT. */
@@ -167,7 +190,8 @@ async function resolver(
 
   const viejo = guardado && !esNoEncontrado(guardado.datos) ? guardado.datos : null;
   try {
-    const datos = tipo === 'dni' ? await consultaDNI(numero) : await consultaRUC(numero);
+    const token = await tokenDecolecta(sb);
+    const datos = tipo === 'dni' ? await consultaDNI(numero, { token }) : await consultaRUC(numero, { token });
     await guardar(sb, tipo, numero, datos);
     return { datos, fuente: 'reniec-sunat' };
   } catch (e) {
