@@ -133,7 +133,8 @@ export function CobrarModal({
       const r = await fetch(`/api/sunat/${tipoDoc.toLowerCase()}/${num}`);
       if (!r.ok) {
         const err = await r.json().catch(() => ({ error: `HTTP ${r.status}` }));
-        toast.error(err.error ?? 'No se encontró');
+        // Aviso, no error: escribiendo el nombre a mano la venta sigue igual.
+        toast.warning(`${err.error ?? 'No se encontró'}`.replace(/\.?\s*Escribe.*$/, '') + '. Escribe la razón social a mano y continúa.', { duration: 8000 });
         return;
       }
       const data = await r.json();

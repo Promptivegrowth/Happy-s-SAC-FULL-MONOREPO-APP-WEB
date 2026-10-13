@@ -78,7 +78,9 @@ async function consultar(tipo: 'dni' | 'ruc', numero: string): Promise<{ nombre:
       direccion: d.direccion, ubigeo: d.ubigeo,
     };
   } catch (e) {
-    toast.error(`${(e as Error).message}. Escríbelo a mano.`);
+    // Aviso, no error: la búsqueda solo ayuda a llenar; escribiéndolo a mano la
+    // guía se emite igual (13/10/2026, Decolecta caída).
+    toast.warning(`No se pudo buscar ahora (${(e as Error).message.replace(/\.?\s*Escribe.*$/, '')}). Escribe el nombre a mano y continúa: la guía se emite igual.`, { duration: 8000 });
     return null;
   }
 }
@@ -367,7 +369,7 @@ export function GuiaForm({ inicial, aviso, hoy, empresa, almacenes, transportist
                           const d = await r.json().catch(() => ({ error: 'No se pudo consultar' }));
                           if (!r.ok) throw new Error(d.error ?? 'No se encontró');
                           setCondNombres(d.nombres ?? ''); setCondApellidos([d.apellidoPaterno, d.apellidoMaterno].filter(Boolean).join(' '));
-                        } catch (e) { toast.error(`${(e as Error).message}. Escríbelo a mano.`); }
+                        } catch (e) { toast.warning(`No se pudo buscar ahora (${(e as Error).message.replace(/\.?\s*Escribe.*$/, '')}). Escribe nombres y apellidos a mano y continúa.`, { duration: 8000 }); }
                         setConsultando(null);
                       }}>
                       {consultando === 'cond' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}

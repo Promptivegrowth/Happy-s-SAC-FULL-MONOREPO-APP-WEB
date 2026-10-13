@@ -71,6 +71,14 @@ async function decolectaFetch<T>(path: string, opts: FetchOptions): Promise<T> {
     if (res.status === 429 || (res.status === 401 && /limit/i.test(text))) {
       throw new Error('Se agotaron las consultas del mes en el servicio de RENIEC/SUNAT. Escribe el nombre a mano.');
     }
+    /*
+     * 403 (página de nginx): Decolecta reconoce el token pero bloquea la cuenta.
+     * Pasó el 13/10/2026 con solo ~120 consultas del mes; su API antigua decía
+     * "API limit exceeded". Antes se mostraba el HTML crudo al usuario.
+     */
+    if (res.status === 403) {
+      throw new Error('Se agotaron las consultas del servicio de RENIEC/SUNAT (Decolecta está bloqueando la cuenta). Escribe los datos a mano.');
+    }
     if (res.status === 401) {
       throw new Error('Token inválido o vencido. Regenerá DECOLECTA_TOKEN en https://decolecta.com');
     }
