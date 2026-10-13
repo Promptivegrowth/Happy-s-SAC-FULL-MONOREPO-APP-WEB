@@ -44,7 +44,9 @@ export const ESTADO_TONO: Record<EstadoPedidoWeb, Tono> = {
 export const TRANSICIONES: Record<EstadoPedidoWeb, EstadoPedidoWeb[]> = {
   PENDIENTE_PAGO: ['PAGO_VERIFICADO', 'CANCELADO', 'WHATSAPP_DERIVADO'],
   PAGO_VERIFICADO: ['EN_PREPARACION', 'CANCELADO'],
-  EN_PREPARACION: ['LISTO_RECOJO', 'EN_DELIVERY', 'CANCELADO'],
+  // Directo a ENTREGADO también: cuando se entrega apenas se prepara, el paso
+  // intermedio solo hacía que el pedido quedara "En preparación" (12/10/2026).
+  EN_PREPARACION: ['LISTO_RECOJO', 'EN_DELIVERY', 'ENTREGADO', 'CANCELADO'],
   LISTO_RECOJO: ['ENTREGADO', 'CANCELADO'],
   EN_DELIVERY: ['ENTREGADO', 'CANCELADO'],
   ENTREGADO: [],

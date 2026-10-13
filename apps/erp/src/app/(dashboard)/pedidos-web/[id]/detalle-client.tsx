@@ -131,11 +131,22 @@ export function DetalleClient({
             {pedido.estado === 'PAGO_VERIFICADO' && (
               <p className="text-xs text-slate-500">↓ Prepara el pedido abajo (descuenta stock y emite la boleta o factura)</p>
             )}
+            {['EN_PREPARACION', 'LISTO_RECOJO', 'EN_DELIVERY'].includes(pedido.estado) && (
+              <p className="text-xs text-slate-500">
+                {pedido.estado === 'EN_PREPARACION'
+                  ? (pedido.metodo_entrega === 'DELIVERY'
+                    ? 'Siguiente paso: "En delivery" al enviarlo, o "Entregado" si ya lo recibió el cliente →'
+                    : 'Siguiente paso: "Listo para recojo", o "Entregado" si ya lo recogió →')
+                  : 'Cuando el cliente lo reciba, presiona "Entregado" para cerrar el pedido →'}
+              </p>
+            )}
             {transiciones
               .filter((t) => t !== 'EN_PREPARACION' && t !== 'CANCELADO' && t !== 'PAGO_VERIFICADO' && t !== 'WHATSAPP_DERIVADO')
+              // Solo el paso que corresponde a cómo se entrega.
+              .filter((t) => !(t === 'LISTO_RECOJO' && pedido.metodo_entrega === 'DELIVERY') && !(t === 'EN_DELIVERY' && pedido.metodo_entrega !== 'DELIVERY'))
               .map((t) => (
-                <Button key={t} variant="outline" size="sm" onClick={() => avanzarA(t)} disabled={pending}>
-                  <Package className="h-4 w-4" /> {ESTADO_LABEL[t]}
+                <Button key={t} variant={t === 'ENTREGADO' ? 'premium' : 'outline'} size="sm" onClick={() => avanzarA(t)} disabled={pending}>
+                  {t === 'ENTREGADO' ? <CheckCircle2 className="h-4 w-4" /> : <Package className="h-4 w-4" />} {ESTADO_LABEL[t]}
                 </Button>
               ))}
             {transiciones.includes('CANCELADO') && (
