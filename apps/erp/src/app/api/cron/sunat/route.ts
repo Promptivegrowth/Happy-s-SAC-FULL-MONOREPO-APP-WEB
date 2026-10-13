@@ -423,7 +423,10 @@ export async function GET(request: Request) {
      */
     .in('tipo', ['BOLETA', 'FACTURA', 'NOTA_CREDITO', 'NOTA_DEBITO'])
     .in('estado', ['BORRADOR', 'EMITIDO', 'RECHAZADO'])
-    .lt('fecha_emision', hace24h);
+    .lt('fecha_emision', hace24h)
+    // Sin los rechazos definitivos ya cerrados (F006-00000037, reemplazada por
+    // la 39): no tienen nada pendiente y hacían sonar la alerta todos los días.
+    .or(`sunat_proximo_intento.is.null,sunat_proximo_intento.lt.${SIN_REINTENTO}`);
 
   if ((vencidos ?? 0) > 0) {
     const { data: avisoPrevio } = await sb
