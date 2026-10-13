@@ -132,8 +132,8 @@ export async function armarReporteComprobantes(sb: Sb, mes: string): Promise<Rep
   const refIds = [...new Set(comps.map((c) => c.documento_referencia_id).filter(Boolean))] as string[];
   const [ventas, pagos, refs] = await Promise.all([
     enTandas(ventaIds, async (t) => {
-      const { data } = await sb.from('ventas').select('id, almacen:almacen_id(nombre)').in('id', t);
-      return (data ?? []) as Array<{ id: string; almacen: { nombre: string } | null }>;
+      const { data } = await sb.from('ventas').select('id, canal, almacen:almacen_id(nombre)').in('id', t);
+      return (data ?? []) as Array<{ id: string; canal: string | null; almacen: { nombre: string } | null }>;
     }),
     enTandas(ventaIds, async (t) => {
       const { data } = await sb.from('ventas_pagos').select('venta_id, metodo, referencia').in('venta_id', t);
@@ -145,7 +145,16 @@ export async function armarReporteComprobantes(sb: Sb, mes: string): Promise<Rep
       return (data ?? []) as Array<{ id: string; numero_completo: string; venta_id: string | null }>;
     }),
   ]);
-  const tiendaDe = new Map(ventas.map((x) => [x.id, x.almacen?.nombre ?? '']));
+  // La venta web va como "Web", no con la tienda que despachó el pedido: así
+  // el reporte por tienda separa tienda física y tienda online (13/10/2026).
+  const tiendaDe = new Map(ventas.map((x) => [x.id, x.canal === 'WEB' ? 'Web' : (x.almacen?.nombre ?? '')]));
+  // La nota de crédito toma la tienda de su comprobante, que puede ser de otro
+  // mes (BC01-00000001 corrige una boleta de septiembre): esas ventas se traen aparte.
+  const faltan = [...new Set(refs.map((r) => r.venta_id).filter((v): v is string => Boolean(v) && !tiendaDe.has(v as string)))];
+  for (const x of await enTandas(faltan, async (t) => {
+    const { data } = await sb.from('ventas').select('id, canal, almacen:almacen_id(nombre)').in('id', t);
+    return (data ?? []) as Array<{ id: string; canal: string | null; almacen: { nombre: string } | null }>;
+  })) tiendaDe.set(x.id, x.canal === 'WEB' ? 'Web' : (x.almacen?.nombre ?? ''));
   const pagosDe = new Map<string, Set<string>>();
   for (const p of pagos) {
     const s = pagosDe.get(p.venta_id) ?? new Set<string>();

@@ -53,10 +53,28 @@ function descargar(base64: string, filename: string, mime: string) {
   setTimeout(() => URL.revokeObjectURL(url), 1500);
 }
 
-export function ReporteComprobantes({ mes, nombreMes, desde, hasta, filas, vistaInicial }: {
-  mes: string; nombreMes: string; desde: string; hasta: string; filas: FilaComprobante[]; vistaInicial: Vista;
+/** Orden en que se muestran las tiendas; las que no estén acá van después. */
+const ORDEN_TIENDAS = ['Tienda Huallaga', 'Tienda La Quinta', 'Web'];
+const tiendaDeFila = (f: FilaComprobante) => f.tienda || 'Sin tienda';
+
+export function ReporteComprobantes({ mes, nombreMes, desde, hasta, filas: todas, vistaInicial, tiendaInicial = '' }: {
+  mes: string; nombreMes: string; desde: string; hasta: string; filas: FilaComprobante[]; vistaInicial: Vista; tiendaInicial?: string;
 }) {
   const [vista, setVista] = useState<Vista>(vistaInicial);
+  /*
+   * Reporte por tienda (pedido de Javier, 13/10/2026): Huallaga, La Quinta y
+   * Web, una por una, o todas juntas. Filtra todo: totales, días, detalle,
+   * registro de ventas y descargas.
+   */
+  const [tienda, setTienda] = useState<string>(tiendaInicial);
+  const tiendas = useMemo(() => {
+    const set = [...new Set(todas.map(tiendaDeFila))];
+    const pos = (t: string) => { const i = ORDEN_TIENDAS.indexOf(t); return i < 0 ? 99 : i; };
+    return set.sort((a, b) => pos(a) - pos(b) || a.localeCompare(b));
+  }, [todas]);
+  const filas = useMemo(() => (tienda ? todas.filter((f) => tiendaDeFila(f) === tienda) : todas), [todas, tienda]);
+  const totalTienda = (t: string) => r2(todas.filter((f) => f.cuenta && (!t || tiendaDeFila(f) === t) && enVista(vista, f.tipo)).reduce((s, f) => s + f.total, 0));
+  const etiquetaTienda = tienda || 'Todas las tiendas';
   const [diaDesde, setDiaDesde] = useState('');
   const [diaHasta, setDiaHasta] = useState('');
   const [pagina, setPagina] = useState(1);
@@ -67,9 +85,10 @@ export function ReporteComprobantes({ mes, nombreMes, desde, hasta, filas, vista
   useEffect(() => {
     const u = new URL(window.location.href);
     u.searchParams.set('vista', vista);
+    if (tienda) u.searchParams.set('tienda', tienda); else u.searchParams.delete('tienda');
     window.history.replaceState(null, '', u.toString());
-  }, [vista]);
-  useEffect(() => { setPagina(1); }, [vista, diaDesde, diaHasta]);
+  }, [vista, tienda]);
+  useEffect(() => { setPagina(1); }, [vista, diaDesde, diaHasta, tienda]);
 
   // ── Totales del mes (no dependen de la vista ni de los días) ────────────
   const porTipo = useMemo(() => {
@@ -124,7 +143,7 @@ export function ReporteComprobantes({ mes, nombreMes, desde, hasta, filas, vista
     start(async () => {
       try {
         const tituloVista = VISTAS.find((v) => v.id === vista)!.titulo;
-        const subtitulo = `${nombreMes} · detalle ${textoRango}`;
+        const subtitulo = `${nombreMes} · ${etiquetaTienda} · detalle ${textoRango}`;
         const resumen = [
           `Boletas: ${porTipo.BOLETA.cantidad} · ${formatPEN(porTipo.BOLETA.total)}`,
           `Facturas: ${porTipo.FACTURA.cantidad} · ${formatPEN(porTipo.FACTURA.total)}`,
@@ -183,7 +202,7 @@ export function ReporteComprobantes({ mes, nombreMes, desde, hasta, filas, vista
           });
         const sumReg = registro.reduce((a, r) => ({ base: a.base + r.base, igv: a.igv + r.igv, total: a.total + r.total }), { base: 0, igv: 0, total: 0 });
         const hojaRegistro: Hoja = {
-          nombre: 'Registro de ventas', titulo: 'Registro de ventas', subtitulo: `${nombreMes} · comprobantes enviados a SUNAT ${textoRango}`,
+          nombre: 'Registro de ventas', titulo: 'Registro de ventas', subtitulo: `${nombreMes} · ${etiquetaTienda} · comprobantes enviados a SUNAT ${textoRango}`,
           cols: [
             { header: 'Fecha emisión', key: 'fecha', formato: 'fecha', width: 13 },
             { header: 'Tipo CP', key: 'cod', width: 8 }, { header: 'Comprobante', key: 'tipo', width: 15 },
@@ -200,7 +219,7 @@ export function ReporteComprobantes({ mes, nombreMes, desde, hasta, filas, vista
 
         const hojas: Hoja[] = [
           {
-            nombre: 'Resumen', titulo: 'Resumen del mes', subtitulo: nombreMes,
+            nombre: 'Resumen', titulo: 'Resumen del mes', subtitulo: `${nombreMes} · ${etiquetaTienda}`,
             cols: [
               { header: 'Documento', key: 'tipo', width: 22 }, { header: 'Cantidad', key: 'cantidad', formato: 'numero', width: 11 },
               { header: 'Base imponible', key: 'base', formato: 'moneda', width: 16 }, { header: 'IGV', key: 'igv', formato: 'moneda', width: 13 },
@@ -216,7 +235,7 @@ export function ReporteComprobantes({ mes, nombreMes, desde, hasta, filas, vista
           // Para la contadora, apenas después del resumen (vistas con comprobantes SUNAT).
           ...(vista !== 'notas' ? [hojaRegistro] : []),
           {
-            nombre: 'Por día', titulo: 'Ventas por día', subtitulo: nombreMes,
+            nombre: 'Por día', titulo: 'Ventas por día', subtitulo: `${nombreMes} · ${etiquetaTienda}`,
             cols: [
               { header: 'Día', key: 'dia', width: 12 }, { header: 'Boletas', key: 'boletas', formato: 'moneda', width: 13 },
               { header: 'Facturas', key: 'facturas', formato: 'moneda', width: 13 }, { header: 'Notas créd./déb.', key: 'notasCD', formato: 'moneda', width: 15 },
@@ -242,7 +261,7 @@ export function ReporteComprobantes({ mes, nombreMes, desde, hasta, filas, vista
             rows: detalle.map(fila), totales,
           },
         ];
-        const r = await generarExcelMultiHoja({ titulo: `Comprobantes ${tituloVista} ${mes}`, hojas });
+        const r = await generarExcelMultiHoja({ titulo: `Comprobantes ${tituloVista}${tienda ? ` ${tienda}` : ''} ${mes}`, hojas });
         descargar(r.base64, r.filename, r.mime);
       } catch (e) {
         alert((e as Error).message ?? 'No se pudo generar el archivo');
@@ -254,6 +273,17 @@ export function ReporteComprobantes({ mes, nombreMes, desde, hasta, filas, vista
 
   return (
     <div className="space-y-6">
+      {/* Tienda: todas, o una por una */}
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="text-[11px] font-medium uppercase tracking-wide text-slate-500">Tienda</span>
+        {['', ...tiendas].map((t) => (
+          <button key={t || 'todas'} type="button" onClick={() => setTienda(t)}
+            className={`rounded-full border px-3 py-1.5 text-sm transition ${tienda === t ? 'border-happy-500 bg-happy-50 font-semibold text-corp-900 ring-1 ring-happy-500' : 'bg-white text-slate-600 hover:bg-slate-50'}`}>
+            {t || 'Todas'} <span className="ml-1 text-xs text-slate-500">{formatPEN(totalTienda(t))}</span>
+          </button>
+        ))}
+      </div>
+
       <div className="grid gap-2 sm:grid-cols-3">
         {VISTAS.map((x) => (
           <button key={x.id} type="button" onClick={() => setVista(x.id)}
