@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation';
 import { Card, CardContent, CardHeader, CardTitle } from '@happy/ui/card';
 import { Button } from '@happy/ui/button';
 import { Badge } from '@happy/ui/badge';
-import { Loader2, CheckCircle2, Send, XCircle, Truck, Trash2, CreditCard } from 'lucide-react';
+import { Loader2, CheckCircle2, Send, XCircle, Trash2, CreditCard } from 'lucide-react';
 import { toast } from 'sonner';
 import { cambiarEstadoOC, eliminarOC, type OCDetalle } from '@/server/actions/oc';
 import { ESTADO_LABEL, ESTADO_TONO, TIPO_LABEL, TRANSICIONES_OC, type EstadoOC } from '@/server/actions/oc-helpers';
@@ -94,11 +94,6 @@ export function DetalleClient({ oc, pagos }: { oc: OCDetalle; pagos: PagoOCRow[]
           {transiciones.includes('ENVIADA') && (
             <Button size="sm" variant="secondary" onClick={() => cambiar('ENVIADA', '¿Marcar como enviada al proveedor?')} disabled={isPending}>
               <Send className="h-4 w-4" /> Marcar enviada
-            </Button>
-          )}
-          {transiciones.includes('RECIBIDA') && (
-            <Button size="sm" variant="secondary" onClick={() => cambiar('RECIBIDA', '¿Marcar como recibida (sin registrar recepción en kardex)?')} disabled={isPending}>
-              <Truck className="h-4 w-4" /> Recibida
             </Button>
           )}
           {transiciones.includes('CANCELADA') && (

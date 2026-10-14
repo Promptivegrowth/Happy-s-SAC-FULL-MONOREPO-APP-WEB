@@ -50,11 +50,18 @@ export const TIPO_LABEL: Record<TipoOC, string> = {
  * PAGADA: se canceló a proveedor (lo marca CxP al cobrar saldo 0).
  * CANCELADA: anulada antes de envío/recepción.
  */
+/*
+ * Cambios de estado A MANO. PARCIAL y RECIBIDA ya no están: los pone solo la
+ * recepción, que es la que ingresa la mercadería al almacén y al kárdex. El
+ * botón "Recibida" marcaba la OC sin ingresar nada y después ya no dejaba
+ * registrar la recepción: OC-26-00008 a 11 quedaron sin stock y el corte dejó
+ * los materiales en negativo (pedido de Javier, 13/10/2026).
+ */
 export const TRANSICIONES_OC: Record<EstadoOC, readonly EstadoOC[]> = {
   BORRADOR: ['APROBADA', 'CANCELADA'],
   APROBADA: ['ENVIADA', 'CANCELADA'],
-  ENVIADA: ['PARCIAL', 'RECIBIDA', 'CANCELADA'],
-  PARCIAL: ['RECIBIDA', 'CANCELADA'],
+  ENVIADA: ['CANCELADA'],
+  PARCIAL: ['CANCELADA'],
   RECIBIDA: ['PAGADA'],
   PAGADA: [],
   CANCELADA: [],
