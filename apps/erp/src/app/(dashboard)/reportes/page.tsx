@@ -121,8 +121,8 @@ const REPORTES: ReporteCard[] = [
   },
   {
     href: '/reportes/trazabilidad-modelo',
-    titulo: 'Trazabilidad producción → venta',
-    descripcion: 'Por modelo y talla: cuánto se produjo, se vendió y queda en stock. Sigue el flujo de la producción hasta la venta.',
+    titulo: 'Trazabilidad de productos',
+    descripcion: 'Busca cualquier producto: lo producido, trasladado y vendido por fecha, el stock en cada almacén y cada venta (vendedor, comprobante, pago y cliente).',
     icono: Route,
     categoria: 'Producción',
     badge: 'Nuevo',

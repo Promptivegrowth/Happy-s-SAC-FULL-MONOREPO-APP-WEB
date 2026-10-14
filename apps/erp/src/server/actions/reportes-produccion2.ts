@@ -136,11 +136,20 @@ export async function reporteTiempoRecetaVsReal(
 // ============================================================================
 // D) TRAZABILIDAD producción → venta por MODELO y TALLA (ver trazabilidad-core)
 // ============================================================================
-export type { TrazaRow, ReporteTrazabilidadResult } from '../trazabilidad-core';
+export type { TrazaRow, ReporteTrazabilidadResult, DetalleTraza, FiltrosTraza } from '../trazabilidad-core';
 
 export async function reporteTrazabilidadProduccionVenta(
-  f: { producto_id?: string } = {},
+  f: import('../trazabilidad-core').FiltrosTraza = {},
 ): Promise<import('../trazabilidad-core').ReporteTrazabilidadResult> {
   const { armarTrazabilidad } = await import('../trazabilidad-core');
   return armarTrazabilidad(await sbReadonly(), f);
+}
+
+/** Una talla: movimientos con saldo por almacén, ventas y control kárdex vs stock. */
+export async function reporteTrazabilidadDetalle(
+  varianteId: string,
+  f: import('../trazabilidad-core').FiltrosTraza = {},
+): Promise<import('../trazabilidad-core').DetalleTraza | null> {
+  const { armarTrazabilidadDetalle } = await import('../trazabilidad-core');
+  return armarTrazabilidadDetalle(await sbReadonly(), varianteId, f);
 }
