@@ -16,7 +16,7 @@ import { etiquetaPago, medioDeDevolucion } from '@happy/lib/pagos/etiqueta';
 import { costosDeTodasLasVariantes } from '@/server/costo-variante';
 import { createClient } from '@happy/db/server';
 import { redirect } from 'next/navigation';
-import { formatTallaChip } from '@happy/lib';
+import { formatTallaChip, ordenarTallas } from '@happy/lib';
 import { LOTE_IDS } from '../lotes';
 import { precioPorUnidadDeConsumo } from '@/server/costo-material';
 import {
@@ -343,7 +343,12 @@ export type FiltrosProductosTemporada = {
   desde: string;
   hasta: string;
   categoria_id?: string;
+  /** '' = todos; 'WEB' = ventas web; si no, el id del almacén de la tienda (ventas de caja). */
+  punto?: string;
 };
+
+/** Dónde se vendió: una tienda (por su almacén) o la web, igual que el reporte de comprobantes. */
+export type PuntoVenta = { key: string; nombre: string };
 
 export type ProductoTemporadaRow = {
   ranking: number;
@@ -354,6 +359,10 @@ export type ProductoTemporadaRow = {
   unidades: number;
   monto: number;
   pct_del_total: number;
+  /** Unidades y monto por talla, en el orden de las tallas. */
+  tallas: { talla: string; unidades: number; monto: number }[];
+  /** Unidades por punto de venta (clave de PuntoVenta). */
+  por_punto: Record<string, number>;
 };
 
 export type ReporteProductosTemporadaResult = {
@@ -364,41 +373,61 @@ export type ReporteProductosTemporadaResult = {
     productos_distintos: number;
   };
   rows: ProductoTemporadaRow[];
+  /** Los puntos de venta con ventas en el período (para las columnas y el filtro). */
+  puntos: PuntoVenta[];
 };
 
 export async function reporteProductosTemporada(
   f: FiltrosProductosTemporada,
 ): Promise<ReporteProductosTemporadaResult> {
   const sb = await sbReadonly();
+  const metricasVacias = { total_unidades: 0, total_ingresos: 0, top1_pct_vs_resto: 0, productos_distintos: 0 };
 
-  // 1) Trae líneas de venta del período (sin filtrar por categoría todavía)
-  const { data: ventas, error: e1 } = await sb
-    .from('ventas')
-    .select('id, fecha, estado')
-    .gte('fecha', `${f.desde}T00:00:00`)
-    .lte('fecha', `${f.hasta}T23:59:59`)
-    .neq('estado', 'ANULADA')
-    .limit(20000);
-  if (e1) throw new Error(e1.message);
-  const ventaIds = ((ventas ?? []) as { id: string }[]).map((v) => v.id);
-  if (ventaIds.length === 0) {
-    return {
-      metricas: { total_unidades: 0, total_ingresos: 0, top1_pct_vs_resto: 0, productos_distintos: 0 },
-      rows: [],
-    };
+  /*
+   * 1) Ventas del período, en hora de Lima y paginadas.
+   *
+   * Antes: fechas sin zona (el día corría 5 horas: lo vendido después de las
+   * 19:00 caía al día siguiente) y una sola consulta, que la base corta en
+   * 1.000 filas sin avisar; en plena temporada el ranking iba a salir
+   * incompleto (14/10/2026).
+   */
+  type VentaRaw = { id: string; canal: string; almacen_id: string | null; almacen: { nombre: string } | null };
+  const ventas: VentaRaw[] = [];
+  for (let desde = 0; ; desde += 1000) {
+    const { data, error } = await sb
+      .from('ventas')
+      .select('id, canal, almacen_id, almacen:almacen_id(nombre)')
+      .gte('fecha', `${f.desde}T00:00:00-05:00`)
+      .lte('fecha', `${f.hasta}T23:59:59.999-05:00`)
+      .neq('estado', 'ANULADA')
+      .order('id')
+      .range(desde, desde + 999);
+    if (error) throw new Error(error.message);
+    ventas.push(...((data ?? []) as unknown as VentaRaw[]));
+    if ((data ?? []).length < 1000) break;
   }
+  // La web es un punto aparte aunque la despache una tienda (igual que en el reporte de comprobantes).
+  const puntoDe = new Map<string, PuntoVenta>();
+  for (const v of ventas) {
+    puntoDe.set(v.id, v.canal === 'WEB'
+      ? { key: 'WEB', nombre: 'Web' }
+      : { key: v.almacen_id ?? 'SIN', nombre: v.almacen?.nombre ?? 'Sin tienda' });
+  }
+  const puntos = [...new Map([...puntoDe.values()].map((x) => [x.key, x])).values()]
+    .sort((a, b) => (a.key === 'WEB' ? 1 : b.key === 'WEB' ? -1 : a.nombre.localeCompare(b.nombre, 'es')));
+  const ventaIds = ventas.filter((v) => !f.punto || puntoDe.get(v.id)?.key === f.punto).map((v) => v.id);
+  if (ventaIds.length === 0) return { metricas: metricasVacias, rows: [], puntos };
 
-  // 2) Líneas con variante → producto → categoría
+  // 2) Líneas con variante (talla) → producto → categoría.
   // El filtro `.in(...)` viaja en la URL: con lotes grandes el servidor la
   // rechaza y el reporte sale vacío sin avisar. Ver LOTE_IDS en _helpers.
-  const chunks: string[][] = [];
-  for (let i = 0; i < ventaIds.length; i += LOTE_IDS) chunks.push(ventaIds.slice(i, i + LOTE_IDS));
-
   type LineaRaw = {
+    venta_id: string;
     cantidad: number;
     sub_total: string | number;
     precio_unitario: string | number;
     variante: {
+      talla: string | null;
       producto: {
         id: string;
         codigo: string;
@@ -410,39 +439,59 @@ export async function reporteProductosTemporada(
   };
 
   const allLineas: LineaRaw[] = [];
-  for (const chunk of chunks) {
-    const { data, error } = await sb
-      .from('ventas_lineas')
-      .select(
-        'cantidad, sub_total, precio_unitario, ' +
-          'variante:variante_id(producto:producto_id(id, codigo, nombre, categoria_id, categoria:categoria_id(id, nombre)))',
-      )
-      .in('venta_id', chunk);
-    if (error) throw new Error(error.message);
-    allLineas.push(...((data ?? []) as LineaRaw[]));
+  for (let i = 0; i < ventaIds.length; i += LOTE_IDS) {
+    const chunk = ventaIds.slice(i, i + LOTE_IDS);
+    // Una venta mayorista puede traer cientos de líneas: también se pagina.
+    for (let desde = 0; ; desde += 1000) {
+      const { data, error } = await sb
+        .from('ventas_lineas')
+        .select(
+          'id, venta_id, cantidad, sub_total, precio_unitario, ' +
+            'variante:variante_id(talla, producto:producto_id(id, codigo, nombre, categoria_id, categoria:categoria_id(id, nombre)))',
+        )
+        .in('venta_id', chunk)
+        .order('id')
+        .range(desde, desde + 999);
+      if (error) throw new Error(error.message);
+      allLineas.push(...((data ?? []) as unknown as LineaRaw[]));
+      if ((data ?? []).length < 1000) break;
+    }
   }
 
-  // 3) Agrupa por producto, filtra por categoría si aplica
-  const acumulador = new Map<
-    string,
-    { codigo: string; nombre: string; categoria: string; categoria_id: string | null; unidades: number; monto: number }
-  >();
+  // 3) Agrupa por producto (con su detalle por talla y por punto), filtra por categoría si aplica.
+  type Acum = {
+    codigo: string; nombre: string; categoria: string; categoria_id: string | null;
+    unidades: number; monto: number;
+    tallas: Map<string, { unidades: number; monto: number }>;
+    por_punto: Record<string, number>;
+  };
+  const acumulador = new Map<string, Acum>();
   for (const l of allLineas) {
     const p = l.variante?.producto;
     if (!p) continue;
     if (f.categoria_id && p.categoria_id !== f.categoria_id) continue;
     const k = p.id;
-    const sub = Number(l.sub_total) || Number(l.cantidad) * Number(l.precio_unitario);
-    const e = acumulador.get(k) ?? {
+    const cant = Number(l.cantidad);
+    const sub = Number(l.sub_total) || cant * Number(l.precio_unitario);
+    const e: Acum = acumulador.get(k) ?? {
       codigo: p.codigo,
       nombre: p.nombre,
       categoria: p.categoria?.nombre ?? '—',
       categoria_id: p.categoria_id,
       unidades: 0,
       monto: 0,
+      tallas: new Map(),
+      por_punto: {},
     };
-    e.unidades += Number(l.cantidad);
+    e.unidades += cant;
     e.monto += sub;
+    const talla = l.variante?.talla ?? '—';
+    const t = e.tallas.get(talla) ?? { unidades: 0, monto: 0 };
+    t.unidades += cant;
+    t.monto += sub;
+    e.tallas.set(talla, t);
+    const punto = puntoDe.get(l.venta_id)?.key ?? 'SIN';
+    e.por_punto[punto] = (e.por_punto[punto] ?? 0) + cant;
     acumulador.set(k, e);
   }
 
@@ -458,6 +507,8 @@ export async function reporteProductosTemporada(
     unidades: e.unidades,
     monto: e.monto,
     pct_del_total: total_unidades > 0 ? (e.unidades / total_unidades) * 100 : 0,
+    tallas: ordenarTallas([...e.tallas.entries()].map(([talla, x]) => ({ talla, unidades: x.unidades, monto: Math.round(x.monto * 100) / 100 }))),
+    por_punto: e.por_punto,
   }));
 
   const top1 = rows[0]?.unidades ?? 0;
@@ -472,6 +523,7 @@ export async function reporteProductosTemporada(
       productos_distintos: rows.length,
     },
     rows,
+    puntos,
   };
 }
 
