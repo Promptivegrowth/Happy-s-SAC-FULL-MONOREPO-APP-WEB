@@ -1,5 +1,6 @@
 import { CheckoutClient } from './checkout-client';
 import { createClient } from '@happy/db/server';
+import { obtenerContenidoWeb } from '@/lib/contenido-web';
 
 export const metadata = { title: 'Checkout' };
 export const dynamic = 'force-dynamic';
@@ -45,10 +46,17 @@ export default async function CheckoutPage() {
       process.env.IZIPAY_PUBLIC_KEY,
   );
 
+  /*
+   * El pedido por WhatsApp va al número de Configuración → Web del ERP, el
+   * mismo del botón flotante. Antes iba a un número fijo en el código (el de
+   * soporte del sistema) y los pedidos no le llegaban a la tienda (14/10/2026).
+   */
+  const { contacto } = await obtenerContenidoWeb();
+
   return (
     <div className="container px-4 py-10">
       <h1 className="mb-6 font-display text-3xl font-semibold">Finaliza tu compra</h1>
-      <CheckoutClient cuentasWeb={cuentasWeb} izipayHabilitado={izipayHabilitado} />
+      <CheckoutClient cuentasWeb={cuentasWeb} izipayHabilitado={izipayHabilitado} whatsapp={contacto.whatsapp} />
     </div>
   );
 }

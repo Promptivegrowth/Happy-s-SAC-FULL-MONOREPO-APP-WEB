@@ -16,6 +16,7 @@ import { CreditCard, MessageCircle, Smartphone, Truck, Building2, Loader2, Lock 
 import { toast } from 'sonner';
 import { useRouter } from 'next/navigation';
 import { buildPedidoWaMessage, buildWhatsappUrl } from '@happy/lib/whatsapp';
+import { WHATSAPP_NUMERO } from '@/lib/contacto';
 import { formatTallaChip } from '@happy/lib';
 import { ENVIO_GRATIS_DESDE, COSTO_ENVIO_DEFECTO, costoEnvio, type DestinoEnvio } from '@/lib/precios';
 
@@ -65,9 +66,12 @@ type CuentaWeb = {
 export function CheckoutClient({
   cuentasWeb = [],
   izipayHabilitado = false,
+  whatsapp,
 }: {
   cuentasWeb?: CuentaWeb[];
   izipayHabilitado?: boolean;
+  /** WhatsApp de la tienda (Configuración → Web del ERP), solo dígitos o con espacios. */
+  whatsapp?: string;
 }) {
   const router = useRouter();
   const METODOS = useMemo(() => metodosDisponibles(izipayHabilitado), [izipayHabilitado]);
@@ -265,7 +269,7 @@ export function CheckoutClient({
           ? { metodo: metodo as 'yape' | 'plin' | 'transferencia', destino: destinoDePago }
           : undefined,
       });
-      const urlWa = buildWhatsappUrl(msg);
+      const urlWa = buildWhatsappUrl(msg, (whatsapp ?? '').replace(/\D/g, '') || WHATSAPP_NUMERO);
       if (ventana) ventana.location.href = urlWa;
       toast.info(
         CON_CAPTURA.includes(metodo)

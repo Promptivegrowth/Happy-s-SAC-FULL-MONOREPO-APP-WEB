@@ -10,6 +10,8 @@ import { useCart } from '@/store/cart';
 import { MegaMenu, MegaMenuMobile } from './mega-menu';
 import type { CampanaVigente, ProductoBusqueda } from '@/server/queries/header-data';
 import { enlaceWhatsApp, telefonoLegible, type ContactoWeb, type RedesWeb } from '@happy/lib/web/contenido';
+// El monto sale de la misma constante que usa el checkout: el banner decía 199 y se cobraba desde 249 (14/10/2026).
+import { ENVIO_GRATIS_DESDE } from '@/lib/precios';
 
 export function SiteHeader({
   campanaVigente = null,
@@ -72,7 +74,7 @@ export function SiteHeader({
           </div>
           <div className="flex flex-1 items-center justify-center gap-2 sm:flex-none">
             <Sparkles className="h-3 w-3 animate-float text-happy-300" />
-            <span>Envío GRATIS desde S/ 199 · Yape · Plin · Tarjeta · WhatsApp</span>
+            <span>Envío GRATIS desde S/ {ENVIO_GRATIS_DESDE} · Yape · Plin · Tarjeta · WhatsApp</span>
             <Sparkles className="h-3 w-3 animate-float text-happy-300" />
           </div>
           <div className="hidden items-center gap-2 sm:flex">
