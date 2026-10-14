@@ -104,7 +104,7 @@ export default async function Page({ params, searchParams }: { params: Promise<{
       )}
 
       {/* Ventas */}
-      <Card>
+      <Card id="ventas" className="scroll-mt-4">
         <div className="flex flex-wrap items-center justify-between gap-2 border-b bg-slate-50 p-3">
           <div>
             <h3 className="text-sm font-semibold text-corp-900">Ventas ({d.ventas.length})</h3>

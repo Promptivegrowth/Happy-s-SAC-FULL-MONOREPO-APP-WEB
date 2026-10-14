@@ -74,7 +74,7 @@ export default async function Page({ searchParams }: { searchParams: Promise<SP>
   return (
     <PageShell
       title="Trazabilidad de productos"
-      description="Lo producido, trasladado y vendido por modelo y talla, y dónde está hoy cada prenda. Toca una fila para ver cada venta y cada movimiento."
+      description="Lo producido, trasladado y vendido por modelo y talla, y dónde está hoy cada prenda. Toca el número de vendidos para ver cada venta (quién vendió, comprobante, monto y cliente), o "Detalle" para ver también los movimientos."
       actions={<ExportButtons payload={exportPayload} />}
     >
       {/* Buscador y filtros */}
@@ -173,12 +173,19 @@ export default async function Page({ searchParams }: { searchParams: Promise<SP>
                       <TableCell className="font-mono text-[11px]">{r.ots || '—'}</TableCell>
                       <TableCell className="text-right font-mono text-sm text-emerald-700">{r.producido ? n(r.producido) : '—'}</TableCell>
                       <TableCell className="text-right font-mono text-xs text-slate-600">{r.traslado_entra || r.traslado_sale ? `+${n(r.traslado_entra)} / −${n(r.traslado_sale)}` : '—'}</TableCell>
-                      <TableCell className="text-right font-mono text-sm">{n(r.vendido)}</TableCell>
+                      {/* El número de vendidos abre directo las ventas de esa talla (pedido de Javier, 14/10/2026). */}
+                      <TableCell className="text-right font-mono text-sm">
+                        {r.vendido ? (
+                          <Link href={`${href}#ventas`} title="Ver quién vendió, comprobante, monto y cliente" className="font-semibold text-happy-700 underline decoration-dotted underline-offset-2 hover:text-happy-900">
+                            {n(r.vendido)}
+                          </Link>
+                        ) : n(r.vendido)}
+                      </TableCell>
                       <TableCell className="text-right font-mono text-xs text-amber-600">{r.devuelto ? n(r.devuelto) : '—'}</TableCell>
                       <TableCell className="text-right font-mono text-xs text-slate-600">{r.ajustes ? `${r.ajustes > 0 ? '+' : ''}${n(r.ajustes)}` : '—'}</TableCell>
                       {!almElegido && almacenes.map((a) => <TableCell key={a.id} className="text-right font-mono text-sm">{n(r.stock[a.id] ?? 0)}</TableCell>)}
                       <TableCell className="text-right font-mono text-sm font-semibold">{n(r.stock_total)}</TableCell>
-                      <TableCell><Link href={href} title="Ver ventas y movimientos"><ChevronRight className="h-4 w-4 text-slate-400" /></Link></TableCell>
+                      <TableCell><Link href={href} title="Ver ventas y movimientos" className="flex items-center gap-0.5 whitespace-nowrap text-[11px] text-slate-500 hover:text-happy-700">Detalle <ChevronRight className="h-4 w-4" /></Link></TableCell>
                     </TableRow>
                   );
                 })}
