@@ -27,6 +27,7 @@ import {
 } from '@/server/actions/caja';
 import type { BalanceCajaDTO, SesionCajaDTO } from '@/server/actions/caja-helpers';
 import { construirTicketCierre, type EncabezadoCaja } from '@happy/lib/escpos/caja';
+import { dineroPorCuenta } from '@happy/lib/pagos/etiqueta';
 import { imprimirDocumentoDeCaja } from './imprimir-ticket';
 
 type Cajero = { id: string; nombre: string };
@@ -464,6 +465,43 @@ export function CerrarCajaModal({
             </div>
           </div>
         )}
+
+        {/*
+          Lo que entró a cada cuenta: ventas + adelantos (− devoluciones), para
+          cuadrar directo con cada banco. Es la misma plata de arriba junta por
+          cuenta: no cambia el total de ventas ni el cuadre del cajón.
+        */}
+        {(() => {
+          const dinero = dineroPorCuenta(balance.por_cuenta ?? [], balance.adelantos ?? [], balance.devoluciones ?? []);
+          if (dinero.length === 0) return null;
+          return (
+            <div className="mt-4 rounded-lg border border-emerald-200 bg-emerald-50/40 p-4">
+              <h3 className="text-xs font-semibold uppercase tracking-wider text-emerald-800">Dinero que entró por cuenta</h3>
+              <p className="mb-2 text-[11px] text-slate-500">Ventas + adelantos de cada cuenta, para cuadrar con el banco.</p>
+              <div className="space-y-1 text-sm">
+                {dinero.map((c) => (
+                  <div key={c.etiqueta}>
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-slate-700">{c.etiqueta}</span>
+                      <span className="font-mono font-semibold text-corp-900">{formatPEN(c.total)}</span>
+                    </div>
+                    {(Math.abs(c.adelantos) > 0.009 || c.devuelto > 0.009) && (
+                      <p className="text-[11px] text-slate-500">
+                        ventas {formatPEN(c.ventas)}
+                        {Math.abs(c.adelantos) > 0.009 && ` ${c.adelantos > 0 ? '+' : '−'} adelantos ${formatPEN(Math.abs(c.adelantos))}`}
+                        {c.devuelto > 0.009 && ` − devuelto ${formatPEN(c.devuelto)}`}
+                      </p>
+                    )}
+                  </div>
+                ))}
+              </div>
+              <div className="mt-2 flex items-center justify-between border-t pt-2 text-sm font-semibold text-corp-900">
+                <span>Total dinero recibido</span>
+                <span className="font-mono">{formatPEN(dinero.reduce((a, c) => a + c.total, 0))}</span>
+              </div>
+            </div>
+          );
+        })()}
 
         {/* Cuadre de efectivo */}
         <div className="mt-4 rounded-lg border bg-white p-4">

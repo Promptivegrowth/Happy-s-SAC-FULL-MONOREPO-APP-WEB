@@ -377,3 +377,53 @@ describe('el cierre separa lo que no es dinero nuevo (06/10/2026)', () => {
     expect(r.join('\n')).not.toContain('DEVOLUCIONES DEL TURNO');
   });
 });
+
+describe('el dinero que entró por cuenta (13/10/2026)', () => {
+  // Cierre real de Huallaga del 08/10/2026: el adelanto ADL-000007 entró a Interbank Javier.
+  const real: DatosCierre = {
+    ...CIERRE,
+    totalVentas: 8934.5,
+    totalCobrado: 8934.5,
+    porCuenta: [
+      { etiqueta: 'EFECTIVO', monto: 5660, cantidad: 30, metodo: 'EFECTIVO' },
+      { etiqueta: 'CONTINENTAL - PLIN HAPPYS', monto: 1150, cantidad: 10, metodo: 'PLIN' },
+      { etiqueta: 'BCP HAPPYS', monto: 674, cantidad: 3, metodo: 'TRANSFERENCIA' },
+      { etiqueta: 'BCP JAVIER', monto: 0, cantidad: 0, metodo: 'TRANSFERENCIA' },
+      { etiqueta: 'INTERBANK JAVIER', monto: 1450.5, cantidad: 8, metodo: 'TRANSFERENCIA' },
+    ],
+    adelantos: [
+      { numero: 'ADL-000007', tipo: 'ENTRADA', medio: 'INTERBANK JAVIER', monto: 500, efectivo: false },
+      { numero: 'ADL-000008', tipo: 'ENTRADA', medio: 'Efectivo', monto: 100, efectivo: true },
+    ],
+  };
+
+  it('suma el adelanto a su cuenta y da el total recibido', () => {
+    const r = renglones(construirTicketCierre(CAB, real));
+    const i = r.findIndex((l) => l.startsWith('DINERO QUE ENTR'));
+    expect(i).toBeGreaterThan(-1);
+    const seccion = r.slice(i);
+    expect(seccion.find((l) => l.startsWith('INTERBANK JAVIER'))).toContain('1950.50');
+    expect(seccion.find((l) => l.startsWith('EFECTIVO'))).toContain('5760.00');
+    expect(seccion.find((l) => l.startsWith('TOTAL DINERO RECIBIDO'))).toContain('9534.50');
+    // La cuenta sin movimiento no aparece en esta sección.
+    expect(seccion.slice(0, seccion.findIndex((l) => l.startsWith('TOTAL DINERO'))).some((l) => l.startsWith('BCP JAVIER'))).toBe(false);
+  });
+
+  it('no cambia el total de ventas ni el cuadre del cajón', () => {
+    const r = renglones(construirTicketCierre(CAB, real));
+    expect(r.find((l) => l.startsWith('TOTAL VENTAS'))).toContain('8934.50');
+    expect(r.find((l) => l.startsWith('Esperado en caja'))).toContain(CIERRE.esperadoEfectivo.toFixed(2));
+  });
+
+  it('no se pasa del ancho del papel', () => {
+    const r = renglones(construirTicketCierre(CAB, {
+      ...real,
+      devoluciones: [{ numero: '000009', venta: 'VEN-000999', medio: 'CONTINENTAL - PLIN HAPPYS', monto: 120.5, efectivo: false }],
+    }));
+    for (const l of r) expect(l.length).toBeLessThanOrEqual(COLUMNAS);
+  });
+
+  it('un ticket viejo sin detalle por cuenta no la muestra', () => {
+    expect(renglones(construirTicketCierre(CAB, CIERRE)).join('\n')).not.toContain('DINERO QUE ENTR');
+  });
+});

@@ -13,6 +13,7 @@ import {
   etiquetaPago,
   agruparPorCuenta,
   arqueoPorCuenta,
+  dineroPorCuenta,
   resumenSaldoAplicado,
   esPagoConSaldo,
 } from './etiqueta-pago';
@@ -238,5 +239,42 @@ describe('el arqueo con los botones de la ventana de venta', () => {
       { metodo: 'TRANSFERENCIA', referencia: 'bcp javier', monto: 10 },
     ]);
     expect(filas.find((f) => f.etiqueta === 'BCP JAVIER')!.monto).toBe(10);
+  });
+});
+
+describe('dineroPorCuenta', () => {
+  const arqueo = [
+    { etiqueta: 'EFECTIVO', monto: 2735, metodo: 'EFECTIVO' },
+    { etiqueta: 'CONTINENTAL - PLIN HAPPYS', monto: 2210, metodo: 'PLIN' },
+    { etiqueta: 'BCP HAPPYS', monto: 0, metodo: 'TRANSFERENCIA' },
+    { etiqueta: 'INTERBANK JAVIER', monto: 1450.5, metodo: 'TRANSFERENCIA' },
+  ];
+
+  it('suma los adelantos a la cuenta por la que entraron', () => {
+    const r = dineroPorCuenta(arqueo, [
+      { numero: 'ADL-1', tipo: 'ENTRADA', medio: 'INTERBANK JAVIER', monto: 500, efectivo: false },
+      { numero: 'ADL-2', tipo: 'ENTRADA', medio: 'Efectivo', monto: 100, efectivo: true },
+    ]);
+    expect(r.find((x) => x.etiqueta === 'INTERBANK JAVIER')).toEqual({ etiqueta: 'INTERBANK JAVIER', ventas: 1450.5, adelantos: 500, devuelto: 0, total: 1950.5 });
+    expect(r.find((x) => x.etiqueta === 'EFECTIVO')?.total).toBe(2835);
+  });
+
+  it('resta adelantos devueltos y devoluciones de dinero', () => {
+    const r = dineroPorCuenta(arqueo,
+      [{ numero: 'ADL-3', tipo: 'DEVOLUCION', medio: 'CONTINENTAL - PLIN HAPPYS', monto: 50, efectivo: false }],
+      [{ numero: '000007', venta: 'VEN-1', medio: 'Efectivo', monto: 65, efectivo: true }]);
+    expect(r.find((x) => x.etiqueta === 'CONTINENTAL - PLIN HAPPYS')?.total).toBe(2160);
+    expect(r.find((x) => x.etiqueta === 'EFECTIVO')).toMatchObject({ devuelto: 65, total: 2670 });
+  });
+
+  it('un adelanto a una cuenta que no está en el arqueo tiene su renglón', () => {
+    const r = dineroPorCuenta(arqueo, [{ numero: 'ADL-4', tipo: 'ENTRADA', medio: 'BCP JAVIER', monto: 300, efectivo: false }]);
+    expect(r.find((x) => x.etiqueta === 'BCP JAVIER')).toMatchObject({ ventas: 0, adelantos: 300, total: 300 });
+  });
+
+  it('una cuenta sin movimiento no sale, y sin adelantos los totales son las ventas', () => {
+    const r = dineroPorCuenta(arqueo);
+    expect(r.map((x) => x.etiqueta)).toEqual(['EFECTIVO', 'CONTINENTAL - PLIN HAPPYS', 'INTERBANK JAVIER']);
+    expect(r.reduce((s, x) => s + x.total, 0)).toBe(6395.5);
   });
 });

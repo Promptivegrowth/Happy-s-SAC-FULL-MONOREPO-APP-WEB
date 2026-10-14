@@ -14,6 +14,7 @@
  */
 
 import { TicketEscPos, COLUMNAS, CORTE_MM_POR_DEFECTO, envolver } from './index';
+import { dineroPorCuenta } from '../pagos/etiqueta-pago';
 
 /**
  * Cuántas columnas entran con letra de ancho doble.
@@ -167,7 +168,7 @@ export type DatosCierre = {
    * Opcional a propósito: un ticket viejo reimpreso no tiene el dato y debe
    * seguir saliendo igual que antes en vez de romperse.
    */
-  porCuenta?: Array<{ etiqueta: string; monto: number; cantidad: number }>;
+  porCuenta?: Array<{ etiqueta: string; monto: number; cantidad: number; metodo?: string | null }>;
   /* (la etiqueta es el texto del botón de cobro, tal cual: "BCP JAVIER") */
   /**
    * El dinero que realmente entró por ventas: sin lo pagado con saldo.
@@ -326,6 +327,43 @@ export function construirTicketCierre(
     t.salto();
   }
   const adelEfectivo = adelantos.filter((x) => x.efectivo).reduce((a, x) => a + (x.tipo === 'ENTRADA' ? x.monto : -x.monto), 0);
+
+  /*
+   * Lo que entró a cada cuenta: ventas + adelantos (− devoluciones), para
+   * cuadrar directo con cada banco sin sumar a mano (pedido de la
+   * administración, 13/10/2026). No cambia ningún total ni el cuadre del
+   * cajón: es la misma plata de arriba, junta por cuenta. Los cierres viejos
+   * sin detalle por cuenta salen como antes.
+   */
+  if (porCuenta.length > 0) {
+    const dinero = dineroPorCuenta(porCuenta, adelantos, devoluciones);
+    if (dinero.length > 0) {
+      t.negrita(true).linea('DINERO QUE ENTRÓ POR CUENTA').negrita(false);
+      t.linea('(ventas + adelantos, para el banco)');
+      for (const c of dinero) {
+        const importe = soles(c.total);
+        if (c.etiqueta.length + importe.length + 1 <= COLUMNAS) t.lineaDoble(c.etiqueta, importe);
+        else {
+          for (const l of envolver(c.etiqueta, COLUMNAS)) t.linea(l);
+          t.lineaDoble('', importe);
+        }
+        // El desglose solo cuando hay algo más que ventas: si no, repite el renglón.
+        if (Math.abs(c.adelantos) > 0.009 || c.devuelto > 0.009) {
+          const partes = [`ventas ${c.ventas.toFixed(2)}`];
+          if (Math.abs(c.adelantos) > 0.009) partes.push(`${c.adelantos > 0 ? '+' : '-'} adelantos ${Math.abs(c.adelantos).toFixed(2)}`);
+          if (c.devuelto > 0.009) partes.push(`- devuelto ${c.devuelto.toFixed(2)}`);
+          const detalle = `  ${partes.join(' ')}`;
+          if (detalle.length <= COLUMNAS) t.linea(detalle);
+          else for (const l of envolver(detalle.trim(), COLUMNAS - 2)) t.linea(`  ${l}`);
+        }
+      }
+      t.separador();
+      t.negrita(true);
+      t.lineaDoble('TOTAL DINERO RECIBIDO', soles(dinero.reduce((a, c) => a + c.total, 0)));
+      t.negrita(false);
+      t.salto();
+    }
+  }
 
   t.negrita(true).linea('CUADRE DE EFECTIVO').negrita(false);
   t.lineaDoble('Monto de apertura', soles(d.montoApertura));

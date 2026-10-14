@@ -7,6 +7,7 @@ import { ArrowLeft } from 'lucide-react';
 import { PageShell } from '@/components/page-shell';
 import { ExportButtons } from '@/components/reportes/export-buttons';
 import { formatDateTime, formatPEN } from '@happy/lib';
+import { dineroPorCuenta } from '@happy/lib/pagos/etiqueta';
 import { detalleCuadre } from '@/server/actions/cuadres-caja';
 
 export const metadata = { title: 'Cuadre de caja' };
@@ -45,6 +46,32 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
     ],
     rows: arqueo as unknown as Record<string, unknown>[],
     totales: { monto: arqueo.reduce((s, a) => s + a.monto, 0) },
+  };
+
+  /*
+   * Lo que entró a cada cuenta: ventas + adelantos (− devoluciones), para
+   * conciliar cada banco. Mismo cálculo que el ticket y el Excel del POS.
+   */
+  const dinero = dineroPorCuenta(arqueo, adelantos, devoluciones);
+  const totalDinero = dinero.reduce((s, x) => s + x.total, 0);
+  const exportDinero = {
+    titulo: 'Dinero que entró por cuenta',
+    subtitulo: `${c.caja_nombre} · ${formatDateTime(c.abierta_en)} · ventas + adelantos`,
+    filtros: encabezado,
+    cols: [
+      { header: 'Cuenta', key: 'etiqueta', width: 32 },
+      { header: 'Ventas', key: 'ventas', formato: 'moneda' as const, width: 14 },
+      { header: 'Adelantos', key: 'adelantos', formato: 'moneda' as const, width: 14 },
+      { header: 'Devuelto', key: 'devuelto', formato: 'moneda' as const, width: 14 },
+      { header: 'Total', key: 'total', formato: 'moneda' as const, width: 16 },
+    ],
+    rows: dinero as unknown as Record<string, unknown>[],
+    totales: {
+      ventas: dinero.reduce((s, x) => s + x.ventas, 0),
+      adelantos: dinero.reduce((s, x) => s + x.adelantos, 0),
+      devuelto: dinero.reduce((s, x) => s + x.devuelto, 0),
+      total: totalDinero,
+    },
   };
 
   const exportVentas = {
@@ -225,6 +252,47 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
                     <TableCell className="text-right text-sm font-semibold">{formatPEN(x.monto)}</TableCell>
                   </TableRow>
                 ))}
+              </TableBody>
+            </Table>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* ─────────── Dinero que entró por cuenta ─────────── */}
+      {dinero.length > 0 && (
+        <Card className="border-emerald-200">
+          <CardContent className="p-4">
+            <div className="mb-1 flex flex-wrap items-center justify-between gap-2">
+              <h3 className="font-display text-sm font-semibold text-corp-900">Dinero que entró por cuenta</h3>
+              <ExportButtons payload={exportDinero} />
+            </div>
+            <p className="mb-3 text-xs text-slate-500">
+              Ventas + adelantos de cada cuenta (menos lo devuelto por esa cuenta), para cuadrar directo con cada banco.
+              Es el mismo dinero de las secciones de arriba, junto por cuenta: no cambia el total de ventas ni el cuadre
+              del cajón. En efectivo no se restan los gastos de caja chica; eso lo hace el cuadre de efectivo.
+            </p>
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Cuenta</TableHead><TableHead className="text-right">Ventas</TableHead>
+                  <TableHead className="text-right">Adelantos</TableHead><TableHead className="text-right">Devuelto</TableHead>
+                  <TableHead className="text-right">Total</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {dinero.map((x) => (
+                  <TableRow key={x.etiqueta}>
+                    <TableCell className="text-sm">{x.etiqueta}</TableCell>
+                    <TableCell className="text-right text-sm">{formatPEN(x.ventas)}</TableCell>
+                    <TableCell className="text-right text-sm">{Math.abs(x.adelantos) > 0.009 ? formatPEN(x.adelantos) : '—'}</TableCell>
+                    <TableCell className="text-right text-sm">{x.devuelto > 0.009 ? `− ${formatPEN(x.devuelto)}` : '—'}</TableCell>
+                    <TableCell className="text-right text-sm font-semibold">{formatPEN(x.total)}</TableCell>
+                  </TableRow>
+                ))}
+                <TableRow className="border-t-2 bg-slate-50">
+                  <TableCell className="text-sm font-semibold" colSpan={4}>Total dinero recibido</TableCell>
+                  <TableCell className="text-right text-sm font-semibold">{formatPEN(totalDinero)}</TableCell>
+                </TableRow>
               </TableBody>
             </Table>
           </CardContent>

@@ -340,3 +340,54 @@ export function adelantosDelTurno(
 export function adelantosEnEfectivo(a: AdelantoDelTurno[]): number {
   return (a ?? []).filter((x) => x.efectivo).reduce((s, x) => s + (x.tipo === 'ENTRADA' ? x.monto : -x.monto), 0);
 }
+
+/** Lo que movió una cuenta en el turno: ventas + adelantos − devoluciones. */
+export type DineroDeCuenta = { etiqueta: string; ventas: number; adelantos: number; devuelto: number; total: number };
+
+/**
+ * El dinero que entró a cada cuenta en el turno, para cuadrar con el banco.
+ *
+ * El arqueo de arriba solo suma ventas; los adelantos van en su sección y las
+ * devoluciones en la suya. Para conciliar, la administradora tenía que sumar a
+ * mano: el 08/10/2026 en Interbank Javier entraron S/ 1,950.50 (1,450.50 de
+ * ventas + 500 del ADL-000007) y el cierre solo decía 1,450.50. Esto junta las
+ * tres cosas por cuenta, sin cambiar ningún total ni el cuadre del cajón.
+ *
+ * Cada adelanto y devolución se cruza con el botón del POS por el nombre de la
+ * cuenta (es el mismo texto); el efectivo, con el renglón de efectivo. Si
+ * alguno no coincide con ningún botón, va en su propio renglón: la plata no se
+ * pierde. Solo salen las cuentas que se movieron.
+ */
+export function dineroPorCuenta(
+  porCuenta: Array<{ etiqueta: string; monto: number; metodo?: string | null }>,
+  adelantos: AdelantoDelTurno[] = [],
+  devoluciones: DevolucionDelTurno[] = [],
+): DineroDeCuenta[] {
+  const clave = (s: string) => (s ?? '').trim().toUpperCase();
+  const filas: Array<DineroDeCuenta & { efectivo: boolean }> = (porCuenta ?? []).map((c) => ({
+    etiqueta: c.etiqueta,
+    ventas: Number(c.monto ?? 0),
+    adelantos: 0,
+    devuelto: 0,
+    total: 0,
+    efectivo: clave(c.metodo ?? '') === 'EFECTIVO' || clave(c.etiqueta) === 'EFECTIVO',
+  }));
+  const filaDe = (medio: string, efectivo: boolean) => {
+    let f = efectivo ? filas.find((x) => x.efectivo) : filas.find((x) => !x.efectivo && clave(x.etiqueta) === clave(medio));
+    if (!f) {
+      f = { etiqueta: efectivo ? 'EFECTIVO' : medio, ventas: 0, adelantos: 0, devuelto: 0, total: 0, efectivo };
+      filas.push(f);
+    }
+    return f;
+  };
+  for (const a of adelantos ?? []) filaDe(a.medio, a.efectivo).adelantos += a.tipo === 'ENTRADA' ? a.monto : -a.monto;
+  for (const d of devoluciones ?? []) filaDe(d.medio, d.efectivo).devuelto += d.monto;
+  const r2 = (n: number) => Math.round(n * 100) / 100;
+  return filas
+    .map(({ efectivo: _e, ...f }) => ({
+      ...f,
+      ventas: r2(f.ventas), adelantos: r2(f.adelantos), devuelto: r2(f.devuelto),
+      total: r2(f.ventas + f.adelantos - f.devuelto),
+    }))
+    .filter((f) => Math.abs(f.ventas) > 0.009 || Math.abs(f.adelantos) > 0.009 || Math.abs(f.devuelto) > 0.009);
+}

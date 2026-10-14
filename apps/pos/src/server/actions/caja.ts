@@ -17,7 +17,7 @@ import { revalidatePath } from 'next/cache';
 import ExcelJS from 'exceljs';
 import {
   etiquetaPago, agruparPorCuenta, arqueoPorCuenta, resumenSaldoAplicado, esPagoConSaldo,
-  devolucionesDelTurno, adelantosDelTurno, adelantosEnEfectivo, type CuentaPos, type SalidaPorDevolucion,
+  devolucionesDelTurno, adelantosDelTurno, adelantosEnEfectivo, dineroPorCuenta, type CuentaPos, type SalidaPorDevolucion,
 } from '@happy/lib/pagos/etiqueta';
 import { DIGITOS_CORRELATIVO } from '@happy/lib/sunat-ubl';
 import { createClient } from '@happy/db/server';
@@ -1271,6 +1271,42 @@ export async function generarExcelCierre(sesionId: string): Promise<{ base64: st
       cV.numFmt = '"S/" #,##0.00';
       cV.font = { size: 10, bold: true };
       cV.alignment = { horizontal: 'right' };
+      row++;
+    }
+    row++;
+  }
+
+  // ---- DINERO QUE ENTRÓ POR CUENTA ----
+  // Ventas + adelantos (− devoluciones) de cada cuenta, para conciliar cada
+  // banco sin sumar a mano. Mismo cálculo que el ticket y la pantalla de cierre.
+  const dineroExcel = dineroPorCuenta(balanceExcel.por_cuenta, balanceExcel.adelantos, balanceExcel.devoluciones);
+  if (dineroExcel.length > 0) {
+    seccionTitulo('DINERO QUE ENTRÓ POR CUENTA (VENTAS + ADELANTOS)');
+    const filasDinero: Array<[string, string, number, boolean]> = dineroExcel.map((c) => {
+      const partes = [`ventas S/ ${c.ventas.toFixed(2)}`];
+      if (Math.abs(c.adelantos) > 0.009) partes.push(`${c.adelantos > 0 ? '+' : '-'} adelantos S/ ${Math.abs(c.adelantos).toFixed(2)}`);
+      if (c.devuelto > 0.009) partes.push(`- devuelto S/ ${c.devuelto.toFixed(2)}`);
+      return [c.etiqueta, partes.join(' '), c.total, false];
+    });
+    filasDinero.push(['Total dinero recibido', '', dineroExcel.reduce((a, c) => a + c.total, 0), true]);
+    for (const [etiqueta, detalle, total, esTotal] of filasDinero) {
+      const c1 = ws.getCell(row, 1);
+      c1.value = etiqueta;
+      c1.font = { size: 10, bold: esTotal };
+      ws.mergeCells(row, 2, row, COLS - 1);
+      const filler = ws.getCell(row, 2);
+      filler.value = detalle;
+      filler.font = { size: 9, color: { argb: BRAND.textoOscuro } };
+      const cV = ws.getCell(row, COLS);
+      cV.value = total;
+      cV.numFmt = '"S/" #,##0.00';
+      cV.font = { size: 10, bold: true };
+      cV.alignment = { horizontal: 'right' };
+      if (esTotal) {
+        [c1, filler, cV].forEach((x) => {
+          x.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: BRAND.bgSuave } };
+        });
+      }
       row++;
     }
     row++;

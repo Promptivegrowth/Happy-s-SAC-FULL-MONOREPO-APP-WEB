@@ -69,7 +69,7 @@ export default async function Page({ searchParams }: { searchParams: Promise<SP>
   return (
     <PageShell
       title="Cuadres de caja"
-      description={`Todos los turnos del ${desde} al ${hasta}. Entrá a uno para ver el arqueo completo e imprimirlo.`}
+      description={`Todos los turnos del ${desde} al ${hasta}. Entra a uno para ver el arqueo completo e imprimirlo.`}
       actions={<ExportButtons payload={exportPayload} />}
     >
       <div className="grid gap-3 sm:grid-cols-4">
