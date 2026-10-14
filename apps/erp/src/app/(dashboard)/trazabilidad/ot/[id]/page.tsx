@@ -131,7 +131,7 @@ export default async function OtTrazaPage({
                 <TableRow>
                   <TableHead>Código</TableHead>
                   <TableHead>SKU</TableHead>
-                  <TableHead className="text-right">Saldo</TableHead>
+                  <TableHead className="text-right">Ingresaron</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -146,9 +146,7 @@ export default async function OtTrazaPage({
                       </Link>
                     </TableCell>
                     <TableCell className="font-mono text-[11px] text-slate-500">{l.variante_sku}</TableCell>
-                    <TableCell className="text-right font-mono text-xs">
-                      {l.cantidad_actual} / {l.cantidad_inicial}
-                    </TableCell>
+                    <TableCell className="text-right font-mono text-xs">{l.cantidad_inicial}</TableCell>
                   </TableRow>
                 ))}
               </TableBody>

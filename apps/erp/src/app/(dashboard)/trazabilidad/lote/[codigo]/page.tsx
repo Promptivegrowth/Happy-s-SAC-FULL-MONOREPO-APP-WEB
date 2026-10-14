@@ -64,9 +64,14 @@ export default async function LoteTrazaPage({
     >
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
         <Card className="p-3">
-          <p className="text-[10px] uppercase tracking-wide text-slate-500">Cantidad actual</p>
-          <p className="font-display text-2xl font-semibold text-corp-900">{lote.cantidad_actual}</p>
-          <p className="text-[10px] text-slate-500">de {lote.cantidad_inicial} iniciales</p>
+          {/* El lote no se descuenta al vender ni al trasladar: su "cantidad
+              actual" siempre era la inicial y parecía stock (13/10/2026). El
+              stock real está en la ficha de la talla. */}
+          <p className="text-[10px] uppercase tracking-wide text-slate-500">Ingresaron</p>
+          <p className="font-display text-2xl font-semibold text-corp-900">{lote.cantidad_inicial}</p>
+          <Link href={`/trazabilidad/variante/${lote.variante.id}`} className="text-[10px] text-happy-700 hover:underline">
+            Ver dónde están hoy →
+          </Link>
         </Card>
         <Card className="p-3">
           <p className="text-[10px] uppercase tracking-wide text-slate-500">Estado</p>

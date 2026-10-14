@@ -189,6 +189,15 @@ type KardexRowRaw = {
   operario: OperarioLite;
 };
 
+/** Nombre del movimiento para una persona, no el código del sistema. */
+const TITULO_KARDEX: Record<string, string> = {
+  ENTRADA_PRODUCCION: 'Ingreso de producción', ENTRADA_COMPRA: 'Ingreso por compra',
+  ENTRADA_DEVOLUCION_CLIENTE: 'Devolución de cliente', ENTRADA_DEVOLUCION_TALLER: 'Devolución de taller',
+  ENTRADA_TRASLADO: 'Traslado recibido', ENTRADA_AJUSTE: 'Ajuste (+)', SALIDA_VENTA: 'Venta',
+  SALIDA_PRODUCCION: 'Consumo en producción', SALIDA_TRASLADO: 'Traslado enviado',
+  SALIDA_TALLER_SERVICIO: 'Envío a taller', SALIDA_AJUSTE: 'Ajuste (−)', SALIDA_MERMA: 'Merma',
+};
+
 function mapKardexEvento(r: KardexRowRaw): TrazaEvento {
   const esEntrada = r.tipo.startsWith('ENTRADA_');
   const esSalida = r.tipo.startsWith('SALIDA_');
@@ -196,7 +205,7 @@ function mapKardexEvento(r: KardexRowRaw): TrazaEvento {
     id: `kardex:${r.id}`,
     fuente: 'KARDEX',
     fecha: r.fecha,
-    titulo: r.tipo.replace(/_/g, ' '),
+    titulo: r.referencia_tipo === 'ANULACION' ? 'Anulación de venta' : (TITULO_KARDEX[r.tipo] ?? r.tipo.replace(/_/g, ' ')),
     subtipo: r.tipo,
     detalle: r.observacion,
     cantidad: Number(r.cantidad),
@@ -306,6 +315,21 @@ const SELECT_CALIDAD =
 
 const MAX_EVENTOS = 200;
 
+/*
+ * Días en hora de Lima. Con 'T00:00:00' sin zona la base toma UTC y el día
+ * quedaba corrido 5 horas: lo vendido después de las 19:00 caía fuera del
+ * "hasta" (auditoría 13/10/2026).
+ */
+/**
+ * El cierre de OT deja dos eventos de producción por lote (uno es copia del
+ * kárdex). Se oculta el extra; con .or y no .not para no perder los eventos
+ * sin observación (NOT LIKE de un nulo los descartaría).
+ */
+const SIN_DUPLICADO_PRODUCCION = 'observacion.is.null,observacion.not.like.Producción cerrada de OT*';
+
+const iniDiaLima = (d: string) => `${d}T00:00:00-05:00`;
+const finDiaLima = (d: string) => `${d}T23:59:59.999-05:00`;
+
 // ---------------------------------------------------------------------------
 // historicoLote
 // ---------------------------------------------------------------------------
@@ -376,16 +400,12 @@ export async function historicoLote(
       ot: raw.ot,
     };
 
-    // 1) trazabilidad_eventos por lote
-    const { data: trazaRows, error: trazaErr } = await sb
-      .from('trazabilidad_eventos')
-      .select(SELECT_TRAZA)
-      .eq('lote_pt_id', lote.id)
-      .order('fecha', { ascending: true })
-      .limit(MAX_EVENTOS);
-    if (trazaErr) throw new Error(trazaErr.message);
-
-    // 2) kardex_movimientos por lote
+    /*
+     * trazabilidad_eventos NO se lee acá: un disparador copia ahí cada
+     * movimiento del kárdex, y el cierre de OT agrega otro de producción. Con
+     * las dos fuentes, cada movimiento salía dos o tres veces (13/10/2026).
+     */
+    // 1) kardex_movimientos por lote
     const { data: kardexRows, error: kardexErr } = await sb
       .from('kardex_movimientos')
       .select(SELECT_KARDEX)
@@ -421,7 +441,6 @@ export async function historicoLote(
     }
 
     const eventos: TrazaEvento[] = [
-      ...((trazaRows ?? []) as unknown as TrazaRowRaw[]).map(mapTrazaEvento),
       ...((kardexRows ?? []) as unknown as KardexRowRaw[]).map(mapKardexEvento),
       ...(calidadRows as CalidadRowRaw[]).map(mapCalidadEvento),
       ...(otRows as OtEventoRowRaw[]).map(mapOtEvento),
@@ -527,22 +546,12 @@ export async function historicoVariante(
       .eq('variante_id', varianteId)
       .order('fecha', { ascending: false })
       .limit(f.limite);
-    if (f.desde) qKardex = qKardex.gte('fecha', `${f.desde}T00:00:00`);
-    if (f.hasta) qKardex = qKardex.lte('fecha', `${f.hasta}T23:59:59`);
+    if (f.desde) qKardex = qKardex.gte('fecha', iniDiaLima(f.desde));
+    if (f.hasta) qKardex = qKardex.lte('fecha', finDiaLima(f.hasta));
     const { data: kardexRows, error: kardexErr } = await qKardex;
     if (kardexErr) throw new Error(kardexErr.message);
 
-    // 2) trazabilidad_eventos por variante
-    let qTraza = sb
-      .from('trazabilidad_eventos')
-      .select(SELECT_TRAZA)
-      .eq('variante_id', varianteId)
-      .order('fecha', { ascending: false })
-      .limit(f.limite);
-    if (f.desde) qTraza = qTraza.gte('fecha', `${f.desde}T00:00:00`);
-    if (f.hasta) qTraza = qTraza.lte('fecha', `${f.hasta}T23:59:59`);
-    const { data: trazaRows, error: trazaErr } = await qTraza;
-    if (trazaErr) throw new Error(trazaErr.message);
+    // trazabilidad_eventos no se suma: es copia del kárdex (ver historicoLote).
 
     // 3) controles_calidad del producto (luego se puede afinar por talla en cliente)
     const { data: ccRows } = await sb
@@ -554,7 +563,6 @@ export async function historicoVariante(
 
     const eventos: TrazaEvento[] = [
       ...((kardexRows ?? []) as unknown as KardexRowRaw[]).map(mapKardexEvento),
-      ...((trazaRows ?? []) as unknown as TrazaRowRaw[]).map(mapTrazaEvento),
       ...((ccRows ?? []) as unknown as CalidadRowRaw[]).map(mapCalidadEvento),
     ];
 
@@ -730,7 +738,7 @@ export async function historicoOT(
           vacioEvento({
             id: `os-em:${s.id}`,
             fuente: 'OS',
-            fecha: `${s.fecha_emision}T00:00:00`,
+            fecha: `${s.fecha_emision}T12:00:00-05:00`,
             titulo: `OS ${s.numero} emitida`,
             subtipo: 'EMISION',
             detalle: s.observaciones,
@@ -744,7 +752,7 @@ export async function historicoOT(
           vacioEvento({
             id: `os-rec:${s.id}`,
             fuente: 'OS',
-            fecha: `${s.fecha_recepcion}T00:00:00`,
+            fecha: `${s.fecha_recepcion}T12:00:00-05:00`,
             titulo: `OS ${s.numero} recepcionada`,
             subtipo: 'RECEPCION',
             detalle: s.observaciones,
@@ -756,14 +764,27 @@ export async function historicoOT(
       return evs;
     });
 
-    // 4) kardex por referencia OT
-    const { data: kardexRows } = await sb
-      .from('kardex_movimientos')
-      .select(SELECT_KARDEX)
-      .eq('referencia_tipo', 'OT')
-      .eq('referencia_id', otId)
-      .order('fecha', { ascending: true })
-      .limit(MAX_EVENTOS);
+    /*
+     * 4) Kárdex de la OT. Los movimientos no apuntan a la OT sino a lo que los
+     * generó: el consumo de tela al CORTE, el envío al taller a la OS y el
+     * ingreso de prendas al INGRESO_PT. Antes se buscaba referencia 'OT' y no
+     * aparecía ninguno (13/10/2026).
+     */
+    const { data: ingRows } = await sb.from('ingresos_pt').select('id').eq('ot_id', otId);
+    const refs: Array<[string, string[]]> = [
+      ['CORTE', ((corteRows ?? []) as unknown as { id: string }[]).map((c) => c.id)],
+      ['OS', ((osRows ?? []) as unknown as { id: string }[]).map((x) => x.id)],
+      ['INGRESO_PT', ((ingRows ?? []) as { id: string }[]).map((x) => x.id)],
+      ['OT', [otId]],
+    ];
+    const kardexRows: unknown[] = [];
+    for (const [tipo, ids] of refs) {
+      if (ids.length === 0) continue;
+      const { data } = await sb.from('kardex_movimientos').select(SELECT_KARDEX)
+        .eq('referencia_tipo', tipo).in('referencia_id', ids)
+        .order('fecha', { ascending: true }).limit(MAX_EVENTOS);
+      kardexRows.push(...(data ?? []));
+    }
 
     // 5) controles_calidad por ot_id
     const { data: ccRows } = await sb
@@ -797,8 +818,13 @@ export async function buscarEntidad(query: string): Promise<ActionResult<Busqued
     const pattern = `%${q}%`;
     const upper = q.toUpperCase();
 
-    // Búsqueda en paralelo (max ~7 por fuente para no inflar resultados)
-    const [lotesRes, varsRes, otsRes, otsByNumberRes] = await Promise.all([
+    // Búsqueda en paralelo (max ~7 por fuente para no inflar resultados).
+    // También por nombre del modelo: "tiffany" no encontraba nada (13/10/2026).
+    const limpio = q.replace(/[%_,()]/g, ' ');
+    const { data: prodsNombre } = await sb.from('productos').select('id')
+      .or(`nombre.ilike.%${limpio}%,codigo.ilike.%${limpio}%`).limit(5);
+    const idsProd = ((prodsNombre ?? []) as { id: string }[]).map((p) => p.id);
+    const [lotesRes, varsRes, otsRes, otsByNumberRes, varsNombreRes] = await Promise.all([
       sb
         .from('lotes_pt')
         .select('id, codigo, cantidad_actual, variante:variante_id(sku, producto:producto_id(nombre))')
@@ -820,6 +846,9 @@ export async function buscarEntidad(query: string): Promise<ActionResult<Busqued
         .select('id, numero, estado')
         .ilike('numero', `%${upper.replace(/^OT-?/, '')}%`)
         .limit(5),
+      idsProd.length
+        ? sb.from('productos_variantes').select('id, sku, talla, producto:producto_id(nombre, codigo)').in('producto_id', idsProd).limit(12)
+        : Promise.resolve({ data: [] }),
     ]);
 
     const out: BusquedaResultado[] = [];
@@ -836,7 +865,10 @@ export async function buscarEntidad(query: string): Promise<ActionResult<Busqued
     }
 
     type VarB = { id: string; sku: string; talla: string; producto: { nombre: string; codigo: string } | null };
-    for (const v of ((varsRes.data ?? []) as unknown as VarB[])) {
+    const vistos = new Set<string>();
+    for (const v of [...((varsRes.data ?? []) as unknown as VarB[]), ...((varsNombreRes.data ?? []) as unknown as VarB[])]) {
+      if (vistos.has(v.id)) continue;
+      vistos.add(v.id);
       out.push({
         tipo: 'VARIANTE',
         id: v.id,
@@ -915,8 +947,11 @@ export async function listarEventosTraza(
       .order('id', { ascending: false });
 
     if (data.tipo) q = q.eq('tipo', data.tipo);
-    if (data.fecha_desde) q = q.gte('fecha', `${data.fecha_desde}T00:00:00`);
-    if (data.fecha_hasta) q = q.lte('fecha', `${data.fecha_hasta}T23:59:59`);
+    if (data.fecha_desde) q = q.gte('fecha', iniDiaLima(data.fecha_desde));
+    if (data.fecha_hasta) q = q.lte('fecha', finDiaLima(data.fecha_hasta));
+    // El cierre de OT deja dos eventos de producción por lote (uno es copia del
+    // kárdex): se muestra uno solo.
+    q = q.or(SIN_DUPLICADO_PRODUCCION);
 
     const offset = (data.pagina - 1) * data.por_pagina;
     q = q.range(offset, offset + data.por_pagina - 1);
@@ -977,7 +1012,8 @@ export async function trazaStats(): Promise<ActionResult<TrazaStats>> {
   return runAction(async () => {
     const { sb } = await requireUser();
     const ahora = new Date();
-    const hoyIso = new Date(ahora.getFullYear(), ahora.getMonth(), ahora.getDate()).toISOString();
+    // "Hoy" en Lima: el servidor corre en UTC y contaba desde las 19:00 del día anterior.
+    const hoyIso = new Date(iniDiaLima(ahora.toLocaleDateString('en-CA', { timeZone: 'America/Lima' }))).toISOString();
     const hace7 = new Date(ahora.getTime() - 7 * 24 * 60 * 60 * 1000).toISOString();
 
     const [lotesQ, hoyQ, semQ] = await Promise.all([
@@ -988,11 +1024,11 @@ export async function trazaStats(): Promise<ActionResult<TrazaStats>> {
       sb
         .from('trazabilidad_eventos')
         .select('id', { count: 'exact', head: true })
-        .gte('fecha', hoyIso),
+        .gte('fecha', hoyIso).or(SIN_DUPLICADO_PRODUCCION),
       sb
         .from('trazabilidad_eventos')
         .select('id', { count: 'exact', head: true })
-        .gte('fecha', hace7),
+        .gte('fecha', hace7).or(SIN_DUPLICADO_PRODUCCION),
     ]);
 
     return {

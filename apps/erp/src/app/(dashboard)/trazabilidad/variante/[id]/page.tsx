@@ -50,11 +50,17 @@ export default async function VarianteTrazaPage({
         </span>
       }
       actions={
-        <Link href="/trazabilidad">
-          <span className="inline-flex items-center gap-1 text-xs text-slate-500 hover:text-happy-600">
-            <ArrowLeft className="h-3.5 w-3.5" /> Volver
-          </span>
-        </Link>
+        <div className="flex items-center gap-3">
+          {/* Ventas con vendedor, comprobante, pago y cliente, y saldos por almacén. */}
+          <Link href={`/reportes/trazabilidad-modelo/${variante.id}`} className="rounded-md border border-happy-300 bg-happy-50 px-3 py-1.5 text-xs font-medium text-happy-700 hover:bg-happy-100">
+            Ver ventas y saldos por almacén
+          </Link>
+          <Link href="/trazabilidad">
+            <span className="inline-flex items-center gap-1 text-xs text-slate-500 hover:text-happy-600">
+              <ArrowLeft className="h-3.5 w-3.5" /> Volver
+            </span>
+          </Link>
+        </div>
       }
     >
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
@@ -116,7 +122,7 @@ export default async function VarianteTrazaPage({
                   <TableHead>Código</TableHead>
                   <TableHead>Estado</TableHead>
                   <TableHead>Almacén</TableHead>
-                  <TableHead className="text-right">Saldo</TableHead>
+                  <TableHead className="text-right">Ingresaron</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -145,9 +151,7 @@ export default async function VarianteTrazaPage({
                       </Badge>
                     </TableCell>
                     <TableCell className="text-xs">{l.almacen_codigo ?? '—'}</TableCell>
-                    <TableCell className="text-right font-mono text-xs">
-                      {l.cantidad_actual} / {l.cantidad_inicial}
-                    </TableCell>
+                    <TableCell className="text-right font-mono text-xs">{l.cantidad_inicial}</TableCell>
                   </TableRow>
                 ))}
               </TableBody>
