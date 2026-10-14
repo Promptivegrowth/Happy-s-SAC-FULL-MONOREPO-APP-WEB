@@ -920,6 +920,8 @@ export type EventoTrazaListado = {
   almacen_destino: { codigo: string } | null;
   ot: { id: string; numero: string } | null;
   cliente: { id: string; razon_social: string | null; nombres: string | null } | null;
+  /** En las ventas: el número, el comprobante y a quién se vendió. */
+  venta: { numero: string; comprobante: string | null; cliente: string } | null;
 };
 
 export async function listarEventosTraza(
@@ -934,7 +936,7 @@ export async function listarEventosTraza(
     let q = sb
       .from('trazabilidad_eventos')
       .select(
-        'id, fecha, tipo, cantidad, observacion, ' +
+        'id, fecha, tipo, cantidad, observacion, referencia_tipo, referencia_id, ' +
           'lote:lote_pt_id(id, codigo), ' +
           'variante:variante_id(id, sku, producto:producto_id(nombre)), ' +
           'almacen_origen:almacen_origen(codigo), ' +
@@ -971,9 +973,53 @@ export async function listarEventosTraza(
       almacen_destino: { codigo: string } | null;
       ot: { id: string; numero: string } | null;
       cliente: { id: string; razon_social: string | null; nombres: string | null } | null;
+      referencia_tipo: string | null;
+      referencia_id: string | null;
     };
+    const lista = (rows ?? []) as unknown as Row[];
 
-    const mapped: EventoTrazaListado[] = ((rows ?? []) as unknown as Row[]).map((r) => ({
+    /*
+     * La venta de cada evento de venta: número, comprobante y cliente. La
+     * columna "OT / Cliente" salía vacía en las ventas y para saber a quién se
+     * vendió había que dar tres vueltas (pedido de Javier, 14/10/2026). El
+     * evento apunta a la venta, o al pedido web (y la venta, a su pedido).
+     */
+    const idsVenta = lista.filter((r) => r.tipo === 'VENTA' && r.referencia_tipo === 'VENTA' && r.referencia_id).map((r) => String(r.referencia_id));
+    const idsPedido = lista.filter((r) => r.tipo === 'VENTA' && r.referencia_tipo === 'PEDIDO_WEB' && r.referencia_id).map((r) => String(r.referencia_id));
+    type VentaRef = {
+      id: string; numero: string; pedido_web_id: string | null; nombre_cliente_rapido: string | null; documento_cliente: string | null;
+      clientes: { razon_social: string | null; nombres: string | null; apellido_paterno: string | null } | null;
+    };
+    const ventas: VentaRef[] = [];
+    const selVenta = 'id, numero, pedido_web_id, nombre_cliente_rapido, documento_cliente, clientes:cliente_id(razon_social, nombres, apellido_paterno)';
+    if (idsVenta.length) {
+      const { data: v } = await sb.from('ventas').select(selVenta).in('id', [...new Set(idsVenta)]);
+      ventas.push(...((v ?? []) as unknown as VentaRef[]));
+    }
+    if (idsPedido.length) {
+      const { data: v } = await sb.from('ventas').select(selVenta).in('pedido_web_id', [...new Set(idsPedido)]);
+      ventas.push(...((v ?? []) as unknown as VentaRef[]));
+    }
+    const comprobanteDe = new Map<string, string>();
+    if (ventas.length) {
+      const { data: cps } = await sb.from('comprobantes').select('venta_id, numero_completo, tipo').in('venta_id', ventas.map((v) => v.id));
+      for (const c of (cps ?? []) as { venta_id: string; numero_completo: string; tipo: string }[]) {
+        if (c.tipo !== 'NOTA_CREDITO' && c.tipo !== 'NOTA_DEBITO') comprobanteDe.set(c.venta_id, c.tipo === 'NOTA_VENTA' ? `NV ${c.numero_completo}` : c.numero_completo);
+      }
+    }
+    const ventaInfo = (v: VentaRef) => {
+      const c = v.clientes;
+      const nombre = c?.razon_social || [c?.nombres, c?.apellido_paterno].filter(Boolean).join(' ').trim() || v.nombre_cliente_rapido || '';
+      return {
+        numero: v.numero,
+        comprobante: comprobanteDe.get(v.id) ?? null,
+        cliente: nombre ? `${nombre}${v.documento_cliente ? ` · ${v.documento_cliente}` : ''}` : 'Cliente varios',
+      };
+    };
+    const ventaPorId = new Map(ventas.map((v) => [v.id, ventaInfo(v)]));
+    const ventaPorPedido = new Map(ventas.filter((v) => v.pedido_web_id).map((v) => [String(v.pedido_web_id), ventaInfo(v)]));
+
+    const mapped: EventoTrazaListado[] = lista.map((r) => ({
       id: r.id,
       fecha: r.fecha,
       tipo: r.tipo,
@@ -987,6 +1033,8 @@ export async function listarEventosTraza(
       almacen_destino: r.almacen_destino,
       ot: r.ot,
       cliente: r.cliente,
+      venta: r.tipo !== 'VENTA' || !r.referencia_id ? null
+        : (r.referencia_tipo === 'PEDIDO_WEB' ? ventaPorPedido.get(String(r.referencia_id)) : ventaPorId.get(String(r.referencia_id))) ?? null,
     }));
 
     return {

@@ -211,7 +211,7 @@ export default async function ProductoTrazaPage({
               <TableBody>
                 {eventos.map((e) => {
                   const fechaTxt = new Date(e.fecha).toLocaleString('es-PE', {
-                    day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit',
+                    timeZone: 'America/Lima', day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit',
                   });
                   const cli = e.cliente?.razon_social ?? e.cliente?.nombres ?? null;
                   const tono = TIPO_TONO[e.tipo] ?? 'bg-slate-100 text-slate-700';

@@ -100,12 +100,12 @@ export default async function TrazabilidadPage({ searchParams }: { searchParams:
   return (
     <PageShell
       title="Trazabilidad"
-      description="De fábrica a venta — buscá un lote, SKU o número de OT para ver su historia completa."
+      description="De fábrica a venta — busca un lote, SKU o número de OT para ver su historia completa."
     >
       <div className="space-y-2">
         <p className="text-xs font-medium text-slate-500">
           <ScanLine className="mr-1 inline h-3.5 w-3.5" />
-          Pegá un código de lote, SKU o número de OT
+          Pega un código de lote, SKU o número de OT
         </p>
         <SearchAutocomplete
           items={indexItems}
@@ -226,7 +226,7 @@ async function EventosTabla({ tipo, fecha_desde, fecha_hasta, pagina }: SP) {
               <TableHead>SKU / Producto</TableHead>
               <TableHead>Almacenes</TableHead>
               <TableHead className="text-right">Cant.</TableHead>
-              <TableHead>OT / Cliente</TableHead>
+              <TableHead>OT / Venta · cliente</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -243,10 +243,11 @@ async function EventosTabla({ tipo, fecha_desde, fecha_hasta, pagina }: SP) {
 }
 
 function EventoRow({ r }: { r: EventoTrazaListado }) {
+  // En hora de Lima: el servidor corre en UTC y mostraba las ventas 5 horas adelantadas.
   const fechaTxt = new Date(r.fecha).toLocaleString('es-PE', {
-    day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit',
+    timeZone: 'America/Lima', day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit',
   });
-  const cli = r.cliente?.razon_social ?? r.cliente?.nombres ?? null;
+  const cli = r.venta ? null : (r.cliente?.razon_social ?? r.cliente?.nombres ?? null);
 
   return (
     <TableRow>
@@ -290,6 +291,19 @@ function EventoRow({ r }: { r: EventoTrazaListado }) {
           <Link href={`/trazabilidad/ot/${r.ot.id}`} className="text-happy-700 hover:underline">
             {r.ot.numero}
           </Link>
+        )}
+        {/* La venta y a quién se vendió; el enlace abre el detalle de ventas de esa talla. */}
+        {r.venta && (
+          <div>
+            {r.variante ? (
+              <Link href={`/reportes/trazabilidad-modelo/${r.variante.id}#ventas`} className="font-mono text-[11px] text-happy-700 hover:underline" title="Ver vendedor, comprobante, pago y cliente">
+                {r.venta.numero}{r.venta.comprobante ? ` · ${r.venta.comprobante}` : ''}
+              </Link>
+            ) : (
+              <span className="font-mono text-[11px]">{r.venta.numero}{r.venta.comprobante ? ` · ${r.venta.comprobante}` : ''}</span>
+            )}
+            <div className="text-[11px] text-slate-500">{r.venta.cliente}</div>
+          </div>
         )}
         {cli && <div className="text-[11px] text-slate-500">{cli}</div>}
       </TableCell>

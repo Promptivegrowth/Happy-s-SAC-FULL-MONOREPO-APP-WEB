@@ -57,7 +57,9 @@ function iconoEvento(ev: TrazaEvento): IconCfg {
 function formatearFecha(iso: string): string {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return iso;
+  // En hora de Lima: el servidor corre en UTC y las horas salían 5 horas adelantadas (14/10/2026).
   return d.toLocaleString('es-PE', {
+    timeZone: 'America/Lima',
     day: '2-digit',
     month: '2-digit',
     year: '2-digit',
