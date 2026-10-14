@@ -27,63 +27,10 @@ export async function consultarTarifa(
   talla: string | null = null,
 ): Promise<{ tarifa: number; observacion: string | null; fuente: string } | null> {
   const { sb } = await requireUser();
-  const today = new Date().toISOString().slice(0, 10);
-
-  type Row = {
-    precio_unitario: number;
-    producto_id: string | null;
-    proceso: string | null;
-    talla: string | null;
-    observacion: string | null;
-    vigente_hasta: string | null;
-  };
-
-  // Igual que en las tarifas centrales: una tarifa sin fecha de inicio vale
-  // desde siempre, así que no puede quedar fuera del filtro de vigencia.
-  let q = sb
-    .from('talleres_tarifas')
-    .select('precio_unitario, producto_id, proceso, talla, observacion, vigente_hasta')
-    .eq('taller_id', tallerId)
-    .or(`vigente_desde.is.null,vigente_desde.lte.${today}`);
-  const { data } = await q;
-  const rows = ((data ?? []) as Row[]).filter(
-    (r) => !r.vigente_hasta || r.vigente_hasta >= today,
-  );
-
-  // Score: cuántos campos matchean (más específico = mejor)
-  const candidatos = rows
-    .map((r) => {
-      let score = 0;
-      let valid = true;
-      if (r.producto_id !== null) {
-        if (r.producto_id === productoId) score += 4;
-        else valid = false;
-      }
-      if (r.proceso !== null) {
-        if (r.proceso === proceso) score += 2;
-        else valid = false;
-      }
-      if (r.talla !== null) {
-        if (r.talla === talla) score += 1;
-        else valid = false;
-      }
-      return valid ? { row: r, score } : null;
-    })
-    .filter((x): x is { row: Row; score: number } => x !== null)
-    .sort((a, b) => b.score - a.score);
-
-  const winner = candidatos[0];
-  if (!winner) return null;
-  const { row, score } = winner;
-  const fuente: string[] = [];
-  if (row.producto_id !== null) fuente.push('producto');
-  if (row.proceso !== null) fuente.push('proceso');
-  if (row.talla !== null) fuente.push('talla');
-  return {
-    tarifa: Number(row.precio_unitario),
-    observacion: row.observacion,
-    fuente: fuente.length === 0 ? 'tarifa genérica del taller' : `match por ${fuente.join('+')} (score ${score})`,
-  };
+  // Misma búsqueda que la vista previa de OS y el PDF (os-preview).
+  const { tarifaTaller } = await import('../os-preview');
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  return tarifaTaller(sb as any, tallerId, productoId, proceso, talla);
 }
 
 /**

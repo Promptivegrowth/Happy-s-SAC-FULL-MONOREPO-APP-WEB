@@ -59,7 +59,7 @@ export default async function Page() {
     <PageShell
       title="Solicitudes de aprobación de OS"
       description={gerente
-        ? 'Revisá y aprobá o rechazá las solicitudes de órdenes de servicio con campaña/movilidad especial.'
+        ? 'Revisa el detalle y aprueba o rechaza las solicitudes de órdenes de servicio con campaña o movilidad especial.'
         : 'Estado de las solicitudes de OS enviadas a gerencia.'}
       actions={
         <Link href="/servicios">
@@ -103,7 +103,13 @@ export default async function Page() {
                         <div className="font-mono">{s.ot_id ? otDe.get(s.ot_id) ?? '—' : '—'}</div>
                         <div className="text-slate-500">{s.taller_id ? tallerDe.get(s.taller_id) ?? '—' : '—'}</div>
                       </TableCell>
-                      <TableCell className="text-sm font-medium text-corp-900">{detalle}</TableCell>
+                      <TableCell className="text-sm font-medium text-corp-900">
+                        {detalle}
+                        {/* Gerencia ve qué prendas, avíos y montos lleva antes de aprobar. */}
+                        <Link href={`/servicios/solicitudes/${s.id}`} className="mt-0.5 block text-[11px] font-normal text-happy-700 hover:underline">
+                          Ver detalle de la OS →
+                        </Link>
+                      </TableCell>
                       <TableCell className="max-w-xs text-xs text-slate-500">
                         {s.estado === 'RECHAZADA' && s.motivo_rechazo
                           ? <span className="text-danger">✕ {s.motivo_rechazo}</span>

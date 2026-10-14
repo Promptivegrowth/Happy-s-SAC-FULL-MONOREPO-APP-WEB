@@ -654,38 +654,10 @@ async function generarAviosOS(
   proceso = 'COSTURA',
 ): Promise<number> {
   if (cantPorTalla.size === 0) return 0;
-  const { data: receta } = await sb
-    .from('recetas')
-    .select('id')
-    .eq('producto_id', productoId)
-    .eq('activa', true)
-    .maybeSingle();
-  if (!receta) return 0;
-
-  const tallasNecesarias = [...cantPorTalla.keys()] as ('T0' | 'T2' | 'T4' | 'T6' | 'T8' | 'T10' | 'T12' | 'T14' | 'T16' | 'TS' | 'TAD' | 'TU')[];
+  // Mismo cálculo que la vista previa de solicitudes (os-preview).
+  const { aviosPrevistosOS } = await import('../os-preview');
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const sbAny = sb as unknown as { from: (t: string) => any };
-  // Filtro por SERVICIO DESTINO (pedido del cliente 22/07/2026): la OS de OJAL
-  // BOTÓN jala solo los materiales marcados "va al serv. botón" (los botones);
-  // los demás servicios (confección incluida) jalan los "va al taller de conf."
-  const esOjalBoton = proceso === 'OJAL_BOTON';
-  const flagServicio = esOjalBoton ? 'sale_a_ojal_boton' : 'sale_a_servicio';
-  const { data: lineasReceta } = await sbAny
-    .from('recetas_lineas')
-    .select('material_id, talla, cantidad, cantidad_almacen')
-    .eq('receta_id', receta.id)
-    .eq(flagServicio, true)
-    .in('talla', tallasNecesarias);
-
-  const aviosMap = new Map<string, number>();
-  for (const lr of (lineasReceta ?? []) as { material_id: string; talla: string; cantidad: number; cantidad_almacen: number | null }[]) {
-    const cantUnidades = cantPorTalla.get(lr.talla as string) ?? 0;
-    if (cantUnidades <= 0) continue;
-    const cantAlTaller = Math.max(0, Number(lr.cantidad) - Number(lr.cantidad_almacen ?? 0));
-    if (cantAlTaller <= 0) continue;
-    const matId = lr.material_id as string;
-    aviosMap.set(matId, (aviosMap.get(matId) ?? 0) + cantAlTaller * cantUnidades);
-  }
+  const aviosMap = await aviosPrevistosOS(sb as any, productoId, cantPorTalla, proceso);
 
   if (aviosMap.size > 0) {
     const filasAvios = [...aviosMap.entries()].map(([material_id, cantidad_enviada]) => ({
@@ -713,19 +685,15 @@ async function poblarLineasOSDesdeOT(
   tallasFiltro?: string[],
   proceso = 'COSTURA',
 ): Promise<{ lineas: number; avios: number }> {
-  const { data: lineasOt, error: errL } = await sb
-    .from('ot_lineas')
-    .select('producto_id, talla, cantidad_planificada, cantidad_cortada')
-    .eq('ot_id', otId);
-  if (errL) throw new Error(`ot_lineas: ${errL.message}`);
-  const filtroSet = tallasFiltro && tallasFiltro.length > 0 ? new Set(tallasFiltro) : null;
-  const candidatas = (lineasOt ?? [])
-    .map((l) => ({
-      producto_id: l.producto_id as string,
-      talla: l.talla as 'T0' | 'T2' | 'T4' | 'T6' | 'T8' | 'T10' | 'T12' | 'T14' | 'T16' | 'TS' | 'TAD' | 'TU',
-      cantidad: Number(l.cantidad_cortada ?? 0) > 0 ? Number(l.cantidad_cortada) : Number(l.cantidad_planificada ?? 0),
-    }))
-    .filter((l) => l.cantidad > 0 && (!filtroSet || filtroSet.has(l.talla)));
+  // Mismas reglas que la vista previa de solicitudes (os-preview).
+  const { lineasPrevistasOS } = await import('../os-preview');
+  // Sin filtro de tallas se toman todas las de la OT.
+  const todas = tallasFiltro && tallasFiltro.length > 0 ? tallasFiltro
+    : [...new Set(((await sb.from('ot_lineas').select('talla').eq('ot_id', otId)).data ?? []).map((l) => l.talla as string))];
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const candidatas = (await lineasPrevistasOS(sb as any, { otId, tallas: todas })).map((l) => ({
+    ...l, talla: l.talla as 'T0' | 'T2' | 'T4' | 'T6' | 'T8' | 'T10' | 'T12' | 'T14' | 'T16' | 'TS' | 'TAD' | 'TU',
+  }));
   if (candidatas.length === 0) return { lineas: 0, avios: 0 };
   const { error: errIns } = await sb.from('ordenes_servicio_lineas').insert(
     candidatas.map((c) => ({ os_id: osId, producto_id: c.producto_id, talla: c.talla, cantidad: c.cantidad })),

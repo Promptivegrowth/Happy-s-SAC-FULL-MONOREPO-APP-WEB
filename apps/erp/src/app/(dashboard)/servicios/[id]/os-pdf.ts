@@ -32,7 +32,10 @@ export type OSPdfData = {
   observaciones?: string | null;
   cuidados?: string | null;
   consideraciones?: string | null;
-  lineas: { producto: string; codigo?: string | null; talla: string; cantidad: number }[];
+  /* tarifa/subtotal: tarifario por talla, solo se imprime en las copias con tarifas. */
+  lineas: { producto: string; codigo?: string | null; talla: string; cantidad: number; tarifa?: number | null; subtotal?: number | null }[];
+  /* Monto base menos lo que da el tarifario (precio acordado por gerencia). */
+  ajuste_tarifa?: number;
   /* `unidad` es el codigo de la unidad de consumo: m, und, kg... */
   avios: { material: string; categoria?: string | null; cantidad: number; unidad?: string | null }[];
 };
@@ -211,18 +214,30 @@ function renderCopia(
   doc.setFontSize(8);
   doc.text('PRENDAS ENVIADAS AL TALLER', M, y);
   y += 2;
+  // Copias de gerencia y taller: con la tarifa de cada talla (pedido de Javier,
+  // 13/10/2026). La de control sale sin montos.
+  const conTarifa = copia.conTarifas && os.lineas.some((l) => l.tarifa != null);
+  const sumaTarifa = os.lineas.reduce((s, l) => s + Number(l.subtotal ?? 0), 0);
+  const ajuste = Math.round(Number(os.ajuste_tarifa ?? 0) * 100) / 100;
+  const pie: unknown[][] = [conTarifa
+    ? [{ content: 'TOTAL', colSpan: 4, styles: { halign: 'right' } }, String(totalUnidades), '', { content: fmtPEN(sumaTarifa), styles: { halign: 'right' } }]
+    : [{ content: 'TOTAL', colSpan: 4, styles: { halign: 'right' } }, String(totalUnidades)]];
+  if (conTarifa && Math.abs(ajuste) > 0.009) {
+    pie.push([
+      { content: `Ajuste acordado por gerencia (monto base ${fmtPEN(os.monto_base)})`, colSpan: 6, styles: { halign: 'right', fontStyle: 'normal', fontSize: 7 } },
+      { content: `${ajuste > 0 ? '+' : '-'}${fmtPEN(Math.abs(ajuste))}`, styles: { halign: 'right', fontSize: 7.5 } },
+    ]);
+  }
   autoTable(doc, {
     startY: y,
     margin: { left: M, right: M },
-    head: [['Item', 'Producto', 'Código', 'Talla', 'Cantidad']],
-    body: os.lineas.map((l, i) => [
-      String(i + 1),
-      l.producto,
-      l.codigo ?? '—',
-      formatTallaChip(l.talla),
-      String(l.cantidad),
-    ]),
-    foot: [[{ content: 'TOTAL', colSpan: 4, styles: { halign: 'right' } }, String(totalUnidades)]],
+    head: [conTarifa ? ['Item', 'Producto', 'Código', 'Talla', 'Cantidad', 'Tarifa', 'Subtotal'] : ['Item', 'Producto', 'Código', 'Talla', 'Cantidad']],
+    body: os.lineas.map((l, i) => {
+      const fila = [String(i + 1), l.producto, l.codigo ?? '—', formatTallaChip(l.talla), String(l.cantidad)];
+      if (conTarifa) fila.push(l.tarifa != null ? fmtPEN(l.tarifa) : 'sin tarifa', l.subtotal != null ? fmtPEN(l.subtotal) : '—');
+      return fila;
+    }),
+    foot: pie,
     headStyles: { fillColor: AZUL, textColor: 255, fontSize: 7.5, halign: 'center' },
     footStyles: { fillColor: [241, 245, 249], textColor: [...AZUL], fontStyle: 'bold' },
     bodyStyles: { fontSize: 7.5, cellPadding: 1.2 },
@@ -231,7 +246,8 @@ function renderCopia(
       1: { cellWidth: 'auto' },
       2: { cellWidth: 30 },
       3: { cellWidth: 18, halign: 'center' },
-      4: { cellWidth: 24, halign: 'right' },
+      4: { cellWidth: conTarifa ? 18 : 24, halign: 'right' },
+      ...(conTarifa ? { 5: { cellWidth: 20, halign: 'right' }, 6: { cellWidth: 24, halign: 'right' } } : {}),
     },
     theme: 'striped',
     alternateRowStyles: { fillColor: [248, 250, 252] },

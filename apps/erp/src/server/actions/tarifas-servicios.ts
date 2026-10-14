@@ -129,59 +129,12 @@ export async function consultarTarifaServicio(
   talla: string,
 ): Promise<{ tarifa: number; observacion: string | null; especificidad: string } | null> {
   const { sb } = await requireUser();
-  const today = new Date().toISOString().slice(0, 10);
-
+  // Misma búsqueda que la vista previa de OS y el PDF (os-preview), que además
+  // lee solo las tarifas del modelo y no la tabla entera.
+  const { tarifaCentral } = await import('../os-preview');
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const sbAny = sb as unknown as { from: (t: string) => any };
-  type Row = {
-    precio_unitario: number;
-    proceso: string | null;
-    producto_id: string | null;
-    talla: string | null;
-    observacion: string | null;
-    vigente_hasta: string | null;
-  };
-  const { data } = await sbAny
-    .from('tarifas_servicios')
-    .select('precio_unitario, proceso, producto_id, talla, observacion, vigente_hasta')
-    .or(`vigente_desde.is.null,vigente_desde.lte.${today}`);
-  const rows = ((data ?? []) as Row[]).filter(
-    (r) => !r.vigente_hasta || r.vigente_hasta >= today,
-  );
-
-  // Score: cuántos campos matchean. Más alto = más específico.
-  const candidatos = rows
-    .map((r) => {
-      let score = 0;
-      let valid = true;
-      if (r.proceso !== null) {
-        if (r.proceso === proceso) score += 4;
-        else valid = false;
-      }
-      if (r.producto_id !== null) {
-        if (r.producto_id === productoId) score += 2;
-        else valid = false;
-      }
-      if (r.talla !== null) {
-        if (r.talla === talla) score += 1;
-        else valid = false;
-      }
-      return valid ? { row: r, score } : null;
-    })
-    .filter((x): x is { row: Row; score: number } => x !== null)
-    .sort((a, b) => b.score - a.score);
-
-  const winner = candidatos[0];
-  if (!winner) return null;
-  const f: string[] = [];
-  if (winner.row.proceso) f.push('proceso');
-  if (winner.row.producto_id) f.push('producto');
-  if (winner.row.talla) f.push('talla');
-  return {
-    tarifa: Number(winner.row.precio_unitario),
-    observacion: winner.row.observacion,
-    especificidad: f.length === 0 ? 'tarifa genérica' : `match por ${f.join('+')} (score ${winner.score})`,
-  };
+  const t = await tarifaCentral(sb as any, proceso, productoId, talla);
+  return t ? { tarifa: t.tarifa, observacion: t.observacion, especificidad: t.fuente } : null;
 }
 
 /**

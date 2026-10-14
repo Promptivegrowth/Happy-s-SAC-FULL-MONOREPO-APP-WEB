@@ -8,6 +8,7 @@ import { PageShell } from '@/components/page-shell';
 import { OsTransitions, RecepcionOSEditor, EditarOSEditor, ImprimirOSButton, RetornarFallasButton, AviosDevueltosEditor } from './client';
 import { cargarEmpresaPDF } from '@/server/empresa-pdf-helper';
 import { formatDate, formatPEN } from '@happy/lib';
+import { precioPorLinea } from '@/server/os-preview';
 
 export const dynamic = 'force-dynamic';
 
@@ -23,6 +24,7 @@ const COLOR: Record<string, 'success' | 'warning' | 'secondary' | 'default' | 'd
 
 type LineaOS = {
   id: string;
+  producto_id: string;
   talla: string;
   cantidad: number;
   cantidad_recepcionada: number | null;
@@ -48,7 +50,7 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
       .single(),
     sb
       .from('ordenes_servicio_lineas')
-      .select('id, talla, cantidad, cantidad_recepcionada, cantidad_fallada, productos(nombre, codigo)')
+      .select('id, producto_id, talla, cantidad, cantidad_recepcionada, cantidad_fallada, productos(nombre, codigo)')
       .eq('os_id', id)
       .order('talla'),
     sb
@@ -100,6 +102,15 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
   const totalRecep = lineas.reduce((s, l) => s + Number(l.cantidad_recepcionada ?? 0), 0);
   const totalFallas = lineas.reduce((s, l) => s + Number(l.cantidad_fallada ?? 0), 0);
 
+  // Tarifa por talla para las copias de gerencia y taller del PDF (pedido de
+  // Javier, 13/10/2026). Si falla, el PDF sale igual, sin esa columna.
+  const precios = await precioPorLinea(
+    sb as unknown as { from: (t: string) => never },
+    osExt.taller_id, os.proceso ?? '',
+    lineas.map((l) => ({ producto_id: l.producto_id, talla: l.talla, cantidad: Number(l.cantidad ?? 0) })),
+    Number(os.monto_base ?? 0),
+  ).catch(() => null);
+
   const osPdf = {
     numero: os.numero,
     taller_nombre: t?.nombre ?? '—',
@@ -119,12 +130,15 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
     observaciones: os.observaciones ?? null,
     cuidados: os.cuidados ?? null,
     consideraciones: os.consideraciones ?? null,
-    lineas: lineas.map((l) => ({
+    lineas: lineas.map((l, i) => ({
       producto: l.productos?.nombre ?? '—',
       codigo: l.productos?.codigo ?? null,
       talla: l.talla,
       cantidad: Number(l.cantidad ?? 0),
+      tarifa: precios?.porLinea[i]?.tarifa ?? null,
+      subtotal: precios?.porLinea[i]?.subtotal ?? null,
     })),
+    ajuste_tarifa: precios?.ajuste ?? 0,
     avios: avios.map((a) => ({
       material: a.materiales?.nombre ?? '—',
       categoria: a.materiales?.categoria ?? null,
