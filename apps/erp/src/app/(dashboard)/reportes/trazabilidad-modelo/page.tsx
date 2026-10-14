@@ -74,7 +74,7 @@ export default async function Page({ searchParams }: { searchParams: Promise<SP>
   return (
     <PageShell
       title="Trazabilidad de productos"
-      description="Lo producido, trasladado y vendido por modelo y talla, y dónde está hoy cada prenda. Toca el número de vendidos para ver cada venta (quién vendió, comprobante, monto y cliente), o "Detalle" para ver también los movimientos."
+      description="Lo producido, trasladado y vendido por modelo y talla, y dónde está hoy cada prenda. Toca el número de vendidos para ver cada venta (quién vendió, comprobante, monto y cliente), o «Detalle» para ver también los movimientos."
       actions={<ExportButtons payload={exportPayload} />}
     >
       {/* Buscador y filtros */}
