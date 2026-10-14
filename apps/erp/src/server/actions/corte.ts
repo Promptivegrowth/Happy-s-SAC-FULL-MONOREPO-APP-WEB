@@ -817,6 +817,8 @@ async function insertarOSCore(
     const montoAuto = Math.round(precioServAutoritativo * totalUnidades * 100) / 100;
     await sbAny.from('ordenes_servicio').update({ monto_base: montoAuto }).eq('id', row.id);
   }
+  // Enviada al taller, la OT ya está en ese proceso (p. ej. confección).
+  if (data.ot_id) { try { await autoAvanzarEstadoOT(sbAny, data.ot_id); } catch { /* no bloquea la OS */ } }
   return { id: row.id as string, ...extras };
 }
 
@@ -1488,6 +1490,7 @@ export async function retornarFallasAlServicio(
     if (errL) throw new Error(errL.message);
 
     const unidades = filas.reduce((s, f) => s + f.cantidad, 0);
+    if (os.ot_id) { try { await autoAvanzarEstadoOT(sbAny, os.ot_id as string); } catch { /* no bloquea la OS */ } }
     return { id: row.id as string, numero: `OS-${nro}`, unidades };
   });
   if (r.ok) await bumpPaths('/servicios');

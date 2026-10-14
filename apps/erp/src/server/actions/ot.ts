@@ -289,7 +289,8 @@ export async function cambiarEstadoOT(otId: string, nuevoEstado: typeof ESTADOS[
     });
     return null;
   });
-  if (r.ok) await bumpPaths(`/ot/${otId}`, '/ot');
+  if (r.ok && nuevoEstado === 'CANCELADA') await sincronizarEstadoPlan(otId);
+  if (r.ok) await bumpPaths(`/ot/${otId}`, '/ot', '/plan-maestro');
   return r;
 }
 
@@ -548,7 +549,8 @@ export async function cerrarOT(
     const lotes = (data as { lotes?: number } | null)?.lotes ?? 0;
     return { lotes };
   });
-  if (r.ok) await bumpPaths(`/ot/${otId}`, '/ot', '/inventario', '/kardex');
+  if (r.ok) await sincronizarEstadoPlan(otId);
+  if (r.ok) await bumpPaths(`/ot/${otId}`, '/ot', '/inventario', '/kardex', '/plan-maestro');
   return r;
 }
 
@@ -632,18 +634,43 @@ const registroTiempoSchema = z.object({
 /**
  * Auto-avanza el estado de la OT según lo REALMENTE declarado (pedido del
  * cliente 22/07/2026: "el botón de estado debe actualizarse solo de acuerdo a
- * los registros de proceso y tiempos"). Solo avanza hacia adelante y nunca a
- * COMPLETADA/CANCELADA (esos son manuales). Mapea el área de las operaciones
- * declaradas — y el corte declarado — al estado correspondiente.
+ * los registros de proceso y tiempos"). Nunca toca COMPLETADA/CANCELADA (son
+ * manuales) ni mueve a una OT que ya está en control de calidad.
+ *
+ * El estado sale del paso MÁS AVANZADO SEGÚN LA RECETA del modelo (el orden de
+ * sus procesos), no de un orden fijo de estados. El orden fijo ponía el
+ * decorado siempre después de la confección: en la vaquera Jessie el bordado
+ * va ANTES de la confección, y OT-26-00002 quedó "En decorado" estando en
+ * confección (13/10/2026). También cuenta la OS enviada al taller y todavía no
+ * devuelta: la OT está en ese proceso.
  */
 const ORDEN_ESTADOS_OT = ['BORRADOR','PLANIFICADA','EN_CORTE','EN_HABILITADO','EN_SERVICIO','EN_DECORADO','EN_CONTROL_CALIDAD'] as const;
 function estadoDeArea(cod: string): EstadoOT {
   if (cod === 'CORTE') return 'EN_CORTE';
-  if (cod === 'COSTURA') return 'EN_SERVICIO';
+  if (cod === 'HABILITADO') return 'EN_HABILITADO';
+  if (cod === 'COSTURA' || cod === 'TALLER') return 'EN_SERVICIO';
   if (['BORDADO','ESTAMPADO','SUBLIMADO','DECORADO','PLISADO'].includes(cod)) return 'EN_DECORADO';
   if (['ACABADO','PLANCHADO'].includes(cod)) return 'EN_CONTROL_CALIDAD';
   return 'PLANIFICADA';
 }
+
+/** Estado que corresponde a lo declarado en la OT, según el orden de la receta. Pura, para poder probarla. */
+export async function estadoSegunReceta(
+  pasos: { area: string; orden: number }[],
+  hechos: { area: string; orden?: number }[],
+): Promise<EstadoOT | null> {
+  // Primer lugar de cada área en la receta (si un área aparece varias veces, cuenta la primera).
+  const ordenDeArea = new Map<string, number>();
+  for (const p of pasos) if (!ordenDeArea.has(p.area) || p.orden < ordenDeArea.get(p.area)!) ordenDeArea.set(p.area, p.orden);
+  let mejor: { orden: number; area: string } | null = null;
+  for (const h of hechos) {
+    const orden = h.orden ?? ordenDeArea.get(h.area);
+    if (orden == null) continue; // un área que no está en la receta no ubica a la OT
+    if (!mejor || orden > mejor.orden) mejor = { orden, area: h.area };
+  }
+  return mejor ? estadoDeArea(mejor.area) : null;
+}
+
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export async function autoAvanzarEstadoOT(sbAny: { from: (t: string) => any }, otId: string): Promise<void> {
   const { data: ot } = await sbAny.from('ot').select('estado').eq('id', otId).maybeSingle();
@@ -652,53 +679,75 @@ export async function autoAvanzarEstadoOT(sbAny: { from: (t: string) => any }, o
   // No tocar estados finales ni CC (a partir de CC el avance es manual: cierre).
   if (['COMPLETADA', 'CANCELADA', 'EN_CONTROL_CALIDAD'].includes(estadoActual)) return;
 
-  const idxEstado = (e: string) => (ORDEN_ESTADOS_OT as readonly string[]).indexOf(e);
-  let objetivoIdx = idxEstado(estadoActual);
-  if (objetivoIdx < 0) return;
+  const { data: lineas } = await sbAny.from('ot_lineas').select('producto_id, cantidad_cortada').eq('ot_id', otId);
+  const lineasArr = (lineas ?? []) as { producto_id: string; cantidad_cortada: number | null }[];
+  const prodIds = Array.from(new Set(lineasArr.map((l) => l.producto_id)));
+  if (prodIds.length === 0) return;
 
-  // Corte declarado (cantidad_cortada > 0) → al menos EN_CORTE.
-  const { data: lineas } = await sbAny.from('ot_lineas').select('cantidad_cortada').eq('ot_id', otId);
-  const cortado = ((lineas ?? []) as { cantidad_cortada: number | null }[]).reduce((s, l) => s + Number(l.cantidad_cortada ?? 0), 0);
-  if (cortado > 0) objetivoIdx = Math.max(objetivoIdx, idxEstado('EN_CORTE'));
+  // Los pasos de la receta, con su orden y su área.
+  const { data: procs } = await sbAny
+    .from('productos_procesos')
+    .select('id, orden, areas_produccion(codigo)')
+    .in('producto_id', prodIds)
+    .eq('activo', true);
+  const procsArr = ((procs ?? []) as { id: string; orden: number | null; areas_produccion: { codigo: string } | null }[])
+    .filter((p) => p.areas_produccion?.codigo);
+  const pasoDe = new Map(procsArr.map((p) => [p.id, { area: p.areas_produccion!.codigo, orden: Number(p.orden ?? 0) }]));
+  const pasos = [...pasoDe.values()];
 
-  // Áreas de las operaciones con tiempo declarado.
+  const hechos: { area: string; orden?: number }[] = [];
+  // Corte declarado.
+  if (lineasArr.some((l) => Number(l.cantidad_cortada ?? 0) > 0)) hechos.push({ area: 'CORTE' });
+  // Operaciones con tiempo declarado: su paso exacto de la receta.
   const { data: regs } = await sbAny.from('ot_registros_tiempo').select('proceso_id').eq('ot_id', otId);
-  const procesoIds = Array.from(new Set(((regs ?? []) as { proceso_id: string }[]).map((r) => r.proceso_id)));
-  if (procesoIds.length > 0) {
-    const { data: procs } = await sbAny
-      .from('productos_procesos')
-      .select('id, areas_produccion(codigo)')
-      .in('id', procesoIds);
-    for (const p of (procs ?? []) as { areas_produccion: { codigo: string } | null }[]) {
-      const cod = p.areas_produccion?.codigo;
-      if (cod) objetivoIdx = Math.max(objetivoIdx, idxEstado(estadoDeArea(cod)));
-    }
+  for (const r of (regs ?? []) as { proceso_id: string }[]) {
+    const paso = pasoDe.get(r.proceso_id);
+    if (paso) hechos.push(paso);
   }
-
-  // Órdenes de servicio ya retornadas del taller (confección/decorado
-  // tercerizado): su retorno ES la declaración de que ese proceso se ejecutó.
-  // Sin esto la OT se quedaba en EN_CORTE aunque la OS de confección estuviera
-  // recepcionada/cerrada (pedido cliente 2026-09-02). `proceso` es el código de
-  // área (COSTURA, BORDADO, …) → estadoDeArea.
-  const { data: oss } = await sbAny
-    .from('ordenes_servicio')
-    .select('proceso, estado')
-    .eq('ot_id', otId)
-    .in('estado', ['RECEPCION_PARCIAL', 'RECEPCIONADA', 'CERRADA']);
+  // Órdenes de servicio: enviada al taller o ya devuelta, la OT está en (o pasó por) ese proceso.
+  const { data: oss } = await sbAny.from('ordenes_servicio').select('proceso, estado').eq('ot_id', otId).neq('estado', 'ANULADA');
   for (const os of (oss ?? []) as { proceso: string | null }[]) {
-    if (os.proceso) objetivoIdx = Math.max(objetivoIdx, idxEstado(estadoDeArea(os.proceso)));
+    if (os.proceso) hechos.push({ area: os.proceso });
   }
 
-  const objetivo = ORDEN_ESTADOS_OT[objetivoIdx];
-  if (objetivo && objetivo !== estadoActual) {
-    await sbAny.from('ot').update({ estado: objetivo }).eq('id', otId);
-    await sbAny.from('ot_eventos').insert({
-      ot_id: otId,
-      tipo: 'ESTADO_CAMBIO',
-      estado_anterior: estadoActual,
-      estado_nuevo: objetivo,
-      detalle: 'Estado actualizado automáticamente según las declaraciones de proceso/tiempo',
-    });
+  const objetivo = await estadoSegunReceta(pasos, hechos);
+  if (!objetivo || objetivo === estadoActual) return;
+  // Lo que la receta ubica en planificación no retrocede una OT ya en curso.
+  if ((ORDEN_ESTADOS_OT as readonly string[]).indexOf(objetivo) < (ORDEN_ESTADOS_OT as readonly string[]).indexOf('EN_CORTE')) return;
+
+  await sbAny.from('ot').update({ estado: objetivo }).eq('id', otId).eq('estado', estadoActual);
+  await sbAny.from('ot_eventos').insert({
+    ot_id: otId,
+    tipo: 'ESTADO_CAMBIO',
+    estado_anterior: estadoActual,
+    estado_nuevo: objetivo,
+    detalle: 'Estado actualizado automáticamente según las declaraciones de proceso/tiempo',
+  });
+}
+
+/**
+ * Cuando todas las OT de un plan terminaron (completadas o canceladas), el
+ * plan se cierra solo. Antes no había nada que lo pasara a COMPLETADO: el
+ * PM-2026-S42-003 seguía "En ejecución" con su única OT ya en almacén
+ * (13/10/2026). Con cliente de servicio (la tabla puede no dejar escribir al
+ * usuario) y sin hacer fallar la acción que lo llama.
+ */
+async function sincronizarEstadoPlan(otId: string): Promise<void> {
+  try {
+    const { createServiceClient } = await import('@happy/db/service');
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const sv = createServiceClient() as any;
+    const { data: ot } = await sv.from('ot').select('plan_id').eq('id', otId).maybeSingle();
+    if (!ot?.plan_id) return;
+    const { data: plan } = await sv.from('plan_maestro').select('estado').eq('id', ot.plan_id).maybeSingle();
+    if (plan?.estado !== 'EN_EJECUCION') return;
+    const { data: ots } = await sv.from('ot').select('estado').eq('plan_id', ot.plan_id);
+    const estados = ((ots ?? []) as { estado: string }[]).map((o) => o.estado);
+    if (estados.length === 0 || estados.some((e) => e !== 'COMPLETADA' && e !== 'CANCELADA')) return;
+    const nuevo = estados.includes('COMPLETADA') ? 'COMPLETADO' : 'CANCELADO';
+    await sv.from('plan_maestro').update({ estado: nuevo }).eq('id', ot.plan_id).eq('estado', 'EN_EJECUCION');
+  } catch (e) {
+    console.error('[sincronizarEstadoPlan]', (e as Error).message);
   }
 }
 

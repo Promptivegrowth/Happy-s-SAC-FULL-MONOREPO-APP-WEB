@@ -8,8 +8,15 @@ export const dynamic = 'force-dynamic';
 type OtRow = {
   id: string;
   numero: string;
-  ot_lineas: Array<{ producto_id: string; productos: { codigo: string; nombre: string } | null }>;
+  estado: string;
+  ot_lineas: Array<{
+    producto_id: string; cantidad_planificada: number | null; cantidad_cortada: number | null;
+    productos: { codigo: string; nombre: string } | null;
+  }>;
 };
+
+/** Estados en que la OT ya pasó el corte: no se le crean más cortes (mismo criterio que crearCorte). */
+const ESTADOS_POST_CORTE = ['EN_SERVICIO', 'EN_DECORADO', 'EN_CONTROL_CALIDAD', 'COMPLETADA', 'CANCELADA'];
 
 export default async function Page({ searchParams }: { searchParams: Promise<{ ot?: string }> }) {
   const sp = await searchParams;
@@ -17,15 +24,26 @@ export default async function Page({ searchParams }: { searchParams: Promise<{ o
 
   const { data: ots } = await sb
     .from('ot')
-    .select('id, numero, ot_lineas(producto_id, productos(codigo, nombre))')
+    .select('id, numero, estado, ot_lineas(producto_id, cantidad_planificada, cantidad_cortada, productos(codigo, nombre))')
     .not('estado', 'in', '("COMPLETADA","CANCELADA")')
     .order('numero', { ascending: false })
     .limit(100);
 
+  /*
+   * Solo OT con unidades PENDIENTES de cortar (pedido de Javier, 13/10/2026):
+   * OT-26-00002 ya estaba cortada entera y seguía saliendo. Saldo = planificado
+   * − cortado; también se dejan fuera las que ya pasaron el corte. Y de cada OT,
+   * solo los modelos que todavía tienen saldo.
+   */
+  const conSaldo = (l: OtRow['ot_lineas'][number]) => Number(l.cantidad_planificada ?? 0) - Number(l.cantidad_cortada ?? 0) > 0;
+  const otsPendientes = ((ots ?? []) as unknown as OtRow[])
+    .filter((o) => !ESTADOS_POST_CORTE.includes(o.estado) && (o.ot_lineas ?? []).some(conSaldo));
+
   // De ot_lineas → lista de productos únicos por OT.
-  const otsConProductos: OtConProductos[] = ((ots ?? []) as unknown as OtRow[]).map((o) => {
+  const otsConProductos: OtConProductos[] = otsPendientes.map((o) => {
     const seen = new Map<string, { id: string; codigo: string; nombre: string }>();
     for (const l of o.ot_lineas ?? []) {
+      if (!conSaldo(l)) continue;
       if (l.producto_id && l.productos && !seen.has(l.producto_id)) {
         seen.set(l.producto_id, {
           id: l.producto_id,
@@ -76,6 +94,11 @@ export default async function Page({ searchParams }: { searchParams: Promise<{ o
       title="Nueva orden de corte"
       description="Una orden por OT. El modelo se toma automáticamente del plan de la OT."
     >
+      {otsConProductos.length === 0 && (
+        <p className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+          No hay órdenes de trabajo con unidades pendientes de cortar. Las OT ya cortadas por completo no aparecen aquí.
+        </p>
+      )}
       <NuevoCorteForm ots={otsConProductos} telasPorProducto={telasPorProducto} defaultOtId={sp.ot} />
     </PageShell>
   );
