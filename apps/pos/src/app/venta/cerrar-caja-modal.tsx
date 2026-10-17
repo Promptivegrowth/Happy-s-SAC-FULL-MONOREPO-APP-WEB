@@ -476,8 +476,8 @@ export function CerrarCajaModal({
           if (dinero.length === 0) return null;
           return (
             <div className="mt-4 rounded-lg border border-emerald-200 bg-emerald-50/40 p-4">
-              <h3 className="text-xs font-semibold uppercase tracking-wider text-emerald-800">Dinero que entró por cuenta</h3>
-              <p className="mb-2 text-[11px] text-slate-500">Ventas + adelantos de cada cuenta, para cuadrar con el banco.</p>
+              <h3 className="text-xs font-semibold uppercase tracking-wider text-emerald-800">{modo === 'PARCIAL' ? 'Ingresos del turno' : 'Ingresos del día'}</h3>
+              <p className="mb-2 text-[11px] text-slate-500">Ventas + adelantos por medio de pago: para cuadrar cada banco y el efectivo.</p>
               <div className="space-y-1 text-sm">
                 {dinero.map((c) => (
                   <div key={c.etiqueta}>
@@ -496,7 +496,7 @@ export function CerrarCajaModal({
                 ))}
               </div>
               <div className="mt-2 flex items-center justify-between border-t pt-2 text-sm font-semibold text-corp-900">
-                <span>Total dinero recibido</span>
+                <span>{modo === 'PARCIAL' ? 'Total ingresos del turno' : 'Total ingresos del día'}</span>
                 <span className="font-mono">{formatPEN(dinero.reduce((a, c) => a + c.total, 0))}</span>
               </div>
             </div>

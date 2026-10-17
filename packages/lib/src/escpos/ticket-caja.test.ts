@@ -399,12 +399,12 @@ describe('el dinero que entró por cuenta (13/10/2026)', () => {
 
   it('suma el adelanto a su cuenta y da el total recibido', () => {
     const r = renglones(construirTicketCierre(CAB, real));
-    const i = r.findIndex((l) => l.startsWith('DINERO QUE ENTR'));
+    const i = r.findIndex((l) => l.startsWith('INGRESOS DEL DIA'));
     expect(i).toBeGreaterThan(-1);
     const seccion = r.slice(i);
     expect(seccion.find((l) => l.startsWith('INTERBANK JAVIER'))).toContain('1950.50');
     expect(seccion.find((l) => l.startsWith('EFECTIVO'))).toContain('5760.00');
-    expect(seccion.find((l) => l.startsWith('TOTAL DINERO RECIBIDO'))).toContain('9534.50');
+    expect(seccion.find((l) => l.startsWith('TOTAL INGRESOS DEL DIA'))).toContain('9534.50');
     // La cuenta sin movimiento no aparece en esta sección.
     expect(seccion.slice(0, seccion.findIndex((l) => l.startsWith('TOTAL DINERO'))).some((l) => l.startsWith('BCP JAVIER'))).toBe(false);
   });
@@ -424,6 +424,6 @@ describe('el dinero que entró por cuenta (13/10/2026)', () => {
   });
 
   it('un ticket viejo sin detalle por cuenta no la muestra', () => {
-    expect(renglones(construirTicketCierre(CAB, CIERRE)).join('\n')).not.toContain('DINERO QUE ENTR');
+    expect(renglones(construirTicketCierre(CAB, CIERRE)).join('\n')).not.toContain('INGRESOS DEL');
   });
 });

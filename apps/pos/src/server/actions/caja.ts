@@ -1276,19 +1276,19 @@ export async function generarExcelCierre(sesionId: string): Promise<{ base64: st
     row++;
   }
 
-  // ---- DINERO QUE ENTRÓ POR CUENTA ----
+  // ---- INGRESOS DEL DÍA ----
   // Ventas + adelantos (− devoluciones) de cada cuenta, para conciliar cada
   // banco sin sumar a mano. Mismo cálculo que el ticket y la pantalla de cierre.
   const dineroExcel = dineroPorCuenta(balanceExcel.por_cuenta, balanceExcel.adelantos, balanceExcel.devoluciones);
   if (dineroExcel.length > 0) {
-    seccionTitulo('DINERO QUE ENTRÓ POR CUENTA (VENTAS + ADELANTOS)');
+    seccionTitulo('INGRESOS DEL DÍA (VENTAS + ADELANTOS, POR MEDIO DE PAGO)');
     const filasDinero: Array<[string, string, number, boolean]> = dineroExcel.map((c) => {
       const partes = [`ventas S/ ${c.ventas.toFixed(2)}`];
       if (Math.abs(c.adelantos) > 0.009) partes.push(`${c.adelantos > 0 ? '+' : '-'} adelantos S/ ${Math.abs(c.adelantos).toFixed(2)}`);
       if (c.devuelto > 0.009) partes.push(`- devuelto S/ ${c.devuelto.toFixed(2)}`);
       return [c.etiqueta, partes.join(' '), c.total, false];
     });
-    filasDinero.push(['Total dinero recibido', '', dineroExcel.reduce((a, c) => a + c.total, 0), true]);
+    filasDinero.push(['Total ingresos del día', '', dineroExcel.reduce((a, c) => a + c.total, 0), true]);
     for (const [etiqueta, detalle, total, esTotal] of filasDinero) {
       const c1 = ws.getCell(row, 1);
       c1.value = etiqueta;

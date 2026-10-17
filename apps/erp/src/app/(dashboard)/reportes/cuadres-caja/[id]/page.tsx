@@ -55,7 +55,7 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
   const dinero = dineroPorCuenta(arqueo, adelantos, devoluciones);
   const totalDinero = dinero.reduce((s, x) => s + x.total, 0);
   const exportDinero = {
-    titulo: 'Dinero que entró por cuenta',
+    titulo: 'Ingresos del día por medio de pago',
     subtitulo: `${c.caja_nombre} · ${formatDateTime(c.abierta_en)} · ventas + adelantos`,
     filtros: encabezado,
     cols: [
@@ -258,16 +258,16 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
         </Card>
       )}
 
-      {/* ─────────── Dinero que entró por cuenta ─────────── */}
+      {/* ─────────── Ingresos del día (ventas + adelantos) ─────────── */}
       {dinero.length > 0 && (
         <Card className="border-emerald-200">
           <CardContent className="p-4">
             <div className="mb-1 flex flex-wrap items-center justify-between gap-2">
-              <h3 className="font-display text-sm font-semibold text-corp-900">Dinero que entró por cuenta</h3>
+              <h3 className="font-display text-sm font-semibold text-corp-900">Ingresos del día</h3>
               <ExportButtons payload={exportDinero} />
             </div>
             <p className="mb-3 text-xs text-slate-500">
-              Ventas + adelantos de cada cuenta (menos lo devuelto por esa cuenta), para cuadrar directo con cada banco.
+              Ventas + adelantos por medio de pago (menos lo devuelto por ese medio), para cuadrar cada banco y el efectivo.
               Es el mismo dinero de las secciones de arriba, junto por cuenta: no cambia el total de ventas ni el cuadre
               del cajón. En efectivo no se restan los gastos de caja chica; eso lo hace el cuadre de efectivo.
             </p>
@@ -290,7 +290,7 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
                   </TableRow>
                 ))}
                 <TableRow className="border-t-2 bg-slate-50">
-                  <TableCell className="text-sm font-semibold" colSpan={4}>Total dinero recibido</TableCell>
+                  <TableCell className="text-sm font-semibold" colSpan={4}>Total ingresos del día</TableCell>
                   <TableCell className="text-right text-sm font-semibold">{formatPEN(totalDinero)}</TableCell>
                 </TableRow>
               </TableBody>

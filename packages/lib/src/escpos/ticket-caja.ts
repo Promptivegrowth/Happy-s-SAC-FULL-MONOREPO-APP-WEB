@@ -338,8 +338,14 @@ export function construirTicketCierre(
   if (porCuenta.length > 0) {
     const dinero = dineroPorCuenta(porCuenta, adelantos, devoluciones);
     if (dinero.length > 0) {
-      t.negrita(true).linea('DINERO QUE ENTRÓ POR CUENTA').negrita(false);
-      t.linea('(ventas + adelantos, para el banco)');
+      /*
+       * "Ingresos del día" y no "dinero por cuenta": incluye el efectivo
+       * (pedido de la administración, 16/10/2026). Los títulos van sin tilde
+       * en mayúscula: la ticketera de La Quinta no imprime la "Ó" y salió
+       * "DINERO QUE ENTR POR CUENTA".
+       */
+      t.negrita(true).linea(d.parcial ? 'INGRESOS DEL TURNO' : 'INGRESOS DEL DIA').negrita(false);
+      t.linea('(ventas + adelantos, por medio de pago)');
       for (const c of dinero) {
         const importe = soles(c.total);
         if (c.etiqueta.length + importe.length + 1 <= COLUMNAS) t.lineaDoble(c.etiqueta, importe);
@@ -353,13 +359,14 @@ export function construirTicketCierre(
           if (Math.abs(c.adelantos) > 0.009) partes.push(`${c.adelantos > 0 ? '+' : '-'} adelantos ${Math.abs(c.adelantos).toFixed(2)}`);
           if (c.devuelto > 0.009) partes.push(`- devuelto ${c.devuelto.toFixed(2)}`);
           const detalle = `  ${partes.join(' ')}`;
-          if (detalle.length <= COLUMNAS) t.linea(detalle);
-          else for (const l of envolver(detalle.trim(), COLUMNAS - 2)) t.linea(`  ${l}`);
+          // lineaCruda respeta la sangría (linea() la quita al acomodar el texto).
+          if (detalle.length <= COLUMNAS) t.lineaCruda(detalle);
+          else for (const l of envolver(detalle.trim(), COLUMNAS - 2)) t.lineaCruda(`  ${l}`);
         }
       }
       t.separador();
       t.negrita(true);
-      t.lineaDoble('TOTAL DINERO RECIBIDO', soles(dinero.reduce((a, c) => a + c.total, 0)));
+      t.lineaDoble(d.parcial ? 'TOTAL INGRESOS DEL TURNO' : 'TOTAL INGRESOS DEL DIA', soles(dinero.reduce((a, c) => a + c.total, 0)));
       t.negrita(false);
       t.salto();
     }
